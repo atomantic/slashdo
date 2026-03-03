@@ -125,7 +125,9 @@ install_claude() {
 
       if (!alreadyRegistered) {
         if (settings.hooks.SessionStart.length > 0) {
-          settings.hooks.SessionStart[0].hooks.push({ type: "command", command: hookCmd });
+          var firstGroup = settings.hooks.SessionStart[0];
+          if (!Array.isArray(firstGroup.hooks)) firstGroup.hooks = [];
+          firstGroup.hooks.push({ type: "command", command: hookCmd });
         } else {
           settings.hooks.SessionStart.push({ hooks: [{ type: "command", command: hookCmd }] });
         }

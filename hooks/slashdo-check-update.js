@@ -42,8 +42,17 @@ const child = spawn(process.execPath, ['-e', `
     latest = execSync('npm view slash-do version', { encoding: 'utf8', timeout: 5000, windowsHide: true }).trim();
   } catch (e) {}
 
+  // Simple semver comparison: only flag update when latest > installed
+  let updateAvailable = false;
+  if (latest && latest !== installed) {
+    const parse = v => (v || '').split('.').map(Number);
+    const [iM, im, ip] = parse(installed);
+    const [lM, lm, lp] = parse(latest);
+    updateAvailable = lM > iM || (lM === iM && (lm > im || (lm === im && lp > ip)));
+  }
+
   const result = {
-    update_available: latest && installed !== latest,
+    update_available: updateAvailable,
     installed,
     latest: latest || 'unknown',
     checked: Math.floor(Date.now() / 1000)

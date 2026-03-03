@@ -81,7 +81,12 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
 
   let settings = {};
   if (fs.existsSync(settingsPath)) {
-    settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    try {
+      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    } catch (e) {
+      // Corrupted settings.json — skip registration to avoid data loss
+      return actions;
+    }
   }
 
   let modified = false;
@@ -100,7 +105,9 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
 
     if (!alreadyRegistered) {
       if (settings.hooks.SessionStart.length > 0) {
-        settings.hooks.SessionStart[0].hooks.push({
+        const firstGroup = settings.hooks.SessionStart[0];
+        if (!Array.isArray(firstGroup.hooks)) firstGroup.hooks = [];
+        firstGroup.hooks.push({
           type: 'command',
           command: hookCommand,
         });
@@ -147,7 +154,13 @@ function deregisterHooksFromSettings(env, hookFiles, dryRun) {
   if (!fs.existsSync(settingsPath)) return [];
 
   const actions = [];
-  const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  let settings;
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  } catch (e) {
+    // Corrupted settings.json — skip deregistration to avoid data loss
+    return actions;
+  }
   let modified = false;
 
   // Remove SessionStart hook entries referencing slashdo

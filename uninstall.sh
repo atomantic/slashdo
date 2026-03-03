@@ -80,10 +80,12 @@ uninstall_claude() {
   if [ -f "$HOME/.claude/cache/slashdo-update-check.json" ]; then
     rm -f "$HOME/.claude/cache/slashdo-update-check.json"
     printf "    removed: cache/slashdo-update-check.json ${GREEN}ok${RESET}\n"
+    count=$((count + 1))
   fi
 
   if [ -f "$HOME/.claude/.slashdo-version" ]; then
     rm -f "$HOME/.claude/.slashdo-version"
+    count=$((count + 1))
   fi
 
   # Deregister from settings.json (requires Node.js)
@@ -96,7 +98,12 @@ uninstall_claude() {
 
       if (!fs.existsSync(settingsPath)) process.exit(0);
 
-      const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+      let settings;
+      try {
+        settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+      } catch (e) {
+        process.exit(0);
+      }
       let modified = false;
 
       if (settings.hooks && settings.hooks.SessionStart) {
