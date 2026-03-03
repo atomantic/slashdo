@@ -21,7 +21,10 @@ describe('getInstalledVersion', () => {
   });
 
   it('returns null for missing file', () => {
-    assert.equal(getInstalledVersion('/tmp/nonexistent-slashdo-version'), null);
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-ver-missing-'));
+    const missingVersionFile = path.join(tmpDir, 'nonexistent-slashdo-version');
+    assert.equal(getInstalledVersion(missingVersionFile), null);
+    fs.rmSync(tmpDir, { recursive: true });
   });
 
   it('returns null when path is null', () => {

@@ -49,7 +49,7 @@ const child = spawn(process.execPath, ['-e', `
     const [iM, im, ip] = parse(installed);
     const [lM, lm, lp] = parse(latest);
     if ([iM, im, ip, lM, lm, lp].some(isNaN)) { updateAvailable = installed !== latest; }
-    updateAvailable = lM > iM || (lM === iM && (lm > im || (lm === im && lp > ip)));
+    else { updateAvailable = lM > iM || (lM === iM && (lm > im || (lm === im && lp > ip))); }
   }
 
   const result = {

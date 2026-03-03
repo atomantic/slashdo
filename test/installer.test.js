@@ -57,7 +57,8 @@ describe('collectCommands', () => {
   });
 
   it('returns empty array for nonexistent directory', () => {
-    const result = collectCommands('/tmp/nonexistent-slashdo-dir');
+    const nonexistentDir = path.join(os.tmpdir(), `nonexistent-slashdo-dir-${Date.now().toString(36)}`);
+    const result = collectCommands(nonexistentDir);
     assert.deepEqual(result, []);
   });
 

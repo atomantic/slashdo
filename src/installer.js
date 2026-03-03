@@ -85,6 +85,7 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
       settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
     } catch (e) {
       // Corrupted settings.json — skip registration to avoid data loss
+      actions.push({ name: 'settings.json', status: 'skipped (parse error)' });
       return actions;
     }
   }
@@ -166,6 +167,7 @@ function deregisterHooksFromSettings(env, hookFiles, dryRun) {
     settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
   } catch (e) {
     // Corrupted settings.json — skip deregistration to avoid data loss
+    actions.push({ name: 'settings.json', status: 'skipped (parse error)' });
     return actions;
   }
   let modified = false;
