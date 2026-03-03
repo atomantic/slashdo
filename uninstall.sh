@@ -122,7 +122,10 @@ uninstall_claude() {
           }
         }
         settings.hooks.SessionStart = settings.hooks.SessionStart.filter(function(g) {
-          return g && typeof g === "object" && Array.isArray(g.hooks) && g.hooks.length > 0;
+          // Only remove groups that have an empty hooks array (from our removal above)
+          // Leave malformed or non-standard groups untouched to avoid data loss
+          if (g && typeof g === "object" && Array.isArray(g.hooks) && g.hooks.length === 0) return false;
+          return true;
         });
         if (settings.hooks.SessionStart.length === 0) delete settings.hooks.SessionStart;
         if (Object.keys(settings.hooks).length === 0) delete settings.hooks;

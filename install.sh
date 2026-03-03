@@ -102,7 +102,8 @@ install_claude() {
   # Register hooks in settings.json (requires Node.js and successful hook downloads)
   if command -v node &>/dev/null && [ -f "$target_hooks/slashdo-check-update.js" ]; then
     printf "    settings.json:          "
-    if node -e '
+    local node_result
+    node_result=$(node -e '
       const fs = require("fs");
       const path = require("path");
       const home = require("os").homedir();
@@ -164,10 +165,13 @@ install_claude() {
       }
 
       process.stdout.write(modified ? "updated" : "already configured");
-    '; then
-      printf " ${GREEN}ok${RESET}\n"
-    else
+    ' 2>/dev/null)
+    if [ $? -ne 0 ]; then
       printf " ${YELLOW}failed${RESET}\n"
+    elif echo "$node_result" | grep -q "^skipped"; then
+      printf "${YELLOW}${node_result}${RESET}\n"
+    else
+      printf "${node_result} ${GREEN}ok${RESET}\n"
     fi
   elif command -v node &>/dev/null; then
     printf "    ${DIM}settings.json: skipped (hook files not found)${RESET}\n"
