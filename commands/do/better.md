@@ -83,7 +83,7 @@ Derive build and test commands from the project type:
 - Rust: `cargo build`, `cargo test`
 - Python: `pytest`, `python -m pytest`
 - Go: `go build ./...`, `go test ./...`
-- If ambiguous, check CLAUDE.md for documented commands
+- If ambiguous, check project conventions already in context for documented commands
 
 Record as `BUILD_CMD` and `TEST_CMD`.
 
@@ -106,7 +106,7 @@ This ensures the browser is ready before we need it in Phase 6, avoiding interru
 
 ## Phase 1: Unified Audit
 
-Read the project's CLAUDE.md files first to understand conventions. Pass relevant conventions to each agent.
+Project conventions are already in your context. Pass relevant conventions to each agent.
 
 Launch 7 Explore agents in two batches. Each agent must report findings in this format:
 ```

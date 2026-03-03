@@ -8,4 +8,6 @@
 
 ## Fixed
 
+- Removed redundant "read CLAUDE.md" instructions from review, release, and better commands — project conventions are already in context
+
 ## Removed

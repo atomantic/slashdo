@@ -85,7 +85,7 @@ For each issue found:
 1. Classify severity: **CRITICAL** (runtime crash, data leak, security) vs **IMPROVEMENT** (consistency, robustness, conventions)
 2. Fix all CRITICAL issues immediately
 3. For IMPROVEMENT issues, fix them too — the goal is to eliminate Copilot review round-trips
-4. After fixes, run the project's test suite and build command (check CLAUDE.md for commands)
+4. After fixes, run the project's test suite and build command (per project conventions already in context)
 5. Commit fixes: `refactor: address code review findings`
 
 ## Report

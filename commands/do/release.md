@@ -9,7 +9,7 @@ Before doing anything, determine the project's source and target branches for re
 1. **Source branch** — run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` to get the repo's default branch (typically `main`)
 2. **Target branch** — determine by reading (in priority order):
    - **GitHub Actions workflows** — check `.github/workflows/release.yml` (or similar) for `on: push: branches:` to find the branch that triggers the release pipeline
-   - **Project CLAUDE.md** — look for git workflow sections, branch descriptions, or release instructions
+   - **Project conventions** (already in context) — look for git workflow sections, branch descriptions, or release instructions
    - **Versioning docs** — check `docs/VERSIONING.md`, `CONTRIBUTING.md`, or `RELEASING.md`
    - **Branch convention** — if a `release` branch exists, the target is `release`; otherwise ask the user
 3. **Ensure the target branch exists** — if not, create it from the last release tag:
@@ -29,7 +29,7 @@ If ambiguous, ask the user to confirm before proceeding.
 
 1. **Ensure you're on the source branch** — checkout if needed
 2. **Pull latest** — `git pull --rebase --autostash`
-3. **Run tests** — execute the project's test suite (check CLAUDE.md or package.json for the command)
+3. **Run tests** — execute the project's test suite (per project conventions already in context, or check package.json)
 4. **Run build** — execute the project's build command if one exists
 
 ## Determine Version and Finalize Changelog
