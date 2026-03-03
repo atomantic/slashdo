@@ -3,7 +3,7 @@ description: Unified DevSecOps audit, remediation, per-category PRs, CI verifica
 argument-hint: "[--scan-only] [--no-merge] [path filter or focus areas]"
 ---
 
-# Good — Unified DevSecOps Pipeline
+# Better — Unified DevSecOps Pipeline
 
 Run the full DevSecOps lifecycle: audit the codebase with 7 deduplicated agents, consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run Copilot review loops, and merge.
 
@@ -50,7 +50,7 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 - Record `DEFAULT_BRANCH` via `gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'` (or `glab` equivalent)
 - Record `IS_DIRTY` via `git status --porcelain`
 - Check for `.changelog/` directory → `HAS_CHANGELOG`
-- Check for existing `../good-*` worktrees: `git worktree list`. If found, inform the user and ask whether to resume (use existing worktree) or clean up (remove it and start fresh)
+- Check for existing `../better-*` worktrees: `git worktree list`. If found, inform the user and ask whether to resume (use existing worktree) or clean up (remove it and start fresh)
 
 ### 0e: Browser Authentication (GitHub only)
 If `VCS_HOST` is `github`, proactively verify browser authentication for the Copilot review loop later:
@@ -129,10 +129,10 @@ Wait for ALL agents to complete before proceeding.
    - If a file is touched by multiple categories, assign it to the category with the highest-severity finding for that file
    - Record the mapping as `FILE_OWNER_MAP` — this ensures no two PRs modify the same file
    - If a module extraction creates a new file (e.g., extracting `mediaConvert.js` from `dbCrud.js`), add a backward-compatible re-export in the original file so other PRs don't break
-5. Add a new section to PLAN.md: `## Good Audit - {YYYY-MM-DD}`
+5. Add a new section to PLAN.md: `## Better Audit - {YYYY-MM-DD}`
 
 ```markdown
-## Good Audit - {date}
+## Better Audit - {date}
 
 Summary: {N} findings across {M} files. {X} shared utilities to extract.
 
@@ -180,13 +180,13 @@ Only proceed with CRITICAL, HIGH, and MEDIUM findings. LOW and Test Coverage fin
 
 ### 3a: Setup
 
-1. If `IS_DIRTY` is true: `git stash --include-untracked -m "good: pre-scan stash"`
+1. If `IS_DIRTY` is true: `git stash --include-untracked -m "better: pre-scan stash"`
 2. Set `DATE` to today's date in YYYY-MM-DD format
 3. Create the worktree:
    ```bash
-   git worktree add ../good-{DATE} -b good/{DATE}
+   git worktree add ../better-{DATE} -b better/{DATE}
    ```
-4. Set `WORKTREE_DIR` to `../good-{DATE}`
+4. Set `WORKTREE_DIR` to `../better-{DATE}`
 
 ### 3b: Foundation Utilities
 
@@ -214,7 +214,7 @@ If no shared utilities were identified, skip this step.
 
 ### 3c: Parallel Remediation
 
-1. Use `TeamCreate` with name `good-{DATE}`
+1. Use `TeamCreate` with name `better-{DATE}`
 2. Use `TaskCreate` for each category that has CRITICAL, HIGH, or MEDIUM findings. Possible categories:
    - Security & Secrets
    - Code Quality & Style
@@ -227,7 +227,7 @@ If no shared utilities were identified, skip this step.
 
 ### Agent instructions template:
 ```
-You are {agent-name} on team good-{DATE}.
+You are {agent-name} on team better-{DATE}.
 
 Your task: Fix all {CATEGORY} findings from the Good audit.
 Working directory: {WORKTREE_DIR} (this is a git worktree — all work happens here)
@@ -307,23 +307,23 @@ Using the `FILE_OWNER_MAP` from Phase 2, create one branch per category:
 
 For each category that has findings:
 1. Switch to `{DEFAULT_BRANCH}`: `git checkout {DEFAULT_BRANCH}`
-2. Create a category branch: `git checkout -b good/{CATEGORY_SLUG}`
+2. Create a category branch: `git checkout -b better/{CATEGORY_SLUG}`
    - Use slugs: `security`, `code-quality`, `dry`, `arch-bugs`, `stack-specific`
 3. For each file assigned to this category in `FILE_OWNER_MAP`:
-   - **Modified files**: `git checkout origin/good/{DATE} -- {file_path}`
-   - **New files (Added)**: `git checkout origin/good/{DATE} -- {file_path}`
+   - **Modified files**: `git checkout origin/better/{DATE} -- {file_path}`
+   - **New files (Added)**: `git checkout origin/better/{DATE} -- {file_path}`
    - **Deleted files**: `git rm {file_path}`
 4. Commit all staged changes with a descriptive message:
    ```bash
    git commit -m "{prefix}: {category summary}"
    ```
-5. Push the branch: `git push -u origin good/{CATEGORY_SLUG}`
+5. Push the branch: `git push -u origin better/{CATEGORY_SLUG}`
 
 **CRITICAL: File isolation rule** — each file must appear in exactly ONE branch. If a file has changes from multiple categories (e.g., `server/index.js` with both security and stack-specific changes), assign the whole file to one category based on the file ownership map. Do not split file-level changes across PRs.
 
 **CRITICAL: Cross-PR dependency check** — after building all branches, verify each branch builds independently:
 ```bash
-git checkout good/{CATEGORY_SLUG} && {BUILD_CMD}
+git checkout better/{CATEGORY_SLUG} && {BUILD_CMD}
 ```
 If a branch fails because it imports from a new module created in another branch:
 - Add a backward-compatible re-export in the original module (in the branch that has the original module)
@@ -333,14 +333,14 @@ If a branch fails because it imports from a new module created in another branch
 ### 5b: Version Bump
 
 Only if ALL category branches pass build:
-1. Pick the first category branch (e.g., `good/security`) for the version bump
+1. Pick the first category branch (e.g., `better/security`) for the version bump
 2. Analyze all commits across ALL category branches to determine the aggregate SemVer bump:
    - Any `breaking:` or `BREAKING CHANGE` → **major**
    - Any `feat:` → **minor**
    - Otherwise (fix:, refactor:, security:, chore:) → **patch**
 3. Bump the version on that branch:
    ```bash
-   git checkout good/{FIRST_CATEGORY}
+   git checkout better/{FIRST_CATEGORY}
    npm version {LEVEL} --no-git-tag-version
    git add package.json package-lock.json
    git commit -m "chore: bump version to {NEW_VERSION}"
@@ -354,10 +354,10 @@ For each category branch, create a PR:
 
 **GitHub:**
 ```bash
-gh pr create --head good/{CATEGORY_SLUG} --base {DEFAULT_BRANCH} \
+gh pr create --head better/{CATEGORY_SLUG} --base {DEFAULT_BRANCH} \
   --title "{prefix}: {short description}" \
   --body "$(cat <<'EOF'
-## Good Audit — {Category Name}
+## Better Audit — {Category Name}
 
 ### Summary
 {count} findings addressed across {files} files.
@@ -376,7 +376,7 @@ EOF
 
 **GitLab:**
 ```bash
-glab mr create --source-branch good/{CATEGORY_SLUG} --target-branch {DEFAULT_BRANCH} \
+glab mr create --source-branch better/{CATEGORY_SLUG} --target-branch {DEFAULT_BRANCH} \
   --title "{prefix}: {short description}" --description "..."
 ```
 
@@ -410,7 +410,7 @@ After creating all PRs, verify CI passes on each one:
       - **Test failures**: a test depends on code changed in the PR. Fix the test or the code.
    c. Switch to the failing branch:
       ```bash
-      git checkout good/{CATEGORY_SLUG}
+      git checkout better/{CATEGORY_SLUG}
       ```
    d. Make the fix, commit, and push:
       ```bash
@@ -468,7 +468,7 @@ For each reviewed PR, fetch review threads via GraphQL using stdin JSON (**never
 ```bash
 echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
 ```
-Save to `/tmp/good_threads_{PR_NUMBER}.json` for parsing.
+Save to `/tmp/better_threads_{PR_NUMBER}.json` for parsing.
 
 - If **no unresolved threads** → mark PR as ready to merge
 - If **unresolved threads exist** → proceed to 6.4 (fix)
@@ -482,7 +482,7 @@ For each unresolved thread on each PR:
    - **Informational/false positive**: resolve the thread without changes
 3. If fixing:
    ```bash
-   git checkout good/{CATEGORY_SLUG}
+   git checkout better/{CATEGORY_SLUG}
    # make changes
    git add <specific files>
    git commit -m "address review: {summary of change}"
@@ -513,7 +513,7 @@ gh pr view {PR_NUMBER} --json state,mergedAt
 If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 - If merge conflict: rebase the branch and retry
   ```bash
-  git checkout good/{CATEGORY_SLUG}
+  git checkout better/{CATEGORY_SLUG}
   git pull --rebase origin {DEFAULT_BRANCH}
   git push --force-with-lease
   ```
@@ -528,8 +528,8 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
    ```
 2. Delete local branches (only if merged):
    ```bash
-   git branch -d good/{DATE}
-   git branch -d good/security good/code-quality good/dry good/arch-bugs good/stack-specific
+   git branch -d better/{DATE}
+   git branch -d better/security better/code-quality better/dry better/arch-bugs better/stack-specific
    ```
 3. Restore stashed changes (if stashed in Phase 3a):
    ```bash

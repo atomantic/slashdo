@@ -1,4 +1,4 @@
-name: Publish to npm
+name: Publish
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
@@ -30,7 +30,24 @@ jobs:
           node bin/cli.js --list --env claude
           echo "Commands validated"
 
-      - name: Publish
+      - name: Publish to npm
         run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Build changelog for release
+        id: changelog
+        run: |
+          if [ -f .changelog/NEXT.md ]; then
+            echo "body<<CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+            cat .changelog/NEXT.md >> "$GITHUB_OUTPUT"
+            echo "CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+          else
+            echo "body=Release ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.changelog.outputs.body }}
+          generate_release_notes: true

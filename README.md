@@ -56,7 +56,7 @@ All commands live under the `do:` namespace:
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
 | `/do:release` | Create a release PR with version bump and changelog |
 | `/do:review` | Deep code review against best practices |
-| `/do:good` | Full DevSecOps audit with 7-agent scan and remediation |
+| `/do:better` | Full DevSecOps audit with 7-agent scan and remediation |
 | `/do:goals` | Generate GOALS.md from codebase analysis |
 | `/do:replan` | Review and clean up PLAN.md |
 | `/do:omd` | Audit and optimize markdown files |

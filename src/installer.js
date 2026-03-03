@@ -63,7 +63,8 @@ function filesAreEqual(fileA, contentB) {
 const RENAMED_COMMANDS = {
   cam: 'push',
   makegoals: 'goals',
-  makegood: 'good',
+  makegood: 'better',
+  good: 'better',
   'optimize-md': 'omd',
 };
 

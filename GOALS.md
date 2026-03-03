@@ -16,7 +16,7 @@ slashdo is a curated library of slash commands that automate the software develo
 Provide a single source of truth for commands that works across Claude Code, OpenCode, Gemini CLI, and Codex. Each environment gets commands in its native format with zero manual conversion.
 
 ### 2. Automate DevSecOps Workflows
-Provide one-command security auditing, code quality analysis, and automated remediation. `/do:good` scans across 7 dimensions, remediates findings in an isolated worktree, and delivers clean PRs.
+Provide one-command security auditing, code quality analysis, and automated remediation. `/do:better` scans across 7 dimensions, remediates findings in an isolated worktree, and delivers clean PRs.
 
 ### 3. Standardize Development Rituals
 Enforce consistent commit practices, SemVer versioning, and changelog management across projects. `/do:push` ensures every commit follows conventional commit prefixes and updates changelogs.

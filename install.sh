@@ -26,11 +26,11 @@ banner() {
 }
 
 COMMANDS=(
-  fpr goals good help omd
+  better fpr goals help omd
   pr push release replan review rpr update
 )
 
-OLD_COMMANDS=(cam makegoals makegood optimize-md)
+OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
 LIBS=(
   code-review-checklist copilot-review-loop graphql-escaping
