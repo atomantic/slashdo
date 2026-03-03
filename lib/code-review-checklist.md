@@ -39,6 +39,18 @@
    - If validation exists on one endpoint for a param, the same param on other endpoints needs the same validation
    - Schema fields that accept values the rest of the system can't handle (e.g., managedSecrets accepting any string when the sync endpoint requires `[A-Z0-9_]`)
 
+   **Concurrency & data integrity**
+   - Shared mutable state (files, in-memory caches) accessed by concurrent requests without locking or atomic writes — if two requests can hit the same resource, consider a mutex or write-to-tmp-then-rename pattern
+   - Multi-step read-modify-write cycles on JSON files or databases that can interleave with other requests
+
+   **Test coverage**
+   - New validation schemas, service functions, or business logic added without corresponding tests — especially when the project already has a test suite covering similar existing code
+   - New error paths (404, 400) that are untestable because the service throws generic errors instead of typed/status-coded ones
+
+   **Accessibility**
+   - Interactive elements (buttons, toggles, custom controls) missing accessible names, roles, or ARIA states — screen readers can't interpret unnamed buttons or div-based toggles
+   - Custom toggle/switch UI built from `<button>` or `<div>` instead of native `<input type="checkbox">` with appropriate labeling
+
    **Configuration & hardcoding**
    - Hardcoded values (usernames, org names, limits) when a config field or env var already exists for that purpose — use the existing config
    - Dead config fields that nothing reads — either wire them up or remove them
