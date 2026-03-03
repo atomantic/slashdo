@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # slashdo — curl-based uninstaller
 # Usage: curl -fsSL https://raw.githubusercontent.com/atomantic/slashdo/main/uninstall.sh | bash
+# shellcheck disable=SC2059,SC2207
 set -euo pipefail
-
-# shellcheck disable=SC2059
 
 CYAN='\033[0;36m'
 YELLOW='\033[0;33m'

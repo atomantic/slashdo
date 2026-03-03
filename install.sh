@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # slashdo — curl-based installer (no npm required)
 # Usage: curl -fsSL https://raw.githubusercontent.com/atomantic/slashdo/main/install.sh | bash
+# shellcheck disable=SC2059,SC2207
 set -euo pipefail
-
-# shellcheck disable=SC2059
 
 REPO="atomantic/slashdo"
 BRANCH="main"
