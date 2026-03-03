@@ -60,6 +60,10 @@
    **Data format portability**
    - Values that cross serialization boundaries (JSON API → database, peer sync) may change format — e.g., pgvector embeddings are strings in SQL but arrays in JSON. Convert consistently before writing to the target format
 
+   **Shell script safety**
+   - Inline `node -e` or other subprocess calls in shell scripts under `set -e` — if the subprocess fails, the script aborts. Check exit status and handle gracefully, or print "failed" instead of unconditional "ok"
+   - When the same data structure is manipulated in both Node.js and shell-inline-Node, apply identical guards in both places
+
    **Cross-platform compatibility**
    - Shell commands like `sleep 1` don't exist on Windows — use Node-native delays (`Atomics.wait`, `setTimeout`) in setup/build scripts
 
