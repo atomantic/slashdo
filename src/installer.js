@@ -150,7 +150,7 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
   const statuslineHook = hookFiles.find(h => h.name === 'slashdo-statusline.js');
   if (statuslineHook) {
     const statuslineCommand = `node "${path.join(env.hooksDir, statuslineHook.name)}"`;
-    const currentCmd = settings.statusLine?.command || '';
+    const currentCmd = typeof settings.statusLine?.command === 'string' ? settings.statusLine.command : '';
 
     if (!settings.statusLine) {
       settings.statusLine = { type: 'command', command: statuslineCommand };

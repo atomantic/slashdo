@@ -156,7 +156,7 @@ install_claude() {
       const statuslineHookPath = path.join(hooksDir, "slashdo-statusline.js");
       if (fs.existsSync(statuslineHookPath)) {
         const slCmd = "node \"" + statuslineHookPath + "\"";
-        const currentCmd = (settings.statusLine && settings.statusLine.command) || "";
+        const currentCmd = (settings.statusLine && typeof settings.statusLine.command === "string") ? settings.statusLine.command : "";
         if (!settings.statusLine) {
           settings.statusLine = { type: "command", command: slCmd };
           modified = true;
