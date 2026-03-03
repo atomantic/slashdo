@@ -50,16 +50,16 @@ All commands live under the `do:` namespace:
 
 | Command | What it does |
 |:---|:---|
-| `/do:cam` | Commit and push all work with changelog |
+| `/do:push` | Commit and push all work with changelog |
 | `/do:pr` | Open a PR with self-review and Copilot review loop |
 | `/do:fpr` | Fork PR -- push to fork, PR against upstream |
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
 | `/do:release` | Create a release PR with version bump and changelog |
 | `/do:review` | Deep code review against best practices |
-| `/do:makegood` | Full DevSecOps audit with 7-agent scan and remediation |
-| `/do:makegoals` | Generate GOALS.md from codebase analysis |
+| `/do:good` | Full DevSecOps audit with 7-agent scan and remediation |
+| `/do:goals` | Generate GOALS.md from codebase analysis |
 | `/do:replan` | Review and clean up PLAN.md |
-| `/do:optimize-md` | Audit and optimize CLAUDE.md files |
+| `/do:omd` | Audit and optimize markdown files |
 | `/do:update` | Update slashdo to latest version |
 | `/do:help` | List all available commands |
 
@@ -87,7 +87,7 @@ npx slash-do@latest --env claude             # target specific environment
 npx slash-do@latest --list                   # show commands and install status
 npx slash-do@latest --dry-run                # preview changes
 npx slash-do@latest --uninstall              # remove installed commands
-npx slash-do@latest cam pr release           # install specific commands only
+npx slash-do@latest push pr release           # install specific commands only
 ```
 
 ## How It Works
@@ -108,10 +108,10 @@ npx slash-do@latest cam pr release           # install specific commands only
   +------------------+
        |
        v
-  ~/.claude/commands/do/cam.md
-  ~/.config/opencode/commands/do-cam.md
-  ~/.gemini/commands/do/cam.md
-  ~/.codex/skills/do-cam/SKILL.md
+  ~/.claude/commands/do/push.md
+  ~/.config/opencode/commands/do-push.md
+  ~/.gemini/commands/do/push.md
+  ~/.codex/skills/do-push/SKILL.md
 ```
 
 ## Updating

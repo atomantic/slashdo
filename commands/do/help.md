@@ -12,13 +12,13 @@ List all available `/do:*` commands with their descriptions.
 
 | Command | Description |
 |---|---|
-| `/do:cam` | Commit and push all work with changelog |
 | `/do:fpr` | Commit, push to fork, and open a PR against the upstream repo |
+| `/do:goals` | Scan codebase to infer project goals, clarify with user, and generate GOALS.md |
+| `/do:good` | Unified DevSecOps audit, remediation, per-category PRs, CI verification, and Copilot review loop |
 | `/do:help` | List all available slashdo commands |
-| `/do:makegoals` | Scan codebase to infer project goals, clarify with user, and generate GOALS.md |
-| `/do:makegood` | Unified DevSecOps audit, remediation, per-category PRs, CI verification, and Copilot review loop |
-| `/do:optimize-md` | Audit and optimize markdown files (CLAUDE.md, README.md, etc.) against best practices |
+| `/do:omd` | Audit and optimize markdown files (CLAUDE.md, README.md, etc.) against best practices |
 | `/do:pr` | Commit, push, and open a PR against the repo's default branch |
+| `/do:push` | Commit and push all work with changelog |
 | `/do:release` | Create a release PR using the project's documented release workflow |
 | `/do:replan` | Review and clean up PLAN.md, extract docs from completed work |
 | `/do:review` | Deep code review of changed files against best practices |

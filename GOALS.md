@@ -16,16 +16,16 @@ slashdo is a curated library of slash commands that automate the software develo
 Provide a single source of truth for commands that works across Claude Code, OpenCode, Gemini CLI, and Codex. Each environment gets commands in its native format with zero manual conversion.
 
 ### 2. Automate DevSecOps Workflows
-Provide one-command security auditing, code quality analysis, and automated remediation. `/do:makegood` scans across 7 dimensions, remediates findings in an isolated worktree, and delivers clean PRs.
+Provide one-command security auditing, code quality analysis, and automated remediation. `/do:good` scans across 7 dimensions, remediates findings in an isolated worktree, and delivers clean PRs.
 
 ### 3. Standardize Development Rituals
-Enforce consistent commit practices, SemVer versioning, and changelog management across projects. `/do:cam` ensures every commit follows conventional commit prefixes and updates changelogs.
+Enforce consistent commit practices, SemVer versioning, and changelog management across projects. `/do:push` ensures every commit follows conventional commit prefixes and updates changelogs.
 
 ### 4. Orchestrate AI-Powered Code Review
 Integrate Copilot review loops with automated thread resolution into the PR workflow. `/do:pr` and `/do:rpr` handle the full cycle from PR creation through review iteration.
 
 ### 5. Maintain Project Governance Documentation
-Keep planning and standards documents current and well-structured. `/do:replan` manages the tactical backlog, `/do:makegoals` generates strategic goal documents, and `/do:optimize-md` audits and optimizes markdown files (CLAUDE.md, README.md, AGENTS.md, etc.).
+Keep planning and standards documents current and well-structured. `/do:replan` manages the tactical backlog, `/do:goals` generates strategic goal documents, and `/do:omd` audits and optimizes markdown files (CLAUDE.md, README.md, AGENTS.md, etc.).
 
 ### 6. Be Project-Agnostic
 Auto-detect tech stacks and adapt build commands, test runners, version bumping, and audit strategies accordingly. Commands should work on any codebase without manual configuration.

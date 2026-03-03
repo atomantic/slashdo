@@ -26,9 +26,11 @@ banner() {
 }
 
 COMMANDS=(
-  cam fpr help makegoals makegood optimize-md
-  pr release replan review rpr update
+  fpr goals good help omd
+  pr push release replan review rpr update
 )
+
+OLD_COMMANDS=(cam makegoals makegood optimize-md)
 
 LIBS=(
   code-review-checklist copilot-review-loop graphql-escaping
@@ -67,6 +69,13 @@ install_claude() {
       printf "failed\n"
     fi
   done
+
+  for old in "${OLD_COMMANDS[@]}"; do
+    if [ -f "$target_cmd/$old.md" ]; then
+      rm -f "$target_cmd/$old.md"
+      printf "    migrated: /do:%-14s${GREEN}ok${RESET}\n" "$old"
+    fi
+  done
 }
 
 install_opencode() {
@@ -94,6 +103,13 @@ install_opencode() {
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
+    fi
+  done
+
+  for old in "${OLD_COMMANDS[@]}"; do
+    if [ -f "$target_cmd/do-$old.md" ]; then
+      rm -f "$target_cmd/do-$old.md"
+      printf "    migrated: /do-%-14s${GREEN}ok${RESET}\n" "$old"
     fi
   done
 }
@@ -131,6 +147,13 @@ install_gemini() {
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
+    fi
+  done
+
+  for old in "${OLD_COMMANDS[@]}"; do
+    if [ -f "$target_cmd/$old.md" ]; then
+      rm -f "$target_cmd/$old.md"
+      printf "    migrated: /do:%-14s${GREEN}ok${RESET}\n" "$old"
     fi
   done
 }

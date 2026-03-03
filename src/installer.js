@@ -60,6 +60,13 @@ function filesAreEqual(fileA, contentB) {
   return contentA === contentB;
 }
 
+const RENAMED_COMMANDS = {
+  cam: 'push',
+  makegoals: 'goals',
+  makegood: 'good',
+  'optimize-md': 'omd',
+};
+
 function install({ env, packageDir, filterNames, dryRun, uninstall }) {
   const commandsDir = path.join(packageDir, 'commands');
   const libDir = path.join(packageDir, 'lib');
@@ -172,6 +179,21 @@ function install({ env, packageDir, filterNames, dryRun, uninstall }) {
       }
       if (isNew) results.installed++;
       else results.updated++;
+    }
+  }
+
+  for (const [oldName, newName] of Object.entries(RENAMED_COMMANDS)) {
+    const oldRelPath = path.join('do', oldName + '.md');
+    const oldTargetRel = getTargetFilename(oldRelPath, env);
+    const oldTargetPath = path.join(env.commandsDir, oldTargetRel);
+
+    if (fs.existsSync(oldTargetPath)) {
+      if (dryRun) {
+        results.actions.push({ name: `/do:${oldName}`, status: `would migrate → /do:${newName}` });
+      } else {
+        fs.unlinkSync(oldTargetPath);
+        results.actions.push({ name: `/do:${oldName}`, status: `migrated → /do:${newName}` });
+      }
     }
   }
 

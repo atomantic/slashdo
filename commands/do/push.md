@@ -2,7 +2,7 @@
 description: Commit and push all work with changelog
 ---
 
-# Commit All My Work (cam)
+# Push — Commit and Push All Work
 
 Commit and push all work from this session, updating documentation as needed.
 

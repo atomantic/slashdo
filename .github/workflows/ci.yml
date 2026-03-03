@@ -36,7 +36,7 @@ jobs:
           node -e "
             const { parseFrontmatter } = require('./src/transformer');
             const fs = require('fs');
-            const content = fs.readFileSync('commands/do/cam.md', 'utf8');
+            const content = fs.readFileSync('commands/do/push.md', 'utf8');
             const { frontmatter, body } = parseFrontmatter(content);
             if (!frontmatter.description) { console.error('Missing description'); process.exit(1); }
             console.log('Frontmatter OK:', frontmatter.description);

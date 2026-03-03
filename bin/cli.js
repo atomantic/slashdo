@@ -27,7 +27,7 @@ function usage() {
   npx slash-do@latest --list                   Show commands and install status
   npx slash-do@latest --dry-run                Preview changes
   npx slash-do@latest --uninstall              Remove installed commands
-  npx slash-do@latest cam pr                   Install specific commands only
+  npx slash-do@latest push pr                   Install specific commands only
 
 Options:
   --env <envs>    Comma-separated environments: ${allEnvNames().join(', ')}

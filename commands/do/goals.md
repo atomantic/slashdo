@@ -3,7 +3,7 @@ description: Scan codebase to infer project goals, clarify with user, and genera
 argument-hint: "[--refresh] [focus hint, e.g. 'just the CLI']"
 ---
 
-# MakeGoals — Generate a GOALS.md from Codebase Analysis
+# Goals — Generate a GOALS.md from Codebase Analysis
 
 Scan the codebase to infer the project's goals, purpose, and direction, then collaborate with the user to produce a comprehensive `GOALS.md` at the repo root.
 
@@ -206,7 +206,7 @@ If `--refresh` was passed and `GOALS.md` already exists:
    - {M} milestones (outcome-oriented)
    - {K} non-goals
    ```
-5. Do NOT commit — let the user review and commit when ready (suggest using `/cam` to commit)
+5. Do NOT commit — let the user review and commit when ready (suggest using `/do:push` to commit)
 
 ## Notes
 
