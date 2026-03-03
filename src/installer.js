@@ -97,7 +97,7 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
     const hookCommand = `node "${path.join(env.hooksDir, updateCheckHook.name)}"`;
 
     if (!settings.hooks) settings.hooks = {};
-    if (!settings.hooks.SessionStart) settings.hooks.SessionStart = [];
+    if (!Array.isArray(settings.hooks.SessionStart)) settings.hooks.SessionStart = [];
 
     const alreadyRegistered = settings.hooks.SessionStart.some(group =>
       group.hooks?.some(h => h.command?.includes('slashdo-check-update'))
@@ -164,7 +164,7 @@ function deregisterHooksFromSettings(env, hookFiles, dryRun) {
   let modified = false;
 
   // Remove SessionStart hook entries referencing slashdo
-  if (settings.hooks?.SessionStart) {
+  if (Array.isArray(settings.hooks?.SessionStart)) {
     for (const group of settings.hooks.SessionStart) {
       if (group.hooks) {
         const before = group.hooks.length;
@@ -403,6 +403,20 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun) {
         results.actions.push({ name: `hook/${hook.name}`, status: 'removed', target: targetPath });
       }
       results.removed++;
+    }
+
+    // Clean up old/renamed hooks that may have been installed by prior versions
+    for (const [oldName] of Object.entries(RENAMED_HOOKS)) {
+      const oldPath = path.join(env.hooksDir, oldName);
+      if (fs.existsSync(oldPath)) {
+        if (dryRun) {
+          results.actions.push({ name: `hook/${oldName}`, status: 'would remove (obsolete)' });
+        } else {
+          fs.unlinkSync(oldPath);
+          results.actions.push({ name: `hook/${oldName}`, status: 'removed (obsolete)' });
+        }
+        results.removed++;
+      }
     }
 
     // Deregister hooks from settings.json

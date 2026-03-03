@@ -106,7 +106,7 @@ uninstall_claude() {
       }
       let modified = false;
 
-      if (settings.hooks && settings.hooks.SessionStart) {
+      if (settings.hooks && Array.isArray(settings.hooks.SessionStart)) {
         for (const group of settings.hooks.SessionStart) {
           if (group.hooks) {
             const before = group.hooks.length;

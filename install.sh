@@ -108,13 +108,18 @@ install_claude() {
       const settingsPath = path.join(home, ".claude", "settings.json");
 
       let settings = {};
-      try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch (e) {}
+      if (fs.existsSync(settingsPath)) {
+        try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch (e) {
+          process.stdout.write("skipped (settings.json parse error)");
+          process.exit(0);
+        }
+      }
 
       let modified = false;
 
       // SessionStart hook
       if (!settings.hooks) settings.hooks = {};
-      if (!settings.hooks.SessionStart) settings.hooks.SessionStart = [];
+      if (!Array.isArray(settings.hooks.SessionStart)) settings.hooks.SessionStart = [];
 
       const hookCmd = "node \"" + path.join(home, ".claude", "hooks", "slashdo-check-update.js") + "\"";
       const alreadyRegistered = settings.hooks.SessionStart.some(function(g) {
@@ -147,7 +152,11 @@ install_claude() {
 
       process.stdout.write(modified ? "updated" : "already configured");
     '
-    printf " ${GREEN}ok${RESET}\n"
+    if [ $? -eq 0 ]; then
+      printf " ${GREEN}ok${RESET}\n"
+    else
+      printf " ${YELLOW}failed${RESET}\n"
+    fi
   else
     printf "    ${DIM}settings.json: skipped (node not found — hooks installed but not registered)${RESET}\n"
   fi
