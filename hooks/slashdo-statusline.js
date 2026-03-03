@@ -66,14 +66,20 @@ process.stdin.on('end', () => {
     const todosDir = path.join(homeDir, '.claude', 'todos');
     if (session && fs.existsSync(todosDir)) {
       try {
-        const files = fs.readdirSync(todosDir)
-          .filter(f => f.startsWith(session) && f.includes('-agent-') && f.endsWith('.json'))
-          .map(f => ({ name: f, mtime: fs.statSync(path.join(todosDir, f)).mtime }))
-          .sort((a, b) => b.mtime - a.mtime);
-
-        if (files.length > 0) {
+        const entries = fs.readdirSync(todosDir);
+        let latestFile = null;
+        let latestMtime = 0;
+        for (const f of entries) {
+          if (!f.startsWith(session) || !f.includes('-agent-') || !f.endsWith('.json')) continue;
           try {
-            const todos = JSON.parse(fs.readFileSync(path.join(todosDir, files[0].name), 'utf8'));
+            const mt = fs.statSync(path.join(todosDir, f)).mtimeMs;
+            if (mt > latestMtime) { latestMtime = mt; latestFile = f; }
+          } catch (e) {}
+        }
+
+        if (latestFile) {
+          try {
+            const todos = JSON.parse(fs.readFileSync(path.join(todosDir, latestFile), 'utf8'));
             const inProgress = todos.find(t => t.status === 'in_progress');
             if (inProgress) task = inProgress.activeForm || '';
           } catch (e) {}
