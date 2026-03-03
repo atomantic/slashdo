@@ -8,9 +8,13 @@ const os = require('os');
 
 // Read JSON from stdin
 let input = '';
+// Timeout guard: if stdin doesn't close within 3s (e.g. pipe issues on
+// Windows/Git Bash), exit silently instead of hanging.
+const stdinTimeout = setTimeout(() => process.exit(0), 3000);
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => input += chunk);
 process.stdin.on('end', () => {
+  clearTimeout(stdinTimeout);
   try {
     const data = JSON.parse(input);
     const model = data.model?.display_name || 'Claude';
@@ -18,14 +22,14 @@ process.stdin.on('end', () => {
     const session = data.session_id || '';
     const remaining = data.context_window?.remaining_percentage;
 
-    // Context window display (shows USED percentage scaled to 80% limit)
-    // Claude Code enforces an 80% context limit, so we scale to show 100% at that point
+    // Context window display (shows USED percentage scaled to usable context)
+    // Claude Code reserves ~16.5% for autocompact buffer, so usable context
+    // is 83.5% of the total window. We normalize to show 100% at that point.
+    const AUTO_COMPACT_BUFFER_PCT = 16.5;
     let ctx = '';
     if (remaining != null) {
-      const rem = Math.round(remaining);
-      const rawUsed = Math.max(0, Math.min(100, 100 - rem));
-      // Scale: 80% real usage = 100% displayed
-      const used = Math.min(100, Math.round((rawUsed / 80) * 100));
+      const usableRemaining = Math.max(0, ((remaining - AUTO_COMPACT_BUFFER_PCT) / (100 - AUTO_COMPACT_BUFFER_PCT)) * 100);
+      const used = Math.max(0, Math.min(100, Math.round(100 - usableRemaining)));
 
       // Write context metrics to bridge file for context-monitor hooks
       if (session) {
@@ -48,12 +52,12 @@ process.stdin.on('end', () => {
       const filled = Math.floor(used / 10);
       const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
 
-      // Color based on scaled usage
-      if (used < 63) {
+      // Color based on usable context thresholds
+      if (used < 50) {
         ctx = ` \x1b[32m${bar} ${used}%\x1b[0m`;
-      } else if (used < 81) {
+      } else if (used < 65) {
         ctx = ` \x1b[33m${bar} ${used}%\x1b[0m`;
-      } else if (used < 95) {
+      } else if (used < 80) {
         ctx = ` \x1b[38;5;208m${bar} ${used}%\x1b[0m`;
       } else {
         ctx = ` \x1b[5;31m💀 ${bar} ${used}%\x1b[0m`;
@@ -63,7 +67,9 @@ process.stdin.on('end', () => {
     // Current task from todos
     let task = '';
     const homeDir = os.homedir();
-    const todosDir = path.join(homeDir, '.claude', 'todos');
+    // Respect CLAUDE_CONFIG_DIR for custom config directory setups
+    const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(homeDir, '.claude');
+    const todosDir = path.join(claudeDir, 'todos');
     if (session && fs.existsSync(todosDir)) {
       try {
         const entries = fs.readdirSync(todosDir);
@@ -91,7 +97,8 @@ process.stdin.on('end', () => {
 
     // Update notifications (GSD + slashdo)
     let updates = '';
-    const gsdCacheFile = path.join(homeDir, '.claude', 'cache', 'gsd-update-check.json');
+    const cacheDir = path.join(claudeDir, 'cache');
+    const gsdCacheFile = path.join(cacheDir, 'gsd-update-check.json');
     if (fs.existsSync(gsdCacheFile)) {
       try {
         const cache = JSON.parse(fs.readFileSync(gsdCacheFile, 'utf8'));
@@ -100,7 +107,7 @@ process.stdin.on('end', () => {
         }
       } catch (e) {}
     }
-    const slashdoCacheFile = path.join(homeDir, '.claude', 'cache', 'slashdo-update-check.json');
+    const slashdoCacheFile = path.join(cacheDir, 'slashdo-update-check.json');
     if (fs.existsSync(slashdoCacheFile)) {
       try {
         const cache = JSON.parse(fs.readFileSync(slashdoCacheFile, 'utf8'));

@@ -152,12 +152,19 @@ install_claude() {
         modified = true;
       }
 
-      // Statusline (only if none exists and hook file was downloaded)
+      // Statusline: upgrade gsd-statusline → slashdo-statusline (superset)
       const statuslineHookPath = path.join(hooksDir, "slashdo-statusline.js");
-      if (!settings.statusLine && fs.existsSync(statuslineHookPath)) {
+      if (fs.existsSync(statuslineHookPath)) {
         const slCmd = "node \"" + statuslineHookPath + "\"";
-        settings.statusLine = { type: "command", command: slCmd };
-        modified = true;
+        const currentCmd = (settings.statusLine && typeof settings.statusLine.command === "string") ? settings.statusLine.command : "";
+        if (!settings.statusLine) {
+          settings.statusLine = { type: "command", command: slCmd };
+          modified = true;
+        } else if (currentCmd.indexOf("gsd-statusline") !== -1) {
+          settings.statusLine = { type: "command", command: slCmd };
+          modified = true;
+        }
+        // slashdo-statusline already active or custom statusline → no change
       }
 
       if (modified) {

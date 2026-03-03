@@ -375,6 +375,60 @@ describe('hook registration via install', () => {
     cleanup(tmpDir);
   });
 
+  it('upgrades gsd-statusline to slashdo-statusline', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    const existingSettings = {
+      statusLine: { type: 'command', command: 'node "/home/user/.claude/hooks/gsd-statusline.js"' },
+    };
+    fs.writeFileSync(env.settingsFile, JSON.stringify(existingSettings), 'utf8');
+
+    install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+
+    const settings = JSON.parse(fs.readFileSync(env.settingsFile, 'utf8'));
+    assert.ok(settings.statusLine.command.includes('slashdo-statusline'), 'should upgrade to slashdo-statusline');
+    assert.ok(!settings.statusLine.command.includes('gsd-statusline'), 'should no longer reference gsd-statusline');
+    const upgradeAction = install({ env, packageDir: PACKAGE_DIR, dryRun: false }).actions
+      .find(a => a.name === 'settings/statusLine');
+    assert.equal(upgradeAction.status, 'already configured');
+
+    cleanup(tmpDir);
+  });
+
+  it('reports gsd→slashdo upgrade in dry run', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    const existingSettings = {
+      statusLine: { type: 'command', command: 'node "/home/user/.claude/hooks/gsd-statusline.js"' },
+    };
+    fs.writeFileSync(env.settingsFile, JSON.stringify(existingSettings), 'utf8');
+
+    const results = install({ env, packageDir: PACKAGE_DIR, dryRun: true });
+
+    const action = results.actions.find(a => a.name === 'settings/statusLine');
+    assert.equal(action.status, 'would upgrade (gsd→slashdo)');
+    // Settings should not be modified
+    const settings = JSON.parse(fs.readFileSync(env.settingsFile, 'utf8'));
+    assert.ok(settings.statusLine.command.includes('gsd-statusline'), 'should not modify settings in dry run');
+
+    cleanup(tmpDir);
+  });
+
+  it('slashdo-statusline is idempotent on re-install', () => {
+    const { tmpDir, env } = makeTmpEnv();
+
+    install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+    const settings1 = JSON.parse(fs.readFileSync(env.settingsFile, 'utf8'));
+    assert.ok(settings1.statusLine.command.includes('slashdo-statusline'));
+
+    const results2 = install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+    const settings2 = JSON.parse(fs.readFileSync(env.settingsFile, 'utf8'));
+    assert.equal(settings2.statusLine.command, settings1.statusLine.command);
+
+    const action = results2.actions.find(a => a.name === 'settings/statusLine');
+    assert.equal(action.status, 'already configured');
+
+    cleanup(tmpDir);
+  });
+
   it('is idempotent — does not double-register hooks', () => {
     const { tmpDir, env } = makeTmpEnv();
 
@@ -467,6 +521,41 @@ describe('hook deregistration via uninstall', () => {
 
     // Should not throw
     install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false });
+
+    cleanup(tmpDir);
+  });
+
+  it('downgrades to gsd-statusline on uninstall when gsd hook exists', () => {
+    const { tmpDir, env } = makeTmpEnv();
+
+    install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+    const before = JSON.parse(fs.readFileSync(env.settingsFile, 'utf8'));
+    assert.ok(before.statusLine.command.includes('slashdo-statusline'));
+
+    // Place a gsd-statusline hook in the hooks dir
+    fs.writeFileSync(path.join(env.hooksDir, 'gsd-statusline.js'), '// gsd stub', 'utf8');
+
+    install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false });
+
+    const after = JSON.parse(fs.readFileSync(env.settingsFile, 'utf8'));
+    assert.ok(after.statusLine, 'statusLine should still exist');
+    assert.ok(after.statusLine.command.includes('gsd-statusline'), 'should downgrade to gsd-statusline');
+    assert.ok(!after.statusLine.command.includes('slashdo-statusline'), 'should not reference slashdo-statusline');
+
+    cleanup(tmpDir);
+  });
+
+  it('removes statusline on uninstall when no gsd hook exists', () => {
+    const { tmpDir, env } = makeTmpEnv();
+
+    install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+    const before = JSON.parse(fs.readFileSync(env.settingsFile, 'utf8'));
+    assert.ok(before.statusLine.command.includes('slashdo-statusline'));
+
+    install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false });
+
+    const after = JSON.parse(fs.readFileSync(env.settingsFile, 'utf8'));
+    assert.ok(!after.statusLine, 'statusLine should be removed when no gsd hook exists');
 
     cleanup(tmpDir);
   });
