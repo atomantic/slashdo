@@ -17,6 +17,7 @@ After the PR is created, run the Copilot review-and-fix loop:
      gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviews(last: 3) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }'
      ```
    - The review is complete when a new Copilot review node appears with a `submittedAt` after your latest push
+   - **Error detection**: After a review appears, check the review `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If the review body contains this error, it is NOT a successful review — re-request the review (step 1) and resume polling. Log a warning so the user knows a retry occurred. Apply a maximum of 3 error retries before asking the user whether to continue waiting or skip.
    - **Do NOT proceed until the re-requested review has actually posted** — "Awaiting requested review" means it is still in progress
    - Poll every 60 seconds; Copilot reviews can take **10-15 minutes** for large diffs — do NOT give up early
    - **Continue polling for at least 15 minutes** before concluding the review won't arrive
@@ -25,6 +26,7 @@ After the PR is created, run the Copilot review-and-fix loop:
 
 3. **Check for unresolved comments**
    - Filter review threads for `isResolved: false`
+   - **First, verify the review was successful**: check that the latest Copilot review body does NOT contain "Copilot encountered an error" or "unable to review". If it does, this is an error response — go back to step 1 (re-request) instead of proceeding. This check is critical because error reviews have no comments and no unresolved threads, making them look identical to a clean review.
    - Also count the total comments in the latest review (check the review body for "generated N comments")
    - If the latest review has **zero comments** (body says "generated 0 comments" or no unresolved threads exist): the PR is clean — exit the loop
    - If **there are unresolved comments**: proceed to fix them (step 4)

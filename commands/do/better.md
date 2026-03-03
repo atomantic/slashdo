@@ -508,6 +508,8 @@ gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments --jq '.[] | "\(.user.logi
 
 The review is complete when a `copilot[bot]` or `copilot-pull-request-reviewer[bot]` review appears.
 
+**Error detection**: After a review appears, check its `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If found, this is NOT a successful review — log a warning, re-request the review (step 6.1), and resume polling from 6.2. Allow up to 3 error retries per PR before asking the user whether to continue or skip.
+
 ### 6.3: Check for unresolved threads
 
 For each reviewed PR, fetch review threads via GraphQL using stdin JSON (**never use `$variables`** — shell expansion consumes `$` signs):

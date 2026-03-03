@@ -75,6 +75,8 @@ gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullReques
 
 Copilot reviews typically take 60-120 seconds. The review is complete when a new `copilot-pull-request-reviewer` review node appears.
 
+**Error detection**: After a review appears, check its `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If found, this is NOT a successful review — log a warning, re-request the review (same API call above), and resume polling. Allow up to 3 error retries before asking the user whether to continue or skip.
+
 ## Notes
 
 - Only resolve threads where you've actually addressed the feedback

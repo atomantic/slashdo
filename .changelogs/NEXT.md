@@ -11,6 +11,7 @@
 
 ## Fixed
 
+- Copilot review loop now detects error responses ("Copilot encountered an error") and retries instead of treating them as clean reviews with zero comments
 - Removed redundant "read CLAUDE.md" instructions from review, release, and better commands — project conventions are already in context
 
 ## Removed
