@@ -103,7 +103,7 @@ install_claude() {
   if command -v node &>/dev/null && [ -f "$target_hooks/slashdo-check-update.js" ]; then
     printf "    settings.json:          "
     local node_result
-    node_result=$(node -e '
+    if ! node_result=$(node -e '
       const fs = require("fs");
       const path = require("path");
       const home = require("os").homedir();
@@ -165,8 +165,7 @@ install_claude() {
       }
 
       process.stdout.write(modified ? "updated" : "already configured");
-    ' 2>/dev/null)
-    if [ $? -ne 0 ]; then
+    ' 2>/dev/null); then
       printf " ${YELLOW}failed${RESET}\n"
     elif echo "$node_result" | grep -q "^skipped"; then
       printf "${YELLOW}${node_result}${RESET}\n"

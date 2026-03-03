@@ -181,7 +181,9 @@ function deregisterHooksFromSettings(env, dryRun) {
 
   // Remove SessionStart hook entries referencing slashdo
   if (Array.isArray(settings.hooks?.SessionStart)) {
-    for (const group of settings.hooks.SessionStart) {
+    const emptiedByUs = new Set();
+    for (let i = 0; i < settings.hooks.SessionStart.length; i++) {
+      const group = settings.hooks.SessionStart[i];
       if (!group || typeof group !== 'object') continue;
       if (Array.isArray(group.hooks)) {
         const before = group.hooks.length;
@@ -191,14 +193,12 @@ function deregisterHooksFromSettings(env, dryRun) {
         if (group.hooks.length < before) {
           modified = true;
           actions.push({ name: 'settings/SessionStart hook', status: dryRun ? 'would deregister' : 'deregistered' });
+          if (group.hooks.length === 0) emptiedByUs.add(i);
         }
       }
     }
-    // Only remove groups that have an empty hooks array (from our removal above)
-    // Leave malformed or non-standard groups untouched to avoid data loss
-    settings.hooks.SessionStart = settings.hooks.SessionStart.filter(g =>
-      !(g && typeof g === 'object' && Array.isArray(g.hooks) && g.hooks.length === 0)
-    );
+    // Only remove groups that became empty as a result of removing slashdo entries
+    settings.hooks.SessionStart = settings.hooks.SessionStart.filter((_, i) => !emptiedByUs.has(i));
     if (settings.hooks.SessionStart.length === 0) {
       delete settings.hooks.SessionStart;
     }

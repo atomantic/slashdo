@@ -110,22 +110,24 @@ uninstall_claude() {
       let modified = false;
 
       if (settings.hooks && Array.isArray(settings.hooks.SessionStart)) {
-        for (const group of settings.hooks.SessionStart) {
+        var emptiedByUs = {};
+        for (var i = 0; i < settings.hooks.SessionStart.length; i++) {
+          var group = settings.hooks.SessionStart[i];
           if (!group || typeof group !== "object") continue;
           if (Array.isArray(group.hooks)) {
-            const before = group.hooks.length;
+            var before = group.hooks.length;
             group.hooks = group.hooks.filter(function(h) {
               if (!h || typeof h !== "object") return true;
               return typeof h.command !== "string" || h.command.indexOf("slashdo-check-update") === -1;
             });
-            if (group.hooks.length < before) modified = true;
+            if (group.hooks.length < before) {
+              modified = true;
+              if (group.hooks.length === 0) emptiedByUs[i] = true;
+            }
           }
         }
-        settings.hooks.SessionStart = settings.hooks.SessionStart.filter(function(g) {
-          // Only remove groups that have an empty hooks array (from our removal above)
-          // Leave malformed or non-standard groups untouched to avoid data loss
-          if (g && typeof g === "object" && Array.isArray(g.hooks) && g.hooks.length === 0) return false;
-          return true;
+        settings.hooks.SessionStart = settings.hooks.SessionStart.filter(function(g, i) {
+          return !emptiedByUs[i];
         });
         if (settings.hooks.SessionStart.length === 0) delete settings.hooks.SessionStart;
         if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
