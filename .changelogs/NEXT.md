@@ -7,6 +7,8 @@
 
 ## Changed
 
+- Refactored `/do:rpr` from team-based coordination (TeamCreate/SendMessage/TaskCreate) to parallel sub-agents for universal compatibility across all 4 environments
+- Added `supportsTeams` capability flag to environment definitions (true for Claude Code only)
 - Enhanced `/do:review` to require code flow analysis and software engineering principle evaluation (DRY, YAGNI, SOLID, SoC, naming) before per-file checklist
 
 ## Fixed

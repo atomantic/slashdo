@@ -92,4 +92,18 @@ describe('environment shape', () => {
     assert.equal(ENVIRONMENTS.gemini.supportsHooks, false);
     assert.equal(ENVIRONMENTS.codex.supportsHooks, false);
   });
+
+  it('only claude supports teams', () => {
+    assert.equal(ENVIRONMENTS.claude.supportsTeams, true);
+    assert.equal(ENVIRONMENTS.opencode.supportsTeams, false);
+    assert.equal(ENVIRONMENTS.gemini.supportsTeams, false);
+    assert.equal(ENVIRONMENTS.codex.supportsTeams, false);
+  });
+
+  it('all envs have supportsTeams boolean', () => {
+    for (const name of allEnvNames()) {
+      const env = ENVIRONMENTS[name];
+      assert.equal(typeof env.supportsTeams, 'boolean', `${name} missing supportsTeams`);
+    }
+  });
 });
