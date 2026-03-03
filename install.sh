@@ -101,7 +101,7 @@ install_claude() {
   # Register hooks in settings.json (requires Node.js)
   if command -v node &>/dev/null; then
     printf "    settings.json:          "
-    node -e '
+    if node -e '
       const fs = require("fs");
       const path = require("path");
       const home = require("os").homedir();
@@ -123,14 +123,18 @@ install_claude() {
 
       const hookCmd = "node \"" + path.join(home, ".claude", "hooks", "slashdo-check-update.js") + "\"";
       const alreadyRegistered = settings.hooks.SessionStart.some(function(g) {
-        return Array.isArray(g.hooks) && g.hooks.some(function(h) {
-          return h.command && h.command.indexOf("slashdo-check-update") !== -1;
+        return g && typeof g === "object" && Array.isArray(g.hooks) && g.hooks.some(function(h) {
+          return h && typeof h === "object" && typeof h.command === "string" && h.command.indexOf("slashdo-check-update") !== -1;
         });
       });
 
       if (!alreadyRegistered) {
         if (settings.hooks.SessionStart.length > 0) {
           var firstGroup = settings.hooks.SessionStart[0];
+          if (!firstGroup || typeof firstGroup !== "object") {
+            firstGroup = {};
+            settings.hooks.SessionStart[0] = firstGroup;
+          }
           if (!Array.isArray(firstGroup.hooks)) firstGroup.hooks = [];
           firstGroup.hooks.push({ type: "command", command: hookCmd });
         } else {
@@ -151,8 +155,7 @@ install_claude() {
       }
 
       process.stdout.write(modified ? "updated" : "already configured");
-    '
-    if [ $? -eq 0 ]; then
+    '; then
       printf " ${GREEN}ok${RESET}\n"
     else
       printf " ${YELLOW}failed${RESET}\n"

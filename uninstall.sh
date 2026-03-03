@@ -85,12 +85,13 @@ uninstall_claude() {
 
   if [ -f "$HOME/.claude/.slashdo-version" ]; then
     rm -f "$HOME/.claude/.slashdo-version"
+    printf "    removed: .slashdo-version        ${GREEN}ok${RESET}\n"
     count=$((count + 1))
   fi
 
   # Deregister from settings.json (requires Node.js)
   if command -v node &>/dev/null; then
-    node -e '
+    if node -e '
       const fs = require("fs");
       const path = require("path");
       const home = require("os").homedir();
@@ -108,16 +109,18 @@ uninstall_claude() {
 
       if (settings.hooks && Array.isArray(settings.hooks.SessionStart)) {
         for (const group of settings.hooks.SessionStart) {
+          if (!group || typeof group !== "object") continue;
           if (Array.isArray(group.hooks)) {
             const before = group.hooks.length;
             group.hooks = group.hooks.filter(function(h) {
-              return !h.command || h.command.indexOf("slashdo-check-update") === -1;
+              if (!h || typeof h !== "object") return true;
+              return typeof h.command !== "string" || h.command.indexOf("slashdo-check-update") === -1;
             });
             if (group.hooks.length < before) modified = true;
           }
         }
         settings.hooks.SessionStart = settings.hooks.SessionStart.filter(function(g) {
-          return g.hooks && g.hooks.length > 0;
+          return g && typeof g === "object" && Array.isArray(g.hooks) && g.hooks.length > 0;
         });
         if (settings.hooks.SessionStart.length === 0) delete settings.hooks.SessionStart;
         if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
@@ -133,7 +136,11 @@ uninstall_claude() {
         fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
         process.stdout.write("    deregistered from settings.json\n");
       }
-    '
+    '; then
+      : # deregistration handled inside node
+    else
+      printf "    ${YELLOW}settings.json deregistration failed${RESET}\n"
+    fi
   fi
 
   if [ $count -eq 0 ]; then

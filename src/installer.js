@@ -100,12 +100,19 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
     if (!Array.isArray(settings.hooks.SessionStart)) settings.hooks.SessionStart = [];
 
     const alreadyRegistered = settings.hooks.SessionStart.some(group =>
-      group.hooks?.some(h => h.command?.includes('slashdo-check-update'))
+      group &&
+      typeof group === 'object' &&
+      Array.isArray(group.hooks) &&
+      group.hooks.some(h => typeof h?.command === 'string' && h.command.includes('slashdo-check-update'))
     );
 
     if (!alreadyRegistered) {
       if (settings.hooks.SessionStart.length > 0) {
-        const firstGroup = settings.hooks.SessionStart[0];
+        let firstGroup = settings.hooks.SessionStart[0];
+        if (!firstGroup || typeof firstGroup !== 'object') {
+          firstGroup = { hooks: [] };
+          settings.hooks.SessionStart[0] = firstGroup;
+        }
         if (!Array.isArray(firstGroup.hooks)) firstGroup.hooks = [];
         firstGroup.hooks.push({
           type: 'command',
@@ -166,9 +173,12 @@ function deregisterHooksFromSettings(env, hookFiles, dryRun) {
   // Remove SessionStart hook entries referencing slashdo
   if (Array.isArray(settings.hooks?.SessionStart)) {
     for (const group of settings.hooks.SessionStart) {
+      if (!group || typeof group !== 'object') continue;
       if (Array.isArray(group.hooks)) {
         const before = group.hooks.length;
-        group.hooks = group.hooks.filter(h => !h.command?.includes('slashdo-check-update'));
+        group.hooks = group.hooks.filter(h =>
+          !h || typeof h !== 'object' || typeof h.command !== 'string' || !h.command.includes('slashdo-check-update')
+        );
         if (group.hooks.length < before) {
           modified = true;
           actions.push({ name: 'settings/SessionStart hook', status: dryRun ? 'would deregister' : 'deregistered' });
@@ -176,7 +186,9 @@ function deregisterHooksFromSettings(env, hookFiles, dryRun) {
       }
     }
     // Clean up empty groups
-    settings.hooks.SessionStart = settings.hooks.SessionStart.filter(g => g.hooks?.length > 0);
+    settings.hooks.SessionStart = settings.hooks.SessionStart.filter(g =>
+      g && typeof g === 'object' && Array.isArray(g.hooks) && g.hooks.length > 0
+    );
     if (settings.hooks.SessionStart.length === 0) {
       delete settings.hooks.SessionStart;
     }
