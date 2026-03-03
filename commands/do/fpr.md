@@ -94,14 +94,10 @@ gh pr create \
 
 - Write a clear title and rich description
 - If a PR template was found, follow its structure
-- Do NOT include co-author or "generated with" messages
 - Print the resulting PR URL so the user can review it
 
 ## Important
 
-- Never stage files you didn't edit
-- Never use `git add -A` or `git add .`
-- Do NOT bump versions or update changelogs — upstream maintainers control those
 - Do NOT merge the PR — upstream maintainers handle that
 - Do NOT run Copilot review loops — you don't control the upstream repo's review settings
 - If the fork is significantly behind upstream, warn the user about potential merge conflicts

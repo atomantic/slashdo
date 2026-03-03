@@ -79,5 +79,4 @@ Copilot reviews typically take 60-120 seconds. The review is complete when a new
 
 - Only resolve threads where you've actually addressed the feedback
 - If feedback is unclear or incorrect, leave a reply comment instead of resolving
-- Do not include co-author info in commits
 - Always run tests before committing — never push code with known failures

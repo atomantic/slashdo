@@ -47,13 +47,7 @@ When the resolved model is `opus`, **omit** the `model` parameter on the Agent/T
 
 ### Model Profile Rationale
 
-**Why Opus for audit in Quality?** Audit agents make judgment calls — distinguishing real bugs from false positives across 30+ lines of context. Opus reduces false positive noise, meaning less wasted remediation work downstream.
-
-**Why Sonnet for audit in Balanced?** Sonnet handles code analysis well when given explicit checklists (which each audit agent has). The 30-line context requirement provides enough signal. Good cost/quality tradeoff with 7 parallel agents.
-
-**Why Haiku for audit in Budget?** Surface-level pattern matching is Haiku's strength. May produce more false positives, but the remediation agents (still Sonnet) will validate findings before fixing. Best for large codebases where you want a fast first pass.
-
-**Why never Haiku for remediation?** Remediation agents write code, run builds, and commit. Code generation quality matters — Haiku may produce fixes that don't compile or introduce subtle regressions. Sonnet is the floor for code-writing agents.
+Opus reduces false positives in audit (judgment-heavy). Sonnet is the floor for code-writing agents (remediation). Haiku works for fast first-pass pattern scanning but may produce more false positives — remediation agents (Sonnet+) validate before fixing.
 
 ## Phase 0: Discovery & Setup
 
@@ -477,7 +471,6 @@ If `BROWSER_AUTHENTICATED` is not true (e.g., Phase 0e was skipped or failed):
 1. Navigate to the first PR URL using `browser_navigate`
 2. Check for user avatar/menu
 3. If not logged in: navigate to `https://github.com/login`, inform the user **"Please log in to GitHub in the browser. I'll wait for you to confirm."**, and use `AskUserQuestion` to wait
-4. Do NOT close the browser at any point during this phase
 
 ### 6.1: Request Copilot reviews on all PRs
 
@@ -612,7 +605,6 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 - **Copilot timeout** (review not received within 3 min): inform user, offer to merge without review approval or wait longer
 - **Copilot review loop exceeds 5 iterations per PR**: stop iterating on that PR, inform user, proceed to merge
 - **Existing worktree found at startup**: ask user — resume (reuse worktree) or cleanup (remove and start fresh)
-- **`gh auth status` / `glab auth status` failure**: halt and tell user to authenticate first
 - **No findings above LOW**: skip Phases 3-7, print "No actionable findings" with the LOW summary
 - **Browser not authenticated**: use `AskUserQuestion` to ask the user to log in — never skip this or close the browser
 - **Merge conflict after prior PR merged**: rebase the branch onto the updated default branch, push with `--force-with-lease`, re-run CI
@@ -628,8 +620,5 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 - When extracting modules, always add backward-compatible re-exports in the original module to prevent cross-PR breakage
 - Version bump happens exactly once on the first category branch based on aggregate commit analysis
 - Only CRITICAL, HIGH, and MEDIUM findings are auto-remediated; LOW and Test Coverage remain tracked in PLAN.md
-- Do not include co-author or generated-by info in any commits, PRs, or output
 - GitLab projects skip the Copilot review loop entirely (Phase 6) and stop after MR creation
-- Always run `gh auth status` (or `glab auth status`) before any authenticated operation
-- The Playwright browser should be opened early (Phase 0e) and kept open throughout — never close it prematurely
 - CI must pass on each PR before requesting Copilot review or merging
