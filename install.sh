@@ -166,11 +166,11 @@ install_claude() {
 
       process.stdout.write(modified ? "updated" : "already configured");
     ' 2>/dev/null); then
-      printf " ${YELLOW}failed${RESET}\n"
+      printf " %sfailed%s\n" "$YELLOW" "$RESET"
     elif echo "$node_result" | grep -q "^skipped"; then
-      printf "${YELLOW}${node_result}${RESET}\n"
+      printf "%s%s%s\n" "$YELLOW" "$node_result" "$RESET"
     else
-      printf "${node_result} ${GREEN}ok${RESET}\n"
+      printf "%s %sok%s\n" "$node_result" "$GREEN" "$RESET"
     fi
   elif command -v node &>/dev/null; then
     printf "    ${DIM}settings.json: skipped (hook files not found)${RESET}\n"

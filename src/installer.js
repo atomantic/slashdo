@@ -97,7 +97,12 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
   if (updateCheckHook) {
     const hookCommand = `node "${path.join(env.hooksDir, updateCheckHook.name)}"`;
 
-    if (!settings.hooks || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) settings.hooks = {};
+    if (!settings.hooks) {
+      settings.hooks = {};
+    } else if (typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) {
+      actions.push({ name: 'settings/hooks', status: 'skipped (unexpected shape)' });
+      return actions;
+    }
 
     // If SessionStart exists but isn't an array, skip hook registration (but continue to statusLine)
     if (Object.prototype.hasOwnProperty.call(settings.hooks, 'SessionStart') &&
@@ -370,6 +375,7 @@ function install({ env, packageDir, filterNames, dryRun, uninstall }) {
           fs.unlinkSync(oldTargetPath);
           results.actions.push({ name: `hook/${oldName}`, status: 'removed (obsolete)' });
         }
+        results.removed++;
       }
     }
   }
@@ -413,7 +419,7 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
     }
   }
 
-  if (env.supportsHooks && env.hooksDir) {
+  if (env.supportsHooks && env.hooksDir && !filterNames?.length) {
     for (const hook of hookFiles) {
       const targetPath = path.join(env.hooksDir, hook.relPath);
       if (!fs.existsSync(targetPath)) continue;
@@ -441,21 +447,19 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
       }
     }
 
-    // Deregister hooks and clean up cache only for full uninstalls
-    if (!filterNames?.length) {
-      const settingsActions = deregisterHooksFromSettings(env, dryRun);
-      results.actions.push(...settingsActions);
+    // Deregister hooks and clean up cache
+    const settingsActions = deregisterHooksFromSettings(env, dryRun);
+    results.actions.push(...settingsActions);
 
-      const cacheFile = path.join(path.dirname(env.hooksDir), 'cache', 'slashdo-update-check.json');
-      if (fs.existsSync(cacheFile)) {
-        if (dryRun) {
-          results.actions.push({ name: 'cache/slashdo-update-check.json', status: 'would remove' });
-        } else {
-          fs.unlinkSync(cacheFile);
-          results.actions.push({ name: 'cache/slashdo-update-check.json', status: 'removed' });
-        }
-        results.removed++;
+    const cacheFile = path.join(path.dirname(env.hooksDir), 'cache', 'slashdo-update-check.json');
+    if (fs.existsSync(cacheFile)) {
+      if (dryRun) {
+        results.actions.push({ name: 'cache/slashdo-update-check.json', status: 'would remove' });
+      } else {
+        fs.unlinkSync(cacheFile);
+        results.actions.push({ name: 'cache/slashdo-update-check.json', status: 'removed' });
       }
+      results.removed++;
     }
   }
 
