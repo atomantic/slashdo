@@ -96,7 +96,7 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
   if (updateCheckHook) {
     const hookCommand = `node "${path.join(env.hooksDir, updateCheckHook.name)}"`;
 
-    if (!settings.hooks) settings.hooks = {};
+    if (!settings.hooks || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) settings.hooks = {};
     if (!Array.isArray(settings.hooks.SessionStart)) settings.hooks.SessionStart = [];
 
     const alreadyRegistered = settings.hooks.SessionStart.some(group =>

@@ -121,7 +121,7 @@ install_claude() {
 
       // SessionStart hook (only if hook file exists)
       const updateHookPath = path.join(hooksDir, "slashdo-check-update.js");
-      if (!settings.hooks) settings.hooks = {};
+      if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) settings.hooks = {};
       if (!Array.isArray(settings.hooks.SessionStart)) settings.hooks.SessionStart = [];
 
       const hookCmd = "node \"" + updateHookPath + "\"";
