@@ -4,7 +4,7 @@ description: Resolve PR review feedback with parallel agents
 
 # Resolve PR Review Feedback
 
-Address the latest code review feedback on the current branch's pull request using a team-based approach.
+Address the latest code review feedback on the current branch's pull request using parallel sub-agents.
 
 ## Steps
 
@@ -18,23 +18,21 @@ Address the latest code review feedback on the current branch's pull request usi
    ```
    Save results to `/tmp/pr_threads.json` for parsing.
 
-4. **Spawn a team to address feedback in parallel**:
-   - Create a team with `TeamCreate`
-   - Create a task for each unresolved review thread using `TaskCreate`
-   - Create an additional task for an **independent code quality review** of all files changed in the PR (`gh pr diff --name-only`)
-   - Spawn sub-agents (general-purpose type) as teammates to handle each task in parallel:
-     - One agent per review thread (or group closely related threads on the same file)
-     - One dedicated agent for the code quality review
-   - Each agent should:
+4. **Spawn parallel sub-agents to address feedback**:
+   - For small PRs (1-3 unresolved threads), handle fixes inline instead of spawning agents
+   - For larger PRs, spawn one `Agent` call (general-purpose type) per review thread (or group closely related threads on the same file into one agent)
+   - Spawn one additional `Agent` call for an **independent code quality review** of all files changed in the PR (`gh pr diff --name-only`)
+   - Launch all Agent calls **in parallel** (multiple tool calls in a single response) and wait for all to return
+   - Each thread-fixing agent should:
      - Read the file and understand the context of the feedback
      - Make the requested code changes if they are accurate and warranted
      - Look for further opportunities to DRY up affected code
-     - Report back what was changed and the thread ID that was addressed
+     - Return what was changed and the thread ID that was addressed
    - The code quality reviewer should:
      - Read all changed files in the PR
      - Check for: style violations, missing error handling, dead code, DRY violations, security issues
-     - Apply fixes directly and report what was changed
-   - Wait for all agents to complete, then review their changes
+     - Apply fixes directly and return what was changed
+   - After all agents return, review their changes for conflicts or overlapping edits
 
 5. **Run tests**: Run the project's test suite to verify all changes pass. Do not proceed if tests fail — fix issues first.
 
@@ -68,18 +66,19 @@ Verify the request was accepted by checking that `Copilot` appears in the respon
 
 ### Poll for review completion
 
-Poll every 30 seconds using GraphQL to check for a new review with a `submittedAt` timestamp after the request:
+Poll using GraphQL to check for a new review with a `submittedAt` timestamp after the request:
 ```bash
 gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviews(last: 3) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }'
 ```
 
-Copilot reviews typically take 60-120 seconds. The review is complete when a new `copilot-pull-request-reviewer` review node appears.
+**Dynamic poll timing**: Before your first poll, check how long the most recent Copilot review on this PR took by comparing consecutive Copilot review `submittedAt` timestamps (or PR creation time for the first review). Use that duration as your expected wait. If no prior review exists, default to 5 minutes. Set poll interval to 60 seconds and max wait to **2x the expected duration** (minimum 5 minutes, maximum 20 minutes). Copilot reviews can take **10-15 minutes** for large diffs — do NOT give up early.
+
+The review is complete when a new `copilot-pull-request-reviewer` review node appears. If no review appears after max wait, **ask the user** whether to continue waiting, re-request, or skip.
+
+**Error detection**: After a review appears, check its `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If found, this is NOT a successful review — log a warning, re-request the review (same API call above), and resume polling. Allow up to 3 error retries before asking the user whether to continue or skip.
 
 ## Notes
 
 - Only resolve threads where you've actually addressed the feedback
 - If feedback is unclear or incorrect, leave a reply comment instead of resolving
-- Do not include co-author info in commits
-- For small PRs (1-3 threads), sub-agents may be overkill — use judgment on whether to spawn a team or handle inline
 - Always run tests before committing — never push code with known failures
-- Shut down the team after all work is complete

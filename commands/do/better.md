@@ -47,13 +47,7 @@ When the resolved model is `opus`, **omit** the `model` parameter on the Agent/T
 
 ### Model Profile Rationale
 
-**Why Opus for audit in Quality?** Audit agents make judgment calls — distinguishing real bugs from false positives across 30+ lines of context. Opus reduces false positive noise, meaning less wasted remediation work downstream.
-
-**Why Sonnet for audit in Balanced?** Sonnet handles code analysis well when given explicit checklists (which each audit agent has). The 30-line context requirement provides enough signal. Good cost/quality tradeoff with 7 parallel agents.
-
-**Why Haiku for audit in Budget?** Surface-level pattern matching is Haiku's strength. May produce more false positives, but the remediation agents (still Sonnet) will validate findings before fixing. Best for large codebases where you want a fast first pass.
-
-**Why never Haiku for remediation?** Remediation agents write code, run builds, and commit. Code generation quality matters — Haiku may produce fixes that don't compile or introduce subtle regressions. Sonnet is the floor for code-writing agents.
+Opus reduces false positives in audit (judgment-heavy). Sonnet is the floor for code-writing agents (remediation). Haiku works for fast first-pass pattern scanning but may produce more false positives — remediation agents (Sonnet+) validate before fixing.
 
 ## Phase 0: Discovery & Setup
 
@@ -83,7 +77,7 @@ Derive build and test commands from the project type:
 - Rust: `cargo build`, `cargo test`
 - Python: `pytest`, `python -m pytest`
 - Go: `go build ./...`, `go test ./...`
-- If ambiguous, check CLAUDE.md for documented commands
+- If ambiguous, check project conventions already in context for documented commands
 
 Record as `BUILD_CMD` and `TEST_CMD`.
 
@@ -106,7 +100,7 @@ This ensures the browser is ready before we need it in Phase 6, avoiding interru
 
 ## Phase 1: Unified Audit
 
-Read the project's CLAUDE.md files first to understand conventions. Pass relevant conventions to each agent.
+Project conventions are already in your context. Pass relevant conventions to each agent.
 
 Launch 7 Explore agents in two batches. Each agent must report findings in this format:
 ```
@@ -477,7 +471,6 @@ If `BROWSER_AUTHENTICATED` is not true (e.g., Phase 0e was skipped or failed):
 1. Navigate to the first PR URL using `browser_navigate`
 2. Check for user avatar/menu
 3. If not logged in: navigate to `https://github.com/login`, inform the user **"Please log in to GitHub in the browser. I'll wait for you to confirm."**, and use `AskUserQuestion` to wait
-4. Do NOT close the browser at any point during this phase
 
 ### 6.1: Request Copilot reviews on all PRs
 
@@ -496,17 +489,16 @@ If this returns 422 ("not a collaborator"), **fall back to Playwright** for each
 
 ### 6.2: Poll for review completion
 
-For each PR, poll every 15 seconds, max 3 minutes (12 polls):
+**Dynamic poll timing**: Before your first poll, check how long the most recent Copilot review on this PR took by comparing consecutive Copilot review `submittedAt` timestamps (or PR creation time for the first review). Use that duration as your expected wait. If no prior review exists, default to 5 minutes. Set poll interval to 60 seconds and max wait to **2x the expected duration** (minimum 5 minutes, maximum 20 minutes). Copilot reviews can take **10-15 minutes** for large diffs — do NOT give up early.
+
+For each PR, poll using GraphQL to check for a new Copilot review:
 ```bash
-gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/reviews --jq '.[] | "\(.user.login): \(.state)"'
+echo '{"query":"{ repository(owner: \"OWNER\", name: \"REPO\") { pullRequest(number: PR_NUM) { reviews(last: 5) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
 ```
 
-Also check for inline comments:
-```bash
-gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments --jq '.[] | "\(.user.login) [\(.path):\(.line)]: \(.body[:120])"'
-```
+The review is complete when a new `copilot-pull-request-reviewer[bot]` review appears with a `submittedAt` after your request. If no review appears after max wait, **ask the user** whether to continue waiting, re-request, or skip.
 
-The review is complete when a `copilot[bot]` or `copilot-pull-request-reviewer[bot]` review appears.
+**Error detection**: After a review appears, check its `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If found, this is NOT a successful review — log a warning, re-request the review (step 6.1), and resume polling from 6.2. Allow up to 3 error retries per PR before asking the user whether to continue or skip.
 
 ### 6.3: Check for unresolved threads
 
@@ -610,7 +602,6 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 - **Copilot timeout** (review not received within 3 min): inform user, offer to merge without review approval or wait longer
 - **Copilot review loop exceeds 5 iterations per PR**: stop iterating on that PR, inform user, proceed to merge
 - **Existing worktree found at startup**: ask user — resume (reuse worktree) or cleanup (remove and start fresh)
-- **`gh auth status` / `glab auth status` failure**: halt and tell user to authenticate first
 - **No findings above LOW**: skip Phases 3-7, print "No actionable findings" with the LOW summary
 - **Browser not authenticated**: use `AskUserQuestion` to ask the user to log in — never skip this or close the browser
 - **Merge conflict after prior PR merged**: rebase the branch onto the updated default branch, push with `--force-with-lease`, re-run CI
@@ -626,8 +617,5 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 - When extracting modules, always add backward-compatible re-exports in the original module to prevent cross-PR breakage
 - Version bump happens exactly once on the first category branch based on aggregate commit analysis
 - Only CRITICAL, HIGH, and MEDIUM findings are auto-remediated; LOW and Test Coverage remain tracked in PLAN.md
-- Do not include co-author or generated-by info in any commits, PRs, or output
 - GitLab projects skip the Copilot review loop entirely (Phase 6) and stop after MR creation
-- Always run `gh auth status` (or `glab auth status`) before any authenticated operation
-- The Playwright browser should be opened early (Phase 0e) and kept open throughout — never close it prematurely
 - CI must pass on each PR before requesting Copilot review or merging

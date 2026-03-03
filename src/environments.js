@@ -12,6 +12,7 @@ const ENVIRONMENTS = {
     commandsDir: path.join(HOME, '.claude', 'commands'),
     libDir: path.join(HOME, '.claude', 'lib'),
     hooksDir: path.join(HOME, '.claude', 'hooks'),
+    settingsFile: path.join(HOME, '.claude', 'settings.json'),
     versionFile: path.join(HOME, '.claude', '.slashdo-version'),
     format: 'yaml-frontmatter',
     ext: '.md',
@@ -19,6 +20,7 @@ const ENVIRONMENTS = {
     libPathPrefix: '~/.claude/lib/',
     supportsHooks: true,
     supportsCatInclusion: true,
+    supportsTeams: true,
   },
   opencode: {
     name: 'OpenCode',
@@ -32,6 +34,7 @@ const ENVIRONMENTS = {
     libPathPrefix: '~/.config/opencode/lib/',
     supportsHooks: false,
     supportsCatInclusion: true,
+    supportsTeams: false,
   },
   gemini: {
     name: 'Gemini CLI',
@@ -45,6 +48,7 @@ const ENVIRONMENTS = {
     libPathPrefix: '~/.gemini/lib/',
     supportsHooks: false,
     supportsCatInclusion: true,
+    supportsTeams: false,
   },
   codex: {
     name: 'Codex',
@@ -58,6 +62,7 @@ const ENVIRONMENTS = {
     libPathPrefix: null,
     supportsHooks: false,
     supportsCatInclusion: false,
+    supportsTeams: false,
   },
 };
 
