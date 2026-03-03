@@ -87,6 +87,7 @@ npx slash-do@latest --env claude             # target specific environment
 npx slash-do@latest --list                   # show commands and install status
 npx slash-do@latest --dry-run                # preview changes
 npx slash-do@latest --uninstall              # remove installed commands
+curl -fsSL https://raw.githubusercontent.com/atomantic/slashdo/main/uninstall.sh | bash  # curl uninstall
 npx slash-do@latest push pr release           # install specific commands only
 ```
 

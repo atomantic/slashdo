@@ -32,7 +32,8 @@
     "commands/",
     "lib/",
     "hooks/",
-    "install.sh"
+    "install.sh",
+    "uninstall.sh"
   ],
   "engines": {
     "node": ">=16.7.0"
