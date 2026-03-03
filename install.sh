@@ -42,7 +42,7 @@ detect_envs() {
   [ -d "$HOME/.config/opencode" ] && envs+=(opencode)
   [ -d "$HOME/.gemini" ] && envs+=(gemini)
   [ -d "$HOME/.codex" ] && envs+=(codex)
-  printf '%s\n' "${envs[@]}"
+  [ ${#envs[@]} -gt 0 ] && printf '%s\n' "${envs[@]}"
 }
 
 install_claude() {
@@ -126,7 +126,7 @@ install_gemini() {
     if curl -fsSL "$BASE_URL/commands/do/$cmd.md" -o "/tmp/slashdo-$cmd.md" 2>/dev/null; then
       # Convert YAML frontmatter to TOML and rewrite lib paths
       awk '
-        BEGIN { in_fm=0; started=0 }
+        BEGIN { in_fm=0 }
         NR==1 && /^---$/ { in_fm=1; print "+++"; next }
         in_fm && /^---$/ { in_fm=0; print "+++"; next }
         in_fm && /^description:/ { sub(/^description: */, ""); gsub(/"/, ""); printf "description = \"%s\"\n", $0; next }
@@ -160,7 +160,7 @@ install_gemini() {
 
 banner
 
-envs=($(detect_envs))
+envs=($(detect_envs)) || true
 
 if [ ${#envs[@]} -eq 0 ]; then
   printf "  No supported AI coding environments detected.\n"
@@ -176,7 +176,7 @@ for env in "${envs[@]}"; do
     claude)   install_claude ;;
     opencode) install_opencode ;;
     gemini)   install_gemini ;;
-    codex)    printf "  ${DIM}Codex: use 'npx slashdo@latest --env codex' (requires Node.js for content inlining)${RESET}\n" ;;
+    codex)    printf "  ${DIM}Codex: use 'npx slash-do@latest --env codex' (requires Node.js for content inlining)${RESET}\n" ;;
   esac
   printf "\n"
 done

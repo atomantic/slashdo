@@ -6,7 +6,6 @@ set -euo pipefail
 CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
 GREEN='\033[0;32m'
-RED='\033[0;31m'
 DIM='\033[2m'
 RESET='\033[0m'
 
@@ -32,20 +31,6 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 LIBS=(
   code-review-checklist copilot-review-loop graphql-escaping
 )
-
-remove_files() {
-  local dir="$1"
-  shift
-  local count=0
-  for f in "$@"; do
-    if [ -f "$dir/$f" ]; then
-      rm -f "$dir/$f"
-      printf "    removed: %-24s${GREEN}ok${RESET}\n" "$f"
-      count=$((count + 1))
-    fi
-  done
-  echo $count
-}
 
 uninstall_claude() {
   local target_cmd="$HOME/.claude/commands/do"
@@ -141,17 +126,17 @@ uninstall_gemini() {
   fi
 }
 
-banner
-
 detect_envs() {
   local envs=()
   [ -d "$HOME/.claude" ] && envs+=(claude)
   [ -d "$HOME/.config/opencode" ] && envs+=(opencode)
   [ -d "$HOME/.gemini" ] && envs+=(gemini)
-  printf '%s\n' "${envs[@]}"
+  [ ${#envs[@]} -gt 0 ] && printf '%s\n' "${envs[@]}"
 }
 
-envs=($(detect_envs))
+banner
+
+envs=($(detect_envs)) || true
 
 if [ ${#envs[@]} -eq 0 ]; then
   printf "  No AI coding environments found. Nothing to uninstall.\n\n"
