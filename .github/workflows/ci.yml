@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [16, 18, 20]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Validate modules load
+        run: node -e "require('./src/environments'); require('./src/transformer'); require('./src/installer'); require('./src/version-check'); console.log('OK')"
+
+      - name: Validate CLI help
+        run: node bin/cli.js --help
+
+      - name: Validate command listing
+        run: node bin/cli.js --list --env claude
+
+      - name: Validate dry-run install
+        run: node bin/cli.js --dry-run --env claude
+
+      - name: Validate frontmatter parsing
+        run: |
+          node -e "
+            const { parseFrontmatter } = require('./src/transformer');
+            const fs = require('fs');
+            const content = fs.readFileSync('commands/do/cam.md', 'utf8');
+            const { frontmatter, body } = parseFrontmatter(content);
+            if (!frontmatter.description) { console.error('Missing description'); process.exit(1); }
+            console.log('Frontmatter OK:', frontmatter.description);
+          "
+
+      - name: Validate all commands have frontmatter
+        run: |
+          node -e "
+            const { parseFrontmatter } = require('./src/transformer');
+            const fs = require('fs');
+            const path = require('path');
+            const dir = 'commands/do';
+            const files = fs.readdirSync(dir).filter(f => f.endsWith('.md'));
+            let ok = true;
+            for (const f of files) {
+              const content = fs.readFileSync(path.join(dir, f), 'utf8');
+              const { frontmatter } = parseFrontmatter(content);
+              if (!frontmatter.description) {
+                console.error('Missing description in', f);
+                ok = false;
+              } else {
+                console.log('OK:', f, '-', frontmatter.description);
+              }
+            }
+            if (!ok) process.exit(1);
+          "

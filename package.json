@@ -1,0 +1,39 @@
+{
+  "name": "slashdo",
+  "version": "0.1.0",
+  "description": "Curated slash commands for AI coding assistants — Claude Code, OpenCode, Gemini CLI, and Codex",
+  "author": "Adam Eivy <adam@eivy.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/atomantic/slashdo.git"
+  },
+  "homepage": "https://github.com/atomantic/slashdo",
+  "bugs": {
+    "url": "https://github.com/atomantic/slashdo/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "slash-commands",
+    "opencode",
+    "gemini-cli",
+    "codex",
+    "devops",
+    "devsecops",
+    "code-review",
+    "ai-tools"
+  ],
+  "bin": {
+    "slashdo": "./bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "commands/",
+    "lib/",
+    "hooks/"
+  ],
+  "engines": {
+    "node": ">=16.7.0"
+  }
+}
