@@ -108,7 +108,7 @@ uninstall_claude() {
 
       if (settings.hooks && Array.isArray(settings.hooks.SessionStart)) {
         for (const group of settings.hooks.SessionStart) {
-          if (group.hooks) {
+          if (Array.isArray(group.hooks)) {
             const before = group.hooks.length;
             group.hooks = group.hooks.filter(function(h) {
               return !h.command || h.command.indexOf("slashdo-check-update") === -1;

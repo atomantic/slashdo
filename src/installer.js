@@ -166,7 +166,7 @@ function deregisterHooksFromSettings(env, hookFiles, dryRun) {
   // Remove SessionStart hook entries referencing slashdo
   if (Array.isArray(settings.hooks?.SessionStart)) {
     for (const group of settings.hooks.SessionStart) {
-      if (group.hooks) {
+      if (Array.isArray(group.hooks)) {
         const before = group.hooks.length;
         group.hooks = group.hooks.filter(h => !h.command?.includes('slashdo-check-update'));
         if (group.hooks.length < before) {
@@ -432,6 +432,7 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun) {
         fs.unlinkSync(cacheFile);
         results.actions.push({ name: 'cache/slashdo-update-check.json', status: 'removed' });
       }
+      results.removed++;
     }
   }
 

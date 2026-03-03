@@ -123,7 +123,7 @@ install_claude() {
 
       const hookCmd = "node \"" + path.join(home, ".claude", "hooks", "slashdo-check-update.js") + "\"";
       const alreadyRegistered = settings.hooks.SessionStart.some(function(g) {
-        return g.hooks && g.hooks.some(function(h) {
+        return Array.isArray(g.hooks) && g.hooks.some(function(h) {
           return h.command && h.command.indexOf("slashdo-check-update") !== -1;
         });
       });

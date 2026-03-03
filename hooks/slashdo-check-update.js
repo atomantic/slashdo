@@ -45,9 +45,10 @@ const child = spawn(process.execPath, ['-e', `
   // Simple semver comparison: only flag update when latest > installed
   let updateAvailable = false;
   if (latest && latest !== installed) {
-    const parse = v => (v || '').split('.').map(Number);
+    const parse = v => (v || '').replace(/-.+$/, '').split('.').map(Number);
     const [iM, im, ip] = parse(installed);
     const [lM, lm, lp] = parse(latest);
+    if ([iM, im, ip, lM, lm, lp].some(isNaN)) { updateAvailable = installed !== latest; }
     updateAvailable = lM > iM || (lM === iM && (lm > im || (lm === im && lp > ip)));
   }
 

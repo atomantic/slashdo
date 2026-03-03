@@ -30,7 +30,8 @@ process.stdin.on('end', () => {
       // Write context metrics to bridge file for context-monitor hooks
       if (session) {
         try {
-          const bridgePath = path.join(os.tmpdir(), `claude-ctx-${session}.json`);
+          const safeSession = session.replace(/[^a-zA-Z0-9_-]/g, '');
+          const bridgePath = path.join(os.tmpdir(), `claude-ctx-${safeSession}.json`);
           const bridgeData = JSON.stringify({
             session_id: session,
             remaining_percentage: remaining,
