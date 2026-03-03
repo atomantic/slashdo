@@ -26,6 +26,46 @@ These conventions override generic best practices. For example, if CLAUDE.md say
 
 For **each changed file** in the diff, read the **entire file** (not just diff hunks). Reviewing only the diff misses context bugs where new code interacts incorrectly with existing code.
 
+### Understand the Code Flow
+
+Before checking individual files against the checklist, **map the flow of changed code across all files**. This means:
+
+1. **Trace call chains** — for each new or modified function/method, identify every caller and callee across the changed files. Read those files too if needed. You cannot evaluate whether code is duplicated or well-structured without knowing how it connects.
+2. **Identify shared data paths** — trace data from entry point (route handler, event listener, CLI arg) through transforms, storage, and output. Understand what each layer is responsible for.
+3. **Map responsibilities** — for each changed module/file, state its single responsibility in one sentence. If you can't, it may be doing too much.
+
+### Evaluate Software Engineering Principles
+
+With the flow understood, evaluate the changed code against these principles:
+
+**DRY (Don't Repeat Yourself)**
+- Look for logic duplicated across changed files or between changed and existing code. Grep for similar function signatures, repeated conditional blocks, or copy-pasted patterns with minor variations.
+- If two functions do nearly the same thing with small differences, they should likely share a common implementation with the differences parameterized.
+- Duplicated validation, error formatting, or data transformation are common violations.
+
+**YAGNI (You Ain't Gonna Need It)**
+- Flag abstractions, config options, parameters, or extension points that serve no current use case. Code should solve the problem at hand, not hypothetical future problems.
+- Unnecessary wrapper functions, premature generalization (e.g., a factory that produces one type), and unused feature flags are common violations.
+
+**SOLID Principles**
+- **Single Responsibility** — each module/function should have one reason to change. If a function handles both business logic and I/O formatting, flag it.
+- **Open/Closed** — new behavior should be addable without modifying existing working code where practical (e.g., strategy patterns, plugin hooks).
+- **Liskov Substitution** — if subclasses or interface implementations exist, verify they are fully substitutable without breaking callers.
+- **Interface Segregation** — callers should not depend on methods they don't use. Large config objects or option bags passed through many layers are a smell.
+- **Dependency Inversion** — high-level modules should not import low-level implementation details directly when an abstraction boundary would be cleaner.
+
+**Separation of Concerns**
+- Business logic should not be tangled with transport (HTTP, WebSocket), storage (SQL, file I/O), or presentation (HTML, JSON formatting).
+- If a route handler contains business rules beyond simple delegation, flag it.
+
+**Naming & Readability**
+- Function and variable names should communicate intent. If you need to read the implementation to understand what a name means, it's poorly named.
+- Boolean variables/params should read as predicates (`isReady`, `hasAccess`), not ambiguous nouns.
+
+Only flag principle violations that are **concrete and actionable** in the changed code. Do not flag pre-existing design issues in untouched code unless the changes make them worse.
+
+### Per-File Checklist
+
 Check every file against this checklist:
 
 !`cat ~/.claude/lib/code-review-checklist.md`
