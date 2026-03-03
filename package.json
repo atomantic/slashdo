@@ -35,6 +35,9 @@
     "install.sh",
     "uninstall.sh"
   ],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
   "engines": {
     "node": ">=16.7.0"
   }

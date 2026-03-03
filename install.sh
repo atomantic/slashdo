@@ -3,6 +3,8 @@
 # Usage: curl -fsSL https://raw.githubusercontent.com/atomantic/slashdo/main/install.sh | bash
 set -euo pipefail
 
+# shellcheck disable=SC2059
+
 REPO="atomantic/slashdo"
 BRANCH="main"
 BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"

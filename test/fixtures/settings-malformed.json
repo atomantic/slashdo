@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "SessionStart": [
+      null,
+      "a string entry",
+      42,
+      {
+        "hooks": "not an array"
+      },
+      {
+        "hooks": [
+          null,
+          "bad entry",
+          {
+            "type": "command",
+            "command": "echo existing"
+          }
+        ]
+      }
+    ]
+  }
+}
