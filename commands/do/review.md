@@ -13,14 +13,9 @@ argument-hint: "[base-branch]"
 
 If there are no changes, inform the user and stop.
 
-## Read Project Conventions
+## Apply Project Conventions
 
-Read the project's CLAUDE.md (if it exists) to understand:
-- Code style rules, error handling patterns, logging conventions
-- Custom error classes, validation patterns, framework-specific rules
-- Any explicit security model or scope exclusions
-
-These conventions override generic best practices. For example, if CLAUDE.md says "no auth needed — internal tool", do not flag missing authentication.
+CLAUDE.md is already loaded into your context. Use its rules (code style, error handling, logging, security model, scope exclusions) as overrides to generic best practices throughout this review. For example, if CLAUDE.md says "no auth needed — internal tool", do not flag missing authentication.
 
 ## Deep File Review
 
