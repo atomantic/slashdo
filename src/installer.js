@@ -236,7 +236,7 @@ function install({ env, packageDir, filterNames, dryRun, uninstall }) {
   const results = { installed: 0, updated: 0, upToDate: 0, removed: 0, actions: [] };
 
   if (uninstall) {
-    return doUninstall(filtered, libFiles, hookFiles, env, results, dryRun);
+    return doUninstall(filtered, libFiles, hookFiles, env, results, dryRun, filterNames);
   }
 
   for (const cmd of filtered) {
@@ -335,9 +335,11 @@ function install({ env, packageDir, filterNames, dryRun, uninstall }) {
       else results.updated++;
     }
 
-    // Register hooks in settings.json
-    const settingsActions = registerHooksInSettings(env, hookFiles, dryRun);
-    results.actions.push(...settingsActions);
+    // Register hooks in settings.json (only for full installs, not filtered command installs)
+    if (!filterNames?.length) {
+      const settingsActions = registerHooksInSettings(env, hookFiles, dryRun);
+      results.actions.push(...settingsActions);
+    }
   }
 
   // Clean up renamed commands
@@ -380,7 +382,7 @@ function install({ env, packageDir, filterNames, dryRun, uninstall }) {
   return results;
 }
 
-function doUninstall(commands, libFiles, hookFiles, env, results, dryRun) {
+function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filterNames) {
   for (const cmd of commands) {
     const targetRel = getTargetFilename(cmd.relPath, env);
     const targetPath = path.join(env.commandsDir, targetRel);
@@ -439,20 +441,21 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun) {
       }
     }
 
-    // Deregister hooks from settings.json
-    const settingsActions = deregisterHooksFromSettings(env, dryRun);
-    results.actions.push(...settingsActions);
+    // Deregister hooks and clean up cache only for full uninstalls
+    if (!filterNames?.length) {
+      const settingsActions = deregisterHooksFromSettings(env, dryRun);
+      results.actions.push(...settingsActions);
 
-    // Clean up cache file
-    const cacheFile = path.join(path.dirname(env.hooksDir), 'cache', 'slashdo-update-check.json');
-    if (fs.existsSync(cacheFile)) {
-      if (dryRun) {
-        results.actions.push({ name: 'cache/slashdo-update-check.json', status: 'would remove' });
-      } else {
-        fs.unlinkSync(cacheFile);
-        results.actions.push({ name: 'cache/slashdo-update-check.json', status: 'removed' });
+      const cacheFile = path.join(path.dirname(env.hooksDir), 'cache', 'slashdo-update-check.json');
+      if (fs.existsSync(cacheFile)) {
+        if (dryRun) {
+          results.actions.push({ name: 'cache/slashdo-update-check.json', status: 'would remove' });
+        } else {
+          fs.unlinkSync(cacheFile);
+          results.actions.push({ name: 'cache/slashdo-update-check.json', status: 'removed' });
+        }
+        results.removed++;
       }
-      results.removed++;
     }
   }
 
