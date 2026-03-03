@@ -68,10 +68,10 @@ const RENAMED_COMMANDS = {
   'optimize-md': 'omd',
 };
 
-// Old hooks to clean up: value is the replacement name (null = just delete)
-const RENAMED_HOOKS = {
-  'update-check.md': null,
-};
+// Old hooks to remove during install/uninstall (superseded or no longer needed)
+const OBSOLETE_HOOKS = [
+  'update-check.md',
+];
 
 function registerHooksInSettings(env, hookFiles, dryRun) {
   if (!env.settingsFile) return [];
@@ -346,19 +346,17 @@ function install({ env, packageDir, filterNames, dryRun, uninstall }) {
     }
   }
 
-  // Clean up renamed/removed hooks
+  // Clean up obsolete hooks from prior versions
   if (env.supportsHooks && env.hooksDir) {
-    for (const [oldName, newName] of Object.entries(RENAMED_HOOKS)) {
+    for (const oldName of OBSOLETE_HOOKS) {
       const oldTargetPath = path.join(env.hooksDir, oldName);
 
       if (fs.existsSync(oldTargetPath)) {
-        const label = newName ? `migrated → hook/${newName}` : 'removed (obsolete)';
-        const dryLabel = newName ? `would migrate → hook/${newName}` : 'would remove (obsolete)';
         if (dryRun) {
-          results.actions.push({ name: `hook/${oldName}`, status: dryLabel });
+          results.actions.push({ name: `hook/${oldName}`, status: 'would remove (obsolete)' });
         } else {
           fs.unlinkSync(oldTargetPath);
-          results.actions.push({ name: `hook/${oldName}`, status: label });
+          results.actions.push({ name: `hook/${oldName}`, status: 'removed (obsolete)' });
         }
       }
     }
@@ -417,8 +415,8 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun) {
       results.removed++;
     }
 
-    // Clean up old/renamed hooks that may have been installed by prior versions
-    for (const [oldName] of Object.entries(RENAMED_HOOKS)) {
+    // Clean up obsolete hooks that may have been installed by prior versions
+    for (const oldName of OBSOLETE_HOOKS) {
       const oldPath = path.join(env.hooksDir, oldName);
       if (fs.existsSync(oldPath)) {
         if (dryRun) {

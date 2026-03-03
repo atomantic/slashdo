@@ -44,6 +44,9 @@
    - Schema fields that accept values the rest of the system can't handle (e.g., a field accepts any string but downstream code requires a specific format)
    - Summary counters/accumulators that miss edge cases — if an item is removed, is the count updated? Are all branches counted?
    - Silent operations in verbose sequences — when a series of operations each prints a status line, ensure all branches print consistent output
+   - Labels, comments, or status messages that describe behavior the code doesn't implement — e.g., a map named "renamed" that only deletes, or an action labeled "migrated" that never creates the target
+   - Registering references (config entries, settings pointers) to files or resources without verifying the resource actually exists — a failed download or missing file leaves dangling references that break later operations
+   - Error/catch handlers that exit cleanly (`exit 0`, `return`) without any user-visible output — makes failures look like successes; always print a skip/warning message explaining why the operation was skipped
 
    **Concurrency & data integrity**
    - Shared mutable state (files, in-memory caches) accessed by concurrent requests without locking or atomic writes

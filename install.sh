@@ -100,14 +100,15 @@ install_claude() {
     fi
   done
 
-  # Register hooks in settings.json (requires Node.js)
-  if command -v node &>/dev/null; then
+  # Register hooks in settings.json (requires Node.js and successful hook downloads)
+  if command -v node &>/dev/null && [ -f "$target_hooks/slashdo-check-update.js" ]; then
     printf "    settings.json:          "
     if node -e '
       const fs = require("fs");
       const path = require("path");
       const home = require("os").homedir();
       const settingsPath = path.join(home, ".claude", "settings.json");
+      const hooksDir = path.join(home, ".claude", "hooks");
 
       let settings = {};
       if (fs.existsSync(settingsPath)) {
@@ -119,11 +120,12 @@ install_claude() {
 
       let modified = false;
 
-      // SessionStart hook
+      // SessionStart hook (only if hook file exists)
+      const updateHookPath = path.join(hooksDir, "slashdo-check-update.js");
       if (!settings.hooks) settings.hooks = {};
       if (!Array.isArray(settings.hooks.SessionStart)) settings.hooks.SessionStart = [];
 
-      const hookCmd = "node \"" + path.join(home, ".claude", "hooks", "slashdo-check-update.js") + "\"";
+      const hookCmd = "node \"" + updateHookPath + "\"";
       const alreadyRegistered = settings.hooks.SessionStart.some(function(g) {
         return g && typeof g === "object" && Array.isArray(g.hooks) && g.hooks.some(function(h) {
           return h && typeof h === "object" && typeof h.command === "string" && h.command.indexOf("slashdo-check-update") !== -1;
@@ -145,9 +147,10 @@ install_claude() {
         modified = true;
       }
 
-      // Statusline (only if none exists)
-      if (!settings.statusLine) {
-        const slCmd = "node \"" + path.join(home, ".claude", "hooks", "slashdo-statusline.js") + "\"";
+      // Statusline (only if none exists and hook file was downloaded)
+      const statuslineHookPath = path.join(hooksDir, "slashdo-statusline.js");
+      if (!settings.statusLine && fs.existsSync(statuslineHookPath)) {
+        const slCmd = "node \"" + statuslineHookPath + "\"";
         settings.statusLine = { type: "command", command: slCmd };
         modified = true;
       }
@@ -162,6 +165,8 @@ install_claude() {
     else
       printf " ${YELLOW}failed${RESET}\n"
     fi
+  elif command -v node &>/dev/null; then
+    printf "    ${DIM}settings.json: skipped (hook files not found)${RESET}\n"
   else
     printf "    ${DIM}settings.json: skipped (node not found — hooks installed but not registered)${RESET}\n"
   fi

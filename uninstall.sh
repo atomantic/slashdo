@@ -105,6 +105,7 @@ uninstall_claude() {
       try {
         settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
       } catch (e) {
+        process.stdout.write("    skipped settings.json deregistration (parse error)\n");
         process.exit(0);
       }
       let modified = false;
