@@ -98,6 +98,13 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
     const hookCommand = `node "${path.join(env.hooksDir, updateCheckHook.name)}"`;
 
     if (!settings.hooks || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) settings.hooks = {};
+
+    // If SessionStart exists but isn't an array, preserve user's existing config
+    if (Object.prototype.hasOwnProperty.call(settings.hooks, 'SessionStart') &&
+      !Array.isArray(settings.hooks.SessionStart)) {
+      actions.push({ name: 'settings/SessionStart hook', status: 'skipped (unexpected shape)' });
+      return actions;
+    }
     if (!Array.isArray(settings.hooks.SessionStart)) settings.hooks.SessionStart = [];
 
     const alreadyRegistered = settings.hooks.SessionStart.some(group =>
@@ -155,7 +162,7 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
   return actions;
 }
 
-function deregisterHooksFromSettings(env, hookFiles, dryRun) {
+function deregisterHooksFromSettings(env, dryRun) {
   if (!env.settingsFile) return [];
 
   const settingsPath = env.settingsFile;
@@ -187,9 +194,10 @@ function deregisterHooksFromSettings(env, hookFiles, dryRun) {
         }
       }
     }
-    // Clean up empty groups
+    // Only remove groups that have an empty hooks array (from our removal above)
+    // Leave malformed or non-standard groups untouched to avoid data loss
     settings.hooks.SessionStart = settings.hooks.SessionStart.filter(g =>
-      g && typeof g === 'object' && Array.isArray(g.hooks) && g.hooks.length > 0
+      !(g && typeof g === 'object' && Array.isArray(g.hooks) && g.hooks.length === 0)
     );
     if (settings.hooks.SessionStart.length === 0) {
       delete settings.hooks.SessionStart;
@@ -432,7 +440,7 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun) {
     }
 
     // Deregister hooks from settings.json
-    const settingsActions = deregisterHooksFromSettings(env, hookFiles, dryRun);
+    const settingsActions = deregisterHooksFromSettings(env, dryRun);
     results.actions.push(...settingsActions);
 
     // Clean up cache file

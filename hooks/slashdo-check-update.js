@@ -46,7 +46,7 @@ try {
     // Simple semver comparison: only flag update when latest > installed
     let updateAvailable = false;
     if (latest && latest !== installed) {
-      const parse = v => (v || '').replace(/-.+$/, '').split('.').map(Number);
+      const parse = v => (v || '').replace(/^v/, '').replace(/-.+$/, '').split('.').map(Number);
       const [iM, im, ip] = parse(installed);
       const [lM, lm, lp] = parse(latest);
       if ([iM, im, ip, lM, lm, lp].some(isNaN)) { updateAvailable = installed !== latest; }
