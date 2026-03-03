@@ -43,6 +43,10 @@ jobs:
             echo "body<<CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
             cat ".changelog/${VERSION}.md" >> "$GITHUB_OUTPUT"
             echo "CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+          elif [ -f ".changelogs/${VERSION}.md" ]; then
+            echo "body<<CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+            cat ".changelogs/${VERSION}.md" >> "$GITHUB_OUTPUT"
+            echo "CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
           elif [ -f .changelogs/NEXT.md ]; then
             echo "body<<CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
             cat .changelogs/NEXT.md >> "$GITHUB_OUTPUT"

@@ -99,45 +99,45 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
 
     if (!settings.hooks || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) settings.hooks = {};
 
-    // If SessionStart exists but isn't an array, preserve user's existing config
+    // If SessionStart exists but isn't an array, skip hook registration (but continue to statusLine)
     if (Object.prototype.hasOwnProperty.call(settings.hooks, 'SessionStart') &&
       !Array.isArray(settings.hooks.SessionStart)) {
       actions.push({ name: 'settings/SessionStart hook', status: 'skipped (unexpected shape)' });
-      return actions;
-    }
-    if (!Array.isArray(settings.hooks.SessionStart)) settings.hooks.SessionStart = [];
+    } else {
+      if (!Array.isArray(settings.hooks.SessionStart)) settings.hooks.SessionStart = [];
 
-    const alreadyRegistered = settings.hooks.SessionStart.some(group =>
-      group &&
-      typeof group === 'object' &&
-      Array.isArray(group.hooks) &&
-      group.hooks.some(h => typeof h?.command === 'string' && h.command.includes('slashdo-check-update'))
-    );
+      const alreadyRegistered = settings.hooks.SessionStart.some(group =>
+        group &&
+        typeof group === 'object' &&
+        Array.isArray(group.hooks) &&
+        group.hooks.some(h => typeof h?.command === 'string' && h.command.includes('slashdo-check-update'))
+      );
 
-    if (!alreadyRegistered) {
-      if (settings.hooks.SessionStart.length > 0) {
-        let firstGroup = settings.hooks.SessionStart[0];
-        if (!firstGroup || typeof firstGroup !== 'object') {
-          firstGroup = { hooks: [] };
-          settings.hooks.SessionStart[0] = firstGroup;
-        }
-        if (!Array.isArray(firstGroup.hooks)) firstGroup.hooks = [];
-        firstGroup.hooks.push({
-          type: 'command',
-          command: hookCommand,
-        });
-      } else {
-        settings.hooks.SessionStart.push({
-          hooks: [{
+      if (!alreadyRegistered) {
+        if (settings.hooks.SessionStart.length > 0) {
+          let firstGroup = settings.hooks.SessionStart[0];
+          if (!firstGroup || typeof firstGroup !== 'object') {
+            firstGroup = { hooks: [] };
+            settings.hooks.SessionStart[0] = firstGroup;
+          }
+          if (!Array.isArray(firstGroup.hooks)) firstGroup.hooks = [];
+          firstGroup.hooks.push({
             type: 'command',
             command: hookCommand,
-          }],
-        });
+          });
+        } else {
+          settings.hooks.SessionStart.push({
+            hooks: [{
+              type: 'command',
+              command: hookCommand,
+            }],
+          });
+        }
+        modified = true;
+        actions.push({ name: 'settings/SessionStart hook', status: dryRun ? 'would register' : 'registered' });
+      } else {
+        actions.push({ name: 'settings/SessionStart hook', status: 'already registered' });
       }
-      modified = true;
-      actions.push({ name: 'settings/SessionStart hook', status: dryRun ? 'would register' : 'registered' });
-    } else {
-      actions.push({ name: 'settings/SessionStart hook', status: 'already registered' });
     }
   }
 

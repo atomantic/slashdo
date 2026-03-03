@@ -122,7 +122,12 @@ install_claude() {
       // SessionStart hook (only if hook file exists)
       const updateHookPath = path.join(hooksDir, "slashdo-check-update.js");
       if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) settings.hooks = {};
-      if (!Array.isArray(settings.hooks.SessionStart)) settings.hooks.SessionStart = [];
+      if (typeof settings.hooks.SessionStart === "undefined") {
+        settings.hooks.SessionStart = [];
+      } else if (!Array.isArray(settings.hooks.SessionStart)) {
+        process.stdout.write("skipped (settings.hooks.SessionStart has unexpected shape)");
+        process.exit(0);
+      }
 
       const hookCmd = "node \"" + updateHookPath + "\"";
       const alreadyRegistered = settings.hooks.SessionStart.some(function(g) {
