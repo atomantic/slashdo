@@ -42,6 +42,7 @@
    - New API routes have the same error handling patterns as existing routes
    - If validation exists on one endpoint for a param, the same param on other endpoints needs the same validation
    - Schema fields that accept values the rest of the system can't handle (e.g., a field accepts any string but downstream code requires a specific format)
+   - Numeric query params (`limit`, `offset`, `page`) parsed from strings without lower-bound clamping — `parseInt` can produce 0, negative, or `NaN` values that cause SQL errors or unexpected behavior. Always clamp to safe bounds (e.g., `Math.max(1, ...)`)
    - Summary counters/accumulators that miss edge cases — if an item is removed, is the count updated? Are all branches counted?
    - Silent operations in verbose sequences — when a series of operations each prints a status line, ensure all branches print consistent output
    - Labels, comments, or status messages that describe behavior the code doesn't implement — e.g., a map named "renamed" that only deletes, or an action labeled "migrated" that never creates the target
@@ -51,6 +52,8 @@
    **Concurrency & data integrity**
    - Shared mutable state (files, in-memory caches) accessed by concurrent requests without locking or atomic writes
    - Multi-step read-modify-write cycles on files or databases that can interleave with other requests
+   - Multi-table writes (e.g., parent row + relationship/link rows) without a transaction — FK violations or errors after the first insert leave partial state. Wrap all related writes in a single transaction
+   - Functions with early returns for "no primary fields to update" that silently skip secondary operations (relationship updates, link table writes) — ensure early-return guards don't bypass logic that should run independently of primary field changes
 
    **Search & navigation**
    - Search results that link to generic list pages instead of deep-linking to the specific record — include the record type and ID in the URL
@@ -65,6 +68,9 @@
    - Database triggers (e.g., `BEFORE UPDATE` setting `updated_at = NOW()`) that clobber explicitly-provided values — verify triggers don't interfere with replication/sync that sets fields to remote timestamps
    - Auto-incrementing columns (`BIGSERIAL`, `SERIAL`) only auto-increment on INSERT, not UPDATE — if change-tracking relies on a sequence column, the UPDATE path must explicitly call `nextval()` to bump it
    - Database functions that require specific extensions or minimum versions — verify the deployment target supports them and the init script enables the extension
+   - Full-text search with strict query parsers (`to_tsquery`) directly on user input — punctuation, quotes, and operators cause SQL errors. Use `websearch_to_tsquery` or `plainto_tsquery` for user-facing search
+   - Query results assigned to variables but never read — remove dead queries to avoid unnecessary database load
+   - N+1 query patterns inside transactions (SELECT + INSERT/UPDATE per row) — use batched upserts (`INSERT ... ON CONFLICT ... DO UPDATE`) to reduce round-trips and lock time
 
    **Lazy initialization & module loading**
    - Cached state getters that return `null`/`undefined` before the module is initialized — code that checks the cached value before triggering initialization will get incorrect results. Provide an async initializer or ensure-style function
