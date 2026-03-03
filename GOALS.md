@@ -31,7 +31,7 @@ Keep planning and standards documents current and well-structured. `/do:replan` 
 Auto-detect tech stacks and adapt build commands, test runners, version bumping, and audit strategies accordingly. Commands should work on any codebase without manual configuration.
 
 ### 7. Frictionless Distribution
-Distribute via npm with semver versioning, self-update notifications, and a single `npx slashdo@latest` install command. No git cloning required.
+Distribute via npm with semver versioning, self-update notifications, and a single `npx slash-do@latest` install command. No git cloning required.
 
 ---
 

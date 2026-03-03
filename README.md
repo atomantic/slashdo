@@ -22,7 +22,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/npm/v/slashdo?style=flat-square&color=blue" alt="npm version" />
+  <img src="https://img.shields.io/npm/v/slash-do?style=flat-square&color=blue" alt="npm version" />
   <img src="https://img.shields.io/badge/environments-4-green?style=flat-square" alt="environments" />
   <img src="https://img.shields.io/badge/commands-12-orange?style=flat-square" alt="commands" />
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="license" />
@@ -34,7 +34,7 @@
 
 **With npm/npx:**
 ```bash
-npx slashdo@latest
+npx slash-do@latest
 ```
 
 **Without npm** (curl):
@@ -75,19 +75,19 @@ All commands live under the `do:` namespace:
 slashdo auto-detects which environments you have installed. Or specify manually:
 
 ```bash
-npx slashdo@latest --env claude             # just Claude Code
-npx slashdo@latest --env opencode,gemini    # multiple environments
+npx slash-do@latest --env claude             # just Claude Code
+npx slash-do@latest --env opencode,gemini    # multiple environments
 ```
 
 ## Install Options
 
 ```bash
-npx slashdo@latest                          # auto-detect + install all
-npx slashdo@latest --env claude             # target specific environment
-npx slashdo@latest --list                   # show commands and install status
-npx slashdo@latest --dry-run                # preview changes
-npx slashdo@latest --uninstall              # remove installed commands
-npx slashdo@latest cam pr release           # install specific commands only
+npx slash-do@latest                          # auto-detect + install all
+npx slash-do@latest --env claude             # target specific environment
+npx slash-do@latest --list                   # show commands and install status
+npx slash-do@latest --dry-run                # preview changes
+npx slash-do@latest --uninstall              # remove installed commands
+npx slash-do@latest cam pr release           # install specific commands only
 ```
 
 ## How It Works
@@ -117,7 +117,7 @@ npx slashdo@latest cam pr release           # install specific commands only
 ## Updating
 
 ```bash
-npx slashdo@latest        # from your terminal
+npx slash-do@latest        # from your terminal
 ```
 
 ```

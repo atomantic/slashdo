@@ -29,5 +29,5 @@ List all available `/do:*` commands with their descriptions.
 
 ## Notes
 
-- Commands are installed via `npx slashdo@latest`
+- Commands are installed via `npx slash-do@latest`
 - For more info, see https://github.com/atomantic/slashdo

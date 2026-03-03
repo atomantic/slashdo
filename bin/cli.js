@@ -21,13 +21,13 @@ const BANNER = `
 function usage() {
   console.log(BANNER);
   console.log(`Usage:
-  npx slashdo@latest                          Install/update all, auto-detect envs
-  npx slashdo@latest --env claude             Install for Claude Code only
-  npx slashdo@latest --env opencode,gemini    Specific environments
-  npx slashdo@latest --list                   Show commands and install status
-  npx slashdo@latest --dry-run                Preview changes
-  npx slashdo@latest --uninstall              Remove installed commands
-  npx slashdo@latest cam pr                   Install specific commands only
+  npx slash-do@latest                          Install/update all, auto-detect envs
+  npx slash-do@latest --env claude             Install for Claude Code only
+  npx slash-do@latest --env opencode,gemini    Specific environments
+  npx slash-do@latest --list                   Show commands and install status
+  npx slash-do@latest --dry-run                Preview changes
+  npx slash-do@latest --uninstall              Remove installed commands
+  npx slash-do@latest cam pr                   Install specific commands only
 
 Options:
   --env <envs>    Comma-separated environments: ${allEnvNames().join(', ')}
@@ -155,7 +155,7 @@ async function main() {
       for (const [key, env] of Object.entries(ENVIRONMENTS)) {
         console.log(`  ${key.padEnd(12)} ${env.name}`);
       }
-      console.log('\nUse --env to specify: npx slashdo@latest --env claude');
+      console.log('\nUse --env to specify: npx slash-do@latest --env claude');
       process.exit(1);
     }
 

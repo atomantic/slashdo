@@ -10,7 +10,7 @@ function getInstalledVersion(versionFile) {
 
 function getLatestVersion(timeoutMs) {
   const timeout = timeoutMs || 3000;
-  const result = execSync('npm view slashdo version 2>/dev/null', {
+  const result = execSync('npm view slash-do version 2>/dev/null', {
     timeout,
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],

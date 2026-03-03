@@ -12,7 +12,7 @@ Check if a newer version of slashdo is available.
 
 1. Read the installed version from `~/.claude/.slashdo-version`
 2. If the file doesn't exist, skip silently (slashdo may not be installed)
-3. Run `npm view slashdo version` with a 3-second timeout
+3. Run `npm view slash-do version` with a 3-second timeout
 4. Compare versions
 5. If the latest version is newer than the installed version, print:
    ```

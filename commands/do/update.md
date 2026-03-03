@@ -10,7 +10,7 @@ Re-install slashdo commands from the latest published npm version.
 
 1. **Run the installer**:
    ```bash
-   npx slashdo@latest
+   npx slash-do@latest
    ```
 
 2. **Show what changed**:
@@ -21,6 +21,6 @@ Re-install slashdo commands from the latest published npm version.
 
 ## Notes
 
-- This command is a convenience wrapper around `npx slashdo@latest`
+- This command is a convenience wrapper around `npx slash-do@latest`
 - It always pulls the latest published version from npm
 - Your existing commands that are not managed by slashdo are never touched

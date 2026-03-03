@@ -1,5 +1,5 @@
 {
-  "name": "slashdo",
+  "name": "slash-do",
   "version": "0.1.1",
   "description": "Curated slash commands for AI coding assistants — Claude Code, OpenCode, Gemini CLI, and Codex",
   "author": "Adam Eivy <adam@eivy.com>",
@@ -24,7 +24,7 @@
     "ai-tools"
   ],
   "bin": {
-    "slashdo": "./bin/cli.js"
+    "slash-do": "./bin/cli.js"
   },
   "files": [
     "bin/",
