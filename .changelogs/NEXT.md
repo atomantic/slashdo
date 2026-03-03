@@ -14,6 +14,9 @@
 
 ## Fixed
 
+- Statusline installer now upgrades `gsd-statusline` to `slashdo-statusline` (superset that reads both GSD and slashdo update caches), fixing `/do:update` notification not showing when GSD was installed first
+- Uninstaller restores `gsd-statusline` when removing `slashdo-statusline` if the GSD hook file still exists
+- Statusline hook backports GSD improvements: 3s stdin timeout guard, `CLAUDE_CONFIG_DIR` support, 16.5% autocompact buffer scaling with updated color thresholds
 - Copilot review loop now detects error responses ("Copilot encountered an error") and retries instead of treating them as clean reviews with zero comments
 - Removed redundant "read CLAUDE.md" instructions from review, release, and better commands — project conventions are already in context
 

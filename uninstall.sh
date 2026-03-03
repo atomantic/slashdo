@@ -135,7 +135,13 @@ uninstall_claude() {
 
       if (settings.statusLine && settings.statusLine.command &&
           settings.statusLine.command.indexOf("slashdo-statusline") !== -1) {
-        delete settings.statusLine;
+        var hooksDir = path.join(home, ".claude", "hooks");
+        var gsdHookPath = path.join(hooksDir, "gsd-statusline.js");
+        if (fs.existsSync(gsdHookPath)) {
+          settings.statusLine = { type: "command", command: "node \"" + gsdHookPath + "\"" };
+        } else {
+          delete settings.statusLine;
+        }
         modified = true;
       }
 

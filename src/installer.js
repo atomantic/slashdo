@@ -146,18 +146,25 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
     }
   }
 
-  // Configure statusline only if none exists
+  // Configure statusline: upgrade gsd-statusline → slashdo-statusline (superset)
   const statuslineHook = hookFiles.find(h => h.name === 'slashdo-statusline.js');
-  if (statuslineHook && !settings.statusLine) {
+  if (statuslineHook) {
     const statuslineCommand = `node "${path.join(env.hooksDir, statuslineHook.name)}"`;
-    settings.statusLine = {
-      type: 'command',
-      command: statuslineCommand,
-    };
-    modified = true;
-    actions.push({ name: 'settings/statusLine', status: dryRun ? 'would configure' : 'configured' });
-  } else if (statuslineHook && settings.statusLine) {
-    actions.push({ name: 'settings/statusLine', status: 'existing statusline preserved' });
+    const currentCmd = settings.statusLine?.command || '';
+
+    if (!settings.statusLine) {
+      settings.statusLine = { type: 'command', command: statuslineCommand };
+      modified = true;
+      actions.push({ name: 'settings/statusLine', status: dryRun ? 'would configure' : 'configured' });
+    } else if (currentCmd.includes('gsd-statusline')) {
+      settings.statusLine = { type: 'command', command: statuslineCommand };
+      modified = true;
+      actions.push({ name: 'settings/statusLine', status: dryRun ? 'would upgrade (gsd→slashdo)' : 'upgraded (gsd→slashdo)' });
+    } else if (currentCmd.includes('slashdo-statusline')) {
+      actions.push({ name: 'settings/statusLine', status: 'already configured' });
+    } else {
+      actions.push({ name: 'settings/statusLine', status: 'existing statusline preserved' });
+    }
   }
 
   if (!dryRun && modified) {
@@ -214,9 +221,16 @@ function deregisterHooksFromSettings(env, dryRun) {
 
   // Remove statusline if it references slashdo-statusline
   if (settings.statusLine?.command?.includes('slashdo-statusline')) {
-    delete settings.statusLine;
+    // Restore gsd-statusline if its hook file still exists
+    const gsdHookPath = path.join(env.hooksDir, 'gsd-statusline.js');
+    if (fs.existsSync(gsdHookPath)) {
+      settings.statusLine = { type: 'command', command: `node "${gsdHookPath}"` };
+      actions.push({ name: 'settings/statusLine', status: dryRun ? 'would downgrade (slashdo→gsd)' : 'downgraded (slashdo→gsd)' });
+    } else {
+      delete settings.statusLine;
+      actions.push({ name: 'settings/statusLine', status: dryRun ? 'would remove' : 'removed' });
+    }
     modified = true;
-    actions.push({ name: 'settings/statusLine', status: dryRun ? 'would remove' : 'removed' });
   }
 
   if (!dryRun && modified) {
