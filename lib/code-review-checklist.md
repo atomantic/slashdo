@@ -12,6 +12,9 @@
    - State/variables that are declared but never updated or only partially wired up (e.g. a state setter that's never called with `true`)
    - Side effects during React render (setState, navigation, mutations outside useEffect)
    - Off-by-one errors, null/undefined access without guards
+   - `JSON.parse` on user-editable files (config, settings, cache) without try/catch — corrupted files will crash the process
+   - Accessing properties/methods on objects from parsed JSON without verifying the expected structure (e.g., `obj.arr.push()` when `arr` might not be an array)
+   - Version/string comparisons using `!==` when semantic ordering matters — use proper semver comparison for version checks
 
    **Resource management**
    - Event listeners, socket handlers, subscriptions, and timers are cleaned up on unmount/teardown
@@ -38,6 +41,7 @@
    - New API routes have the same error handling patterns as existing routes
    - If validation exists on one endpoint for a param, the same param on other endpoints needs the same validation
    - Schema fields that accept values the rest of the system can't handle (e.g., managedSecrets accepting any string when the sync endpoint requires `[A-Z0-9_]`)
+   - Summary counters/accumulators that miss edge cases — if a file is removed, is the count incremented? Are all branches counted?
 
    **Concurrency & data integrity**
    - Shared mutable state (files, in-memory caches) accessed by concurrent requests without locking or atomic writes — if two requests can hit the same resource, consider a mutex or write-to-tmp-then-rename pattern
