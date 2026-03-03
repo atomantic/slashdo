@@ -1,0 +1,20 @@
+# Unreleased Changes
+
+## Added
+
+- Background update check hook (`slashdo-check-update.js`) — spawns `npm view` in background, writes to cache for zero-latency session starts
+- Statusline hook (`slashdo-statusline.js`) — shows model, active task, directory, context usage bar, and update notifications for slashdo and GSD
+- Automatic `settings.json` registration — installer registers SessionStart hook and configures statusline (only if none exists)
+- Automatic `settings.json` deregistration on uninstall
+- `RENAMED_HOOKS` map to clean up obsolete `update-check.md` prompt hook
+- Cache file cleanup (`slashdo-update-check.json`) on uninstall
+- Hook download and `settings.json` registration in curl-based `install.sh`
+- Hook removal and `settings.json` deregistration in curl-based `uninstall.sh`
+
+## Changed
+
+- `collectHooks()` now handles `.js` files in addition to `.md`
+
+## Removed
+
+- `hooks/update-check.md` — non-functional prompt-based hook that was never registered or executed

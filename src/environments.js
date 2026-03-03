@@ -12,6 +12,7 @@ const ENVIRONMENTS = {
     commandsDir: path.join(HOME, '.claude', 'commands'),
     libDir: path.join(HOME, '.claude', 'lib'),
     hooksDir: path.join(HOME, '.claude', 'hooks'),
+    settingsFile: path.join(HOME, '.claude', 'settings.json'),
     versionFile: path.join(HOME, '.claude', '.slashdo-version'),
     format: 'yaml-frontmatter',
     ext: '.md',

@@ -32,9 +32,14 @@ LIBS=(
   code-review-checklist copilot-review-loop graphql-escaping
 )
 
+HOOKS=(slashdo-check-update slashdo-statusline)
+
+OLD_HOOKS=(update-check)
+
 uninstall_claude() {
   local target_cmd="$HOME/.claude/commands/do"
   local target_lib="$HOME/.claude/lib"
+  local target_hooks="$HOME/.claude/hooks"
   local count=0
 
   printf "  Uninstalling from ${GREEN}Claude Code${RESET}...\n"
@@ -55,8 +60,73 @@ uninstall_claude() {
     fi
   done
 
+  for hook in "${HOOKS[@]}"; do
+    if [ -f "$target_hooks/$hook.js" ]; then
+      rm -f "$target_hooks/$hook.js"
+      printf "    removed: hook/%-17s${GREEN}ok${RESET}\n" "$hook.js"
+      count=$((count + 1))
+    fi
+  done
+
+  for old in "${OLD_HOOKS[@]}"; do
+    if [ -f "$target_hooks/$old.md" ]; then
+      rm -f "$target_hooks/$old.md"
+      printf "    removed: hook/%-17s${GREEN}ok${RESET}\n" "$old.md"
+      count=$((count + 1))
+    fi
+  done
+
+  # Remove cache file
+  if [ -f "$HOME/.claude/cache/slashdo-update-check.json" ]; then
+    rm -f "$HOME/.claude/cache/slashdo-update-check.json"
+    printf "    removed: cache/slashdo-update-check.json ${GREEN}ok${RESET}\n"
+  fi
+
   if [ -f "$HOME/.claude/.slashdo-version" ]; then
     rm -f "$HOME/.claude/.slashdo-version"
+  fi
+
+  # Deregister from settings.json (requires Node.js)
+  if command -v node &>/dev/null; then
+    node -e '
+      const fs = require("fs");
+      const path = require("path");
+      const home = require("os").homedir();
+      const settingsPath = path.join(home, ".claude", "settings.json");
+
+      if (!fs.existsSync(settingsPath)) process.exit(0);
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+      let modified = false;
+
+      if (settings.hooks && settings.hooks.SessionStart) {
+        for (const group of settings.hooks.SessionStart) {
+          if (group.hooks) {
+            const before = group.hooks.length;
+            group.hooks = group.hooks.filter(function(h) {
+              return !h.command || h.command.indexOf("slashdo-check-update") === -1;
+            });
+            if (group.hooks.length < before) modified = true;
+          }
+        }
+        settings.hooks.SessionStart = settings.hooks.SessionStart.filter(function(g) {
+          return g.hooks && g.hooks.length > 0;
+        });
+        if (settings.hooks.SessionStart.length === 0) delete settings.hooks.SessionStart;
+        if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
+      }
+
+      if (settings.statusLine && settings.statusLine.command &&
+          settings.statusLine.command.indexOf("slashdo-statusline") !== -1) {
+        delete settings.statusLine;
+        modified = true;
+      }
+
+      if (modified) {
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+        process.stdout.write("    deregistered from settings.json\n");
+      }
+    '
   fi
 
   if [ $count -eq 0 ]; then

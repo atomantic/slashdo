@@ -43,7 +43,7 @@ function collectHooks(hooksDir) {
   const files = [];
   const entries = fs.readdirSync(hooksDir, { withFileTypes: true });
   for (const entry of entries) {
-    if (entry.isFile() && entry.name.endsWith('.md')) {
+    if (entry.isFile() && (entry.name.endsWith('.md') || entry.name.endsWith('.js'))) {
       files.push({
         relPath: entry.name,
         absPath: path.join(hooksDir, entry.name),
@@ -67,6 +67,124 @@ const RENAMED_COMMANDS = {
   good: 'better',
   'optimize-md': 'omd',
 };
+
+// Old hooks to clean up: value is the replacement name (null = just delete)
+const RENAMED_HOOKS = {
+  'update-check.md': null,
+};
+
+function registerHooksInSettings(env, hookFiles, dryRun) {
+  if (!env.settingsFile) return [];
+
+  const actions = [];
+  const settingsPath = env.settingsFile;
+
+  let settings = {};
+  if (fs.existsSync(settingsPath)) {
+    settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  }
+
+  let modified = false;
+
+  // Register SessionStart hook for slashdo-check-update.js
+  const updateCheckHook = hookFiles.find(h => h.name === 'slashdo-check-update.js');
+  if (updateCheckHook) {
+    const hookCommand = `node "${path.join(env.hooksDir, updateCheckHook.name)}"`;
+
+    if (!settings.hooks) settings.hooks = {};
+    if (!settings.hooks.SessionStart) settings.hooks.SessionStart = [];
+
+    const alreadyRegistered = settings.hooks.SessionStart.some(group =>
+      group.hooks?.some(h => h.command?.includes('slashdo-check-update'))
+    );
+
+    if (!alreadyRegistered) {
+      if (settings.hooks.SessionStart.length > 0) {
+        settings.hooks.SessionStart[0].hooks.push({
+          type: 'command',
+          command: hookCommand,
+        });
+      } else {
+        settings.hooks.SessionStart.push({
+          hooks: [{
+            type: 'command',
+            command: hookCommand,
+          }],
+        });
+      }
+      modified = true;
+      actions.push({ name: 'settings/SessionStart hook', status: dryRun ? 'would register' : 'registered' });
+    } else {
+      actions.push({ name: 'settings/SessionStart hook', status: 'already registered' });
+    }
+  }
+
+  // Configure statusline only if none exists
+  const statuslineHook = hookFiles.find(h => h.name === 'slashdo-statusline.js');
+  if (statuslineHook && !settings.statusLine) {
+    const statuslineCommand = `node "${path.join(env.hooksDir, statuslineHook.name)}"`;
+    settings.statusLine = {
+      type: 'command',
+      command: statuslineCommand,
+    };
+    modified = true;
+    actions.push({ name: 'settings/statusLine', status: dryRun ? 'would configure' : 'configured' });
+  } else if (statuslineHook && settings.statusLine) {
+    actions.push({ name: 'settings/statusLine', status: 'existing statusline preserved' });
+  }
+
+  if (!dryRun && modified) {
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  }
+
+  return actions;
+}
+
+function deregisterHooksFromSettings(env, hookFiles, dryRun) {
+  if (!env.settingsFile) return [];
+
+  const settingsPath = env.settingsFile;
+  if (!fs.existsSync(settingsPath)) return [];
+
+  const actions = [];
+  const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  let modified = false;
+
+  // Remove SessionStart hook entries referencing slashdo
+  if (settings.hooks?.SessionStart) {
+    for (const group of settings.hooks.SessionStart) {
+      if (group.hooks) {
+        const before = group.hooks.length;
+        group.hooks = group.hooks.filter(h => !h.command?.includes('slashdo-check-update'));
+        if (group.hooks.length < before) {
+          modified = true;
+          actions.push({ name: 'settings/SessionStart hook', status: dryRun ? 'would deregister' : 'deregistered' });
+        }
+      }
+    }
+    // Clean up empty groups
+    settings.hooks.SessionStart = settings.hooks.SessionStart.filter(g => g.hooks?.length > 0);
+    if (settings.hooks.SessionStart.length === 0) {
+      delete settings.hooks.SessionStart;
+    }
+    if (Object.keys(settings.hooks).length === 0) {
+      delete settings.hooks;
+    }
+  }
+
+  // Remove statusline if it references slashdo-statusline
+  if (settings.statusLine?.command?.includes('slashdo-statusline')) {
+    delete settings.statusLine;
+    modified = true;
+    actions.push({ name: 'settings/statusLine', status: dryRun ? 'would remove' : 'removed' });
+  }
+
+  if (!dryRun && modified) {
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  }
+
+  return actions;
+}
 
 function install({ env, packageDir, filterNames, dryRun, uninstall }) {
   const commandsDir = path.join(packageDir, 'commands');
@@ -181,8 +299,13 @@ function install({ env, packageDir, filterNames, dryRun, uninstall }) {
       if (isNew) results.installed++;
       else results.updated++;
     }
+
+    // Register hooks in settings.json
+    const settingsActions = registerHooksInSettings(env, hookFiles, dryRun);
+    results.actions.push(...settingsActions);
   }
 
+  // Clean up renamed commands
   for (const [oldName, newName] of Object.entries(RENAMED_COMMANDS)) {
     const oldRelPath = path.join('do', oldName + '.md');
     const oldTargetRel = getTargetFilename(oldRelPath, env);
@@ -194,6 +317,24 @@ function install({ env, packageDir, filterNames, dryRun, uninstall }) {
       } else {
         fs.unlinkSync(oldTargetPath);
         results.actions.push({ name: `/do:${oldName}`, status: `migrated → /do:${newName}` });
+      }
+    }
+  }
+
+  // Clean up renamed/removed hooks
+  if (env.supportsHooks && env.hooksDir) {
+    for (const [oldName, newName] of Object.entries(RENAMED_HOOKS)) {
+      const oldTargetPath = path.join(env.hooksDir, oldName);
+
+      if (fs.existsSync(oldTargetPath)) {
+        const label = newName ? `migrated → hook/${newName}` : 'removed (obsolete)';
+        const dryLabel = newName ? `would migrate → hook/${newName}` : 'would remove (obsolete)';
+        if (dryRun) {
+          results.actions.push({ name: `hook/${oldName}`, status: dryLabel });
+        } else {
+          fs.unlinkSync(oldTargetPath);
+          results.actions.push({ name: `hook/${oldName}`, status: label });
+        }
       }
     }
   }
@@ -249,6 +390,21 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun) {
         results.actions.push({ name: `hook/${hook.name}`, status: 'removed', target: targetPath });
       }
       results.removed++;
+    }
+
+    // Deregister hooks from settings.json
+    const settingsActions = deregisterHooksFromSettings(env, hookFiles, dryRun);
+    results.actions.push(...settingsActions);
+
+    // Clean up cache file
+    const cacheFile = path.join(path.dirname(env.hooksDir), 'cache', 'slashdo-update-check.json');
+    if (fs.existsSync(cacheFile)) {
+      if (dryRun) {
+        results.actions.push({ name: 'cache/slashdo-update-check.json', status: 'would remove' });
+      } else {
+        fs.unlinkSync(cacheFile);
+        results.actions.push({ name: 'cache/slashdo-update-check.json', status: 'removed' });
+      }
     }
   }
 

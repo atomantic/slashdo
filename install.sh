@@ -36,6 +36,10 @@ LIBS=(
   code-review-checklist copilot-review-loop graphql-escaping
 )
 
+HOOKS=(slashdo-check-update slashdo-statusline)
+
+OLD_HOOKS=(update-check)
+
 detect_envs() {
   local envs=()
   [ -d "$HOME/.claude" ] && envs+=(claude)
@@ -48,7 +52,8 @@ detect_envs() {
 install_claude() {
   local target_cmd="$HOME/.claude/commands/do"
   local target_lib="$HOME/.claude/lib"
-  mkdir -p "$target_cmd" "$target_lib"
+  local target_hooks="$HOME/.claude/hooks"
+  mkdir -p "$target_cmd" "$target_lib" "$target_hooks"
 
   printf "  Installing to ${GREEN}Claude Code${RESET}...\n"
 
@@ -70,12 +75,80 @@ install_claude() {
     fi
   done
 
+  for hook in "${HOOKS[@]}"; do
+    printf "    hook/%-19s" "$hook.js"
+    if curl -fsSL "$BASE_URL/hooks/$hook.js" -o "$target_hooks/$hook.js" 2>/dev/null; then
+      printf "${GREEN}ok${RESET}\n"
+    else
+      printf "failed\n"
+    fi
+  done
+
   for old in "${OLD_COMMANDS[@]}"; do
     if [ -f "$target_cmd/$old.md" ]; then
       rm -f "$target_cmd/$old.md"
       printf "    migrated: /do:%-14s${GREEN}ok${RESET}\n" "$old"
     fi
   done
+
+  for old in "${OLD_HOOKS[@]}"; do
+    if [ -f "$target_hooks/$old.md" ]; then
+      rm -f "$target_hooks/$old.md"
+      printf "    removed:  hook/%-13s${GREEN}ok${RESET}\n" "$old.md"
+    fi
+  done
+
+  # Register hooks in settings.json (requires Node.js)
+  if command -v node &>/dev/null; then
+    printf "    settings.json:          "
+    node -e '
+      const fs = require("fs");
+      const path = require("path");
+      const home = require("os").homedir();
+      const settingsPath = path.join(home, ".claude", "settings.json");
+
+      let settings = {};
+      try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch (e) {}
+
+      let modified = false;
+
+      // SessionStart hook
+      if (!settings.hooks) settings.hooks = {};
+      if (!settings.hooks.SessionStart) settings.hooks.SessionStart = [];
+
+      const hookCmd = "node \"" + path.join(home, ".claude", "hooks", "slashdo-check-update.js") + "\"";
+      const alreadyRegistered = settings.hooks.SessionStart.some(function(g) {
+        return g.hooks && g.hooks.some(function(h) {
+          return h.command && h.command.indexOf("slashdo-check-update") !== -1;
+        });
+      });
+
+      if (!alreadyRegistered) {
+        if (settings.hooks.SessionStart.length > 0) {
+          settings.hooks.SessionStart[0].hooks.push({ type: "command", command: hookCmd });
+        } else {
+          settings.hooks.SessionStart.push({ hooks: [{ type: "command", command: hookCmd }] });
+        }
+        modified = true;
+      }
+
+      // Statusline (only if none exists)
+      if (!settings.statusLine) {
+        const slCmd = "node \"" + path.join(home, ".claude", "hooks", "slashdo-statusline.js") + "\"";
+        settings.statusLine = { type: "command", command: slCmd };
+        modified = true;
+      }
+
+      if (modified) {
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+      }
+
+      process.stdout.write(modified ? "updated" : "already configured");
+    '
+    printf " ${GREEN}ok${RESET}\n"
+  else
+    printf "    ${DIM}settings.json: skipped (node not found — hooks installed but not registered)${RESET}\n"
+  fi
 }
 
 install_opencode() {
