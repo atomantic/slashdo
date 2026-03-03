@@ -6,16 +6,24 @@ description: Create a release PR using the project's documented release workflow
 
 Before doing anything, determine the project's source and target branches for releases. Do NOT hardcode branch names. Instead, discover them:
 
-1. **Source branch** — run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` to get the repo's default branch
+1. **Source branch** — run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` to get the repo's default branch (typically `main`)
 2. **Target branch** — determine by reading (in priority order):
    - **GitHub Actions workflows** — check `.github/workflows/release.yml` (or similar) for `on: push: branches:` to find the branch that triggers the release pipeline
    - **Project CLAUDE.md** — look for git workflow sections, branch descriptions, or release instructions
    - **Versioning docs** — check `docs/VERSIONING.md`, `CONTRIBUTING.md`, or `RELEASING.md`
    - **Branch convention** — if a `release` branch exists, the target is `release`; otherwise ask the user
+3. **Ensure the target branch exists** — if not, create it from the last release tag:
+   ```bash
+   git branch release $(git describe --tags --abbrev=0)
+   git push -u origin release
+   ```
+   This ensures the PR diff shows ALL changes since the last release, not just the version bump.
 
 Print the detected workflow: `Detected release flow: {source} → {target}`
 
 If ambiguous, ask the user to confirm before proceeding.
+
+**Important**: The PR direction is `{source}` → `{target}` (e.g., `main` → `release`). This gives Copilot the full diff of all changes since the last release for review. Do NOT create a branch from source and PR back into it — that only shows the version bump commit.
 
 ## Pre-Release Checks
 
@@ -63,8 +71,11 @@ Perform a thorough self-review. Read each changed file — not just the diff —
 
 ## Open the Release PR
 
-- Push the source branch to remote
-- Create a PR from `{source}` to `{target}`
+- Push the source branch to remote (it should already be up to date with the release commit)
+- Create a PR from `{source}` → `{target}` (e.g., `main` → `release`)
+  ```bash
+  gh pr create --title "Release v{version}" --base {target} --head {source} --body "..."
+  ```
 - Title: `Release v{version}` (read version from package.json or equivalent)
 - Body: include the changelog content for this version if available, otherwise summarize commits since last release
 - Keep the description clean — no co-author or "generated with" messages
@@ -91,6 +102,12 @@ Perform a thorough self-review. Read each changed file — not just the diff —
 
 ## Post-Merge
 
-- Report the final status including version, PR URL, and merge state
-- Remind the user to check for the GitHub release once CI completes (if the project uses automated releases)
-- Switch back to the source branch locally: `git checkout {source} && git pull --rebase --autostash`
+1. **Tag the release** on the target branch to trigger the publish workflow:
+   ```bash
+   git fetch origin {target}
+   git tag v{version} origin/{target}
+   git push origin v{version}
+   ```
+2. **Switch back to the source branch** locally: `git checkout {source} && git pull --rebase --autostash`
+3. **Report the final status** including version, PR URL, tag, and merge state
+4. Remind the user to check for the GitHub release once CI completes (if the project uses automated releases)

@@ -38,12 +38,17 @@ jobs:
       - name: Build changelog for release
         id: changelog
         run: |
-          if [ -f .changelog/NEXT.md ]; then
+          VERSION="${GITHUB_REF_NAME}"
+          if [ -f ".changelog/${VERSION}.md" ]; then
+            echo "body<<CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+            cat ".changelog/${VERSION}.md" >> "$GITHUB_OUTPUT"
+            echo "CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+          elif [ -f .changelog/NEXT.md ]; then
             echo "body<<CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
             cat .changelog/NEXT.md >> "$GITHUB_OUTPUT"
             echo "CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
           else
-            echo "body=Release ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "body=Release ${VERSION}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create GitHub Release
