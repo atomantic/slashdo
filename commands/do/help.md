@@ -17,7 +17,7 @@ List all available `/do:*` commands with their descriptions.
 | `/do:help` | List all available slashdo commands |
 | `/do:makegoals` | Scan codebase to infer project goals, clarify with user, and generate GOALS.md |
 | `/do:makegood` | Unified DevSecOps audit, remediation, per-category PRs, CI verification, and Copilot review loop |
-| `/do:optimize-md` | Audit and optimize CLAUDE.md files against best practices |
+| `/do:optimize-md` | Audit and optimize markdown files (CLAUDE.md, README.md, etc.) against best practices |
 | `/do:pr` | Commit, push, and open a PR against the repo's default branch |
 | `/do:release` | Create a release PR using the project's documented release workflow |
 | `/do:replan` | Review and clean up PLAN.md, extract docs from completed work |

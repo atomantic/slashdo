@@ -25,7 +25,7 @@ Enforce consistent commit practices, SemVer versioning, and changelog management
 Integrate Copilot review loops with automated thread resolution into the PR workflow. `/do:pr` and `/do:rpr` handle the full cycle from PR creation through review iteration.
 
 ### 5. Maintain Project Governance Documentation
-Keep planning and standards documents current and well-structured. `/do:replan` manages the tactical backlog, `/do:makegoals` generates strategic goal documents, and `/do:optimize-md` audits CLAUDE.md files.
+Keep planning and standards documents current and well-structured. `/do:replan` manages the tactical backlog, `/do:makegoals` generates strategic goal documents, and `/do:optimize-md` audits and optimizes markdown files (CLAUDE.md, README.md, AGENTS.md, etc.).
 
 ### 6. Be Project-Agnostic
 Auto-detect tech stacks and adapt build commands, test runners, version bumping, and audit strategies accordingly. Commands should work on any codebase without manual configuration.
