@@ -8,11 +8,19 @@ const { install, list } = require('../src/installer');
 
 const PACKAGE_DIR = path.resolve(__dirname, '..');
 
-function usage() {
-  console.log(`
-slashdo — Install curated slash commands for AI coding assistants
+const BANNER = `
+  \x1b[36m    ██╗\x1b[33m██████╗  ██████╗ \x1b[0m
+  \x1b[36m   ██╔╝\x1b[33m██╔══██╗██╔═══██╗\x1b[0m
+  \x1b[36m  ██╔╝ \x1b[33m██║  ██║██║   ██║\x1b[0m
+  \x1b[36m ██╔╝  \x1b[33m██║  ██║██║   ██║\x1b[0m
+  \x1b[36m██╔╝   \x1b[33m██████╔╝╚██████╔╝\x1b[0m
+  \x1b[36m╚═╝    \x1b[33m╚═════╝  ╚═════╝ \x1b[0m
+  \x1b[2mslashdo — curated slash commands for AI coding assistants\x1b[0m
+`;
 
-Usage:
+function usage() {
+  console.log(BANNER);
+  console.log(`Usage:
   npx slashdo@latest                          Install/update all, auto-detect envs
   npx slashdo@latest --env claude             Install for Claude Code only
   npx slashdo@latest --env opencode,gemini    Specific environments
@@ -181,7 +189,7 @@ async function main() {
     process.exit(0);
   }
 
-  console.log('\nslashdo — installing commands...\n');
+  console.log(BANNER);
 
   for (const envName of selectedEnvs) {
     const env = getEnv(envName);
