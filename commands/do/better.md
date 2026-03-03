@@ -13,6 +13,48 @@ Parse `$ARGUMENTS` for:
 - **Path filter**: limit scanning scope to specific directories or files
 - **Focus areas**: e.g., "security only", "DRY and bugs"
 
+## Configuration
+
+Before starting the pipeline, present the user with configuration options using `AskUserQuestion`:
+
+```
+AskUserQuestion([
+  {
+    question: "Which model profile for audit and remediation agents?",
+    header: "Model",
+    multiSelect: false,
+    options: [
+      { label: "Quality", description: "Opus for all agents — fewest false positives, best fixes (highest cost, 7+ Opus agents)" },
+      { label: "Balanced (Recommended)", description: "Sonnet for audit and remediation — good quality at moderate cost" },
+      { label: "Budget", description: "Haiku for audit, Sonnet for remediation — fastest and cheapest" }
+    ]
+  }
+])
+```
+
+Record the selection as `MODEL_PROFILE` and derive agent models from this table:
+
+| Agent Role | Quality | Balanced | Budget |
+|------------|---------|----------|--------|
+| Audit agents (7 Explore agents, Phase 1) | opus | sonnet | haiku |
+| Remediation agents (general-purpose, Phase 3) | opus | sonnet | sonnet |
+
+Derive two variables:
+- `AUDIT_MODEL`: `opus` / `sonnet` / `haiku` based on profile
+- `REMEDIATION_MODEL`: `opus` / `sonnet` / `sonnet` based on profile
+
+When the resolved model is `opus`, **omit** the `model` parameter on the Agent/Task call so the agent inherits the session's Opus version. This avoids version conflicts when organizations pin specific Opus versions.
+
+### Model Profile Rationale
+
+**Why Opus for audit in Quality?** Audit agents make judgment calls — distinguishing real bugs from false positives across 30+ lines of context. Opus reduces false positive noise, meaning less wasted remediation work downstream.
+
+**Why Sonnet for audit in Balanced?** Sonnet handles code analysis well when given explicit checklists (which each audit agent has). The 30-line context requirement provides enough signal. Good cost/quality tradeoff with 7 parallel agents.
+
+**Why Haiku for audit in Budget?** Surface-level pattern matching is Haiku's strength. May produce more false positives, but the remediation agents (still Sonnet) will validate findings before fixing. Best for large codebases where you want a fast first pass.
+
+**Why never Haiku for remediation?** Remediation agents write code, run builds, and commit. Code generation quality matters — Haiku may produce fixes that don't compile or introduce subtle regressions. Sonnet is the floor for code-writing agents.
+
 ## Phase 0: Discovery & Setup
 
 Detect the project environment before any scanning or remediation.
@@ -81,6 +123,8 @@ If the surrounding context shows the code is correct, do NOT flag it.
 
 ### Batch 1 (5 parallel Explore agents via Task tool):
 
+**Model**: Pass `AUDIT_MODEL` as the `model` parameter on each agent. If `AUDIT_MODEL` is `opus`, omit the parameter to inherit from session.
+
 1. **Security & Secrets**
    Sources: authentication checks, credential exposure, infrastructure security, input validation, dependency health
    Focus: hardcoded credentials, API keys, exposed secrets, authentication bypasses, disabled security checks, PII exposure, injection vulnerabilities (SQL/command/path traversal), insecure CORS configurations, missing auth checks, unsanitized user input in file paths or queries, known CVEs in dependencies (check `npm audit` / `cargo audit` / `pip-audit` / `go vuln` output), abandoned or unmaintained dependencies, overly permissive dependency version ranges
@@ -102,6 +146,8 @@ If the surrounding context shows the code is correct, do NOT flag it.
    Focus: missing `await` on async calls, unhandled promise rejections, null/undefined access without guards, off-by-one errors, incorrect comparison operators, mutation of shared state, resource leaks (unbounded caches/maps, unclosed connections/streams), `process.exit()` in library code, async routes without error forwarding, missing AbortController on data fetching, N+1 query patterns (loading related records inside loops), O(n²) or worse algorithms in hot paths, unbounded result sets (missing LIMIT/pagination on DB queries), missing database indexes on frequently queried columns, race conditions (TOCTOU, double-submit without idempotency keys, concurrent writes to shared state without locks, stale-read-then-write patterns), missing connection pooling or pool exhaustion
 
 ### Batch 2 (2 agents after Batch 1 completes):
+
+**Model**: Same `AUDIT_MODEL` as Batch 1.
 
 6. **Stack-Specific**
    Dynamically focus based on `PROJECT_TYPE` detected in Phase 0:
@@ -223,7 +269,7 @@ If no shared utilities were identified, skip this step.
    - Bugs, Performance & Error Handling
    - Stack-Specific
 3. Only create tasks for categories that have actionable findings
-4. Spawn up to 5 general-purpose agents as teammates
+4. Spawn up to 5 general-purpose agents as teammates. **Pass `REMEDIATION_MODEL` as the `model` parameter on each agent.** If `REMEDIATION_MODEL` is `opus`, omit the parameter to inherit from session.
 
 ### Agent instructions template:
 ```
