@@ -49,6 +49,14 @@
    - Shared mutable state (files, in-memory caches) accessed by concurrent requests without locking or atomic writes — if two requests can hit the same resource, consider a mutex or write-to-tmp-then-rename pattern
    - Multi-step read-modify-write cycles on JSON files or databases that can interleave with other requests
 
+   **Search & navigation**
+   - Search results or Cmd+K entries that link to generic pages instead of deep-linking to the specific record — include destination type and record ID in the URL (e.g., `/brain/memory?type=people&id=123` not just `/brain/memory`)
+   - Search/query code that hardcodes one backend's implementation (e.g., BM25 file search) when the system supports multiple backends (e.g., file vs database) — use the active backend's search capabilities so results aren't stale or empty after a backend switch
+
+   **Sync & replication**
+   - `ON CONFLICT UPDATE` or upsert clauses that only update a subset of the fields exported by the corresponding "get changes" query — omitted fields cause replicas to diverge. Deliberately omit only fields that should stay local (e.g., access stats), and document the decision
+   - Pagination using `COUNT(*)` to compute `hasMore` — this forces a full table scan. Use the `limit + 1` pattern instead: fetch one extra row to detect more pages, return only `limit` rows
+
    **SQL & database**
    - Parameterized query placeholder indices (`$1`, `$2`, ...) must match the actual parameter array positions — especially when multiple queries share a param builder or when `paramIdx` is computed from prior queries that aren't in the same `query()` call
    - Database triggers (e.g., `BEFORE UPDATE` setting `updated_at = NOW()`) that clobber explicitly-provided values — verify triggers don't interfere with replication/sync that sets fields to remote timestamps
@@ -80,6 +88,7 @@
    **Configuration & hardcoding**
    - Hardcoded values (usernames, org names, limits) when a config field or env var already exists for that purpose — use the existing config
    - Dead config fields that nothing reads — either wire them up or remove them
+   - Duplicated config/constants across modules — extract to a single shared module to prevent drift (watch for circular imports when choosing the shared location)
 
    **Style & conventions**
    - Naming and patterns consistent with the rest of the codebase
