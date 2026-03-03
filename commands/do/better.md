@@ -489,17 +489,14 @@ If this returns 422 ("not a collaborator"), **fall back to Playwright** for each
 
 ### 6.2: Poll for review completion
 
-For each PR, poll every 15 seconds, max 3 minutes (12 polls):
+**Dynamic poll timing**: Before your first poll, check how long the most recent Copilot review on this PR took by comparing consecutive Copilot review `submittedAt` timestamps (or PR creation time for the first review). Use that duration as your expected wait. If no prior review exists, default to 5 minutes. Set poll interval to 60 seconds and max wait to **2x the expected duration** (minimum 5 minutes, maximum 20 minutes). Copilot reviews can take **10-15 minutes** for large diffs — do NOT give up early.
+
+For each PR, poll using GraphQL to check for a new Copilot review:
 ```bash
-gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/reviews --jq '.[] | "\(.user.login): \(.state)"'
+echo '{"query":"{ repository(owner: \"OWNER\", name: \"REPO\") { pullRequest(number: PR_NUM) { reviews(last: 5) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
 ```
 
-Also check for inline comments:
-```bash
-gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments --jq '.[] | "\(.user.login) [\(.path):\(.line)]: \(.body[:120])"'
-```
-
-The review is complete when a `copilot[bot]` or `copilot-pull-request-reviewer[bot]` review appears.
+The review is complete when a new `copilot-pull-request-reviewer[bot]` review appears with a `submittedAt` after your request. If no review appears after max wait, **ask the user** whether to continue waiting, re-request, or skip.
 
 **Error detection**: After a review appears, check its `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If found, this is NOT a successful review — log a warning, re-request the review (step 6.1), and resume polling from 6.2. Allow up to 3 error retries per PR before asking the user whether to continue or skip.
 

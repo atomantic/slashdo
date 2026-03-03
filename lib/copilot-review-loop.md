@@ -19,9 +19,9 @@ After the PR is created, run the Copilot review-and-fix loop:
    - The review is complete when a new Copilot review node appears with a `submittedAt` after your latest push
    - **Error detection**: After a review appears, check the review `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If the review body contains this error, it is NOT a successful review — re-request the review (step 1) and resume polling. Log a warning so the user knows a retry occurred. Apply a maximum of 3 error retries before asking the user whether to continue waiting or skip.
    - **Do NOT proceed until the re-requested review has actually posted** — "Awaiting requested review" means it is still in progress
-   - Poll every 60 seconds; Copilot reviews can take **10-15 minutes** for large diffs — do NOT give up early
-   - **Continue polling for at least 15 minutes** before concluding the review won't arrive
-   - If no review appears after 15 minutes, **ask the user** whether to continue waiting, re-request the review, or skip — **never proceed without user approval when the review loop fails**
+   - **Dynamic poll timing**: Before your first poll, check how long the most recent Copilot review on this PR took by comparing its `submittedAt` to the previous review's `submittedAt` (or to the PR creation time if it was the first review). Use that duration as your expected wait time. If no prior review exists, default to 5 minutes. Set poll interval to 60 seconds and max wait to **2x the expected duration** (minimum 5 minutes, maximum 20 minutes).
+   - Copilot reviews can take **10-15 minutes** for large diffs — do NOT give up early
+   - If no review appears after the max wait time, **ask the user** whether to continue waiting, re-request the review, or skip — **never proceed without user approval when the review loop fails**
    - If the review request silently disappears (reviewRequests becomes empty without a review being posted), re-request the review once and resume polling
 
 3. **Check for unresolved comments**
