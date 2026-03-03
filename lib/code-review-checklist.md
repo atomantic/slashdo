@@ -47,6 +47,22 @@
    - Shared mutable state (files, in-memory caches) accessed by concurrent requests without locking or atomic writes — if two requests can hit the same resource, consider a mutex or write-to-tmp-then-rename pattern
    - Multi-step read-modify-write cycles on JSON files or databases that can interleave with other requests
 
+   **SQL & database**
+   - Parameterized query placeholder indices (`$1`, `$2`, ...) must match the actual parameter array positions — especially when multiple queries share a param builder or when `paramIdx` is computed from prior queries that aren't in the same `query()` call
+   - Database triggers (e.g., `BEFORE UPDATE` setting `updated_at = NOW()`) that clobber explicitly-provided values — verify triggers don't interfere with replication/sync that sets fields to remote timestamps
+   - `BIGSERIAL` columns only auto-increment on INSERT, not UPDATE — if sync/federation relies on a sequence column to detect changes, the UPDATE trigger must explicitly call `nextval()` to bump it
+   - PostgreSQL built-in functions (e.g., `gen_random_uuid()`) may require specific extensions or minimum PG versions — verify the Docker image/deployment target supports them
+
+   **Lazy initialization & module loading**
+   - Cached state getters (e.g., `getBackendName()`) that return `null` before the module is initialized — route handlers that check the cached value before any backend call will get incorrect results. Provide an async `ensure*()` function that triggers initialization
+   - Re-exporting constants from heavy modules (e.g., `export { CONFIG } from './heavyModule.js'`) defeats lazy loading — define shared constants in a lightweight module or inline them
+
+   **Data format portability**
+   - Values that cross serialization boundaries (JSON API → database, peer sync) may change format — e.g., pgvector embeddings are strings in SQL but arrays in JSON. Convert consistently before writing to the target format
+
+   **Cross-platform compatibility**
+   - Shell commands like `sleep 1` don't exist on Windows — use Node-native delays (`Atomics.wait`, `setTimeout`) in setup/build scripts
+
    **Test coverage**
    - New validation schemas, service functions, or business logic added without corresponding tests — especially when the project already has a test suite covering similar existing code
    - New error paths (404, 400) that are untestable because the service throws generic errors instead of typed/status-coded ones
