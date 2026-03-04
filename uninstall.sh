@@ -63,7 +63,7 @@ uninstall_claude() {
       count=$((count + 1))
     fi
   done
-  [ -d "$target_improve" ] && rmdir "$target_improve" 2>/dev/null || true
+  if [ -d "$target_improve" ]; then rmdir "$target_improve" 2>/dev/null || true; fi
 
   for lib in "${LIBS[@]}"; do
     if [ -f "$target_lib/$lib.md" ]; then
@@ -236,7 +236,7 @@ uninstall_gemini() {
       count=$((count + 1))
     fi
   done
-  [ -d "$target_improve" ] && rmdir "$target_improve" 2>/dev/null || true
+  if [ -d "$target_improve" ]; then rmdir "$target_improve" 2>/dev/null || true; fi
 
   for lib in "${LIBS[@]}"; do
     if [ -f "$target_lib/$lib.md" ]; then
