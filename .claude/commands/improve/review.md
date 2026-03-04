@@ -5,7 +5,7 @@ argument-hint: "<PR URL or owner/repo#number>"
 
 # Improve Review Checklist from PR Feedback
 
-Analyze code review feedback on a PR, identify patterns our self-review checklist missed, update `~/.claude/lib/code-review-checklist.md` with new generic checks, and improve the review process itself (`commands/do/review.md`) when gaps require deeper tracing or new review strategies.
+Analyze code review feedback on a PR, identify patterns our self-review checklist missed, update the source-of-truth checklist in `lib/code-review-checklist.md` (which is installed to `~/.claude/lib/code-review-checklist.md`) with new generic checks, and improve the review process itself (`commands/do/review.md`) when gaps require deeper tracing or new review strategies.
 
 ## Phase 1: Parse Input & Fetch Feedback
 
@@ -75,9 +75,9 @@ For each theme, write a **generic, technology-agnostic checklist item** that wou
 
 ### 3a: Read current checklist
 
-Read the installed checklist:
+Read the source-of-truth checklist from the repo:
 ```bash
-cat ~/.claude/lib/code-review-checklist.md
+cat lib/code-review-checklist.md
 ```
 
 ### 3b: Classify each theme
@@ -122,11 +122,18 @@ The goal is a checklist that is **wide** (covers many categories of bugs) but **
 
 ### 4c: Verify the file
 
-After editing, read back `~/.claude/lib/code-review-checklist.md` to verify:
+After editing, read back `lib/code-review-checklist.md` to verify:
 - No formatting errors (broken markdown, missing bullets)
 - No duplicate items
 - No project-specific language leaked in
 - Items flow logically within their sections
+
+### 4d: Sync checklist to installed location
+
+Copy the updated checklist to the user's installed location:
+```bash
+cp lib/code-review-checklist.md ~/.claude/lib/code-review-checklist.md
+```
 
 ## Phase 5: Report
 
