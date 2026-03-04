@@ -1,46 +1,76 @@
 ## Copilot Code Review Loop
 
-After the PR is created, run the Copilot review-and-fix loop:
+After the PR is created, run the Copilot review-and-fix loop.
 
-1. **Request a Copilot review via API**
-   ```bash
-   gh api repos/OWNER/REPO/pulls/PR_NUM/requested_reviewers -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
-   ```
-   **CRITICAL**: The reviewer name MUST include the `[bot]` suffix. Without it, the API returns a 422 "not a collaborator" error.
-   - For **public repos**: Copilot review may trigger automatically on PR creation — check if a review already exists before requesting
-   - If no Copilot reviewer is configured at all, inform the user and skip this loop
+**IMPORTANT — Sub-agent delegation**: To prevent context exhaustion on long review cycles, delegate the entire review loop to a **general-purpose sub-agent** via the Agent tool. The sub-agent runs the full loop (request → wait → check → fix → re-request) autonomously and returns only the final status. This keeps the parent agent's context clean.
 
-2. **Wait for the review to complete (BLOCKING — do not skip or proceed early)**
-   - Record the current review count and latest `submittedAt` timestamp before waiting
-   - Poll using `gh api graphql` to check the `reviews` array for a NEW review node (compare `submittedAt` timestamps or count):
-     ```bash
-     gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviews(last: 3) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }'
-     ```
-   - The review is complete when a new Copilot review node appears with a `submittedAt` after your latest push
-   - **Error detection**: After a review appears, check the review `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If the review body contains this error, it is NOT a successful review — re-request the review (step 1) and resume polling. Log a warning so the user knows a retry occurred. Apply a maximum of 3 error retries before asking the user whether to continue waiting or skip.
-   - **Do NOT proceed until the re-requested review has actually posted** — "Awaiting requested review" means it is still in progress
-   - **Dynamic poll timing**: Before your first poll, check how long the most recent Copilot review on this PR took by comparing its `submittedAt` to the previous review's `submittedAt` (or to the PR creation time if it was the first review). Use that duration as your expected wait time. If no prior review exists, default to 5 minutes. Set poll interval to 60 seconds and max wait to **2x the expected duration** (minimum 5 minutes, maximum 20 minutes).
-   - Copilot reviews can take **10-15 minutes** for large diffs — do NOT give up early
-   - If no review appears after the max wait time, **ask the user** whether to continue waiting, re-request the review, or skip — **never proceed without user approval when the review loop fails**
-   - If the review request silently disappears (reviewRequests becomes empty without a review being posted), re-request the review once and resume polling
+### Sub-agent prompt template:
 
-3. **Check for unresolved comments**
-   - Filter review threads for `isResolved: false`
-   - **First, verify the review was successful**: check that the latest Copilot review body does NOT contain "Copilot encountered an error" or "unable to review". If it does, this is an error response — go back to step 1 (re-request) instead of proceeding. This check is critical because error reviews have no comments and no unresolved threads, making them look identical to a clean review.
-   - Also count the total comments in the latest review (check the review body for "generated N comments")
-   - If the latest review has **zero comments** (body says "generated 0 comments" or no unresolved threads exist): the PR is clean — exit the loop
-   - If **there are unresolved comments**: proceed to fix them (step 4)
+```
+You are a Copilot review loop agent.
 
-4. **Fix all unresolved review comments**
+PR: #{PR_NUMBER} in {OWNER}/{REPO}
+Branch: {BRANCH_NAME}
+Build command: {BUILD_CMD}
+Max iterations: 5
+
+DECREASING TIMEOUT SCHEDULE:
+- Iteration 1: max wait 5 minutes
+- Iteration 2: max wait 4 minutes
+- Iteration 3: max wait 3 minutes
+- Iteration 4: max wait 2 minutes
+- Iteration 5+: max wait 1 minute
+Poll interval: 30 seconds for all iterations.
+
+Run the following loop until Copilot returns zero new comments or you hit
+the max iteration limit:
+
+1. REQUEST a Copilot review:
+   gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
+     -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
+   CRITICAL: The reviewer name MUST include the [bot] suffix.
+   - For public repos: check if a review already exists before requesting
+   - If no Copilot reviewer is configured, report back and exit
+
+2. WAIT for the review to complete (BLOCKING):
+   - Record the current review count and latest submittedAt timestamp
+   - Poll using gh api graphql to check the reviews array for a NEW node:
+     gh api graphql -f query='{ repository(owner: "{OWNER}", name: "{REPO}") { pullRequest(number: {PR_NUMBER}) { reviews(last: 3) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }'
+   - The review is complete when a new Copilot review node appears with a
+     submittedAt after your latest push
+   - Use the DECREASING TIMEOUT for the current iteration number
+   - Error detection: if the review body contains "Copilot encountered an
+     error" or "unable to review this pull request", re-request (step 1)
+     and resume polling. Max 3 error retries before reporting failure.
+   - If the review request silently disappears (reviewRequests empty
+     without a review posted), re-request once and resume polling
+   - If no review appears after max wait, report the timeout — the parent
+     agent will ask the user what to do
+
+3. CHECK for unresolved comments:
+   - Filter review threads for isResolved: false
+   - First verify the review was successful: check that the latest Copilot
+     review body does NOT contain error text. If it does, go back to step 1.
+   - If zero comments (body says "generated 0 comments" or no unresolved
+     threads): PR is clean — report success and exit
+   - If unresolved comments exist: proceed to step 4
+
+4. FIX all unresolved review comments:
    For each unresolved thread:
    - Read the referenced file and understand the feedback
    - Make the code fix
-   - Run the build (`npm run build` or the project's build command)
-   - If build passes, commit with message `address review: <summary of changes>`
+   - Run the build command
+   - If build passes, commit: address review: <summary>
    - Resolve the thread via GraphQL mutation:
-     ```bash
-     gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "THREAD_ID"}) { thread { id isResolved } } }'
-     ```
-   - After all threads are resolved, push all commits to remote
-   - **Re-request a Copilot review** via API (same command as step 1)
-   - **Go back to step 2** (wait for new review) — this loop MUST repeat until Copilot returns a review with zero new comments. Never proceed after only one round of fixes.
+     gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "{THREAD_ID}"}) { thread { id isResolved } } }'
+   - After all threads resolved, push all commits to remote
+   - Increment iteration counter and go back to step 1
+
+When done, report back:
+- Final status: clean / max-iterations-reached / timeout / error
+- Total iterations completed
+- List of commits made (if any)
+- Any unresolved threads remaining
+```
+
+Launch the sub-agent and wait for its result. If the sub-agent reports a timeout or error, **ask the user** whether to continue waiting, re-request the review, or skip — never proceed without user approval when the review loop fails.

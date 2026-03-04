@@ -465,6 +465,8 @@ After creating all PRs, verify CI passes on each one:
 
 Maximum 5 iterations per PR to prevent infinite loops.
 
+**IMPORTANT — Sub-agent delegation**: To prevent context exhaustion on long review cycles with multiple PRs, delegate each PR's review loop to a **separate general-purpose sub-agent** via the Agent tool. Launch sub-agents in parallel (one per PR). Each sub-agent runs the full loop (request → wait → check → fix → re-request) autonomously and returns only the final status.
+
 ### 6.0: Verify browser authentication
 
 If `BROWSER_AUTHENTICATED` is not true (e.g., Phase 0e was skipped or failed):
@@ -472,69 +474,98 @@ If `BROWSER_AUTHENTICATED` is not true (e.g., Phase 0e was skipped or failed):
 2. Check for user avatar/menu
 3. If not logged in: navigate to `https://github.com/login`, inform the user **"Please log in to GitHub in the browser. I'll wait for you to confirm."**, and use `AskUserQuestion` to wait
 
-### 6.1: Request Copilot reviews on all PRs
+### 6.1: Determine review request method
 
-For each PR:
-
-**Try the API first:**
+**Try the API first** on any one PR:
 ```bash
 gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers --method POST --input - <<< '{"reviewers":["copilot-pull-request-reviewer"]}'
 ```
 
-If this returns 422 ("not a collaborator"), **fall back to Playwright** for each PR:
-1. Navigate to `{PR_URL}`
-2. Click the "Reviewers" gear button in the PR sidebar
-3. In the dropdown menu, click the Copilot `menuitemradio` option (not the "Request" button which may be obscured by the dropdown header)
-4. Verify the sidebar shows "Awaiting requested review from Copilot"
+If this returns 422 ("not a collaborator"), record `REVIEW_METHOD=playwright`. Otherwise record `REVIEW_METHOD=api`.
 
-### 6.2: Poll for review completion
+### 6.2: Launch parallel sub-agents (one per PR)
 
-**Dynamic poll timing**: Before your first poll, check how long the most recent Copilot review on this PR took by comparing consecutive Copilot review `submittedAt` timestamps (or PR creation time for the first review). Use that duration as your expected wait. If no prior review exists, default to 5 minutes. Set poll interval to 60 seconds and max wait to **2x the expected duration** (minimum 5 minutes, maximum 20 minutes). Copilot reviews can take **10-15 minutes** for large diffs — do NOT give up early.
+For each PR, spawn a general-purpose sub-agent with:
 
-For each PR, poll using GraphQL to check for a new Copilot review:
-```bash
-echo '{"query":"{ repository(owner: \"OWNER\", name: \"REPO\") { pullRequest(number: PR_NUM) { reviews(last: 5) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
+```
+You are a Copilot review loop agent for PR #{PR_NUMBER}.
+
+Repository: {OWNER}/{REPO}
+Branch: better/{CATEGORY_SLUG}
+Build command: {BUILD_CMD}
+Review request method: {REVIEW_METHOD}
+Max iterations: 5
+
+DECREASING TIMEOUT SCHEDULE:
+- Iteration 1: max wait 5 minutes
+- Iteration 2: max wait 4 minutes
+- Iteration 3: max wait 3 minutes
+- Iteration 4: max wait 2 minutes
+- Iteration 5+: max wait 1 minute
+Poll interval: 30 seconds for all iterations.
+
+Run the following loop until Copilot returns zero new comments or you hit
+the max iteration limit:
+
+1. REQUEST a Copilot review:
+   If REVIEW_METHOD is "api":
+     gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
+       -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
+   If REVIEW_METHOD is "playwright":
+     Navigate to the PR URL, click the "Reviewers" gear button, click the
+     Copilot menuitemradio option, verify sidebar shows "Awaiting requested
+     review from Copilot"
+
+2. WAIT for the review (BLOCKING):
+   - Record current review count and latest submittedAt timestamp
+   - Poll using GraphQL (use stdin JSON — never use $variables):
+     echo '{{"query":"{{ repository(owner: \\"{OWNER}\\", name: \\"{REPO}\\") {{ pullRequest(number: {PR_NUMBER}) {{ reviews(last: 5) {{ nodes {{ state body author {{ login }} submittedAt }} }} reviewThreads(first: 100) {{ nodes {{ id isResolved comments(first: 3) {{ nodes {{ body path line author {{ login }} }} }} }} }} }} }} }}"}}' | gh api graphql --input -
+   - Complete when a new copilot-pull-request-reviewer[bot] review appears
+     with submittedAt after your request
+   - Use the DECREASING TIMEOUT for the current iteration number
+   - Error detection: if review body contains "Copilot encountered an error"
+     or "unable to review", re-request and resume. Max 3 error retries.
+   - If review request silently disappears, re-request once and resume
+   - If no review after max wait, report timeout and exit
+
+3. CHECK for unresolved threads:
+   Fetch threads via GraphQL (stdin JSON):
+     echo '{{"query":"{{ repository(owner: \\"{OWNER}\\", name: \\"{REPO}\\") {{ pullRequest(number: {PR_NUMBER}) {{ reviewThreads(first: 100) {{ nodes {{ id isResolved comments(first: 10) {{ nodes {{ body path line author {{ login }} }} }} }} }} }} }} }}"}}' | gh api graphql --input -
+   - Verify review was successful (no error text in body)
+   - If zero comments / no unresolved threads: report success and exit
+   - If unresolved threads exist: proceed to step 4
+
+4. FIX all unresolved threads:
+   For each unresolved thread:
+   - Read the referenced file and understand the feedback
+   - Evaluate: valid feedback → make the fix; informational/false positive →
+     resolve without changes
+   - If fixing:
+     git checkout better/{CATEGORY_SLUG}
+     # make changes
+     git add <specific files>
+     git commit -m "address review: {{summary}}"
+     git push
+   - Resolve thread via GraphQL mutation:
+     echo '{{"query":"mutation {{ resolveReviewThread(input: {{threadId: \\"{THREAD_ID}\\"}}) {{ thread {{ id isResolved }} }} }}"}}' | gh api graphql --input -
+   - After all threads resolved, increment iteration and go back to step 1
+
+When done, report back:
+- Final status: clean / max-iterations-reached / timeout / error
+- Total iterations completed
+- List of commits made (if any)
+- Any unresolved threads remaining
 ```
 
-The review is complete when a new `copilot-pull-request-reviewer[bot]` review appears with a `submittedAt` after your request. If no review appears after max wait, **ask the user** whether to continue waiting, re-request, or skip.
+Launch all PR sub-agents in parallel. Wait for all to complete.
 
-**Error detection**: After a review appears, check its `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If found, this is NOT a successful review — log a warning, re-request the review (step 6.1), and resume polling from 6.2. Allow up to 3 error retries per PR before asking the user whether to continue or skip.
+### 6.3: Handle sub-agent results
 
-### 6.3: Check for unresolved threads
-
-For each reviewed PR, fetch review threads via GraphQL using stdin JSON (**never use `$variables`** — shell expansion consumes `$` signs):
-```bash
-echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
-```
-Save to `/tmp/better_threads_{PR_NUMBER}.json` for parsing.
-
-- If **no unresolved threads** → mark PR as ready to merge
-- If **unresolved threads exist** → proceed to 6.4 (fix)
-
-### 6.4: Fix unresolved threads
-
-For each unresolved thread on each PR:
-1. Read the referenced file and understand the feedback
-2. Evaluate: is the feedback valid? Some Copilot comments are informational or about pre-existing patterns.
-   - **Valid feedback**: make the code fix
-   - **Informational/false positive**: resolve the thread without changes
-3. If fixing:
-   ```bash
-   git checkout better/{CATEGORY_SLUG}
-   # make changes
-   git add <specific files>
-   git commit -m "address review: {summary of change}"
-   git push
-   ```
-4. Resolve the thread via GraphQL mutation:
-   ```bash
-   echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
-   ```
-
-After all threads are resolved on a PR:
-1. Increment that PR's `REVIEW_ITERATION`
-2. If `REVIEW_ITERATION >= 5`: inform the user "Reached max review iterations (5) on PR #{number}. Remaining issues may need manual review."
-3. Otherwise: re-request Copilot review on that PR and repeat from 6.2
+For each sub-agent result:
+- **clean**: mark PR as ready to merge
+- **timeout**: ask the user whether to continue waiting, re-request, or skip
+- **max-iterations-reached**: inform the user "Reached max review iterations (5) on PR #{number}. Remaining issues may need manual review."
+- **error**: inform the user and ask whether to retry or skip
 
 ### 6.5: Merge
 
@@ -599,7 +630,7 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 - **Push failure**: `git pull --rebase --autostash` then retry push
 - **CI failure on PR**: investigate logs, fix in a new commit, push, re-check (max 3 attempts per PR)
 - **Cross-PR dependency breakage**: add backward-compatible re-exports or move shared files to the PR that creates them
-- **Copilot timeout** (review not received within 3 min): inform user, offer to merge without review approval or wait longer
+- **Copilot timeout** (review not received within decreasing timeout window): inform user, offer to merge without review approval or wait longer
 - **Copilot review loop exceeds 5 iterations per PR**: stop iterating on that PR, inform user, proceed to merge
 - **Existing worktree found at startup**: ask user — resume (reuse worktree) or cleanup (remove and start fresh)
 - **No findings above LOW**: skip Phases 3-7, print "No actionable findings" with the LOW summary
