@@ -12,7 +12,7 @@
    - State/variables that are declared but never updated or only partially wired up (e.g. a state setter that's never called)
    - Side effects during React render (setState, navigation, mutations outside useEffect)
    - Off-by-one errors, null/undefined access without guards
-   - `JSON.parse` on user-editable files (config, settings, cache) without error handling — corrupted files will crash the process
+   - `JSON.parse` on user-editable or external files (config, settings, cache, package metadata) without error handling — corrupted files will crash the process. When the parsed data is optional enrichment (e.g., version info, display metadata), isolate the failure so it doesn't abort the main operation
    - Accessing properties/methods on parsed JSON objects without verifying expected structure (e.g., `obj.arr.push()` when `arr` might not be an array)
    - Iterating arrays from external/user-editable sources without guarding each element — a `null` or wrong-type entry throws `TypeError` when treated as an object
    - Version/string comparisons using `!==` when semantic ordering matters — use proper semver comparison for version checks
@@ -38,6 +38,7 @@
    **API & URL safety**
    - User-supplied values interpolated into URL paths must use `encodeURIComponent()` — even if the UI restricts input, the API should be safe independently
    - Route params (`:name`, `:id`) passed to services without validation — add format checks (regex, length limits) at the route level
+   - Data from external APIs or upstream services interpolated into shell commands, file paths, or subprocess arguments without validation — enforce expected format (e.g., regex allowlist) before passing to execution boundaries
 
    **Data exposure**
    - API responses returning full objects that contain sensitive fields (secrets, tokens, passwords) — destructure and omit before sending. Check ALL response paths (GET, PUT, POST) not just one
@@ -62,6 +63,7 @@
    - Numeric query params (`limit`, `offset`, `page`) parsed from strings without lower-bound clamping — `parseInt` can produce 0, negative, or `NaN` values that cause SQL errors or unexpected behavior. Always clamp to safe bounds (e.g., `Math.max(1, ...)`)
    - Summary counters/accumulators that miss edge cases — if an item is removed, is the count updated? Are all branches counted?
    - Silent operations in verbose sequences — when a series of operations each prints a status line, ensure all branches print consistent output
+   - UI elements hidden from navigation (filtered tabs, conditional menu items) but still accessible via direct URL — enforce access restrictions at the route/handler level, not just visibility
    - Labels, comments, or status messages that describe behavior the code doesn't implement — e.g., a map named "renamed" that only deletes, or an action labeled "migrated" that never creates the target
    - Registering references (config entries, settings pointers) to files or resources without verifying the resource actually exists — a failed download or missing file leaves dangling references that break later operations
    - Error/catch handlers that exit cleanly (`exit 0`, `return`) without any user-visible output — makes failures look like successes; always print a skip/warning message explaining why the operation was skipped
@@ -97,11 +99,12 @@
    - Values that cross serialization boundaries (JSON API → database, peer sync) may change format — e.g., arrays in JSON vs specialized string literals in the database. Convert consistently before writing to the target
 
    **Shell script safety**
-   - Subprocess calls in shell scripts under `set -e` — if the subprocess fails, the script aborts. Check exit status and handle gracefully
+   - Subprocess calls in shell scripts under `set -e` — if the subprocess fails, the script aborts. Also check non-critical writes (e.g., `echo` to stdout) which fail on broken pipes and trigger exit — use `|| true` for non-critical output
+   - Detached/background child processes spawned with piped stdio — if the parent exits (restart, crash), pipes close and writes cause SIGPIPE. Redirect stdio to log files or use `'ignore'` for children that must outlive the parent
    - When the same data structure is manipulated in both application code and shell-inline scripts, apply identical guards in both places
 
    **Cross-platform compatibility**
-   - Shell-specific commands (e.g., `sleep`) in Node.js setup/build scripts — use language-native alternatives for portability
+   - Platform-specific execution assumptions — hardcoded shell interpreters (`bash`, `sh`), `path.join()` producing backslashes that break ESM `import()` or URL-based APIs on Windows, platform-gated scripts without fallback or clear error. Use `pathToFileURL()` for dynamic imports, check `process.platform` for shell dispatch
 
    **Test coverage**
    - New validation schemas, service functions, or business logic added without corresponding tests — especially when the project already has a test suite covering similar existing code
@@ -117,7 +120,7 @@
    - Hardcoded values (usernames, org names, limits) when a config field or env var already exists for that purpose
    - Dead config fields that nothing reads — either wire them up or remove them
    - Function parameters that are accepted but never used — creates a false API contract; remove unused params or implement the intended behavior
-   - Duplicated config/constants across modules — extract to a single shared module to prevent drift (watch for circular imports when choosing the shared location)
+   - Duplicated config/constants/utility helpers across modules — extract to a single shared module to prevent drift (watch for circular imports when choosing the shared location)
 
    **Style & conventions**
    - Naming and patterns consistent with the rest of the codebase
