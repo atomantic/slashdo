@@ -91,6 +91,12 @@ Check every file against this checklist:
 **Guard-before-cache ordering**
 - If a handler performs a pre-flight guard check (rate limit, quota, feature flag) before a cache lookup or short-circuit path, verify the guard doesn't block operations that would be served from cache without touching the guarded resource — restructure so cache hits bypass the guard
 
+**Sanitization/validation coverage**
+- If the PR introduces a new validation or sanitization function for a data field, trace every code path that writes to that field (create, update, import, sync, rename) — verify they all use the same sanitization. Partial application is the #1 way invalid data re-enters through an unguarded path
+
+**Bootstrap/initialization ordering**
+- If the PR adds resilience or self-healing code (dependency installers, auto-repair, migration runners), trace the execution order: does the main code path resolve or import the dependencies BEFORE the resilience code runs? If so, the bootstrapper never executes when it's needed most — restructure so verification/installation precedes resolution
+
 **Lock/flag exit-path completeness**
 - If a function sets a shared flag or lock (in-progress, mutex, status marker), trace every exit path — early returns, error catches, platform-specific guards, and normal completion — to verify the flag is cleared. A missed path leaves the system permanently locked
 
@@ -99,6 +105,15 @@ Check every file against this checklist:
 
 **Real-time event vs response timing**
 - If a handler emits push notifications (WebSocket, SSE, pub/sub) AND returns an HTTP response, verify clients won't receive push events before the response that gives them context to interpret those events — especially when the response contains IDs or version numbers the event consumer needs
+
+**Intent vs implementation (meta-cognitive pass)**
+- For each label, comment, docstring, status message, or inline instruction that describes behavior, verify the code actually implements that behavior. A detection mechanism must query the data it claims to detect; a migration must create the target, not just delete the source
+- If the PR contains inline code examples, command templates, or query snippets, verify they are syntactically valid for their language — run a mental parse of each example. Watch for template placeholder format inconsistencies within and across files
+- If the PR modifies a value (identifier, parameter name, format convention, threshold, timeout) that is referenced in other files, trace all cross-references and verify they agree. This includes: reviewer usernames, API names, placeholder formats, GraphQL field names, operational constants
+- If the PR adds or reorders sequential steps/instructions, verify the ordering matches execution dependencies — readers following steps in order must not perform an action before its prerequisite
+
+**Formatting & structural consistency**
+- If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
 
 ## Fix Issues Found
 
