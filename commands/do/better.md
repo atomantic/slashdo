@@ -478,7 +478,7 @@ If `BROWSER_AUTHENTICATED` is not true (e.g., Phase 0e was skipped or failed):
 
 **Try the API first** on any one PR:
 ```bash
-gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers --method POST --input - <<< '{"reviewers":["copilot-pull-request-reviewer"]}'
+gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers --method POST --input - <<< '{"reviewers":["copilot-pull-request-reviewer[bot]"]}'
 ```
 
 If this returns 422 ("not a collaborator"), record `REVIEW_METHOD=playwright`. Otherwise record `REVIEW_METHOD=api`.
@@ -518,8 +518,8 @@ the max iteration limit:
 
 2. WAIT for the review (BLOCKING):
    - Record current review count and latest submittedAt timestamp
-   - Poll using GraphQL (use stdin JSON — never use $variables):
-     echo '{{"query":"{{ repository(owner: \\"{OWNER}\\", name: \\"{REPO}\\") {{ pullRequest(number: {PR_NUMBER}) {{ reviews(last: 5) {{ nodes {{ state body author {{ login }} submittedAt }} }} reviewThreads(first: 100) {{ nodes {{ id isResolved comments(first: 3) {{ nodes {{ body path line author {{ login }} }} }} }} }} }} }} }}"}}' | gh api graphql --input -
+   - Poll using GraphQL:
+     gh api graphql -f query='{ repository(owner: "{OWNER}", name: "{REPO}") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }'
    - Complete when a new copilot-pull-request-reviewer[bot] review appears
      with submittedAt after your request
    - Use the DECREASING TIMEOUT for the current iteration number
@@ -529,8 +529,8 @@ the max iteration limit:
    - If no review after max wait, report timeout and exit
 
 3. CHECK for unresolved threads:
-   Fetch threads via GraphQL (stdin JSON):
-     echo '{{"query":"{{ repository(owner: \\"{OWNER}\\", name: \\"{REPO}\\") {{ pullRequest(number: {PR_NUMBER}) {{ reviewThreads(first: 100) {{ nodes {{ id isResolved comments(first: 10) {{ nodes {{ body path line author {{ login }} }} }} }} }} }} }} }}"}}' | gh api graphql --input -
+   Fetch threads via GraphQL:
+     gh api graphql -f query='{ repository(owner: "{OWNER}", name: "{REPO}") { pullRequest(number: {PR_NUMBER}) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }'
    - Verify review was successful (no error text in body)
    - If zero comments / no unresolved threads: report success and exit
    - If unresolved threads exist: proceed to step 4
@@ -544,10 +544,10 @@ the max iteration limit:
      git checkout better/{CATEGORY_SLUG}
      # make changes
      git add <specific files>
-     git commit -m "address review: {{summary}}"
+     git commit -m "address review: {SUMMARY}"
      git push
    - Resolve thread via GraphQL mutation:
-     echo '{{"query":"mutation {{ resolveReviewThread(input: {{threadId: \\"{THREAD_ID}\\"}}) {{ thread {{ id isResolved }} }} }}"}}' | gh api graphql --input -
+     gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "{THREAD_ID}"}) { thread { id isResolved } } }'
    - After all threads resolved, increment iteration and go back to step 1
 
 When done, report back:
@@ -567,7 +567,7 @@ For each sub-agent result:
 - **max-iterations-reached**: inform the user "Reached max review iterations (5) on PR #{number}. Remaining issues may need manual review."
 - **error**: inform the user and ask whether to retry or skip
 
-### 6.5: Merge
+### 6.4: Merge
 
 For each PR that has passed CI and review (in dependency order if applicable):
 ```bash
