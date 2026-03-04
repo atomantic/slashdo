@@ -8,6 +8,8 @@
 
 ## Changed
 
+- `/improve:review` now also analyzes review process gaps (depth, flow, tooling) and updates `commands/do/review.md` with new deep-check and flow-tracing instructions
+
 ## Fixed
 
 ## Removed

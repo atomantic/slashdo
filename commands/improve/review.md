@@ -5,7 +5,7 @@ argument-hint: "<PR URL or owner/repo#number>"
 
 # Improve Review Checklist from PR Feedback
 
-Analyze code review feedback on a PR, identify patterns our self-review checklist missed, and update `~/.claude/lib/code-review-checklist.md` with new generic checks.
+Analyze code review feedback on a PR, identify patterns our self-review checklist missed, update `~/.claude/lib/code-review-checklist.md` with new generic checks, and improve the review process itself (`commands/do/review.md`) when gaps require deeper tracing or new review strategies.
 
 ## Phase 1: Parse Input & Fetch Feedback
 
@@ -157,6 +157,68 @@ Print a summary of what was learned:
 
 ### New/Modified Items
 {list each new or modified checklist item with a brief explanation of what PR feedback inspired it}
+
+### Process Improvements
+- **Depth gaps found**: {N} — added to review.md deep checks
+- **Flow gaps found**: {N} — added to review.md flow tracing
+- **Tooling suggestions**: {N} — noted for user consideration
+
+#### New Deep Checks Added
+- {description} — inspired by {theme}
+
+#### New Flow Checks Added
+- {description} — inspired by {theme}
+
+#### Sub-Agent Suggestions (for user consideration)
+- {suggestion} — would catch {class of issues}
+
+(If no process improvements were identified, print "No process gaps found — all themes were addressable via checklist items alone.")
+```
+
+## Phase 5.5: Review Process Improvement
+
+After updating the checklist, analyze whether the review **process** itself (`commands/do/review.md`) should be improved. The checklist tells reviewers *what to look for*; the process tells them *how to look*. Some classes of bugs require deeper reading, broader tracing, or dedicated tooling — a checklist item alone won't catch them.
+
+### 5.5a: Classify themes by failure mode
+
+For each theme from Phase 2 that was **not already covered** by the existing checklist, ask: "Would adding a checklist item alone have caught this, or did the reviewer need to do something the process doesn't instruct?"
+
+Classify into:
+
+- **Checklist gap** — a new checklist item suffices (already handled by Phases 1–5)
+- **Depth gap** — the process doesn't instruct reading deep enough (e.g., "trace data across serialization boundaries", "verify option names are mapped between backend implementations", "check that both sides of a rename are updated")
+- **Flow gap** — the process doesn't instruct tracing a particular cross-cutting flow (e.g., "trace schema migration paths", "verify lifecycle propagation to dependent systems", "follow feature flags from definition through all conditional branches")
+- **Tooling gap** — a sub-agent or parallel review strategy would catch this class better (e.g., dedicated security scan, dedicated pagination audit, schema consistency checker)
+
+### 5.5b: Propose concrete process edits
+
+For each depth or flow gap, draft a concrete edit to `commands/do/review.md`:
+
+- New bullet points under "Additional deep checks" for depth gaps
+- New sub-sections under "Additional deep checks" if a whole category of tracing is missing, for flow gaps
+- Sub-agent suggestions are recorded in the report only (not auto-applied) — these are architectural decisions that need user approval
+
+Rules for process edits:
+- Generic and technology-agnostic, just like checklist items
+- Action-oriented: tell the reviewer what to trace and why
+- Don't duplicate what's already in the checklist — process instructions are about *how to look*, not *what to look for*
+- Should make the review more thorough without slowing down simple PRs (use conditional language like "if the PR touches X, also trace Y")
+
+### 5.5c: Apply process improvements
+
+Edit `commands/do/review.md` to add new deep-check bullets or flow-tracing instructions. Place new items under the most relevant existing sub-section of "Additional deep checks", or create a new sub-section if the category is genuinely new.
+
+After editing, read back `commands/do/review.md` to verify:
+- No formatting errors
+- No duplicate instructions
+- No project-specific language
+- New items are conditional where appropriate (don't add overhead for unrelated PRs)
+
+### 5.5d: Sync process file
+
+Copy the updated review process to the user's global commands:
+```bash
+cp commands/do/review.md ~/.claude/commands/do/review.md
 ```
 
 ## Guidelines
@@ -166,3 +228,6 @@ Print a summary of what was learned:
 - Prefer fewer, broader items over many narrow ones — a good checklist item catches a class of bugs, not one specific instance
 - When in doubt about whether something is too specific, generalize it one level: "PostgreSQL index" → "database index" → "query performance"
 - If the PR review feedback is all noise (no actionable items), report that and exit without changes
+- Process edits (`review.md`) should focus on *how to look*, not *what to look for* — the checklist covers the "what"
+- Sub-agent suggestions are logged in the report but never auto-implemented — they require user approval as architectural decisions
+- Keep `review.md` focused on instructions, not examples — if a concrete example helps, put it in parentheses as a brief illustration
