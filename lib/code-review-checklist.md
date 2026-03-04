@@ -24,11 +24,14 @@
    - Object spread/merge followed by unconditional field assignment that clobbers spread values — e.g., `{...input.details, notes: notes || null}` silently overwrites `input.details.notes` even when `notes` is undefined. Only set fields when the overriding value is explicitly provided
 
    **Async & UI state consistency**
-   - Optimistic UI state changes (view switches, navigation, success callbacks) before an async operation completes — if the operation fails, the UI is stuck in the wrong state with no rollback. Await the result and only transition on success
+   - Optimistic UI state changes (view switches, navigation, success callbacks) before an async operation completes — if the operation fails or is cancelled (drag cancel, upload abort, form dismiss), the UI is stuck in the wrong state with no rollback. Handle both failure and cancellation paths to reset intermediate state
    - `Promise.all` without try/catch — if any request rejects, the UI ends up partially loaded with an unhandled rejection. Wrap in try/catch with fallback/error state so the view remains usable
    - Success callbacks (`onSaved()`, `onComplete()`) called unconditionally after an async call — check the return value or catch errors before calling the callback
    - Debounced/cancelable async operations that don't reset loading state on all code paths (input cleared, stale response arrives, request fails) — loading spinners get stuck and stale results display. Use AbortController or request IDs to discard outdated responses and clear loading in every exit path (including early returns)
    - Multiple UI state variables representing coupled data (coordinates + display name, selected item + dependent list) updated independently — actions that change one must update all related fields to prevent display/data mismatch
+   - Error notification at multiple layers (shared API client that auto-displays errors + component-level error handling) — verify exactly one layer is responsible for user-facing error messages to avoid duplicate toasts/alerts. Suppress lower-layer notifications when the caller handles its own error display
+   - Optimistic state updates using full-collection snapshots for rollback — if a second user action starts while the first is in-flight, rollback restores the snapshot and clobbers the second action's changes. Use per-item rollback and functional state updaters (`setState(prev => ...)`) after async gaps to avoid stale closures
+   - Child components maintaining local copies of parent-provided data for optimistic updates without propagating changes back — on unmount/remount the parent's stale cache is re-rendered. Sync optimistic changes to the parent via callback alongside local state, or trigger a data refetch on remount
 
    **Resource management**
    - Event listeners, socket handlers, subscriptions, and timers are cleaned up on unmount/teardown
@@ -126,7 +129,7 @@
    - Tests that depend on real wall-clock time (`setTimeout`, `Date.now`, network delays) for rate limiters, debounce, or scheduling — slow under normal conditions and flaky under CI load. Use fake timers or time mocking
 
    **Accessibility**
-   - Interactive elements (buttons, toggles, custom controls) missing accessible names, roles, or ARIA states
+   - Interactive elements (buttons, toggles, custom controls) missing accessible names, roles, or ARIA states — including programmatically disabled interactions that don't reflect the disabled state visually or via `aria-disabled` (e.g., drag handles that appear interactive but are inert during async operations)
    - Custom toggle/switch UI built from `<button>` or `<div>` instead of native inputs with appropriate labeling
 
    **Configuration & hardcoding**
