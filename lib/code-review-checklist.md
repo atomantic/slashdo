@@ -33,7 +33,7 @@
    - Error notification at multiple layers (shared API client that auto-displays errors + component-level error handling) — verify exactly one layer is responsible for user-facing error messages to avoid duplicate toasts/alerts. Suppress lower-layer notifications when the caller handles its own error display
    - Optimistic state updates using full-collection snapshots for rollback — if a second user action starts while the first is in-flight, rollback restores the snapshot and clobbers the second action's changes. Use per-item rollback and functional state updaters (`setState(prev => ...)`) after async gaps to avoid stale closures
    - Child components maintaining local copies of parent-provided data for optimistic updates without propagating changes back — on unmount/remount the parent's stale cache is re-rendered. Sync optimistic changes to the parent via callback alongside local state, or trigger a data refetch on remount
-   - State updates guarded by truthiness of response data (`if (arr?.length)`, `if (data)`) — prevents clearing state when the source legitimately returns an empty set. Distinguish "no response" from "empty response" to allow users to remove all items
+   - State or field updates guarded by truthiness of the new value (`if (arr?.length)`, `if (data)`, `if (remoteVersion)`) — prevents clearing state when the source legitimately returns an empty set or null. Distinguish "no response" from "empty response"; on both client (UI state) and server (sync/replication fields), conditionally skipping a field update leaves stale values that misrepresent current state
 
    **Resource management**
    - Event listeners, socket handlers, subscriptions, and timers are cleaned up on unmount/teardown
@@ -63,12 +63,14 @@
    **Input handling**
    - Trimming values where whitespace is significant (API keys, tokens, passwords, base64) — only trim identifiers/names, not secret values
    - Swallowed errors (empty `.catch(() => {})`) or error handlers that replace detailed failure info with generic messages — at minimum surface a notification, and propagate original context (step name, exit code, original message) rather than discarding it
+  - Destructive operations in retry/cleanup paths (`rmSync`, `dropTable`, `deleteFile`) assumed to succeed without their own error handling — if cleanup fails (file locks, permissions, concurrent access), the retry logic crashes with an unhandled error instead of reporting the intended failure message
    - Endpoints that accept unbounded arrays/collections without an upper limit — large payloads can exceed request timeouts, exhaust memory, or create DoS vectors. Enforce a max size and return 400 when exceeded, or move large operations to background jobs
 
    **Validation & consistency**
    - New endpoints/schemas match validation standards of similar existing endpoints (check for field limits, required fields, types)
    - New API routes have the same error handling patterns as existing routes
    - If validation exists on one endpoint for a param, the same param on other endpoints needs the same validation
+  - When a sanitization or validation function is introduced for a field, trace ALL write paths for that field (create, update, sync, import) — partial application means the invalid values re-enter through the unguarded path
    - Schema fields that accept values the rest of the system can't handle (e.g., a field accepts any string but downstream code requires a specific format)
    - Zod/schema stripping fields the service actually reads — when Zod uses `.strict()` or strips unknown keys, any field the service reads from the validated object must be declared in the schema, otherwise it's silently `undefined`
    - Config values accepted by the API and persisted but silently ignored by the implementation — trace each config field through schema → service → generator/consumer to verify it's actually used (e.g., a `startRange` saved to config but the generator hardcodes a range)
@@ -81,6 +83,7 @@
    - Success markers, completion flags, or status files written before the operation they attest to finishes — if the operation fails after the marker is written, consumers see false success. Write markers only after confirming the operation completed
    - Tracking/checkpoint files (applied migrations, processed IDs, sync cursors) that default to empty on parse failure — causes full re-execution of all operations. Fail loudly or require manual recovery instead of silently re-processing
    - Registering references (config entries, settings pointers) to files or resources without verifying the resource actually exists — a failed download or missing file leaves dangling references that break later operations
+  - Existence checks (directory exists, file exists, module resolves) used as proof of correct or complete installation — a directory can exist but be empty/corrupt, a file can exist with invalid contents. Verify the specific resource the consumer needs (e.g., a critical binary or package manifest), not just the container
    - Error/catch handlers that exit cleanly (`exit 0`, `return`) without any user-visible output — makes failures look like successes; always print a skip/warning message explaining why the operation was skipped
 
    **Concurrency & data integrity**
@@ -114,6 +117,7 @@
    - Cached state getters that return `null`/`undefined` before the module is initialized — code that checks the cached value before triggering initialization will get incorrect results. Provide an async initializer or ensure-style function
    - Re-exporting constants from heavy modules defeats lazy loading — define shared constants in a lightweight module or inline them
    - Module-level side effects (file reads, JSON.parse, SDK client init) that run on import without error handling — a corrupted file or missing credential crashes the entire process before any request is served. Wrap module-level init in try/catch and degrade gracefully
+  - Bootstrap/resilience code that resolves or imports the dependencies it's meant to install — if the dependency is missing, the bootstrapper crashes before it can act. Structure so prerequisite resolution happens after the installation/verification step, not before
 
    **Data format portability**
    - Values that cross serialization boundaries (JSON API → database, peer sync) may change format — e.g., arrays in JSON vs specialized string literals in the database. Convert consistently before writing to the target
@@ -133,6 +137,7 @@
    - Tests that re-implement the logic under test instead of importing real exports — these pass even when the real code regresses. Import and call the actual functions
    - Missing tests for trust-boundary enforcement — if the server strips/recomputes client-provided fields, add a test that submits tampered values and verifies the server ignores them
    - Tests that depend on real wall-clock time (`setTimeout`, `Date.now`, network delays) for rate limiters, debounce, or scheduling — slow under normal conditions and flaky under CI load. Use fake timers or time mocking
+  - Tests that hit real external dependencies (databases, process managers, network services) when testing response shape or business logic — mock the dependency and assert the contract, keeping unit tests fast and deterministic
 
    **Accessibility**
    - Interactive elements (buttons, toggles, custom controls) missing accessible names, roles, or ARIA states — including programmatically disabled interactions that don't reflect the disabled state visually or via `aria-disabled` (e.g., drag handles that appear interactive but are inert during async operations)

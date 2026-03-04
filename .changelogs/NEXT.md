@@ -4,6 +4,9 @@
 
 ## Changed
 
+- Add checklist items from PortOS#59 and #60 reviews: bootstrap ordering, shallow existence checks, destructive cleanup error handling, sanitization write-path tracing, stale conditional updates, real-dependency tests
+- Add deep checks to review process: sanitization/validation coverage, bootstrap/initialization ordering
+- Remove version bump instruction from `do:pr` (only `do:release` should bump versions)
 - Copilot review loop now delegates to sub-agents to prevent context exhaustion on long review cycles
 - Review wait timeouts decrease per iteration: 5min → 4min → 3min → 2min → 1min
 - Poll interval reduced from 60s to 30s for faster review detection

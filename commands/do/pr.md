@@ -34,8 +34,6 @@ Before creating the PR, perform a thorough self-review. Read each changed file â
 - Create a PR from `{current_branch}` to `{default_branch}`
 - Create a rich PR description
 
-**IMPORTANT**: During each fix cycle in the Copilot review loop below, after fixing all review comments and before pushing, also bump the patch version (`npm version patch --no-git-tag-version` or equivalent) and commit the version bump.
-
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
 **Report the final status** to the user including PR URL and review outcome.
