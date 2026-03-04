@@ -32,7 +32,10 @@ Run the following loop until Copilot returns zero new comments or you hit
 the max iteration limit:
 
 1. CAPTURE the latest Copilot review submittedAt timestamp (so you can
-   detect when a NEW review arrives). Then REQUEST a Copilot review:
+   detect when a NEW review arrives):
+   echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { nodes { author { login } submittedAt } } } } }"}' | gh api graphql --input -
+   Record the most recent submittedAt from copilot-pull-request-reviewer.
+   Then REQUEST a Copilot review:
    gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
      -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
    CRITICAL: The reviewer name MUST include the [bot] suffix.
@@ -69,8 +72,8 @@ the max iteration limit:
    - Make the code fix
    - Run the build command
    - If build passes, commit: address review: <summary>
-   - Resolve the thread via GraphQL mutation:
-     gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "{THREAD_ID}"}) { thread { id isResolved } } }'
+   - Resolve the thread via GraphQL mutation using stdin JSON piping:
+     echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
    - After all threads resolved, push all commits to remote
    - Increment iteration counter and go back to step 1
 

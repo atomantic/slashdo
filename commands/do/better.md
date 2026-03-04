@@ -478,7 +478,8 @@ If `BROWSER_AUTHENTICATED` is not true (e.g., Phase 0e was skipped or failed):
 
 **Try the API first** on any one PR:
 ```bash
-gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers --method POST --input - <<< '{"reviewers":["copilot-pull-request-reviewer[bot]"]}'
+gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
+  -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
 ```
 
 If this returns 422 ("not a collaborator"), record `REVIEW_METHOD=playwright`. Otherwise record `REVIEW_METHOD=api`.
