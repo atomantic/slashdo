@@ -24,7 +24,6 @@ List all available `/do:*` commands with their descriptions.
 | `/do:review` | Deep code review of changed files against best practices |
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
 | `/do:update` | Update slashdo commands to the latest version |
-| `/improve:review` | Learn from PR review feedback to improve the self-review checklist |
 
 2. **Check for updates**: Run `npm view slash-do version` and compare to the installed version in `~/.claude/.slashdo-version`. If an update is available, mention it.
 
