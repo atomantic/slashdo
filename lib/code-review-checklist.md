@@ -16,6 +16,16 @@
    - Accessing properties/methods on parsed JSON objects without verifying expected structure (e.g., `obj.arr.push()` when `arr` might not be an array)
    - Iterating arrays from external/user-editable sources without guarding each element — a `null` or wrong-type entry throws `TypeError` when treated as an object
    - Version/string comparisons using `!==` when semantic ordering matters — use proper semver comparison for version checks
+   - `Number('')` produces `0`, not empty — cleared numeric inputs must map to `undefined`/`null`, not `0`, which silently fails validation or sets wrong values
+   - Truthy checks on numeric values where `0` is valid (e.g., `days || 365` treats `0` as falsy) — use `!= null` or explicit undefined checks instead
+   - Functions that index into arrays (`arr[Math.floor(Math.random() * arr.length)]`) without guarding empty arrays — produces `undefined`/`NaN` when `arr.length === 0`
+   - Module-level default/config objects passed by reference to consumers — shared mutation across calls. Use `structuredClone()` or spread when handing out defaults
+   - `useCallback`/`useMemo` referencing a `const` declared later in the same function body — triggers temporal dead zone `ReferenceError`. Ensure dependency declarations appear before their dependents
+
+   **Async & UI state consistency**
+   - Optimistic UI state changes (view switches, navigation, success callbacks) before an async operation completes — if the operation fails, the UI is stuck in the wrong state with no rollback. Await the result and only transition on success
+   - `Promise.all` without try/catch — if any request rejects, the UI ends up partially loaded with an unhandled rejection. Wrap in try/catch with fallback/error state so the view remains usable
+   - Success callbacks (`onSaved()`, `onComplete()`) called unconditionally after an async call — check the return value or catch errors before calling the callback
 
    **Resource management**
    - Event listeners, socket handlers, subscriptions, and timers are cleaned up on unmount/teardown
@@ -33,6 +43,11 @@
    - API responses returning full objects that contain sensitive fields (secrets, tokens, passwords) — destructure and omit before sending. Check ALL response paths (GET, PUT, POST) not just one
    - Comments/docs claiming data is never exposed while the code path does expose it
 
+   **Client/server trust boundary**
+   - Server trusting client-provided computed/derived values (scores, totals, correctness flags) when the server has the data to recompute them — strip client-provided scoring/summary fields and recompute server-side
+   - Validation schemas requiring clients to submit fields the server should own (e.g., `expected` answers, `correct` flags) — make these optional/omitted in submissions and derive them server-side
+   - API responses leaking answer keys or expected values that the client will later submit back — either strip before responding or use server-side nonce/seed verification
+
    **Input handling**
    - Trimming values where whitespace is significant (API keys, tokens, passwords, base64) — only trim identifiers/names, not secret values
    - Swallowed errors (empty `.catch(() => {})`) that hide failures from users — at minimum surface a notification on failure
@@ -42,6 +57,8 @@
    - New API routes have the same error handling patterns as existing routes
    - If validation exists on one endpoint for a param, the same param on other endpoints needs the same validation
    - Schema fields that accept values the rest of the system can't handle (e.g., a field accepts any string but downstream code requires a specific format)
+   - Zod/schema stripping fields the service actually reads — when Zod uses `.strict()` or strips unknown keys, any field the service reads from the validated object must be declared in the schema, otherwise it's silently `undefined`
+   - Config values accepted by the API and persisted but silently ignored by the implementation — trace each config field through schema → service → generator/consumer to verify it's actually used (e.g., a `startRange` saved to config but the generator hardcodes a range)
    - Numeric query params (`limit`, `offset`, `page`) parsed from strings without lower-bound clamping — `parseInt` can produce 0, negative, or `NaN` values that cause SQL errors or unexpected behavior. Always clamp to safe bounds (e.g., `Math.max(1, ...)`)
    - Summary counters/accumulators that miss edge cases — if an item is removed, is the count updated? Are all branches counted?
    - Silent operations in verbose sequences — when a series of operations each prints a status line, ensure all branches print consistent output
@@ -89,6 +106,8 @@
    **Test coverage**
    - New validation schemas, service functions, or business logic added without corresponding tests — especially when the project already has a test suite covering similar existing code
    - New error paths (404, 400) that are untestable because the service throws generic errors instead of typed/status-coded ones
+   - Tests that re-implement the logic under test instead of importing real exports — these pass even when the real code regresses. Import and call the actual functions
+   - Missing tests for trust-boundary enforcement — if the server strips/recomputes client-provided fields, add a test that submits tampered values and verifies the server ignores them
 
    **Accessibility**
    - Interactive elements (buttons, toggles, custom controls) missing accessible names, roles, or ARIA states
@@ -97,6 +116,7 @@
    **Configuration & hardcoding**
    - Hardcoded values (usernames, org names, limits) when a config field or env var already exists for that purpose
    - Dead config fields that nothing reads — either wire them up or remove them
+   - Function parameters that are accepted but never used — creates a false API contract; remove unused params or implement the intended behavior
    - Duplicated config/constants across modules — extract to a single shared module to prevent drift (watch for circular imports when choosing the shared location)
 
    **Style & conventions**

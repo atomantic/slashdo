@@ -27,6 +27,8 @@ COMMANDS=(
   pr push release replan review rpr update
 )
 
+IMPROVE_COMMANDS=(review)
+
 OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
 LIBS=(
@@ -52,6 +54,16 @@ uninstall_claude() {
       count=$((count + 1))
     fi
   done
+
+  local target_improve="$HOME/.claude/commands/improve"
+  for cmd in "${IMPROVE_COMMANDS[@]}"; do
+    if [ -f "$target_improve/$cmd.md" ]; then
+      rm -f "$target_improve/$cmd.md"
+      printf "    removed: /improve:%-14s${GREEN}ok${RESET}\n" "$cmd"
+      count=$((count + 1))
+    fi
+  done
+  [ -d "$target_improve" ] && rmdir "$target_improve" 2>/dev/null || true
 
   for lib in "${LIBS[@]}"; do
     if [ -f "$target_lib/$lib.md" ]; then
@@ -178,6 +190,14 @@ uninstall_opencode() {
     fi
   done
 
+  for cmd in "${IMPROVE_COMMANDS[@]}"; do
+    if [ -f "$target_cmd/improve-$cmd.md" ]; then
+      rm -f "$target_cmd/improve-$cmd.md"
+      printf "    removed: /improve-%-14s${GREEN}ok${RESET}\n" "$cmd"
+      count=$((count + 1))
+    fi
+  done
+
   for lib in "${LIBS[@]}"; do
     if [ -f "$target_lib/$lib.md" ]; then
       rm -f "$target_lib/$lib.md"
@@ -207,6 +227,16 @@ uninstall_gemini() {
       count=$((count + 1))
     fi
   done
+
+  local target_improve="$HOME/.gemini/commands/improve"
+  for cmd in "${IMPROVE_COMMANDS[@]}"; do
+    if [ -f "$target_improve/$cmd.md" ]; then
+      rm -f "$target_improve/$cmd.md"
+      printf "    removed: /improve:%-14s${GREEN}ok${RESET}\n" "$cmd"
+      count=$((count + 1))
+    fi
+  done
+  [ -d "$target_improve" ] && rmdir "$target_improve" 2>/dev/null || true
 
   for lib in "${LIBS[@]}"; do
     if [ -f "$target_lib/$lib.md" ]; then

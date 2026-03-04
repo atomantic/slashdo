@@ -31,6 +31,8 @@ COMMANDS=(
   pr push release replan review rpr update
 )
 
+IMPROVE_COMMANDS=(review)
+
 OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
 LIBS=(
@@ -79,6 +81,18 @@ install_claude() {
   for hook in "${HOOKS[@]}"; do
     printf "    hook/%-19s" "$hook.js"
     if curl -fsSL "$BASE_URL/hooks/$hook.js" -o "$target_hooks/$hook.js" 2>/dev/null; then
+      printf "${GREEN}ok${RESET}\n"
+    else
+      printf "failed\n"
+    fi
+  done
+
+  local target_improve="$HOME/.claude/commands/improve"
+  mkdir -p "$target_improve"
+
+  for cmd in "${IMPROVE_COMMANDS[@]}"; do
+    printf "    /improve:%-16s" "$cmd"
+    if curl -fsSL "$BASE_URL/commands/improve/$cmd.md" -o "$target_improve/$cmd.md" 2>/dev/null; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
@@ -214,6 +228,18 @@ install_opencode() {
     fi
   done
 
+  local target_improve="$HOME/.config/opencode/commands"
+  for cmd in "${IMPROVE_COMMANDS[@]}"; do
+    printf "    /improve-%-16s" "$cmd"
+    if curl -fsSL "$BASE_URL/commands/improve/$cmd.md" -o "/tmp/slashdo-improve-$cmd.md" 2>/dev/null; then
+      sed 's|~/.claude/lib/|~/.config/opencode/lib/|g' "/tmp/slashdo-improve-$cmd.md" > "$target_improve/improve-$cmd.md"
+      rm -f "/tmp/slashdo-improve-$cmd.md"
+      printf "${GREEN}ok${RESET}\n"
+    else
+      printf "failed\n"
+    fi
+  done
+
   for old in "${OLD_COMMANDS[@]}"; do
     if [ -f "$target_cmd/do-$old.md" ]; then
       rm -f "$target_cmd/do-$old.md"
@@ -252,6 +278,28 @@ install_gemini() {
   for lib in "${LIBS[@]}"; do
     printf "    lib/%-20s" "$lib.md"
     if curl -fsSL "$BASE_URL/lib/$lib.md" -o "$target_lib/$lib.md" 2>/dev/null; then
+      printf "${GREEN}ok${RESET}\n"
+    else
+      printf "failed\n"
+    fi
+  done
+
+  local target_improve="$HOME/.gemini/commands/improve"
+  mkdir -p "$target_improve"
+
+  for cmd in "${IMPROVE_COMMANDS[@]}"; do
+    printf "    /improve:%-16s" "$cmd"
+    if curl -fsSL "$BASE_URL/commands/improve/$cmd.md" -o "/tmp/slashdo-improve-$cmd.md" 2>/dev/null; then
+      awk '
+        BEGIN { in_fm=0 }
+        NR==1 && /^---$/ { in_fm=1; print "+++"; next }
+        in_fm && /^---$/ { in_fm=0; print "+++"; next }
+        in_fm && /^description:/ { sub(/^description: */, ""); gsub(/"/, ""); printf "description = \"%s\"\n", $0; next }
+        in_fm && /^allowed-tools:/ { next }
+        in_fm { print; next }
+        { gsub(/~\/.claude\/lib\//, "~/.gemini/lib/"); print }
+      ' "/tmp/slashdo-improve-$cmd.md" > "$target_improve/$cmd.md"
+      rm -f "/tmp/slashdo-improve-$cmd.md"
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
