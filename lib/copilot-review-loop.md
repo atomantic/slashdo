@@ -9,7 +9,7 @@ After the PR is created, run the Copilot review-and-fix loop.
 ```
 You are a Copilot review loop agent.
 
-PR: #{PR_NUMBER} in {OWNER}/{REPO}
+PR: {PR_NUMBER} in {OWNER}/{REPO}
 Branch: {BRANCH_NAME}
 Build command: {BUILD_CMD}
 Max iterations: 5
@@ -34,7 +34,7 @@ the max iteration limit:
 1. CAPTURE the latest Copilot review submittedAt timestamp (so you can
    detect when a NEW review arrives):
    echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { nodes { author { login } submittedAt } } } } }"}' | gh api graphql --input -
-   Record the most recent submittedAt from copilot-pull-request-reviewer.
+   Record the most recent submittedAt from copilot-pull-request-reviewer[bot].
    Then REQUEST a Copilot review:
    gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
      -f 'reviewers[]=copilot-pull-request-reviewer[bot]'

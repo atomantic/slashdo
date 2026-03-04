@@ -489,7 +489,7 @@ If this returns 422 ("not a collaborator"), record `REVIEW_METHOD=playwright`. O
 For each PR, spawn a general-purpose sub-agent with:
 
 ```
-You are a Copilot review loop agent for PR #{PR_NUMBER}.
+You are a Copilot review loop agent for PR {PR_NUMBER}.
 
 Repository: {OWNER}/{REPO}
 Branch: better/{CATEGORY_SLUG}
@@ -513,7 +513,7 @@ the max iteration limit:
    - First, capture the latest Copilot review timestamp via GraphQL:
      echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 20) { nodes { author { login } submittedAt } } } } }"}' | gh api graphql --input -
    - Find the most recent submittedAt where author.login is
-     copilot-pull-request-reviewer and record as LAST_COPILOT_SUBMITTED_AT.
+     copilot-pull-request-reviewer[bot] and record as LAST_COPILOT_SUBMITTED_AT.
    - If no prior Copilot review exists, record LAST_COPILOT_SUBMITTED_AT=NONE
      and treat the next Copilot review as NEW regardless of timestamp.
    - Then REQUEST:
