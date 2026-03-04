@@ -44,7 +44,11 @@ the max iteration limit:
      echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { totalCount nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
    - The review is complete when a new Copilot review node appears with a
      submittedAt after the timestamp captured in step 1
-   - Use the DECREASING TIMEOUT for the current iteration number
+   - For parallel PR reviews (do:better): use the DECREASING TIMEOUT for
+     the current iteration number
+   - For single-PR reviews (do:pr, do:release): use dynamic timing based on
+     the previous Copilot review duration on this PR (2x that, min 5 min,
+     max 20 min)
    - Error detection: if the review body contains "Copilot encountered an
      error" or "unable to review this pull request", re-request (step 1)
      and resume polling. Max 3 error retries before reporting failure.
