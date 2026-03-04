@@ -509,20 +509,29 @@ Poll interval: 30 seconds for all iterations.
 Run the following loop until Copilot returns zero new comments or you hit
 the max iteration limit:
 
-1. CAPTURE the latest Copilot review submittedAt timestamp, then REQUEST:
-   If REVIEW_METHOD is "api":
-     gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
-       -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
-   If REVIEW_METHOD is "playwright":
-     Navigate to the PR URL, click the "Reviewers" gear button, click the
-     Copilot menuitemradio option, verify sidebar shows "Awaiting requested
-     review from Copilot"
+1. CAPTURE the latest Copilot review timestamp, then REQUEST a new review:
+   - First, capture the latest Copilot review timestamp via GraphQL:
+     echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 20) { nodes { author { login } submittedAt } } } } }"}' | gh api graphql --input -
+   - Find the most recent submittedAt where author.login is
+     copilot-pull-request-reviewer and record as LAST_COPILOT_SUBMITTED_AT.
+   - If no prior Copilot review exists, record LAST_COPILOT_SUBMITTED_AT=NONE
+     and treat the next Copilot review as NEW regardless of timestamp.
+   - Then REQUEST:
+     If REVIEW_METHOD is "api":
+       gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
+         -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
+     If REVIEW_METHOD is "playwright":
+       Navigate to the PR URL, click the "Reviewers" gear button, click the
+       Copilot menuitemradio option, verify sidebar shows "Awaiting requested
+       review from Copilot"
 
 2. WAIT for the review (BLOCKING):
    - Poll using stdin JSON piping (avoid shell-escaping issues):
      echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { totalCount nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
    - Complete when a new copilot-pull-request-reviewer review appears
-     with submittedAt after the timestamp captured before step 1
+     with submittedAt after LAST_COPILOT_SUBMITTED_AT captured in step 1
+     (or, if LAST_COPILOT_SUBMITTED_AT=NONE, when the first Copilot review
+     for this loop appears)
    - Use the DECREASING TIMEOUT for the current iteration number
    - Error detection: if review body contains "Copilot encountered an error"
      or "unable to review", re-request and resume. Max 3 error retries.
@@ -544,7 +553,7 @@ the max iteration limit:
      git checkout better/{CATEGORY_SLUG}
      # make changes
      git add <specific files>
-     git commit -m "address review: {SUMMARY}"
+     git commit -m "address Copilot review feedback"
      git push
    - Resolve thread via stdin JSON piping:
      echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
