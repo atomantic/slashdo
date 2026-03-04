@@ -528,10 +528,10 @@ the max iteration limit:
 2. WAIT for the review (BLOCKING):
    - Poll using stdin JSON piping (avoid shell-escaping issues):
      echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { totalCount nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
-   - Complete when a new copilot-pull-request-reviewer review appears
+   - Complete when a new copilot-pull-request-reviewer[bot] review appears
      with submittedAt after LAST_COPILOT_SUBMITTED_AT captured in step 1
-     (or, if LAST_COPILOT_SUBMITTED_AT=NONE, when the first Copilot review
-     for this loop appears)
+     (or, if LAST_COPILOT_SUBMITTED_AT=NONE, when the first
+     copilot-pull-request-reviewer[bot] review for this loop appears)
    - Use the DECREASING TIMEOUT for the current iteration number
    - Error detection: if review body contains "Copilot encountered an error"
      or "unable to review", re-request and resume. Max 3 error retries.
