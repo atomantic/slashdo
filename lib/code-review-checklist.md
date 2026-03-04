@@ -83,7 +83,7 @@
 
    **Search & navigation**
    - Search results that link to generic list pages instead of deep-linking to the specific record — include the record type and ID in the URL
-   - Search or query code that hardcodes one backend's implementation when the system supports multiple backends — use the active backend's capabilities so results aren't stale after a backend switch
+   - Search or query code that hardcodes one backend's implementation when the system supports multiple backends — use the active backend's capabilities so results aren't stale after a backend switch. Also check that option/parameter names are mapped between backends (e.g., `ftsWeight` vs `bm25Weight`) so configuration isn't silently ignored
 
    **Sync & replication**
    - Upsert/`ON CONFLICT UPDATE` clauses that only update a subset of the fields exported by the corresponding "get changes" query — omitted fields cause replicas to diverge. Deliberately omit only fields that should stay local (e.g., access stats), and document the decision
@@ -98,6 +98,8 @@
    - Full-text search with strict query parsers (`to_tsquery`) directly on user input — punctuation, quotes, and operators cause SQL errors. Use `websearch_to_tsquery` or `plainto_tsquery` for user-facing search
    - Query results assigned to variables but never read — remove dead queries to avoid unnecessary database load
    - N+1 query patterns inside transactions (SELECT + INSERT/UPDATE per row) — use batched upserts (`INSERT ... ON CONFLICT ... DO UPDATE`) to reduce round-trips and lock time
+   - `CREATE TABLE IF NOT EXISTS` used as the sole schema migration strategy — it won't add new columns, indexes, or triggers to existing tables on upgrade. Use `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` or a migration framework for schema evolution
+   - O(n²) algorithms (self-joins, all-pairs comparisons, nested loops over full tables) triggered per-request on data that grows over time — these become prohibitive at scale. Add caps, use indexed lookups, or move to background jobs
 
    **Lazy initialization & module loading**
    - Cached state getters that return `null`/`undefined` before the module is initialized — code that checks the cached value before triggering initialization will get incorrect results. Provide an async initializer or ensure-style function
@@ -106,6 +108,7 @@
 
    **Data format portability**
    - Values that cross serialization boundaries (JSON API → database, peer sync) may change format — e.g., arrays in JSON vs specialized string literals in the database. Convert consistently before writing to the target
+   - Database BIGINT/BIGSERIAL values parsed into JavaScript `Number` via `parseInt` or `Number()` — precision is lost past `Number.MAX_SAFE_INTEGER`, silently corrupting IDs, sequence cursors, or pagination tokens. Use string representation or `BigInt` for large integer columns
 
    **Shell script safety**
    - Subprocess calls in shell scripts under `set -e` — if the subprocess fails, the script aborts. Also check non-critical writes (e.g., `echo` to stdout) which fail on broken pipes and trigger exit — use `|| true` for non-critical output
