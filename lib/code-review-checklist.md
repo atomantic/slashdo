@@ -21,6 +21,7 @@
    - Functions that index into arrays (`arr[Math.floor(Math.random() * arr.length)]`) without guarding empty arrays — produces `undefined`/`NaN` when `arr.length === 0`
    - Module-level default/config objects passed by reference to consumers — shared mutation across calls. Use `structuredClone()` or spread when handing out defaults
    - `useCallback`/`useMemo` referencing a `const` declared later in the same function body — triggers temporal dead zone `ReferenceError`. Ensure dependency declarations appear before their dependents
+   - Object spread/merge followed by unconditional field assignment that clobbers spread values — e.g., `{...input.details, notes: notes || null}` silently overwrites `input.details.notes` even when `notes` is undefined. Only set fields when the overriding value is explicitly provided
 
    **Async & UI state consistency**
    - Optimistic UI state changes (view switches, navigation, success callbacks) before an async operation completes — if the operation fails, the UI is stuck in the wrong state with no rollback. Await the result and only transition on success
@@ -41,6 +42,8 @@
    - User-supplied values interpolated into URL paths must use `encodeURIComponent()` — even if the UI restricts input, the API should be safe independently
    - Route params (`:name`, `:id`) passed to services without validation — add format checks (regex, length limits) at the route level
    - Data from external APIs or upstream services interpolated into shell commands, file paths, or subprocess arguments without validation — enforce expected format (e.g., regex allowlist) before passing to execution boundaries
+   - Path containment checks using string prefix comparison (`resolvedPath.startsWith(baseDir)`) without a path separator boundary — `baseDir + "evil/..."` passes the check. Use `path.relative()` (reject if starts with `..`) or append `path.sep` to the base
+   - Error/fallback responses that hardcode security headers (CORS, CSP) instead of using the centralized policy — error paths bypass security tightening applied to happy paths. Always reuse shared header middleware/constants
 
    **Data exposure**
    - API responses returning full objects that contain sensitive fields (secrets, tokens, passwords) — destructure and omit before sending. Check ALL response paths (GET, PUT, POST) not just one
@@ -54,6 +57,7 @@
    **Input handling**
    - Trimming values where whitespace is significant (API keys, tokens, passwords, base64) — only trim identifiers/names, not secret values
    - Swallowed errors (empty `.catch(() => {})`) that hide failures from users — at minimum surface a notification on failure
+   - Endpoints that accept unbounded arrays/collections without an upper limit — large payloads can exceed request timeouts, exhaust memory, or create DoS vectors. Enforce a max size and return 400 when exceeded, or move large operations to background jobs
 
    **Validation & consistency**
    - New endpoints/schemas match validation standards of similar existing endpoints (check for field limits, required fields, types)
@@ -84,6 +88,7 @@
    **Sync & replication**
    - Upsert/`ON CONFLICT UPDATE` clauses that only update a subset of the fields exported by the corresponding "get changes" query — omitted fields cause replicas to diverge. Deliberately omit only fields that should stay local (e.g., access stats), and document the decision
    - Pagination using `COUNT(*)` to compute `hasMore` — this forces a full table scan on large tables. Use the `limit + 1` pattern: fetch one extra row to detect more pages, return only `limit` rows
+   - Pagination endpoints that return a `next` token but don't accept one as input (or vice versa) — clients can't retrieve pages beyond the first. Also check that hard-capped query limits (e.g., `Limit: 100`) don't silently truncate results when offset exceeds the cap
 
    **SQL & database**
    - Parameterized query placeholder indices (`$1`, `$2`, ...) must match the actual parameter array positions — especially when multiple queries share a param builder or when the index is computed dynamically
@@ -97,6 +102,7 @@
    **Lazy initialization & module loading**
    - Cached state getters that return `null`/`undefined` before the module is initialized — code that checks the cached value before triggering initialization will get incorrect results. Provide an async initializer or ensure-style function
    - Re-exporting constants from heavy modules defeats lazy loading — define shared constants in a lightweight module or inline them
+   - Module-level side effects (file reads, JSON.parse, SDK client init) that run on import without error handling — a corrupted file or missing credential crashes the entire process before any request is served. Wrap module-level init in try/catch and degrade gracefully
 
    **Data format portability**
    - Values that cross serialization boundaries (JSON API → database, peer sync) may change format — e.g., arrays in JSON vs specialized string literals in the database. Convert consistently before writing to the target
@@ -125,6 +131,7 @@
    - Dead config fields that nothing reads — either wire them up or remove them
    - Function parameters that are accepted but never used — creates a false API contract; remove unused params or implement the intended behavior
    - Duplicated config/constants/utility helpers across modules — extract to a single shared module to prevent drift (watch for circular imports when choosing the shared location)
+   - CI pipelines that install dependencies without lockfile pinning (`npm install` instead of `npm ci`) or that ad-hoc install packages without version constraints — creates non-deterministic builds that can break unpredictably
 
    **Style & conventions**
    - Naming and patterns consistent with the rest of the codebase
