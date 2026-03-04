@@ -26,6 +26,8 @@
    - Optimistic UI state changes (view switches, navigation, success callbacks) before an async operation completes — if the operation fails, the UI is stuck in the wrong state with no rollback. Await the result and only transition on success
    - `Promise.all` without try/catch — if any request rejects, the UI ends up partially loaded with an unhandled rejection. Wrap in try/catch with fallback/error state so the view remains usable
    - Success callbacks (`onSaved()`, `onComplete()`) called unconditionally after an async call — check the return value or catch errors before calling the callback
+   - Debounced/cancelable async operations that don't reset loading state on all code paths (input cleared, stale response arrives, request fails) — loading spinners get stuck and stale results display. Use AbortController or request IDs to discard outdated responses and clear loading in every exit path (including early returns)
+   - Multiple UI state variables representing coupled data (coordinates + display name, selected item + dependent list) updated independently — actions that change one must update all related fields to prevent display/data mismatch
 
    **Resource management**
    - Event listeners, socket handlers, subscriptions, and timers are cleaned up on unmount/teardown
@@ -60,6 +62,7 @@
    - Schema fields that accept values the rest of the system can't handle (e.g., a field accepts any string but downstream code requires a specific format)
    - Zod/schema stripping fields the service actually reads — when Zod uses `.strict()` or strips unknown keys, any field the service reads from the validated object must be declared in the schema, otherwise it's silently `undefined`
    - Config values accepted by the API and persisted but silently ignored by the implementation — trace each config field through schema → service → generator/consumer to verify it's actually used (e.g., a `startRange` saved to config but the generator hardcodes a range)
+   - Handlers/functions that read properties from framework-provided objects (request, event, context) using a field name the framework doesn't populate — results in silent `undefined`. Verify the property name matches the caller's contract, not just the handler's assumption
    - Numeric query params (`limit`, `offset`, `page`) parsed from strings without lower-bound clamping — `parseInt` can produce 0, negative, or `NaN` values that cause SQL errors or unexpected behavior. Always clamp to safe bounds (e.g., `Math.max(1, ...)`)
    - Summary counters/accumulators that miss edge cases — if an item is removed, is the count updated? Are all branches counted?
    - Silent operations in verbose sequences — when a series of operations each prints a status line, ensure all branches print consistent output
@@ -111,6 +114,7 @@
    - New error paths (404, 400) that are untestable because the service throws generic errors instead of typed/status-coded ones
    - Tests that re-implement the logic under test instead of importing real exports — these pass even when the real code regresses. Import and call the actual functions
    - Missing tests for trust-boundary enforcement — if the server strips/recomputes client-provided fields, add a test that submits tampered values and verifies the server ignores them
+   - Tests that depend on real wall-clock time (`setTimeout`, `Date.now`, network delays) for rate limiters, debounce, or scheduling — slow under normal conditions and flaky under CI load. Use fake timers or time mocking
 
    **Accessibility**
    - Interactive elements (buttons, toggles, custom controls) missing accessible names, roles, or ARIA states
