@@ -85,6 +85,12 @@ Check every file against this checklist:
 - For sensitive data (secrets, tokens): trace the value from input → storage → retrieval → response. Verify it is never leaked in ANY response path (GET, PUT, POST, error responses, socket events)
 - For user input → URL/command interpolation: verify encoding/escaping at every boundary
 
+**Access scope changes**
+- If the PR widens access to an endpoint or resource (admin→public, internal→external), trace all shared dependencies the endpoint uses (rate limiters, queues, connection pools, external service quotas) and assess whether they were sized for the previous access level — in-memory/process-local limiters don't enforce limits across horizontally scaled instances
+
+**Guard-before-cache ordering**
+- If a handler performs a pre-flight guard check (rate limit, quota, feature flag) before a cache lookup or short-circuit path, verify the guard doesn't block operations that would be served from cache without touching the guarded resource — restructure so cache hits bypass the guard
+
 ## Fix Issues Found
 
 For each issue found:
