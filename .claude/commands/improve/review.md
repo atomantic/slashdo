@@ -25,24 +25,19 @@ If no argument is provided, ask the user for a PR URL.
 
 ### 1b: Fetch all review comments
 
-Fetch PR review comments (inline code comments from all reviewers):
+Use GraphQL to fetch review threads with resolution state, inline comments, and review bodies in a single query:
 ```bash
-gh api repos/{OWNER}/{REPO}/pulls/{PR_NUM}/comments --paginate
+gh api graphql --paginate -f query='{ repository(owner: "{OWNER}", name: "{REPO}") { pullRequest(number: {PR_NUM}) { reviewThreads(first: 100) { nodes { isResolved comments(first: 10) { nodes { body path line author { login } } } } } reviews(first: 50) { nodes { body state author { login } submittedAt } } } } }'
 ```
 
-Also fetch review bodies (top-level review summaries):
-```bash
-gh api repos/{OWNER}/{REPO}/pulls/{PR_NUM}/reviews --paginate
-```
-
-Save both to `/tmp/improve-review-comments.json` and `/tmp/improve-review-bodies.json`.
+Save the result to `/tmp/improve-review-data.json`.
 
 ### 1c: Extract actionable feedback
 
 From the raw comments, extract only **actionable code review feedback** — comments that identify bugs, anti-patterns, missing validation, security issues, or correctness problems. Skip:
 - Purely informational comments ("nice work", "looks good")
 - Style-only comments that don't affect correctness
-- Comments the PR author already addressed (resolved threads)
+- Comments the PR author already addressed (threads where `isResolved: true` in the GraphQL response)
 - Duplicate comments across review rounds (same issue flagged again after a fix attempt counts once)
 
 For each actionable comment, record:
