@@ -496,7 +496,8 @@ Build command: {BUILD_CMD}
 Review request method: {REVIEW_METHOD}
 Max iterations: 5
 
-DECREASING TIMEOUT SCHEDULE:
+DECREASING TIMEOUT SCHEDULE (shorter than single-PR review since multiple
+PRs are reviewed in parallel — see do:rpr for single-PR dynamic timing):
 - Iteration 1: max wait 5 minutes
 - Iteration 2: max wait 4 minutes
 - Iteration 3: max wait 3 minutes
@@ -517,15 +518,14 @@ the max iteration limit:
      review from Copilot"
 
 2. WAIT for the review (BLOCKING):
-   - Record current review count and latest submittedAt timestamp
+   - Record the latest Copilot review submittedAt timestamp before requesting
    - Poll using GraphQL:
-     gh api graphql -f query='{ repository(owner: "{OWNER}", name: "{REPO}") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }'
-   - Complete when a new copilot-pull-request-reviewer[bot] review appears
-     with submittedAt after your request
+     gh api graphql -f query='{ repository(owner: "{OWNER}", name: "{REPO}") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { totalCount nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }'
+   - Complete when a new copilot-pull-request-reviewer review appears
+     with submittedAt after your request timestamp
    - Use the DECREASING TIMEOUT for the current iteration number
    - Error detection: if review body contains "Copilot encountered an error"
      or "unable to review", re-request and resume. Max 3 error retries.
-   - If review request silently disappears, re-request once and resume
    - If no review after max wait, report timeout and exit
 
 3. CHECK for unresolved threads:
