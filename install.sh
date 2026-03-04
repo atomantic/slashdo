@@ -232,7 +232,9 @@ install_opencode() {
   for cmd in "${IMPROVE_COMMANDS[@]}"; do
     printf "    /improve-%-16s" "$cmd"
     if curl -fsSL "$BASE_URL/commands/improve/$cmd.md" -o "/tmp/slashdo-improve-$cmd.md" 2>/dev/null; then
-      sed 's|~/.claude/lib/|~/.config/opencode/lib/|g' "/tmp/slashdo-improve-$cmd.md" > "$target_improve/improve-$cmd.md"
+      sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
+          -e 's|~/.claude/commands/do/|~/.config/opencode/commands/do-|g' \
+        "/tmp/slashdo-improve-$cmd.md" > "$target_improve/improve-$cmd.md"
       rm -f "/tmp/slashdo-improve-$cmd.md"
       printf "${GREEN}ok${RESET}\n"
     else
@@ -264,6 +266,7 @@ install_gemini() {
         NR==1 && /^---$/ { in_fm=1; print "+++"; next }
         in_fm && /^---$/ { in_fm=0; print "+++"; next }
         in_fm && /^description:/ { sub(/^description: */, ""); gsub(/"/, ""); printf "description = \"%s\"\n", $0; next }
+        in_fm && /^argument-hint:/ { sub(/^argument-hint: */, ""); gsub(/"/, ""); printf "argument-hint = \"%s\"\n", $0; next }
         in_fm && /^allowed-tools:/ { next }
         in_fm { print; next }
         { gsub(/~\/.claude\/lib\//, "~/.gemini/lib/"); print }
@@ -295,9 +298,10 @@ install_gemini() {
         NR==1 && /^---$/ { in_fm=1; print "+++"; next }
         in_fm && /^---$/ { in_fm=0; print "+++"; next }
         in_fm && /^description:/ { sub(/^description: */, ""); gsub(/"/, ""); printf "description = \"%s\"\n", $0; next }
+        in_fm && /^argument-hint:/ { sub(/^argument-hint: */, ""); gsub(/"/, ""); printf "argument-hint = \"%s\"\n", $0; next }
         in_fm && /^allowed-tools:/ { next }
         in_fm { print; next }
-        { gsub(/~\/.claude\/lib\//, "~/.gemini/lib/"); print }
+        { gsub(/~\/.claude\/lib\//, "~/.gemini/lib/"); gsub(/~\/.claude\/commands\/do\//, "~/.gemini/commands/do/"); print }
       ' "/tmp/slashdo-improve-$cmd.md" > "$target_improve/$cmd.md"
       rm -f "/tmp/slashdo-improve-$cmd.md"
       printf "${GREEN}ok${RESET}\n"
