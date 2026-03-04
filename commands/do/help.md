@@ -12,9 +12,9 @@ List all available `/do:*` commands with their descriptions.
 
 | Command | Description |
 |---|---|
+| `/do:better` | Unified DevSecOps audit, remediation, per-category PRs, CI verification, and Copilot review loop |
 | `/do:fpr` | Commit, push to fork, and open a PR against the upstream repo |
 | `/do:goals` | Scan codebase to infer project goals, clarify with user, and generate GOALS.md |
-| `/do:better` | Unified DevSecOps audit, remediation, per-category PRs, CI verification, and Copilot review loop |
 | `/do:help` | List all available slashdo commands |
 | `/do:omd` | Audit and optimize markdown files (CLAUDE.md, README.md, etc.) against best practices |
 | `/do:pr` | Commit, push, and open a PR against the repo's default branch |

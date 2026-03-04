@@ -75,9 +75,21 @@ Check every file against this checklist:
 - Trace each error path end-to-end: does the error reach the user with a helpful message and correct HTTP status? Or does it get swallowed, logged silently, or surface as a generic 500?
 - For multi-step operations (sync to N repos, batch updates): are per-item failures tracked separately from overall success? Does the status reflect partial failure accurately?
 
+**Concurrency under user interaction**
+- If a component performs optimistic updates with async operations, simulate what happens when the user triggers a second action while the first is in-flight — trace whether rollback/success handlers can clobber concurrent state changes or close over stale snapshots
+
+**State ownership across component boundaries**
+- If a child component maintains local state derived from a parent's data (e.g., optimistic UI copies), trace the ownership boundary: does the child propagate changes back to the parent? What happens on unmount/remount — does the parent's stale cache resurface?
+
 **Data flow audit**
 - For sensitive data (secrets, tokens): trace the value from input → storage → retrieval → response. Verify it is never leaked in ANY response path (GET, PUT, POST, error responses, socket events)
 - For user input → URL/command interpolation: verify encoding/escaping at every boundary
+
+**Access scope changes**
+- If the PR widens access to an endpoint or resource (admin→public, internal→external), trace all shared dependencies the endpoint uses (rate limiters, queues, connection pools, external service quotas) and assess whether they were sized for the previous access level — in-memory/process-local limiters don't enforce limits across horizontally scaled instances
+
+**Guard-before-cache ordering**
+- If a handler performs a pre-flight guard check (rate limit, quota, feature flag) before a cache lookup or short-circuit path, verify the guard doesn't block operations that would be served from cache without touching the guarded resource — restructure so cache hits bypass the guard
 
 ## Fix Issues Found
 

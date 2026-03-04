@@ -31,6 +31,7 @@ COMMANDS=(
   pr push release replan review rpr update
 )
 
+
 OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
 LIBS=(
@@ -238,6 +239,7 @@ install_gemini() {
         NR==1 && /^---$/ { in_fm=1; print "+++"; next }
         in_fm && /^---$/ { in_fm=0; print "+++"; next }
         in_fm && /^description:/ { sub(/^description: */, ""); gsub(/"/, ""); printf "description = \"%s\"\n", $0; next }
+        in_fm && /^argument-hint:/ { sub(/^argument-hint: */, ""); gsub(/"/, ""); printf "argument-hint = \"%s\"\n", $0; next }
         in_fm && /^allowed-tools:/ { next }
         in_fm { print; next }
         { gsub(/~\/.claude\/lib\//, "~/.gemini/lib/"); print }
