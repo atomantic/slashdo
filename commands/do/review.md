@@ -91,6 +91,15 @@ Check every file against this checklist:
 **Guard-before-cache ordering**
 - If a handler performs a pre-flight guard check (rate limit, quota, feature flag) before a cache lookup or short-circuit path, verify the guard doesn't block operations that would be served from cache without touching the guarded resource — restructure so cache hits bypass the guard
 
+**Lock/flag exit-path completeness**
+- If a function sets a shared flag or lock (in-progress, mutex, status marker), trace every exit path — early returns, error catches, platform-specific guards, and normal completion — to verify the flag is cleared. A missed path leaves the system permanently locked
+
+**Operation-marker ordering**
+- If the PR writes completion markers, success flags, or status files, verify they are written AFTER the operation they attest to, not before. If the operation can fail after the marker write, consumers see false success. Also check that marker-dependent startup logic validates the marker's contents rather than treating presence as unconditional success
+
+**Real-time event vs response timing**
+- If a handler emits push notifications (WebSocket, SSE, pub/sub) AND returns an HTTP response, verify clients won't receive push events before the response that gives them context to interpret those events — especially when the response contains IDs or version numbers the event consumer needs
+
 ## Fix Issues Found
 
 For each issue found:
