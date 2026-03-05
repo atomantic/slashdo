@@ -1,0 +1,163 @@
+name: Release
+
+on:
+  push:
+    branches: [release]
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Get version from package.json
+        id: package-version
+        run: echo "version=$(node -p \"require('./package.json').version\")" >> $GITHUB_OUTPUT
+
+      - name: Check if tag exists
+        id: tag-check
+        run: |
+          if git rev-parse --verify "refs/tags/v${{ steps.package-version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate package
+        if: steps.tag-check.outputs.exists == 'false'
+        run: |
+          node bin/cli.js --help
+          node -e "require('./src/environments'); require('./src/transformer'); require('./src/installer'); require('./src/version-check'); console.log('All modules load successfully')"
+          node bin/cli.js --list --env claude
+
+      - name: Check if version exists on npm
+        id: npm-check
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.package-version.outputs.version }}"
+          PACKAGE_NAME="$(node -p \"require('./package.json').name\")"
+
+          set +e
+          OUTPUT="$(npm view "${PACKAGE_NAME}@${VERSION}" version 2>&1)"
+          STATUS=$?
+          set -e
+
+          if [ "$STATUS" -eq 0 ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            if printf '%s\n' "$OUTPUT" | grep -qiE 'E404|404 Not Found|not found'; then
+              echo "published=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "npm view failed with an unexpected error:" >&2
+              printf '%s\n' "$OUTPUT" >&2
+              exit "$STATUS"
+            fi
+          fi
+
+      - name: Publish to npm
+        if: steps.npm-check.outputs.published == 'false'
+        run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Generate changelog
+        id: changelog
+        if: steps.tag-check.outputs.exists == 'false'
+        run: |
+          VERSION="${{ steps.package-version.outputs.version }}"
+          MAJOR_MINOR=$(echo "$VERSION" | cut -d. -f1-2)
+
+          CHANGELOG_FILE_EXACT=".changelogs/v${VERSION}.md"
+          CHANGELOG_FILE_PATTERN=".changelogs/v${MAJOR_MINOR}.x.md"
+          CHANGELOG_FILE_NEXT=".changelogs/NEXT.md"
+
+          if [ -f "$CHANGELOG_FILE_EXACT" ]; then
+            CHANGELOG=$(cat "$CHANGELOG_FILE_EXACT")
+          elif [ -f "$CHANGELOG_FILE_PATTERN" ]; then
+            CHANGELOG=$(cat "$CHANGELOG_FILE_PATTERN")
+            CHANGELOG=$(printf '%s' "$CHANGELOG" | sed "s/v${MAJOR_MINOR}\.x/v${VERSION}/g" | sed "s/${MAJOR_MINOR}\.x/${VERSION}/g" | sed "s/YYYY-MM-DD/$(date +%Y-%m-%d)/g")
+          elif [ -f "$CHANGELOG_FILE_NEXT" ]; then
+            CHANGELOG=$(cat "$CHANGELOG_FILE_NEXT")
+            CHANGELOG=$(printf '%s' "$CHANGELOG" | sed "s/NEXT/v${VERSION}/g" | sed "s/YYYY-MM-DD/$(date +%Y-%m-%d)/g")
+          else
+            PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
+            COMMIT_LOG=$(git log "$PREV_TAG"..HEAD --pretty=format:"- %s" --no-merges | grep -v "\[skip ci\]" || true)
+            COMMIT_LOG=$(printf '%s\n' "$COMMIT_LOG" | head -50)
+            CHANGELOG="# Release v${VERSION}
+
+## Changes
+
+${COMMIT_LOG}"
+          fi
+
+          DELIM="changelog_$(date +%s)"
+          echo "changelog<<${DELIM}" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$CHANGELOG" >> "$GITHUB_OUTPUT"
+          echo "${DELIM}" >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        if: steps.tag-check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.package-version.outputs.version }}
+          name: v${{ steps.package-version.outputs.version }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Archive changelog on main
+        continue-on-error: true
+        run: |
+          CURRENT_VERSION=${{ steps.package-version.outputs.version }}
+          MAJOR=$(echo $CURRENT_VERSION | cut -d. -f1)
+          MINOR=$(echo $CURRENT_VERSION | cut -d. -f2)
+          MAJOR_MINOR="$MAJOR.$MINOR"
+
+          PATTERN_FILE=".changelogs/v${MAJOR_MINOR}.x.md"
+          VERSIONED_FILE=".changelogs/v${CURRENT_VERSION}.md"
+
+          git fetch origin main
+          git checkout -B main origin/main
+
+          if [ -f "$VERSIONED_FILE" ]; then
+            echo "Versioned changelog $VERSIONED_FILE already exists; skipping archive."
+          elif [ -f "$PATTERN_FILE" ]; then
+            git mv "$PATTERN_FILE" "$VERSIONED_FILE"
+            sed -i.bak "s/v${MAJOR_MINOR}\.x/v${CURRENT_VERSION}/g; s/${MAJOR_MINOR}\.x/${CURRENT_VERSION}/g; s/YYYY-MM-DD/$(date +%Y-%m-%d)/g" "$VERSIONED_FILE"
+            rm "${VERSIONED_FILE}.bak"
+
+            git add "$VERSIONED_FILE"
+            git commit -m "docs: archive changelog for v${CURRENT_VERSION} [skip ci]"
+            git push origin main
+
+            if git merge-base --is-ancestor origin/release HEAD; then
+              git push origin main:release
+            else
+              echo "Warning: release branch has diverged from main; skipping sync to avoid rewriting history."
+            fi
+          fi
