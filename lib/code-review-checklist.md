@@ -142,6 +142,11 @@
    - Tracking/checkpoint files that default to empty on parse failure — causes full re-execution. Fail loudly instead
    - Registering references to resources without verifying the resource exists — dangling references after failed operations
 
+   **Automated pipeline discipline**
+   - Internal code review must run on all automated remediation changes BEFORE creating PRs — never go straight from "tests pass" to PR creation
+   - Copilot review must complete (approved or commented) on all PRs before merging — never merge while reviews are still pending unless the user explicitly approves
+   - Automated agents may introduce subtle issues that pass tests but violate project conventions — review agent output against CLAUDE.md conventions
+
    **AI-generated code quality** _(Claude 4.6 specific failure modes)_
    - Over-engineering: new abstractions, wrapper functions, helper files, or utility modules that serve only one call site — inline the logic instead
    - Feature flags, configuration options, or extension points with only one possible value or consumer

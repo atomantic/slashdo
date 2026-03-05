@@ -321,6 +321,34 @@ After all agents complete:
 4. Shut down all agents via `SendMessage` with `type: "shutdown_request"`
 5. Clean up team via `TeamDelete`
 
+## Phase 4b: Internal Code Review
+
+Before creating PRs, run a deep code review on all remediation changes to catch issues that automated agents may have introduced.
+
+1. Generate the diff of all changes in the worktree:
+   ```bash
+   cd {WORKTREE_DIR} && git diff {DEFAULT_BRANCH}...HEAD
+   ```
+2. Review the diff against the code review checklist:
+   ```
+   !`cat ~/.claude/lib/code-review-checklist.md`
+   ```
+3. For each issue found:
+   - Fix in a new commit: `fix: {description of review finding}`
+   - Re-run `{BUILD_CMD}` and `{TEST_CMD}` to verify
+4. Present a summary of review findings and fixes to the user via `AskUserQuestion`:
+   ```
+   AskUserQuestion([{
+     question: "Code review complete. {N} issues found and fixed. {list}. Proceed to PR creation?",
+     options: [
+       { label: "Proceed", description: "Create per-category PRs" },
+       { label: "Show diff", description: "Show the full diff for manual review before proceeding" },
+       { label: "Abort", description: "Stop here — I'll review manually" }
+     ]
+   }])
+   ```
+5. If "Show diff" selected, print the diff and re-ask. If "Abort", stop and print the worktree path.
+
 ## Phase 5: Per-Category PR Creation
 
 Instead of one mega PR, create **separate branches and PRs for each category**. This enables independent review, targeted CI, and granular merge decisions.
@@ -469,9 +497,28 @@ For each sub-agent result:
 - **max-iterations-reached**: inform the user "Reached max review iterations (5) on PR #{number}. Remaining issues may need manual review."
 - **error**: inform the user and ask whether to retry or skip
 
-### 6.3: Merge
+### 6.3: Merge Gate (MANDATORY)
 
-For each PR that has passed CI and review (in dependency order if applicable):
+**Do NOT merge any PR until Copilot review has completed (approved or commented) on ALL PRs, or the user explicitly approves skipping.**
+
+Present the review status summary to the user via `AskUserQuestion`:
+```
+AskUserQuestion([{
+  question: "Copilot review status:\n{for each PR: #number - status (approved/comments/pending/timeout)}\n\nHow would you like to proceed?",
+  options: [
+    { label: "Merge approved PRs", description: "Merge only PRs with passing review" },
+    { label: "Merge all", description: "Merge all PRs regardless of review status" },
+    { label: "Wait", description: "Wait longer for pending reviews" },
+    { label: "Don't merge", description: "Leave PRs open for manual review" }
+  ]
+}])
+```
+
+Only proceed with merging based on the user's selection. Never auto-merge without user confirmation.
+
+### 6.4: Merge
+
+For each PR approved for merge (in dependency order if applicable):
 ```bash
 gh pr merge {PR_NUMBER} --merge
 ```
