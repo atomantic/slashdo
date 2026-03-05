@@ -1,5 +1,5 @@
 ---
-description: Unified DevSecOps audit, remediation, per-category PRs, CI verification, and Copilot review loop with worktree isolation
+description: Unified DevSecOps audit, remediation, test enhancement, per-category PRs, CI verification, and Copilot review loop with worktree isolation
 argument-hint: "[--scan-only] [--no-merge] [path filter or focus areas]"
 ---
 
@@ -58,6 +58,7 @@ When compacting during this workflow, always preserve:
 - All PR numbers and URLs created so far
 - `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR` values
 - `VCS_HOST`, `CLI_TOOL`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
+- `TEST_ENHANCEMENT_STATS` (vacuous fixed, weak strengthened, new cases, new files)
 
 
 ## Phase 0: Discovery & Setup
@@ -173,9 +174,31 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - **Database migrations**: exclusive-lock ALTER TABLE on large tables, CREATE INDEX without CONCURRENTLY, missing down migrations or untested rollback paths
    - General: framework-specific security issues, language-specific gotchas, domain-specific compliance, environment variable hygiene (missing `.env.example`, required env vars not validated at startup, secrets in config files that should be in env)
 
-7. **Test Coverage**
-   Uses Batch 1 findings as context to prioritize:
-   Focus: missing test files for critical modules, untested edge cases, tests that only cover happy paths, mocked dependencies that hide real bugs, areas with high complexity (identified by agents 1-5) but no tests, test files that don't actually assert anything meaningful
+7. **Test Quality & Coverage**
+   Uses Batch 1 findings as context to prioritize.
+   Focus areas:
+
+   **Coverage gaps:**
+   - Missing test files for critical modules, untested edge cases, tests that only cover happy paths
+   - Areas with high complexity (identified by agents 1-5) but no tests
+   - Remediation changes from agents 1-6 that lack corresponding test coverage
+
+   **Vacuous tests (tests that don't actually test anything):**
+   - Tests that assert on mocked return values instead of real behavior (testing the mock, not the code)
+   - Tests that only check truthiness (`assert.ok(result)`) when they should verify specific values or shapes
+   - Tests with assertions that can never fail (e.g., asserting a hardcoded value equals itself, asserting `typeof x === 'object'` on a literal `{}`)
+   - Tests that re-implement the logic under test instead of importing the real function — these pass even when real code regresses
+   - `it('should work', ...)` tests with no meaningful assertion or with assertions commented out
+   - Tests that mock the module they're testing (testing mock behavior, not real behavior)
+
+   **Weak test patterns:**
+   - Tests that verify implementation details (internal state, private methods, call counts) instead of observable behavior
+   - Tests where all assertions pass even if the function under test returns `null`/`undefined`/empty — verify by mentally substituting a no-op and checking if the test would still pass
+   - Integration tests that mock so aggressively they become unit tests of glue code
+   - Tests missing negative cases (invalid input, error paths, boundary conditions)
+   - Tests with shared mutable state between cases (`beforeEach` that doesn't reset, module-level variables)
+
+   Report each finding with `[VACUOUS]`, `[WEAK]`, or `[MISSING]` prefix to distinguish quality issues from coverage gaps. Include the specific test name and file:line for existing test issues.
 
 Wait for ALL agents to complete before proceeding.
 
@@ -220,7 +243,7 @@ For each file touched by multiple categories, document why it was assigned to on
 ### Architecture & SOLID
 ### Bugs, Performance & Error Handling
 ### Stack-Specific
-### Test Coverage (tracked, not auto-remediated)
+### Test Quality & Coverage
 ```
 
 6. Print a summary table:
@@ -233,7 +256,7 @@ For each file touched by multiple categories, document why it was assigned to on
 | Architecture      | ...      | ...  | ...    | ... | ...   |
 | Bugs & Perf       | ...      | ...  | ...    | ... | ...   |
 | Stack-Specific    | ...      | ...  | ...    | ... | ...   |
-| Test Coverage     | ...      | ...  | ...    | ... | ...   |
+| Test Quality      | ...      | ...  | ...    | ... | ...   |
 | TOTAL             | ...      | ...  | ...    | ... | ...   |
 ```
 
@@ -241,7 +264,7 @@ For each file touched by multiple categories, document why it was assigned to on
 
 ## Phase 3: Worktree Remediation
 
-Only proceed with CRITICAL, HIGH, and MEDIUM findings. LOW and Test Coverage findings remain tracked in PLAN.md but are not auto-remediated.
+Only proceed with CRITICAL, HIGH, and MEDIUM findings for code remediation. LOW findings remain tracked in PLAN.md but are not auto-remediated. Test Quality & Coverage findings are handled separately in Phase 4c.
 
 ### 3a: Setup
 
@@ -349,6 +372,87 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
    ```
 5. If "Show diff" selected, print the diff and re-ask. If "Abort", stop and print the worktree path.
 
+## Phase 4c: Test Enhancement
+
+After internal code review passes, evaluate and enhance the project's test suite. This phase acts on Agent 7's findings AND ensures all remediation work from Phase 3 has proper test coverage.
+
+### 4c.1: Test Audit Triage
+
+Review Agent 7 findings from Phase 1 and categorize them:
+
+1. **`[VACUOUS]` findings** — tests that exist but don't test real behavior. These are the highest priority because they create a false sense of safety.
+2. **`[WEAK]` findings** — tests that partially cover behavior but miss important cases. Strengthen with additional assertions and edge cases.
+3. **`[MISSING]` findings** — no tests exist for critical paths. Write new test files or add test cases to existing files.
+
+Additionally, scan all remediation changes from Phase 3:
+- For each file modified by remediation agents, check if corresponding tests exist
+- If tests exist, verify they cover the specific behavior that was fixed/changed
+- If no tests exist for a remediated module, flag for new test creation
+
+### 4c.2: Test Enhancement Execution
+
+Spawn a general-purpose agent (using `REMEDIATION_MODEL`) in the worktree to fix and write tests. The agent instructions:
+
+```
+You are a test enhancement agent working in {WORKTREE_DIR}.
+Project type: {PROJECT_TYPE}. Test command: {TEST_CMD}.
+
+Your job is to fix weak/vacuous tests and write missing tests that verify REAL BEHAVIOR.
+
+## Rules for writing good tests
+
+1. **Test observable behavior, not implementation.** Assert on return values, side effects (files written, state changed), and error messages — never on internal variable names, call counts, or private method invocations.
+
+2. **Every assertion must be falsifiable.** For each assertion you write, mentally substitute a broken implementation (returns null, returns wrong value, throws instead of succeeding, succeeds instead of throwing). If your assertion would still pass, it's vacuous — rewrite it.
+
+3. **Prefer real modules over mocks.** Only mock at system boundaries (filesystem, network, time). If you must mock, assert on the arguments passed TO the mock, not on its return value.
+
+4. **Test the edges.** Each test function needs at minimum:
+   - Happy path with specific expected output
+   - Empty/null/undefined input
+   - Invalid input that should error
+   - Boundary values (0, -1, MAX, empty string vs null)
+
+5. **Use concrete expected values.** `assert.equal(result, 'expected string')` not `assert.ok(result)`. `assert.deepEqual(output, { key: 'value' })` not `assert.ok(typeof output === 'object')`.
+
+6. **One behavior per test.** Each `it()` block tests exactly one scenario. The test name describes the scenario and expected outcome.
+
+7. **No shared mutable state.** Each test must be independently runnable. Use `beforeEach` to create fresh fixtures. Never rely on test execution order.
+
+## Task list
+
+Fix these vacuous/weak tests:
+{VACUOUS_AND_WEAK_FINDINGS}
+
+Write tests for these gaps:
+{MISSING_FINDINGS}
+
+Write tests for these remediated files:
+{REMEDIATED_FILES_WITHOUT_TESTS}
+
+## Verification
+
+After writing/fixing each test file:
+1. Run `{TEST_CMD}` to verify all tests pass
+2. For each NEW test: temporarily break the code under test (e.g., return null, swap a conditional) and verify the test FAILS. Revert the break after confirming. This is the key quality gate — a test that doesn't fail when the code is broken is worthless.
+3. Commit passing tests: `test: {description of what's tested}`
+```
+
+### 4c.3: Verification
+
+After the test agent completes:
+
+1. Run the full test suite:
+   ```bash
+   cd {WORKTREE_DIR} && {TEST_CMD}
+   ```
+2. If tests fail, fix in a new commit
+3. Count new/fixed tests and record as `TEST_ENHANCEMENT_STATS`:
+   - Vacuous tests fixed
+   - Weak tests strengthened
+   - New test cases added
+   - New test files created
+
 ## Phase 5: Per-Category PR Creation
 
 Instead of one mega PR, create **separate branches and PRs for each category**. This enables independent review, targeted CI, and granular merge decisions.
@@ -360,7 +464,7 @@ Using the `FILE_OWNER_MAP` from Phase 2, create one branch per category:
 For each category that has findings:
 1. Switch to `{DEFAULT_BRANCH}`: `git checkout {DEFAULT_BRANCH}`
 2. Create a category branch: `git checkout -b better/{CATEGORY_SLUG}`
-   - Use slugs: `security`, `code-quality`, `dry`, `arch-bugs`, `stack-specific`
+   - Use slugs: `security`, `code-quality`, `dry`, `arch-bugs`, `stack-specific`, `tests`
 3. For each file assigned to this category in `FILE_OWNER_MAP`:
    - **Modified files**: `git checkout origin/better/{DATE} -- {file_path}`
    - **New files (Added)**: `git checkout origin/better/{DATE} -- {file_path}`
@@ -549,11 +653,11 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 2. Delete local AND remote branches (only if merged):
    ```bash
    git branch -d better/{DATE}
-   git branch -d better/security better/code-quality better/dry better/arch-bugs better/stack-specific
+   git branch -d better/security better/code-quality better/dry better/arch-bugs better/stack-specific better/tests
    ```
    ```bash
    git push origin --delete better/{DATE}
-   git push origin --delete better/security better/code-quality better/dry better/arch-bugs better/stack-specific
+   git push origin --delete better/security better/code-quality better/dry better/arch-bugs better/stack-specific better/tests
    ```
    Ignore errors from `--delete` if a branch doesn't exist remotely.
 3. Restore stashed changes (if stashed in Phase 3a):
@@ -575,8 +679,14 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 | Architecture       | ...      | ...   | ...     | #number  | pass   | approved |
 | Bugs & Perf        | ...      | ...   | ...     | #number  | pass   | approved |
 | Stack-Specific     | ...      | ...   | ...     | #number  | pass   | approved |
-| Test Coverage      | ...      | (tracked only) | ...     |        |          |
+| Tests              | ...      | ...   | ...     | #number  | pass   | approved |
 | TOTAL              | ...      | ...   | ...     | N PRs    |        |          |
+
+Test Enhancement Stats:
+- Vacuous tests fixed: {N}
+- Weak tests strengthened: {N}
+- New test cases added: {N}
+- New test files created: {N}
 ```
 
 ## Error Recovery
@@ -602,6 +712,7 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 - Each file appears in exactly ONE PR (file ownership map) to prevent merge conflicts between PRs
 - When extracting modules, always add backward-compatible re-exports in the original module to prevent cross-PR breakage
 - Version bump happens exactly once on the first category branch based on aggregate commit analysis
-- Only CRITICAL, HIGH, and MEDIUM findings are auto-remediated; LOW and Test Coverage remain tracked in PLAN.md
+- Only CRITICAL, HIGH, and MEDIUM findings are auto-remediated for code categories; LOW findings remain tracked in PLAN.md
+- Test Quality & Coverage findings are remediated in Phase 4c with a dedicated test enhancement agent that verifies tests fail when code is broken
 - GitLab projects skip the Copilot review loop entirely (Phase 6) and stop after MR creation
 - CI must pass on each PR before requesting Copilot review or merging
