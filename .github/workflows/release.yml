@@ -84,7 +84,7 @@ jobs:
         if: steps.tag-check.outputs.exists == 'false'
         run: |
           VERSION="${{ steps.package-version.outputs.version }}"
-          MAJOR_MINOR=$(echo $VERSION | cut -d. -f1-2)
+          MAJOR_MINOR=$(echo "$VERSION" | cut -d. -f1-2)
 
           CHANGELOG_FILE_EXACT=".changelogs/v${VERSION}.md"
           CHANGELOG_FILE_PATTERN=".changelogs/v${MAJOR_MINOR}.x.md"
@@ -94,10 +94,10 @@ jobs:
             CHANGELOG=$(cat "$CHANGELOG_FILE_EXACT")
           elif [ -f "$CHANGELOG_FILE_PATTERN" ]; then
             CHANGELOG=$(cat "$CHANGELOG_FILE_PATTERN")
-            CHANGELOG=$(echo "$CHANGELOG" | sed "s/v${MAJOR_MINOR}\.x/v${VERSION}/g" | sed "s/${MAJOR_MINOR}\.x/${VERSION}/g" | sed "s/YYYY-MM-DD/$(date +%Y-%m-%d)/g")
+            CHANGELOG=$(printf '%s' "$CHANGELOG" | sed "s/v${MAJOR_MINOR}\.x/v${VERSION}/g" | sed "s/${MAJOR_MINOR}\.x/${VERSION}/g" | sed "s/YYYY-MM-DD/$(date +%Y-%m-%d)/g")
           elif [ -f "$CHANGELOG_FILE_NEXT" ]; then
             CHANGELOG=$(cat "$CHANGELOG_FILE_NEXT")
-            CHANGELOG=$(echo "$CHANGELOG" | sed "s/NEXT/v${VERSION}/g" | sed "s/YYYY-MM-DD/$(date +%Y-%m-%d)/g")
+            CHANGELOG=$(printf '%s' "$CHANGELOG" | sed "s/NEXT/v${VERSION}/g" | sed "s/YYYY-MM-DD/$(date +%Y-%m-%d)/g")
           else
             PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
             COMMIT_LOG=$(git log "$PREV_TAG"..HEAD --pretty=format:"- %s" --no-merges | grep -v "\[skip ci\]" || true)
@@ -136,10 +136,12 @@ ${COMMIT_LOG}"
           PATTERN_FILE=".changelogs/v${MAJOR_MINOR}.x.md"
           VERSIONED_FILE=".changelogs/v${CURRENT_VERSION}.md"
 
-          if [ -f "$PATTERN_FILE" ]; then
-            git fetch origin main
-            git checkout main
+          git fetch origin main
+          git checkout main
 
+          if [ -f "$VERSIONED_FILE" ]; then
+            echo "Versioned changelog $VERSIONED_FILE already exists; skipping archive."
+          elif [ -f "$PATTERN_FILE" ]; then
             git mv "$PATTERN_FILE" "$VERSIONED_FILE"
             sed -i.bak "s/v${MAJOR_MINOR}\.x/v${CURRENT_VERSION}/g; s/${MAJOR_MINOR}\.x/${CURRENT_VERSION}/g; s/YYYY-MM-DD/$(date +%Y-%m-%d)/g" "$VERSIONED_FILE"
             rm "${VERSIONED_FILE}.bak"
