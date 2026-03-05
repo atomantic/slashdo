@@ -14,7 +14,7 @@
    - Side effects during React render (setState, navigation, mutations outside useEffect)
 
    **Async & state consistency**
-   - Optimistic state changes (view switches, navigation, success callbacks) before async completion — if the operation fails or is cancelled, the UI is stuck with no rollback. Check return values/errors before calling success callbacks. Handle both failure and cancellation paths
+   - Optimistic state changes (view switches, navigation, success callbacks) before async completion — if the operation fails or is cancelled, the UI is stuck with no rollback. Check return values/errors before calling success callbacks. Handle both failure and cancellation paths. Watch for `.catch(() => null)` followed by unconditional success code (toast, state update) — the catch silences the error but the success path still runs. Either let errors propagate naturally or check the return value before proceeding
    - Multiple coupled state variables updated independently — actions that change one must update all related fields; debounced/cancelable operations must reset loading state on every exit path (cleared, stale, failed, aborted)
    - Error notification at multiple layers (shared API client + component-level) — verify exactly one layer owns user-facing error messages
    - Optimistic updates using full-collection snapshots for rollback — a second in-flight action gets clobbered. Use per-item rollback and functional state updaters after async gaps; sync optimistic changes to parent via callback or trigger refetch on remount
@@ -35,7 +35,7 @@
    - Destructive operations in retry/cleanup paths assumed to succeed without their own error handling — if cleanup fails, retry logic crashes instead of reporting the intended failure
 
    **API & URL safety**
-   - User-supplied or system-generated values interpolated into URL paths, shell commands, file paths, or subprocess arguments without encoding/validation — use `encodeURIComponent()` for URLs, regex allowlists for execution boundaries. Generated identifiers used as URL path segments must be safe for your router/storage (no `/`, `?`, `#`; consider allowlisting characters and/or applying `encodeURIComponent()`)
+   - User-supplied or system-generated values interpolated into URL paths, shell commands, file paths, or subprocess arguments without encoding/validation — use `encodeURIComponent()` for URLs, regex allowlists for execution boundaries. Generated identifiers used as URL path segments must be safe for your router/storage (no `/`, `?`, `#`; consider allowlisting characters and/or applying `encodeURIComponent()`). Identifiers derived from human-readable names (slugs) used for namespaced resources (git branches, directories) need a unique suffix (ID, hash) to prevent collisions between entities with the same or similar names
    - Route params passed to services without format validation; path containment checks using string prefix without path separator boundary (use `path.relative()`)
    - Error/fallback responses that hardcode security headers instead of using centralized policy — error paths bypass security tightening
 
@@ -51,7 +51,8 @@
    **Validation & consistency**
    - New endpoints/schemas should match validation patterns of existing similar endpoints — field limits, required fields, types, error handling. If validation exists on one endpoint for a param, the same param on other endpoints needs the same validation
    - When a validation/sanitization function is introduced for a field, trace ALL write paths (create, update, sync, import) — partial application means invalid values re-enter through the unguarded path
-   - Schema fields accepting values downstream code can't handle; Zod/schema stripping fields the service reads (silent `undefined`); config values persisted but silently ignored by the implementation — trace each field through schema → service → consumer. Update schemas derived from create schemas (e.g., `.partial()`) must also make nested object fields optional — shallow partial on a deeply-required schema rejects valid partial updates
+   - Schema fields accepting values downstream code can't handle; Zod/schema stripping fields the service reads (silent `undefined`); config values persisted but silently ignored by the implementation — trace each field through schema → service → consumer. Update schemas derived from create schemas (e.g., `.partial()`) must also make nested object fields optional — shallow partial on a deeply-required schema rejects valid partial updates. Additionally, `.deepPartial()` or `.partial()` on schemas with `.default()` values will apply those defaults on update, silently overwriting existing persisted values with defaults — create explicit update schemas without defaults instead
+   - Entity creation without case-insensitive uniqueness checks — names differing only in case (e.g., "MyAgent" vs "myagent") cause collisions in case-insensitive contexts (file paths, git branches, URLs). Normalize to lowercase before comparing
    - Handlers reading properties from framework-provided objects using field names the framework doesn't populate — silent `undefined`. Verify property names match the caller's contract
    - Data model fields that have different names depending on the creation/write path (e.g., `createdAt` vs `created`) — code referencing only one naming convention silently misses records created through other paths. Trace all write paths to discover the actual field names in use
    - Numeric values from strings used without `NaN`/type guards — `NaN` comparisons silently pass bounds checks. Clamp query params to safe lower bounds
@@ -67,6 +68,7 @@
    - Sequential numbering (section numbers, step numbers) with gaps or jumps after edits — verify continuity
    - Completion markers, success flags, or status files written before the operation they attest to finishes — consumers see false success if the operation fails after the write
    - Existence checks (directory exists, file exists, module resolves) used as proof of correct/complete installation — a directory can exist but be empty, a file can exist with invalid contents. Verify the specific resource the consumer needs
+   - Lookups that check only one scope when multiple exist — e.g., checking local git branches but not remote, checking in-memory cache but not persistent store. Trace all locations where the resource could exist and check each
    - Tracking/checkpoint files that default to empty on parse failure — causes full re-execution. Fail loudly instead
    - Registering references to resources without verifying the resource exists — dangling references after failed operations
 
