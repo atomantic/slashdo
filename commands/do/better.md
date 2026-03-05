@@ -546,11 +546,16 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
    ```bash
    git worktree remove {WORKTREE_DIR}
    ```
-2. Delete local branches (only if merged):
+2. Delete local AND remote branches (only if merged):
    ```bash
    git branch -d better/{DATE}
    git branch -d better/security better/code-quality better/dry better/arch-bugs better/stack-specific
    ```
+   ```bash
+   git push origin --delete better/{DATE}
+   git push origin --delete better/security better/code-quality better/dry better/arch-bugs better/stack-specific
+   ```
+   Ignore errors from `--delete` if a branch doesn't exist remotely.
 3. Restore stashed changes (if stashed in Phase 3a):
    ```bash
    git stash pop
