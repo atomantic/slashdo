@@ -87,6 +87,7 @@ Check every file against this checklist:
 
 **Access scope changes**
 - If the PR widens access to an endpoint or resource (admin→public, internal→external), trace all shared dependencies the endpoint uses (rate limiters, queues, connection pools, external service quotas) and assess whether they were sized for the previous access level — in-memory/process-local limiters don't enforce limits across horizontally scaled instances
+- If the PR adds endpoints under a restricted route group (admin, internal, scoped), read sibling endpoints in the same route group and verify the new endpoint applies the same authorization gate — missing gates on admin-mounted endpoints are consistently the most dangerous review finding
 
 **Guard-before-cache ordering**
 - If a handler performs a pre-flight guard check (rate limit, quota, feature flag) before a cache lookup or short-circuit path, verify the guard doesn't block operations that would be served from cache without touching the guarded resource — restructure so cache hits bypass the guard
@@ -131,6 +132,12 @@ Check every file against this checklist:
 
 **Mutation return value freshness**
 - If a function mutates an entity and returns it, verify the returned object reflects the post-mutation state, not a pre-read snapshot. Also check whether dependent scheduling/evaluation state (backoff, timers, status flags) is reset when a "force" or "trigger" operation is invoked
+
+**Responsibility relocation audit**
+- If the PR moves a responsibility from one module to another (e.g., a database write from a handler to middleware, a computation from client to server), trace all code at the old location that depended on the timing, return value, or side effects of the moved operation — guards, response fields, in-memory state updates, and downstream scheduling that assumed co-located execution. Verify the new execution point preserves these contracts or that dependents are updated. Check for dead code left behind at the old location
+
+**Read-after-write consistency**
+- If the PR writes to a data store and then immediately queries that store (especially scans, aggregations, or replica reads), check whether the store's consistency model guarantees visibility of the write. If not, flag the read as potentially stale and suggest computing from in-memory state, using consistent-read options, or adding a delay/caveat
 
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding

@@ -20,6 +20,7 @@
    - Optimistic updates using full-collection snapshots for rollback — a second in-flight action gets clobbered. Use per-item rollback and functional state updaters after async gaps; sync optimistic changes to parent via callback or trigger refetch on remount
    - State updates guarded by truthiness of the new value (`if (arr?.length)`) — prevents clearing state when the source legitimately returns empty. Distinguish "no response" from "empty response"
    - Mutation/trigger functions that return or propagate stale pre-mutation state — if a function activates, updates, or resets an entity, the returned value and any dependent scheduling/evaluation state (backoff timers, "last run" timestamps, status flags) must reflect the post-mutation state, not a snapshot read before the mutation
+   - Fire-and-forget or async writes where the in-memory object is not updated (response returns stale data) or is updated unconditionally regardless of write success (response claims state that was never persisted) — update in-memory state conditionally on write outcome, or document the tradeoff explicitly
    - Missing `await` on async operations in error/cleanup paths — fire-and-forget cleanup (e.g., aborting a failed operation, rolling back partial state) that must complete before the function returns or the caller proceeds
    - `Promise.all` without error handling — partial load with unhandled rejection. Wrap with fallback/error state
 
@@ -41,6 +42,7 @@
    **Trust boundaries & data exposure**
    - API responses returning full objects with sensitive fields — destructure and omit across ALL response paths (GET, PUT, POST, error, socket); comments/docs claiming data isn't exposed while the code path does expose it
    - Server trusting client-provided computed/derived values (scores, totals, correctness flags) when the server can recompute them — strip and recompute server-side; don't require clients to submit fields the server should own
+   - New endpoints mounted under restricted paths (admin, internal) missing authorization verification — compare with sibling endpoints in the same route group to ensure the same access gate (role check, scope validation) is applied consistently
 
    **Input handling**
    - Trimming values where whitespace is significant (API keys, tokens, passwords, base64) — only trim identifiers/names
@@ -51,6 +53,7 @@
    - When a validation/sanitization function is introduced for a field, trace ALL write paths (create, update, sync, import) — partial application means invalid values re-enter through the unguarded path
    - Schema fields accepting values downstream code can't handle; Zod/schema stripping fields the service reads (silent `undefined`); config values persisted but silently ignored by the implementation — trace each field through schema → service → consumer. Update schemas derived from create schemas (e.g., `.partial()`) must also make nested object fields optional — shallow partial on a deeply-required schema rejects valid partial updates
    - Handlers reading properties from framework-provided objects using field names the framework doesn't populate — silent `undefined`. Verify property names match the caller's contract
+   - Data model fields that have different names depending on the creation/write path (e.g., `createdAt` vs `created`) — code referencing only one naming convention silently misses records created through other paths. Trace all write paths to discover the actual field names in use
    - Numeric values from strings used without `NaN`/type guards — `NaN` comparisons silently pass bounds checks. Clamp query params to safe lower bounds
    - UI elements hidden from navigation but still accessible via direct URL — enforce restrictions at the route level
    - Summary counters/accumulators that miss edge cases (removals, branch coverage, underflow on decrements — guard against going negative with lower-bound conditions); silent operations in verbose sequences where all branches should print status
@@ -59,6 +62,7 @@
    - Labels, comments, status messages, or documentation that describe behavior the code doesn't implement — e.g., a map named "renamed" that only deletes, or an action labeled "migrated" that never creates the target
    - Inline code examples, command templates, and query snippets that aren't syntactically valid as written — template placeholders must use a consistent format, queries must use correct syntax for their language (e.g., single `{}` in GraphQL, not `{{}}`)
    - Cross-references between files (identifiers, parameter names, format conventions, operational thresholds) that disagree — when one reference changes, trace all other files that reference the same entity and update them
+   - Responsibility relocated from one module to another (e.g., writes moved from handler to middleware) without updating all consumers that depended on the old location's timing, return value, or side effects — trace callers that relied on the synchronous or co-located behavior and verify they still work with the new execution point. Remove dead code left behind at the old location
    - Sequential instructions or steps whose ordering doesn't match the required execution order — readers following in order will perform actions at the wrong time (e.g., "record X" in step 2 when X must be captured before step 1's action)
    - Sequential numbering (section numbers, step numbers) with gaps or jumps after edits — verify continuity
    - Completion markers, success flags, or status files written before the operation they attest to finishes — consumers see false success if the operation fails after the write
@@ -69,6 +73,7 @@
    **Concurrency & data integrity**
    - Shared mutable state accessed by concurrent requests without locking or atomic writes; multi-step read-modify-write cycles that can interleave — use conditional writes/optimistic concurrency (e.g., condition expressions, version checks) to close the gap between read and write; if the conditional write fails, surface a retryable error instead of letting it bubble as a 500
    - Multi-table writes without a transaction — FK violations or errors leave partial state
+   - Writes that replace an entire composite attribute (array, map, JSON blob) when the field is populated by multiple sources — the write discards data from other sources. Use a separate attribute, merge with the existing value, or use list/set append operations
    - Functions with early returns for "no primary fields to update" that silently skip secondary operations (relationship updates, link writes)
    - Functions that acquire shared state (locks, flags, markers) with exit paths that skip cleanup — leaves the system permanently locked. Trace all exit paths including error branches
 
@@ -98,6 +103,7 @@
 
    **Data format portability**
    - Values crossing serialization boundaries may change format (arrays in JSON vs string literals in DB) — convert consistently
+   - Reads issued immediately after writes to an eventually consistent store (database scans, replica reads, cache refreshes) may return stale data — use consistent-read options, compute from in-memory state after confirmed writes, or document the eventual-consistency window
    - BIGINT values parsed into JavaScript `Number` — precision lost past `MAX_SAFE_INTEGER`. Use strings or `BigInt`
    - Data model key/index design that doesn't support required query access patterns — e.g., claiming "recent" ordering but using non-time-sortable keys (random UUIDs, user IDs). Verify sort keys and indexes can serve the queries the code performs without full-partition scans and in-memory sorting
 
