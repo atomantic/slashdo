@@ -9,15 +9,15 @@ Build command: {BUILD_CMD}
 Test command: {TEST_CMD}
 Working directory: {WORKTREE_DIR} (this is a git worktree — all work happens here)
 Foundation utilities available (if created):
-{list of utility files with brief descriptions}
+{FOUNDATION_UTILS}
 </context>
 
 <findings>
-{filtered list of CRITICAL/HIGH/MEDIUM findings for this category}
+{FINDINGS}
 </findings>
 
 <instructions>
-You are {agent-name} on team better-{DATE}.
+You are {AGENT_NAME} on team better-{DATE}.
 
 Your task: Fix all {CATEGORY} findings listed above.
 
