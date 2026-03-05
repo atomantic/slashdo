@@ -106,11 +106,7 @@ jobs:
             PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
             COMMIT_LOG=$(git log "$PREV_TAG"..HEAD --pretty=format:"- %s" --no-merges | grep -v "\[skip ci\]" || true)
             COMMIT_LOG=$(printf '%s\n' "$COMMIT_LOG" | head -50)
-            CHANGELOG="# Release v${VERSION}
-
-## Changes
-
-${COMMIT_LOG}"
+            CHANGELOG="$(printf '# Release v%s\n\n## Changes\n\n%s' "${VERSION}" "${COMMIT_LOG}")"
           fi
 
           DELIM="changelog_$(date +%s)"
