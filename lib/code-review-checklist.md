@@ -31,7 +31,7 @@
    - Destructive operations in retry/cleanup paths assumed to succeed without their own error handling — if cleanup fails, retry logic crashes instead of reporting the intended failure
 
    **API & URL safety**
-   - User-supplied or system-generated values interpolated into URL paths, shell commands, file paths, or subprocess arguments without encoding/validation — use `encodeURIComponent()` for URLs, regex allowlists for execution boundaries. Generated identifiers used as URL path segments must be URL-safe (avoid `:`, `.`, `/` etc.)
+   - User-supplied or system-generated values interpolated into URL paths, shell commands, file paths, or subprocess arguments without encoding/validation — use `encodeURIComponent()` for URLs, regex allowlists for execution boundaries. Generated identifiers used as URL path segments must be safe for your router/storage (no `/`, `?`, `#`; consider allowlisting characters and/or applying `encodeURIComponent()`)
    - Route params passed to services without format validation; path containment checks using string prefix without path separator boundary (use `path.relative()`)
    - Error/fallback responses that hardcode security headers instead of using centralized policy — error paths bypass security tightening
 

@@ -74,7 +74,7 @@ jobs:
           fi
 
       - name: Publish to npm
-        if: steps.tag-check.outputs.exists == 'false' && steps.npm-check.outputs.published == 'false'
+        if: steps.npm-check.outputs.published == 'false'
         run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -126,7 +126,7 @@ ${COMMIT_LOG}"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Archive changelog on main
-        if: steps.tag-check.outputs.exists == 'false'
+        continue-on-error: true
         run: |
           CURRENT_VERSION=${{ steps.package-version.outputs.version }}
           MAJOR=$(echo $CURRENT_VERSION | cut -d. -f1)
