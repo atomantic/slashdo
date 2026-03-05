@@ -19,10 +19,13 @@
    - Error notification at multiple layers (shared API client + component-level) — verify exactly one layer owns user-facing error messages
    - Optimistic updates using full-collection snapshots for rollback — a second in-flight action gets clobbered. Use per-item rollback and functional state updaters after async gaps; sync optimistic changes to parent via callback or trigger refetch on remount
    - State updates guarded by truthiness of the new value (`if (arr?.length)`) — prevents clearing state when the source legitimately returns empty. Distinguish "no response" from "empty response"
+   - Mutation/trigger functions that return or propagate stale pre-mutation state — if a function activates, updates, or resets an entity, the returned value and any dependent scheduling/evaluation state (backoff timers, "last run" timestamps, status flags) must reflect the post-mutation state, not a snapshot read before the mutation
+   - Missing `await` on async operations in error/cleanup paths — fire-and-forget cleanup (e.g., aborting a failed operation, rolling back partial state) that must complete before the function returns or the caller proceeds
    - `Promise.all` without error handling — partial load with unhandled rejection. Wrap with fallback/error state
 
    **Resource management**
    - Event listeners, socket handlers, subscriptions, timers, and useEffect side effects are cleaned up on unmount/teardown
+   - Deletion/destroy functions that clean up the primary resource but leave orphaned secondary resources (data directories, git branches, child records, temporary files) — trace all resources created during the entity's lifecycle and verify each is removed on delete
    - Initialization functions (schedulers, pollers, listeners) that don't guard against multiple calls — creates duplicate instances. Check for existing instances before reinitializing
 
    **Error handling**
@@ -46,7 +49,7 @@
    **Validation & consistency**
    - New endpoints/schemas should match validation patterns of existing similar endpoints — field limits, required fields, types, error handling. If validation exists on one endpoint for a param, the same param on other endpoints needs the same validation
    - When a validation/sanitization function is introduced for a field, trace ALL write paths (create, update, sync, import) — partial application means invalid values re-enter through the unguarded path
-   - Schema fields accepting values downstream code can't handle; Zod/schema stripping fields the service reads (silent `undefined`); config values persisted but silently ignored by the implementation — trace each field through schema → service → consumer
+   - Schema fields accepting values downstream code can't handle; Zod/schema stripping fields the service reads (silent `undefined`); config values persisted but silently ignored by the implementation — trace each field through schema → service → consumer. Update schemas derived from create schemas (e.g., `.partial()`) must also make nested object fields optional — shallow partial on a deeply-required schema rejects valid partial updates
    - Handlers reading properties from framework-provided objects using field names the framework doesn't populate — silent `undefined`. Verify property names match the caller's contract
    - Numeric values from strings used without `NaN`/type guards — `NaN` comparisons silently pass bounds checks. Clamp query params to safe lower bounds
    - UI elements hidden from navigation but still accessible via direct URL — enforce restrictions at the route level
@@ -110,13 +113,16 @@
    - Tests depending on real wall-clock time or external dependencies when testing logic — use fake timers and mocks
    - Missing tests for trust-boundary enforcement — submit tampered values, verify server ignores them
 
+   **Destructive UI operations**
+   - Destructive actions (delete, reset, revoke) in the UI without a confirmation step — compare with how similar destructive operations elsewhere in the codebase handle confirmation
+
    **Accessibility**
    - Interactive elements missing accessible names, roles, or ARIA states — including disabled interactions without `aria-disabled`
    - Custom toggle/switch UI built from non-semantic elements instead of native inputs
 
    **Configuration & hardcoding**
    - Hardcoded values when a config field or env var already exists; dead config fields nothing consumes; unused function parameters creating false API contracts; resource names (table names, queue names, bucket names) hardcoded without accounting for environment prefixes — lookups on response objects using the wrong key silently return undefined
-   - Duplicated config/constants/utilities across modules — extract to shared module to prevent drift
+   - Duplicated config/constants/utilities/helper functions across modules — extract to shared module to prevent drift. Watch for behavioral inconsistencies between copies (e.g., one returns `'unknown'` for null while another returns `'never'`)
    - CI pipelines installing without lockfile pinning or version constraints — non-deterministic builds
 
    **Style & conventions**

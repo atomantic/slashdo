@@ -123,6 +123,15 @@ Check every file against this checklist:
 **Data model vs access pattern alignment**
 - If the PR adds queries that claim ordering (e.g., "recent", "top"), verify the underlying key/index design actually supports that ordering natively — random UUIDs and non-time-sortable keys require full scans and in-memory sorting, which degrades at scale
 
+**Deletion/lifecycle cleanup completeness**
+- If the PR adds a delete or destroy function, trace all resources created during the entity's lifecycle (data directories, git branches, child records, temporary files, worktrees) and verify each is cleaned up on deletion. Compare with existing delete functions in the codebase for completeness patterns
+
+**Update schema depth**
+- If the PR derives an update/patch schema from a create schema (e.g., `.partial()`, `Partial<T>`), verify that nested objects also become partial — shallow partial on deeply-required schemas rejects valid partial updates where the caller only wants to change one nested field
+
+**Mutation return value freshness**
+- If a function mutates an entity and returns it, verify the returned object reflects the post-mutation state, not a pre-read snapshot. Also check whether dependent scheduling/evaluation state (backoff, timers, status flags) is reset when a "force" or "trigger" operation is invoked
+
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
 
