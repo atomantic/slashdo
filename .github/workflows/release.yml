@@ -8,6 +8,10 @@ permissions:
   contents: write
   id-token: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -137,7 +141,7 @@ ${COMMIT_LOG}"
           VERSIONED_FILE=".changelogs/v${CURRENT_VERSION}.md"
 
           git fetch origin main
-          git checkout main
+          git checkout -B main origin/main
 
           if [ -f "$VERSIONED_FILE" ]; then
             echo "Versioned changelog $VERSIONED_FILE already exists; skipping archive."
@@ -150,5 +154,5 @@ ${COMMIT_LOG}"
             git commit -m "docs: archive changelog for v${CURRENT_VERSION} [skip ci]"
             git push origin main
 
-            git push origin main:release || echo "Warning: failed to sync main to release branch; continuing without failing the release job."
+            git push --force-with-lease origin main:release || echo "Warning: failed to sync main to release branch; continuing without failing the release job."
           fi
