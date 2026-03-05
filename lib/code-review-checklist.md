@@ -1,6 +1,6 @@
 <!--
-  Triage: Check Tier 1 for every file. Check Tier 2/3 only when the
-  relevance filter matches the changed code. This prevents important
+  Triage: Check Tiers 1 and 4 for every file. Check Tier 2/3 only when
+  the relevance filter matches the changed code. This prevents important
   checks from being lost in a long list.
 -->
 
