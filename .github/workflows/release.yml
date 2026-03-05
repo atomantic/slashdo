@@ -51,7 +51,6 @@ jobs:
 
       - name: Check if version exists on npm
         id: npm-check
-        if: steps.tag-check.outputs.exists == 'false'
         run: |
           VERSION="${{ steps.package-version.outputs.version }}"
           if npm view "$(node -p \"require('./package.json').name\")@${VERSION}" version >/dev/null 2>&1; then
@@ -61,7 +60,7 @@ jobs:
           fi
 
       - name: Publish to npm
-        if: steps.tag-check.outputs.exists == 'false' && steps.npm-check.outputs.published == 'false'
+        if: steps.npm-check.outputs.published == 'false'
         run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -75,15 +74,20 @@ jobs:
 
           CHANGELOG_FILE_EXACT=".changelogs/v${VERSION}.md"
           CHANGELOG_FILE_PATTERN=".changelogs/v${MAJOR_MINOR}.x.md"
+          CHANGELOG_FILE_NEXT=".changelogs/NEXT.md"
 
           if [ -f "$CHANGELOG_FILE_EXACT" ]; then
             CHANGELOG=$(cat "$CHANGELOG_FILE_EXACT")
           elif [ -f "$CHANGELOG_FILE_PATTERN" ]; then
             CHANGELOG=$(cat "$CHANGELOG_FILE_PATTERN")
             CHANGELOG=$(echo "$CHANGELOG" | sed "s/v${MAJOR_MINOR}\.x/v${VERSION}/g" | sed "s/${MAJOR_MINOR}\.x/${VERSION}/g" | sed "s/YYYY-MM-DD/$(date +%Y-%m-%d)/g")
+          elif [ -f "$CHANGELOG_FILE_NEXT" ]; then
+            CHANGELOG=$(cat "$CHANGELOG_FILE_NEXT")
+            CHANGELOG=$(echo "$CHANGELOG" | sed "s/NEXT/v${VERSION}/g" | sed "s/YYYY-MM-DD/$(date +%Y-%m-%d)/g")
           else
             PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
-            COMMIT_LOG=$(git log $PREV_TAG..HEAD --pretty=format:"- %s" --no-merges | grep -v "\[skip ci\]" | head -50)
+            COMMIT_LOG=$(git log "$PREV_TAG"..HEAD --pretty=format:"- %s" --no-merges | grep -v "\[skip ci\]" || true)
+            COMMIT_LOG=$(printf '%s\n' "$COMMIT_LOG" | head -50)
             CHANGELOG="# Release v${VERSION}
 
           ## Changes
@@ -130,5 +134,5 @@ jobs:
             git commit -m "docs: archive changelog for v${CURRENT_VERSION} [skip ci]"
             git push origin main
 
-            git push origin main:release
+            git push origin main:release || echo "Warning: failed to sync main to release branch; continuing without failing the release job."
           fi
