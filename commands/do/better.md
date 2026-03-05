@@ -59,6 +59,7 @@ When compacting during this workflow, always preserve:
 - `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR` values
 - `VCS_HOST`, `CLI_TOOL`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
 
+
 ## Phase 0: Discovery & Setup
 
 Detect the project environment before any scanning or remediation.
@@ -98,15 +99,6 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 - Check for `.changelog/` directory → `HAS_CHANGELOG`
 - Check for existing `../better-*` worktrees: `git worktree list`. If found, inform the user and ask whether to resume (use existing worktree) or clean up (remove it and start fresh)
 
-### 0e: Browser Authentication (GitHub only)
-If `VCS_HOST` is `github`, proactively verify browser authentication for the Copilot review loop later:
-1. Navigate to the repo URL using `browser_navigate` via Playwright MCP
-2. Take a snapshot and check for user avatar/menu indicating logged-in state
-3. If NOT logged in: navigate to `https://github.com/login`, inform the user **"Please log in to GitHub in the browser. I'll wait for you to complete authentication."**, and use `AskUserQuestion` to wait for the user to confirm they've logged in
-4. Do NOT close the browser — it stays open for the entire session
-5. Record `BROWSER_AUTHENTICATED = true` once confirmed
-
-This ensures the browser is ready before we need it in Phase 6, avoiding interruptions mid-flow.
 
 <audit_instructions>
 
@@ -459,34 +451,17 @@ Maximum 5 iterations per PR to prevent infinite loops.
 
 **Sub-agent delegation** (prevents context exhaustion): delegate each PR's review loop to a **separate general-purpose sub-agent** via the Agent tool. Launch sub-agents in parallel (one per PR). Each sub-agent runs the full loop (request → wait → check → fix → re-request) autonomously and returns only the final status.
 
-### 6.0: Verify browser authentication
-
-If `BROWSER_AUTHENTICATED` is not true (e.g., Phase 0e was skipped or failed):
-1. Navigate to the first PR URL using `browser_navigate`
-2. Check for user avatar/menu
-3. If not logged in: navigate to `https://github.com/login`, inform the user **"Please log in to GitHub in the browser. I'll wait for you to confirm."**, and use `AskUserQuestion` to wait
-
-### 6.1: Determine review request method
-
-**Try the API first** on any one PR:
-```bash
-gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
-  -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
-```
-
-If this returns 422 ("not a collaborator"), record `REVIEW_METHOD=playwright`. Otherwise record `REVIEW_METHOD=api`.
-
-### 6.2: Launch parallel sub-agents (one per PR)
+### 6.1: Launch parallel sub-agents (one per PR)
 
 For each PR, spawn a general-purpose sub-agent using the shared review loop template:
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
-Pass each sub-agent the PR-specific variables: `{PR_NUMBER}`, `{OWNER}/{REPO}`, `better/{CATEGORY_SLUG}`, `{BUILD_CMD}`, and `{REVIEW_METHOD}`.
+Pass each sub-agent the PR-specific variables: `{PR_NUMBER}`, `{OWNER}/{REPO}`, `better/{CATEGORY_SLUG}`, and `{BUILD_CMD}`.
 
 Launch all PR sub-agents in parallel. Wait for all to complete.
 
-### 6.3: Handle sub-agent results
+### 6.2: Handle sub-agent results
 
 For each sub-agent result:
 - **clean**: mark PR as ready to merge
@@ -494,7 +469,7 @@ For each sub-agent result:
 - **max-iterations-reached**: inform the user "Reached max review iterations (5) on PR #{number}. Remaining issues may need manual review."
 - **error**: inform the user and ask whether to retry or skip
 
-### 6.4: Merge
+### 6.3: Merge
 
 For each PR that has passed CI and review (in dependency order if applicable):
 ```bash
@@ -563,7 +538,6 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 - **Copilot review loop exceeds 5 iterations per PR**: stop iterating on that PR, inform user, proceed to merge
 - **Existing worktree found at startup**: ask user — resume (reuse worktree) or cleanup (remove and start fresh)
 - **No findings above LOW**: skip Phases 3-7, print "No actionable findings" with the LOW summary
-- **Browser not authenticated**: use `AskUserQuestion` to ask the user to log in — never skip this or close the browser
 - **Merge conflict after prior PR merged**: rebase the branch onto the updated default branch, push with `--force-with-lease`, re-run CI
 
 !`cat ~/.claude/lib/graphql-escaping.md`
