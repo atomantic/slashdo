@@ -17,26 +17,35 @@ Print: `PR flow: {current_branch} → {default_branch}`
 - Keep commit message concise and do not use co-author information
 - Push the branch to remote: `git pull --rebase --autostash && git push -u origin {current_branch}`
 
-## Local Code Review (REQUIRED GATE — do NOT skip)
+## Local Code Review (REQUIRED GATE)
 
-**STOP. You MUST complete this entire section before proceeding to "Open the PR". Do NOT skip, abbreviate, or summarize this review. Every changed file must be read in full and checked against the checklist. If you find yourself wanting to skip ahead — stop and do the review.**
+This review catches bugs that Copilot misses — incomplete pattern copying is the #1 source of post-merge review feedback. Skipping costs more time in review cycles than it saves.
 
-1. Run `git diff {default_branch}...{current_branch}` to get the list of changed files
-2. **For EVERY changed file** (no exceptions):
-   a. **Read the ENTIRE file** using the Read tool — not just the diff hunks, not just a summary
-   b. Check it against every item in the checklist below
-   c. Record what you checked and any findings
-3. After reviewing ALL files, print a review summary table (see do:review for format)
-4. If issues are found, fix them and amend/recommit before proceeding
-5. Only after printing the review summary may you proceed to "Open the PR"
+<review_gate>
+
+1. Read commit messages to understand what this change claims to do
+2. Run `git diff {default_branch}...{current_branch}` to get the list of changed files
+3. For every changed file:
+   a. Read the entire file using the Read tool (not just diff hunks)
+   b. Check it against the tiered checklist below (always check Tiers 1+4; check Tiers 2-3 when relevance filters match)
+   c. For each finding, quote the specific code line and explain why it's a problem
+4. After reviewing all files, verify: does the code actually deliver what the commits claim?
+5. Print a review summary table (see do:review for format)
+6. Fix any issues, run tests, and verify tests cover the changed code paths
+7. Only after printing the review summary may you proceed to "Open the PR"
+
+If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.
+
+</review_gate>
 
 Checklist to apply to each file:
 
 !`cat ~/.claude/lib/code-review-checklist.md`
 
-**Verification**: Before moving on, confirm you have:
+Verification — confirm before proceeding:
 - [ ] Read every changed file in full (not just diffs)
-- [ ] Checked each file against the checklist above
+- [ ] Checked each file against the relevant checklist tiers
+- [ ] Quoted specific code for each finding
 - [ ] Printed a review summary table with findings
 
 ## Open the PR

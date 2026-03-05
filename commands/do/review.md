@@ -17,6 +17,22 @@ If there are no changes, inform the user and stop.
 
 CLAUDE.md is already loaded into your context. Use its rules (code style, error handling, logging, security model, scope exclusions) as overrides to generic best practices throughout this review. For example, if CLAUDE.md says "no auth needed — internal tool", do not flag missing authentication.
 
+<review_instructions>
+
+## PR-Level Coherence Check
+
+Before reviewing individual files, understand what this change set claims to do:
+
+1. Read commit messages (`git log {base}...HEAD --oneline`)
+2. After reviewing all files, verify: does the changed code actually deliver what the commits claim? Flag any claims not backed by code (e.g., "adds rate limiting" but only adds a comment).
+
+## Large PR Strategy
+
+If the diff touches more than 15 files, split the review into batches:
+1. Group files by module/directory
+2. Review each batch, printing findings as you go
+3. Delegate files beyond the first 15 to a subagent if context is getting full
+
 ## Deep File Review
 
 For **each changed file** in the diff, read the **entire file** (not just diff hunks). Reviewing only the diff misses context bugs where new code interacts incorrectly with existing code.
@@ -59,11 +75,19 @@ With the flow understood, evaluate the changed code against these principles:
 
 Only flag principle violations that are **concrete and actionable** in the changed code. Do not flag pre-existing design issues in untouched code unless the changes make them worse.
 
+</review_instructions>
+
+<checklist>
+
 ### Per-File Checklist
 
-Check every file against this checklist:
+Check every file against this checklist. The checklist is organized into tiers — always check Tiers 1 and 4, and check Tiers 2-3 only when the relevance filter matches the file:
 
 !`cat ~/.claude/lib/code-review-checklist.md`
+
+</checklist>
+
+<deep_checks>
 
 ### Additional deep checks (read surrounding code to verify):
 
@@ -142,14 +166,33 @@ Check every file against this checklist:
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
 
+</deep_checks>
+
+<verify_findings>
+
+## Verify Findings
+
+For each issue found, ground it in evidence before classifying:
+1. **Quote the specific code line(s)** that demonstrate the issue
+2. **Explain why it's a problem** in one sentence given the surrounding context
+3. If the fix involves async/state changes, **trace the execution path** to confirm the issue is real
+4. If you cannot quote specific code for a finding, downgrade it to **[UNCERTAIN]**
+
+After verifying all findings, run the project's build and test commands to confirm no false positives.
+
+</verify_findings>
+
+<fix_and_report>
+
 ## Fix Issues Found
 
-For each issue found:
+For each verified issue:
 1. Classify severity: **CRITICAL** (runtime crash, data leak, security) vs **IMPROVEMENT** (consistency, robustness, conventions)
 2. Fix all CRITICAL issues immediately
 3. For IMPROVEMENT issues, fix them too — the goal is to eliminate Copilot review round-trips
 4. After fixes, run the project's test suite and build command (per project conventions already in context)
-5. Commit fixes: `refactor: address code review findings`
+5. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
+6. Commit fixes: `refactor: address code review findings`
 
 ## Report
 
@@ -171,3 +214,5 @@ Print a summary table of what was reviewed and found:
 ```
 
 If no issues were found, confirm the code is clean and ready for PR.
+
+</fix_and_report>

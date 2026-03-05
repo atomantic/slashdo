@@ -49,6 +49,16 @@ When the resolved model is `opus`, **omit** the `model` parameter on the Agent/T
 
 Opus reduces false positives in audit (judgment-heavy). Sonnet is the floor for code-writing agents (remediation). Haiku works for fast first-pass pattern scanning but may produce more false positives — remediation agents (Sonnet+) validate before fixing.
 
+## Compaction Guidance
+
+When compacting during this workflow, always preserve:
+- The `FILE_OWNER_MAP` (complete, not summarized)
+- All CRITICAL/HIGH findings with file:line references
+- The current phase number and what phases remain
+- All PR numbers and URLs created so far
+- `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR` values
+- `VCS_HOST`, `CLI_TOOL`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
+
 ## Phase 0: Discovery & Setup
 
 Detect the project environment before any scanning or remediation.
@@ -97,6 +107,8 @@ If `VCS_HOST` is `github`, proactively verify browser authentication for the Cop
 5. Record `BROWSER_AUTHENTICATED = true` once confirmed
 
 This ensures the browser is ready before we need it in Phase 6, avoiding interruptions mid-flow.
+
+<audit_instructions>
 
 ## Phase 1: Unified Audit
 
@@ -174,6 +186,10 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    Focus: missing test files for critical modules, untested edge cases, tests that only cover happy paths, mocked dependencies that hide real bugs, areas with high complexity (identified by agents 1-5) but no tests, test files that don't actually assert anything meaningful
 
 Wait for ALL agents to complete before proceeding.
+
+</audit_instructions>
+
+<plan_and_remediate>
 
 ## Phase 2: Plan Generation
 
@@ -289,6 +305,10 @@ If no shared utilities were identified, skip this step.
 ### Conflict avoidance:
 - Review all findings before task assignment. If two categories touch the same file, assign both sets of findings to the same agent.
 - Security agent gets priority on validation logic; DRY agent gets priority on import consolidation.
+
+</plan_and_remediate>
+
+<verification_and_pr>
 
 ## Phase 4: Verification
 
@@ -495,6 +515,8 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
   ```
   Then re-run CI check before merging.
 - If branch protection: inform the user and suggest manual merge
+
+</verification_and_pr>
 
 ## Phase 7: Cleanup
 

@@ -12,6 +12,10 @@
 - `commands/do/release.md`, `commands/do/pr.md`, `commands/do/fpr.md`: Strengthened code review section with REQUIRED GATE language, explicit STOP instructions, per-file read requirements, and verification checklist to prevent skipping the deep review before opening PRs
 - `commands/do/better.md`: Expanded audit agent focus (OWASP, supply chain, API contracts, resilience, observability, migration safety); optimized prompts for Claude 4.6 (reduced urgency language, added [UNCERTAIN] permission, investigate-before-answering pattern, data-before-instructions layout); extracted inline templates to shared lib files via !cat references (-103 lines)
 - `lib/code-review-checklist.md`: Added supply chain & dependency health section, API versioning checks, migration safety, external service timeouts/fallbacks, observability items, cyclomatic complexity threshold
+- `lib/code-review-checklist.md`: Restructured into 4 priority tiers with relevance filters (`[applies when: ...]`) per Anthropic's context engineering guidance; added "AI-generated code quality" section for Claude 4.6 failure modes (over-engineering, false confidence, placeholder stubs); added test coverage verification check
+- `commands/do/review.md`: Added PR-level coherence check, self-verification step requiring quoted code evidence, large PR batching strategy, XML tag structure for prompt clarity
+- `commands/do/pr.md`, `commands/do/release.md`, `commands/do/fpr.md`: Replaced aggressive gate language with motivational context per Claude 4.6 prompting best practices; added PR-level coherence check, large PR subagent delegation, XML `<review_gate>` tags
+- `commands/do/better.md`: Added compaction preservation guidance for long workflows; added XML section tags (`<audit_instructions>`, `<plan_and_remediate>`, `<verification_and_pr>`)
 
 ## Fixed
 
