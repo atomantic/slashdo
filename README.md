@@ -30,6 +30,10 @@
 
 ---
 
+## Philosophy
+
+slashdo commands emphasize **high-quality software engineering over token conservation**. While efforts are made to use agents, models, and prompts efficiently, these tools work hard to ensure your software meets high quality standards — and will use the tokens necessary to meet that end. Expect thorough reviews, multi-agent scans, and verification loops rather than shortcuts.
+
 ## Quick Start
 
 **With npm/npx:**

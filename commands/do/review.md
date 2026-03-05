@@ -112,6 +112,17 @@ Check every file against this checklist:
 - If the PR modifies a value (identifier, parameter name, format convention, threshold, timeout) that is referenced in other files, trace all cross-references and verify they agree. This includes: reviewer usernames, API names, placeholder formats, GraphQL field names, operational constants
 - If the PR adds or reorders sequential steps/instructions, verify the ordering matches execution dependencies — readers following steps in order must not perform an action before its prerequisite
 
+**Transactional write integrity**
+- If the PR performs multi-item writes (database transactions, batch operations), verify each write includes condition expressions that prevent stale-read races (TOCTOU) — an unconditioned write after a read can upsert deleted records, double-count aggregates, or drive counters negative. Trace the gap between read and write for each operation
+- If the PR catches transaction/conditional failures, verify the error is translated to a client-appropriate status (409, 404) rather than bubbling as 500 — expected concurrency failures are not server errors
+
+**Batch/paginated API consumption**
+- If the PR calls batch or paginated external APIs (database batch gets, paginated queries, bulk service calls), verify the caller handles partial results — unprocessed items, continuation tokens, and rate-limited responses must be retried or surfaced, not silently dropped. Check that retry loops include backoff and attempt limits
+- If the PR references resource names from API responses (table names, queue names), verify lookups account for environment-prefixed names rather than hardcoding bare names
+
+**Data model vs access pattern alignment**
+- If the PR adds queries that claim ordering (e.g., "recent", "top"), verify the underlying key/index design actually supports that ordering natively — random UUIDs and non-time-sortable keys require full scans and in-memory sorting, which degrades at scale
+
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
 

@@ -26,12 +26,12 @@
    - Initialization functions (schedulers, pollers, listeners) that don't guard against multiple calls — creates duplicate instances. Check for existing instances before reinitializing
 
    **Error handling**
-   - Service functions throwing generic `Error` for client-caused conditions — bubbles as 500 instead of 400/404. Use typed error classes with explicit status codes; ensure consistent error responses across similar endpoints
+   - Service functions throwing generic `Error` for client-caused conditions — bubbles as 500 instead of 400/404. Use typed error classes with explicit status codes; ensure consistent error responses across similar endpoints. Include expected concurrency/conditional failures (transaction cancellations, optimistic lock conflicts) — catch and translate to 409/retry rather than letting them surface as 500
    - Swallowed errors (empty `.catch(() => {})`), handlers that replace detailed failure info with generic messages, and error/catch handlers that exit cleanly (`exit 0`, `return`) without any user-visible output — surface a notification, propagate original context, and make failures look like failures
    - Destructive operations in retry/cleanup paths assumed to succeed without their own error handling — if cleanup fails, retry logic crashes instead of reporting the intended failure
 
    **API & URL safety**
-   - User-supplied values interpolated into URL paths, shell commands, file paths, or subprocess arguments without encoding/validation — use `encodeURIComponent()` for URLs, regex allowlists for execution boundaries
+   - User-supplied or system-generated values interpolated into URL paths, shell commands, file paths, or subprocess arguments without encoding/validation — use `encodeURIComponent()` for URLs, regex allowlists for execution boundaries. Generated identifiers used as URL path segments must be URL-safe (avoid `:`, `.`, `/` etc.)
    - Route params passed to services without format validation; path containment checks using string prefix without path separator boundary (use `path.relative()`)
    - Error/fallback responses that hardcode security headers instead of using centralized policy — error paths bypass security tightening
 
@@ -50,7 +50,7 @@
    - Handlers reading properties from framework-provided objects using field names the framework doesn't populate — silent `undefined`. Verify property names match the caller's contract
    - Numeric values from strings used without `NaN`/type guards — `NaN` comparisons silently pass bounds checks. Clamp query params to safe lower bounds
    - UI elements hidden from navigation but still accessible via direct URL — enforce restrictions at the route level
-   - Summary counters/accumulators that miss edge cases (removals, branch coverage); silent operations in verbose sequences where all branches should print status
+   - Summary counters/accumulators that miss edge cases (removals, branch coverage, underflow on decrements — guard against going negative with lower-bound conditions); silent operations in verbose sequences where all branches should print status
 
    **Intent vs implementation**
    - Labels, comments, status messages, or documentation that describe behavior the code doesn't implement — e.g., a map named "renamed" that only deletes, or an action labeled "migrated" that never creates the target
@@ -64,7 +64,7 @@
    - Registering references to resources without verifying the resource exists — dangling references after failed operations
 
    **Concurrency & data integrity**
-   - Shared mutable state accessed by concurrent requests without locking or atomic writes; multi-step read-modify-write cycles that can interleave
+   - Shared mutable state accessed by concurrent requests without locking or atomic writes; multi-step read-modify-write cycles that can interleave — use conditional writes/optimistic concurrency (e.g., condition expressions, version checks) to close the gap between read and write; if the conditional write fails, surface a retryable error instead of letting it bubble as a 500
    - Multi-table writes without a transaction — FK violations or errors leave partial state
    - Functions with early returns for "no primary fields to update" that silently skip secondary operations (relationship updates, link writes)
    - Functions that acquire shared state (locks, flags, markers) with exit paths that skip cleanup — leaves the system permanently locked. Trace all exit paths including error branches
@@ -76,6 +76,8 @@
    **Sync & replication**
    - Upsert/`ON CONFLICT UPDATE` updating only a subset of exported fields — replicas diverge. Document deliberately omitted fields
    - Pagination using `COUNT(*)` (full table scan) instead of `limit + 1`; endpoints missing `next` token input/output; hard-capped limits silently truncating results
+   - Batch/paginated API calls (database batch gets, external service calls) that don't handle partial results — unprocessed items, continuation tokens, or rate-limited responses silently dropped. Add retry loops with backoff for unprocessed items
+   - Retry loops without backoff or max-attempt limits — tight loops under throttling extend latency indefinitely. Use bounded retries with exponential backoff/jitter
 
    **SQL & database**
    - Parameterized query placeholder indices must match parameter array positions — especially with shared param builders or computed indices
@@ -94,6 +96,7 @@
    **Data format portability**
    - Values crossing serialization boundaries may change format (arrays in JSON vs string literals in DB) — convert consistently
    - BIGINT values parsed into JavaScript `Number` — precision lost past `MAX_SAFE_INTEGER`. Use strings or `BigInt`
+   - Data model key/index design that doesn't support required query access patterns — e.g., claiming "recent" ordering but using non-time-sortable keys (random UUIDs, user IDs). Verify sort keys and indexes can serve the queries the code performs without full-partition scans and in-memory sorting
 
    **Shell & portability**
    - Subprocess calls under `set -e` abort on failure; non-critical writes fail on broken pipes — use `|| true` for non-critical output
@@ -112,7 +115,7 @@
    - Custom toggle/switch UI built from non-semantic elements instead of native inputs
 
    **Configuration & hardcoding**
-   - Hardcoded values when a config field or env var already exists; dead config fields nothing consumes; unused function parameters creating false API contracts
+   - Hardcoded values when a config field or env var already exists; dead config fields nothing consumes; unused function parameters creating false API contracts; resource names (table names, queue names, bucket names) hardcoded without accounting for environment prefixes — lookups on response objects using the wrong key silently return undefined
    - Duplicated config/constants/utilities across modules — extract to shared module to prevent drift
    - CI pipelines installing without lockfile pinning or version constraints — non-deterministic builds
 
