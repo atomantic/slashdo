@@ -12,6 +12,7 @@
    - Functions that index into arrays without guarding empty arrays; state/variables declared but never updated or only partially wired up
    - Shared mutable references — module-level defaults passed by reference mutate across calls (use `structuredClone()`/spread); `useCallback`/`useMemo` referencing a later `const` (temporal dead zone); object spread followed by unconditional assignment that clobbers spread values
    - Side effects during React render (setState, navigation, mutations outside useEffect)
+   - Functions with >10 branches or >15 cyclomatic complexity — refactor into smaller units (supplements the 50-line heuristic in Architecture)
 
    **Async & state consistency**
    - Optimistic state changes (view switches, navigation, success callbacks) before async completion — if the operation fails or is cancelled, the UI is stuck with no rollback. Check return values/errors before calling success callbacks. Handle both failure and cancellation paths. Watch for `.catch(() => null)` followed by unconditional success code (toast, state update) — the catch silences the error but the success path still runs. Either let errors propagate naturally or check the return value before proceeding
@@ -33,6 +34,8 @@
    - Service functions throwing generic `Error` for client-caused conditions — bubbles as 500 instead of 400/404. Use typed error classes with explicit status codes; ensure consistent error responses across similar endpoints. Include expected concurrency/conditional failures (transaction cancellations, optimistic lock conflicts) — catch and translate to 409/retry rather than letting them surface as 500
    - Swallowed errors (empty `.catch(() => {})`), handlers that replace detailed failure info with generic messages, and error/catch handlers that exit cleanly (`exit 0`, `return`) without any user-visible output — surface a notification, propagate original context, and make failures look like failures
    - Destructive operations in retry/cleanup paths assumed to succeed without their own error handling — if cleanup fails, retry logic crashes instead of reporting the intended failure
+   - External service calls without configurable timeouts — a hung downstream service blocks the caller indefinitely
+   - Missing fallback behavior when downstream services are unavailable (see also: retry without backoff in "Sync & replication")
 
    **API & URL safety**
    - User-supplied or system-generated values interpolated into URL paths, shell commands, file paths, or subprocess arguments without encoding/validation — use `encodeURIComponent()` for URLs, regex allowlists for execution boundaries. Generated identifiers used as URL path segments must be safe for your router/storage (no `/`, `?`, `#`; consider allowlisting characters and/or applying `encodeURIComponent()`). Identifiers derived from human-readable names (slugs) used for namespaced resources (git branches, directories) need a unique suffix (ID, hash) to prevent collisions between entities with the same or similar names
@@ -49,6 +52,8 @@
    - Endpoints accepting unbounded arrays/collections without upper limits — enforce max size or move to background jobs
 
    **Validation & consistency**
+   - API versioning: breaking changes to public endpoints without version bump or deprecation path
+   - Backward-incompatible response shape changes without client migration plan
    - New endpoints/schemas should match validation patterns of existing similar endpoints — field limits, required fields, types, error handling. If validation exists on one endpoint for a param, the same param on other endpoints needs the same validation
    - When a validation/sanitization function is introduced for a field, trace ALL write paths (create, update, sync, import) — partial application means invalid values re-enter through the unguarded path
    - Schema fields accepting values downstream code can't handle; Zod/schema stripping fields the service reads (silent `undefined`); config values persisted but silently ignored by the implementation — trace each field through schema → service → consumer. Update schemas derived from create schemas (e.g., `.partial()`) must also make nested object fields optional — shallow partial on a deeply-required schema rejects valid partial updates. Additionally, `.deepPartial()` or `.partial()` on schemas with `.default()` values will apply those defaults on update, silently overwriting existing persisted values with defaults — create explicit update schemas without defaults instead
@@ -96,6 +101,8 @@
    - Dead queries (results never read), N+1 patterns inside transactions, O(n²) algorithms on growing data
    - `CREATE TABLE IF NOT EXISTS` as sole migration strategy — won't add columns/indexes on upgrade. Use `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` or a migration framework
    - Functions/extensions requiring specific database versions without verification
+   - Migrations that lock tables for extended periods (ADD COLUMN with default on large tables, CREATE INDEX without CONCURRENTLY) — use concurrent operations or batched backfills
+   - Missing rollback/down migration or untested rollback path
 
    **Lazy initialization & module loading**
    - Cached state getters returning null before initialization — provide async initializer or ensure-style function
@@ -132,6 +139,15 @@
    - Hardcoded values when a config field or env var already exists; dead config fields nothing consumes; unused function parameters creating false API contracts; resource names (table names, queue names, bucket names) hardcoded without accounting for environment prefixes — lookups on response objects using the wrong key silently return undefined
    - Duplicated config/constants/utilities/helper functions across modules — extract to shared module to prevent drift. Watch for behavioral inconsistencies between copies (e.g., one returns `'unknown'` for null while another returns `'never'`)
    - CI pipelines installing without lockfile pinning or version constraints — non-deterministic builds
+   - Production code paths with no structured logging at entry/exit points
+   - Error logs missing reproduction context (request ID, input parameters)
+   - Async flows without correlation ID propagation
+
+   **Supply chain & dependency health**
+   - Lockfile committed and CI uses `--frozen-lockfile`; no lockfile drift from manifest
+   - `npm audit` / `cargo audit` / `pip-audit` has no unaddressed HIGH/CRITICAL vulnerabilities
+   - No `postinstall` scripts from untrusted packages executing arbitrary code without review
+   - Overly permissive version ranges (`*`, `>=`) on deps with known breaking-change history
 
    **Style & conventions**
    - Naming and patterns consistent with the rest of the codebase
