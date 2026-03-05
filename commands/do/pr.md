@@ -17,17 +17,27 @@ Print: `PR flow: {current_branch} → {default_branch}`
 - Keep commit message concise and do not use co-author information
 - Push the branch to remote: `git pull --rebase --autostash && git push -u origin {current_branch}`
 
-## Local Code Review (before opening PR)
+## Local Code Review (REQUIRED GATE — do NOT skip)
 
-Before creating the PR, perform a thorough self-review. Read each changed file — not just the diff — to understand how the changes behave at runtime.
+**STOP. You MUST complete this entire section before proceeding to "Open the PR". Do NOT skip, abbreviate, or summarize this review. Every changed file must be read in full and checked against the checklist. If you find yourself wanting to skip ahead — stop and do the review.**
 
-1. Run `git diff {default_branch}...{current_branch}` to see the full diff
-2. **For each changed file**, read the full file (not just the diff hunks) and check:
+1. Run `git diff {default_branch}...{current_branch}` to get the list of changed files
+2. **For EVERY changed file** (no exceptions):
+   a. **Read the ENTIRE file** using the Read tool — not just the diff hunks, not just a summary
+   b. Check it against every item in the checklist below
+   c. Record what you checked and any findings
+3. After reviewing ALL files, print a review summary table (see do:review for format)
+4. If issues are found, fix them and amend/recommit before proceeding
+5. Only after printing the review summary may you proceed to "Open the PR"
+
+Checklist to apply to each file:
 
 !`cat ~/.claude/lib/code-review-checklist.md`
 
-3. If issues are found, fix them and amend/recommit before proceeding
-4. Summarize the review findings (even if clean) so the user can see what was checked
+**Verification**: Before moving on, confirm you have:
+- [ ] Read every changed file in full (not just diffs)
+- [ ] Checked each file against the checklist above
+- [ ] Printed a review summary table with findings
 
 ## Open the PR
 

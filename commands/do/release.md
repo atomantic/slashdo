@@ -57,17 +57,29 @@ If ambiguous, ask the user to confirm before proceeding.
 
 4. **Commit the release**: Stage `package.json`, `package-lock.json`, and the changelog file. Commit with message `chore: release v{new_version}`
 
-## Local Code Review (before opening PR)
+## Local Code Review (REQUIRED GATE — do NOT skip)
 
-Perform a thorough self-review. Read each changed file — not just the diff — to understand how the changes behave at runtime.
+**STOP. You MUST complete this entire section before proceeding to "Open the Release PR". Do NOT skip, abbreviate, or summarize this review. Every changed file must be read in full and checked against the checklist. If you find yourself wanting to skip ahead — stop and do the review.**
 
-1. Run `git diff {target}...{source}` to see the full diff
-2. **For each changed file**, read the full file (not just the diff hunks) and check:
+This is the most important step in the release process. A release without a deep code review ships bugs to users.
+
+1. Run `git diff {target}...{source}` to get the list of changed files
+2. **For EVERY changed file** (no exceptions):
+   a. **Read the ENTIRE file** using the Read tool — not just the diff hunks, not just a summary
+   b. Check it against every item in the checklist below
+   c. Record what you checked and any findings
+3. After reviewing ALL files, print a review summary table (see do:review for format)
+4. If issues are found, fix them, commit, and push before proceeding
+5. Only after printing the review summary may you proceed to "Open the Release PR"
+
+Checklist to apply to each file:
 
 !`cat ~/.claude/lib/code-review-checklist.md`
 
-3. If issues are found, fix them, commit, and push before proceeding
-4. Summarize the review findings (even if clean) so the user can see what was checked
+**Verification**: Before moving on, confirm you have:
+- [ ] Read every changed file in full (not just diffs)
+- [ ] Checked each file against the checklist above
+- [ ] Printed a review summary table with findings
 
 ## Open the Release PR
 
