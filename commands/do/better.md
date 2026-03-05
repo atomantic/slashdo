@@ -49,6 +49,16 @@ When the resolved model is `opus`, **omit** the `model` parameter on the Agent/T
 
 Opus reduces false positives in audit (judgment-heavy). Sonnet is the floor for code-writing agents (remediation). Haiku works for fast first-pass pattern scanning but may produce more false positives — remediation agents (Sonnet+) validate before fixing.
 
+## Compaction Guidance
+
+When compacting during this workflow, always preserve:
+- The `FILE_OWNER_MAP` (complete, not summarized)
+- All CRITICAL/HIGH findings with file:line references
+- The current phase number and what phases remain
+- All PR numbers and URLs created so far
+- `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR` values
+- `VCS_HOST`, `CLI_TOOL`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
+
 ## Phase 0: Discovery & Setup
 
 Detect the project environment before any scanning or remediation.
@@ -98,6 +108,8 @@ If `VCS_HOST` is `github`, proactively verify browser authentication for the Cop
 
 This ensures the browser is ready before we need it in Phase 6, avoiding interruptions mid-flow.
 
+<audit_instructions>
+
 ## Phase 1: Unified Audit
 
 Project conventions are already in your context. Pass relevant conventions to each agent.
@@ -107,13 +119,24 @@ Launch 7 Explore agents in two batches. Each agent must report findings in this 
 - **[CRITICAL/HIGH/MEDIUM/LOW]** `file:line` - Description. Suggested fix: ... Complexity: Simple/Medium/Complex
 ```
 
-**IMPORTANT: Context requirement for audit agents.** When flagging an issue, agents MUST read at least 30 lines of surrounding context to confirm the issue is real. Common false positives to watch for:
+**Context requirement.** Before flagging, read at least 30 lines of surrounding context to confirm the issue is real. Common false positives to watch for:
 - A Promise `.then()` chain that appears "unawaited" but IS collected into an array and awaited via `Promise.all` downstream
 - A value that appears "unvalidated" but IS checked by a guard clause earlier in the function or by the caller
 - A pattern that looks like an anti-pattern in isolation but IS idiomatic for the specific framework or library being used
 - An `async` function called without `await` that IS intentionally fire-and-forget (the return value is unused by design)
 
 If the surrounding context shows the code is correct, do NOT flag it.
+
+If uncertain whether something is a genuine issue, report it as **[UNCERTAIN]** with your reasoning. The consolidation phase will evaluate these separately. Fewer confident findings is better than padding with questionable ones.
+
+<approach>
+For each potential finding:
+1. Read the file and 30+ lines of surrounding context
+2. Quote the specific code that demonstrates the issue
+3. Explain why it's a problem given the context
+4. Only then classify severity and suggest a fix
+Skip step 4 if steps 1-3 reveal the code is correct.
+</approach>
 
 ### Batch 1 (5 parallel Explore agents via Task tool):
 
@@ -122,6 +145,8 @@ If the surrounding context shows the code is correct, do NOT flag it.
 1. **Security & Secrets**
    Sources: authentication checks, credential exposure, infrastructure security, input validation, dependency health
    Focus: hardcoded credentials, API keys, exposed secrets, authentication bypasses, disabled security checks, PII exposure, injection vulnerabilities (SQL/command/path traversal), insecure CORS configurations, missing auth checks, unsanitized user input in file paths or queries, known CVEs in dependencies (check `npm audit` / `cargo audit` / `pip-audit` / `go vuln` output), abandoned or unmaintained dependencies, overly permissive dependency version ranges
+   OWASP Top 10 framing: broken auth (session fixation, credential stuffing), security misconfiguration (default creds, debug mode in prod), SSRF (user-controlled URLs in server fetch without allowlist), mass assignment (request bodies bound to models without field allowlist)
+   Supply chain: lockfile committed + frozen installs in CI, no untrusted postinstall scripts
 
 2. **Code Quality & Style**
    Sources: code brittleness, convention violations, test workarounds, logging & observability
@@ -134,10 +159,13 @@ If the surrounding context shows the code is correct, do NOT flag it.
 4. **Architecture & SOLID**
    Sources: structural violations, coupling analysis, modularity, API contract quality
    Focus: Single Responsibility violations (god files >500 lines, functions >50 lines doing multiple things), tight coupling between modules, circular dependencies, mixed concerns in single files, dependency inversion violations, classes/modules with too many responsibilities (>20 public methods), deep nesting (>4 levels), long parameter lists, modules reaching into other modules' internals, inconsistent API error response shapes across endpoints, list endpoints missing pagination, missing rate limiting on public endpoints, inconsistent request/response envelope patterns
+   API contract consistency: breaking response shape changes without versioning, inconsistent error envelopes across endpoints, missing deprecation headers on sunset endpoints
 
 5. **Bugs, Performance & Error Handling**
    Sources: runtime safety, resource management, async correctness, performance, race conditions
    Focus: missing `await` on async calls, unhandled promise rejections, null/undefined access without guards, off-by-one errors, incorrect comparison operators, mutation of shared state, resource leaks (unbounded caches/maps, unclosed connections/streams), `process.exit()` in library code, async routes without error forwarding, missing AbortController on data fetching, N+1 query patterns (loading related records inside loops), O(n²) or worse algorithms in hot paths, unbounded result sets (missing LIMIT/pagination on DB queries), missing database indexes on frequently queried columns, race conditions (TOCTOU, double-submit without idempotency keys, concurrent writes to shared state without locks, stale-read-then-write patterns), missing connection pooling or pool exhaustion
+   Resilience: external calls without timeouts, missing fallback for unavailable downstream services, retry without backoff ceiling/jitter, missing health check endpoints
+   Observability: production paths without structured logging, error logs missing reproduction context (request ID, input params), async flows without correlation IDs
 
 ### Batch 2 (2 agents after Batch 1 completes):
 
@@ -150,6 +178,7 @@ If the surrounding context shows the code is correct, do NOT flag it.
    - **Python**: mutable default arguments, bare except clauses, missing type hints on public APIs, sync I/O in async contexts
    - **Go**: unchecked errors, goroutine leaks, defer in loops, context propagation gaps
    - **Web projects (any stack)**: accessibility issues — missing alt text on images, broken keyboard navigation, missing ARIA labels on interactive elements, insufficient color contrast, form inputs without associated labels
+   - **Database migrations**: exclusive-lock ALTER TABLE on large tables, CREATE INDEX without CONCURRENTLY, missing down migrations or untested rollback paths
    - General: framework-specific security issues, language-specific gotchas, domain-specific compliance, environment variable hygiene (missing `.env.example`, required env vars not validated at startup, secrets in config files that should be in env)
 
 7. **Test Coverage**
@@ -158,12 +187,16 @@ If the surrounding context shows the code is correct, do NOT flag it.
 
 Wait for ALL agents to complete before proceeding.
 
+</audit_instructions>
+
+<plan_and_remediate>
+
 ## Phase 2: Plan Generation
 
 1. Read the existing `PLAN.md` (create if it doesn't exist)
 2. Consolidate all findings from Phase 1, deduplicating across agents (same file:line flagged by multiple agents → keep the most specific description)
 3. Identify **shared utility extractions** — patterns duplicated 3+ times that should become reusable functions. Group these as "Foundation" work for Phase 3b.
-4. **Build the file ownership map** (CRITICAL for Phase 5):
+4. **Build the file ownership map** (required by Phase 5 for conflict-free PRs):
    - For each finding, record which file(s) it touches
    - Assign each file to exactly ONE category (its primary category)
    - If a file is touched by multiple categories, assign it to the category with the highest-severity finding for that file
@@ -266,57 +299,16 @@ If no shared utilities were identified, skip this step.
 4. Spawn up to 5 general-purpose agents as teammates. **Pass `REMEDIATION_MODEL` as the `model` parameter on each agent.** If `REMEDIATION_MODEL` is `opus`, omit the parameter to inherit from session.
 
 ### Agent instructions template:
-```
-You are {agent-name} on team better-{DATE}.
 
-Your task: Fix all {CATEGORY} findings from the Good audit.
-Working directory: {WORKTREE_DIR} (this is a git worktree — all work happens here)
-
-Project type: {PROJECT_TYPE}
-Build command: {BUILD_CMD}
-Test command: {TEST_CMD}
-
-Foundation utilities available (if created):
-{list of utility files with brief descriptions}
-
-Findings to address:
-{filtered list of CRITICAL/HIGH/MEDIUM findings for this category}
-
-FINDING VALIDATION — verify before fixing:
-- Before fixing each finding, READ the file and at least 30 lines of surrounding
-  context to confirm the issue is genuine.
-- Check whether the flagged code is already correct (e.g., a Promise chain that
-  IS properly awaited downstream, a value that IS validated earlier in the function,
-  a pattern that IS idiomatic for the framework).
-- If the existing code is already correct, SKIP the fix and report it as a
-  false positive with a brief explanation of why the original code is fine.
-- Do not make changes that are semantically equivalent to the original code
-  (e.g., wrapping a .then() chain in an async IIFE adds noise without fixing anything).
-
-COMMIT STRATEGY — commit early and often:
-- After completing each logical group of related fixes, stage those files
-  and commit immediately with a descriptive conventional commit message.
-- Each commit should be independently valid (build should pass).
-- Run {BUILD_CMD} in {WORKTREE_DIR} before each commit to verify.
-- Use `git -C {WORKTREE_DIR} add <specific files>` — never `git add -A` or `git add .`
-- Use `git -C {WORKTREE_DIR} commit -m "prefix: description"`
-- Use conventional commit prefixes: fix:, refactor:, feat:, security:
-- Do NOT include co-author or generated-by annotations in commits.
-- Do NOT bump the version — that happens once at the end.
-
-After all fixes:
-- Ensure all changes are committed (no uncommitted work)
-- Mark your task as completed via TaskUpdate
-- Report: commits made, files modified, findings addressed, any skipped issues
-
-CONFLICT AVOIDANCE:
-- Only modify files listed in your assigned findings
-- If you need to modify a file assigned to another agent, skip that change and report it
-```
+!`cat ~/.claude/lib/remediation-agent-template.md`
 
 ### Conflict avoidance:
 - Review all findings before task assignment. If two categories touch the same file, assign both sets of findings to the same agent.
 - Security agent gets priority on validation logic; DRY agent gets priority on import consolidation.
+
+</plan_and_remediate>
+
+<verification_and_pr>
 
 ## Phase 4: Verification
 
@@ -359,9 +351,9 @@ For each category that has findings:
    ```
 5. Push the branch: `git push -u origin better/{CATEGORY_SLUG}`
 
-**CRITICAL: File isolation rule** — each file must appear in exactly ONE branch. If a file has changes from multiple categories (e.g., `server/index.js` with both security and stack-specific changes), assign the whole file to one category based on the file ownership map. Do not split file-level changes across PRs.
+**File isolation rule** (one file per branch) — each file must appear in exactly ONE branch. If a file has changes from multiple categories (e.g., `server/index.js` with both security and stack-specific changes), assign the whole file to one category based on the file ownership map. Do not split file-level changes across PRs.
 
-**CRITICAL: Cross-PR dependency check** — after building all branches, verify each branch builds independently:
+**Cross-PR dependency check** — verify each branch builds independently:
 ```bash
 git checkout better/{CATEGORY_SLUG} && {BUILD_CMD}
 ```
@@ -465,7 +457,7 @@ After creating all PRs, verify CI passes on each one:
 
 Maximum 5 iterations per PR to prevent infinite loops.
 
-**IMPORTANT — Sub-agent delegation**: To prevent context exhaustion on long review cycles with multiple PRs, delegate each PR's review loop to a **separate general-purpose sub-agent** via the Agent tool. Launch sub-agents in parallel (one per PR). Each sub-agent runs the full loop (request → wait → check → fix → re-request) autonomously and returns only the final status.
+**Sub-agent delegation** (prevents context exhaustion): delegate each PR's review loop to a **separate general-purpose sub-agent** via the Agent tool. Launch sub-agents in parallel (one per PR). Each sub-agent runs the full loop (request → wait → check → fix → re-request) autonomously and returns only the final status.
 
 ### 6.0: Verify browser authentication
 
@@ -486,85 +478,11 @@ If this returns 422 ("not a collaborator"), record `REVIEW_METHOD=playwright`. O
 
 ### 6.2: Launch parallel sub-agents (one per PR)
 
-For each PR, spawn a general-purpose sub-agent with:
+For each PR, spawn a general-purpose sub-agent using the shared review loop template:
 
-```
-You are a Copilot review loop agent for PR {PR_NUMBER}.
+!`cat ~/.claude/lib/copilot-review-loop.md`
 
-Repository: {OWNER}/{REPO}
-Branch: better/{CATEGORY_SLUG}
-Build command: {BUILD_CMD}
-Review request method: {REVIEW_METHOD}
-Max iterations: 5
-
-DECREASING TIMEOUT SCHEDULE (shorter than single-PR review since multiple
-PRs are reviewed in parallel — see do:rpr for single-PR dynamic timing):
-- Iteration 1: max wait 5 minutes
-- Iteration 2: max wait 4 minutes
-- Iteration 3: max wait 3 minutes
-- Iteration 4: max wait 2 minutes
-- Iteration 5+: max wait 1 minute
-Poll interval: 30 seconds for all iterations.
-
-Run the following loop until Copilot returns zero new comments or you hit
-the max iteration limit:
-
-1. CAPTURE the latest Copilot review timestamp, then REQUEST a new review:
-   - First, capture the latest Copilot review timestamp via GraphQL:
-     echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 20) { nodes { author { login } submittedAt } } } } }"}' | gh api graphql --input -
-   - Find the most recent submittedAt where author.login is
-     copilot-pull-request-reviewer[bot] and record as LAST_COPILOT_SUBMITTED_AT.
-   - If no prior Copilot review exists, record LAST_COPILOT_SUBMITTED_AT=NONE
-     and treat the next Copilot review as NEW regardless of timestamp.
-   - Then REQUEST:
-     If REVIEW_METHOD is "api":
-       gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
-         -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
-     If REVIEW_METHOD is "playwright":
-       Navigate to the PR URL, click the "Reviewers" gear button, click the
-       Copilot menuitemradio option, verify sidebar shows "Awaiting requested
-       review from Copilot"
-
-2. WAIT for the review (BLOCKING):
-   - Poll using stdin JSON piping (avoid shell-escaping issues):
-     echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { totalCount nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
-   - Complete when a new copilot-pull-request-reviewer[bot] review appears
-     with submittedAt after LAST_COPILOT_SUBMITTED_AT captured in step 1
-     (or, if LAST_COPILOT_SUBMITTED_AT=NONE, when the first
-     copilot-pull-request-reviewer[bot] review for this loop appears)
-   - Use the DECREASING TIMEOUT for the current iteration number
-   - Error detection: if review body contains "Copilot encountered an error"
-     or "unable to review", re-request and resume. Max 3 error retries.
-   - If no review after max wait, report timeout and exit
-
-3. CHECK for unresolved threads:
-   Fetch threads via stdin JSON piping:
-     echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
-   - Verify review was successful (no error text in body)
-   - If zero comments / no unresolved threads: report success and exit
-   - If unresolved threads exist: proceed to step 4
-
-4. FIX all unresolved threads:
-   For each unresolved thread:
-   - Read the referenced file and understand the feedback
-   - Evaluate: valid feedback → make the fix; informational/false positive →
-     resolve without changes
-   - If fixing:
-     git checkout better/{CATEGORY_SLUG}
-     # make changes
-     git add <specific files>
-     git commit -m "address Copilot review feedback"
-     git push
-   - Resolve thread via stdin JSON piping:
-     echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
-   - After all threads resolved, increment iteration and go back to step 1
-
-When done, report back:
-- Final status: clean / max-iterations-reached / timeout / error
-- Total iterations completed
-- List of commits made (if any)
-- Any unresolved threads remaining
-```
+Pass each sub-agent the PR-specific variables: `{PR_NUMBER}`, `{OWNER}/{REPO}`, `better/{CATEGORY_SLUG}`, `{BUILD_CMD}`, and `{REVIEW_METHOD}`.
 
 Launch all PR sub-agents in parallel. Wait for all to complete.
 
@@ -597,6 +515,8 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
   ```
   Then re-run CI check before merging.
 - If branch protection: inform the user and suggest manual merge
+
+</verification_and_pr>
 
 ## Phase 7: Cleanup
 

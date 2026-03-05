@@ -32,6 +32,7 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
 LIBS=(
   code-review-checklist copilot-review-loop graphql-escaping
+  remediation-agent-template
 )
 
 HOOKS=(slashdo-check-update slashdo-statusline)

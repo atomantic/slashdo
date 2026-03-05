@@ -57,17 +57,36 @@ If ambiguous, ask the user to confirm before proceeding.
 
 4. **Commit the release**: Stage `package.json`, `package-lock.json`, and the changelog file. Commit with message `chore: release v{new_version}`
 
-## Local Code Review (before opening PR)
+## Local Code Review (REQUIRED GATE)
 
-Perform a thorough self-review. Read each changed file — not just the diff — to understand how the changes behave at runtime.
+A release without a deep code review ships bugs to users. This review is the last line of defense — the full diff since the last release often contains interactions that individual PR reviews missed.
 
-1. Run `git diff {target}...{source}` to see the full diff
-2. **For each changed file**, read the full file (not just the diff hunks) and check:
+<review_gate>
+
+1. Read all commit messages since last release to understand the scope
+2. Run `git diff {target}...{source}` to get the list of changed files
+3. For every changed file:
+   a. Read the entire file using the Read tool (not just diff hunks)
+   b. Check it against the tiered checklist below (always check Tiers 1+4; check Tiers 2-3 when relevance filters match)
+   c. For each finding, quote the specific code line and explain why it's a problem
+4. After reviewing all files, verify: does the aggregate change set deliver what the release claims?
+5. Print a review summary table (see do:review for format)
+6. Fix any issues, run tests, verify tests cover the changed code paths, commit and push
+7. Only after printing the review summary may you proceed to "Open the Release PR"
+
+If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.
+
+</review_gate>
+
+Checklist to apply to each file:
 
 !`cat ~/.claude/lib/code-review-checklist.md`
 
-3. If issues are found, fix them, commit, and push before proceeding
-4. Summarize the review findings (even if clean) so the user can see what was checked
+Verification — confirm before proceeding:
+- [ ] Read every changed file in full (not just diffs)
+- [ ] Checked each file against the relevant checklist tiers
+- [ ] Quoted specific code for each finding
+- [ ] Printed a review summary table with findings
 
 ## Open the Release PR
 

@@ -17,6 +17,22 @@ If there are no changes, inform the user and stop.
 
 CLAUDE.md is already loaded into your context. Use its rules (code style, error handling, logging, security model, scope exclusions) as overrides to generic best practices throughout this review. For example, if CLAUDE.md says "no auth needed — internal tool", do not flag missing authentication.
 
+<review_instructions>
+
+## PR-Level Coherence Check
+
+Before reviewing individual files, understand what this change set claims to do:
+
+1. Read commit messages (`git log {base}...HEAD --oneline`)
+2. After reviewing all files, verify: does the changed code actually deliver what the commits claim? Flag any claims not backed by code (e.g., "adds rate limiting" but only adds a comment).
+
+## Large PR Strategy
+
+If the diff touches more than 15 files, split the review into batches:
+1. Group files by module/directory
+2. Review each batch, printing findings as you go
+3. Delegate files beyond the first 15 to a subagent if context is getting full
+
 ## Deep File Review
 
 For **each changed file** in the diff, read the **entire file** (not just diff hunks). Reviewing only the diff misses context bugs where new code interacts incorrectly with existing code.
@@ -59,11 +75,19 @@ With the flow understood, evaluate the changed code against these principles:
 
 Only flag principle violations that are **concrete and actionable** in the changed code. Do not flag pre-existing design issues in untouched code unless the changes make them worse.
 
+</review_instructions>
+
+<checklist>
+
 ### Per-File Checklist
 
-Check every file against this checklist:
+Check every file against this checklist. The checklist is organized into tiers — always check Tiers 1 and 4, and check Tiers 2-3 only when the relevance filter matches the file:
 
 !`cat ~/.claude/lib/code-review-checklist.md`
+
+</checklist>
+
+<deep_checks>
 
 ### Additional deep checks (read surrounding code to verify):
 
@@ -87,6 +111,7 @@ Check every file against this checklist:
 
 **Access scope changes**
 - If the PR widens access to an endpoint or resource (admin→public, internal→external), trace all shared dependencies the endpoint uses (rate limiters, queues, connection pools, external service quotas) and assess whether they were sized for the previous access level — in-memory/process-local limiters don't enforce limits across horizontally scaled instances
+- If the PR adds endpoints under a restricted route group (admin, internal, scoped), read sibling endpoints in the same route group and verify the new endpoint applies the same authorization gate — missing gates on admin-mounted endpoints are consistently the most dangerous review finding
 
 **Guard-before-cache ordering**
 - If a handler performs a pre-flight guard check (rate limit, quota, feature flag) before a cache lookup or short-circuit path, verify the guard doesn't block operations that would be served from cache without touching the guarded resource — restructure so cache hits bypass the guard
@@ -123,17 +148,51 @@ Check every file against this checklist:
 **Data model vs access pattern alignment**
 - If the PR adds queries that claim ordering (e.g., "recent", "top"), verify the underlying key/index design actually supports that ordering natively — random UUIDs and non-time-sortable keys require full scans and in-memory sorting, which degrades at scale
 
+**Deletion/lifecycle cleanup completeness**
+- If the PR adds a delete or destroy function, trace all resources created during the entity's lifecycle (data directories, git branches, child records, temporary files, worktrees) and verify each is cleaned up on deletion. Compare with existing delete functions in the codebase for completeness patterns
+
+**Update schema depth**
+- If the PR derives an update/patch schema from a create schema (e.g., `.partial()`, `Partial<T>`), verify that nested objects also become partial — shallow partial on deeply-required schemas rejects valid partial updates where the caller only wants to change one nested field
+
+**Mutation return value freshness**
+- If a function mutates an entity and returns it, verify the returned object reflects the post-mutation state, not a pre-read snapshot. Also check whether dependent scheduling/evaluation state (backoff, timers, status flags) is reset when a "force" or "trigger" operation is invoked
+
+**Responsibility relocation audit**
+- If the PR moves a responsibility from one module to another (e.g., a database write from a handler to middleware, a computation from client to server), trace all code at the old location that depended on the timing, return value, or side effects of the moved operation — guards, response fields, in-memory state updates, and downstream scheduling that assumed co-located execution. Verify the new execution point preserves these contracts or that dependents are updated. Check for dead code left behind at the old location
+
+**Read-after-write consistency**
+- If the PR writes to a data store and then immediately queries that store (especially scans, aggregations, or replica reads), check whether the store's consistency model guarantees visibility of the write. If not, flag the read as potentially stale and suggest computing from in-memory state, using consistent-read options, or adding a delay/caveat
+
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
 
+</deep_checks>
+
+<verify_findings>
+
+## Verify Findings
+
+For each issue found, ground it in evidence before classifying:
+1. **Quote the specific code line(s)** that demonstrate the issue
+2. **Explain why it's a problem** in one sentence given the surrounding context
+3. If the fix involves async/state changes, **trace the execution path** to confirm the issue is real
+4. If you cannot quote specific code for a finding, downgrade it to **[UNCERTAIN]**
+
+After verifying all findings, run the project's build and test commands to confirm no false positives.
+
+</verify_findings>
+
+<fix_and_report>
+
 ## Fix Issues Found
 
-For each issue found:
+For each verified issue:
 1. Classify severity: **CRITICAL** (runtime crash, data leak, security) vs **IMPROVEMENT** (consistency, robustness, conventions)
 2. Fix all CRITICAL issues immediately
 3. For IMPROVEMENT issues, fix them too — the goal is to eliminate Copilot review round-trips
 4. After fixes, run the project's test suite and build command (per project conventions already in context)
-5. Commit fixes: `refactor: address code review findings`
+5. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
+6. Commit fixes: `refactor: address code review findings`
 
 ## Report
 
@@ -155,3 +214,5 @@ Print a summary table of what was reviewed and found:
 ```
 
 If no issues were found, confirm the code is clean and ready for PR.
+
+</fix_and_report>
