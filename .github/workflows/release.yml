@@ -46,8 +46,20 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Check if GitHub Release exists
+        id: release-check
+        run: |
+          VERSION="${{ steps.package-version.outputs.version }}"
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Validate package
-        if: steps.tag-check.outputs.exists == 'false'
+        if: steps.release-check.outputs.exists == 'false'
         run: |
           node bin/cli.js --help
           node -e "require('./src/environments'); require('./src/transformer'); require('./src/installer'); require('./src/version-check'); console.log('All modules load successfully')"
@@ -85,7 +97,7 @@ jobs:
 
       - name: Generate changelog
         id: changelog
-        if: steps.tag-check.outputs.exists == 'false'
+        if: steps.release-check.outputs.exists == 'false'
         run: |
           VERSION="${{ steps.package-version.outputs.version }}"
           MAJOR_MINOR=$(echo "$VERSION" | cut -d. -f1-2)
@@ -115,7 +127,7 @@ jobs:
           echo "${DELIM}" >> "$GITHUB_OUTPUT"
 
       - name: Create Release
-        if: steps.tag-check.outputs.exists == 'false'
+        if: steps.release-check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.package-version.outputs.version }}
@@ -127,6 +139,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Archive changelog on main
+        if: steps.release-check.outputs.exists == 'false'
         continue-on-error: true
         run: |
           CURRENT_VERSION=${{ steps.package-version.outputs.version }}
