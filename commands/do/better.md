@@ -59,6 +59,7 @@ When compacting during this workflow, always preserve:
 - `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR` values
 - `VCS_HOST`, `CLI_TOOL`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
 
+
 ## Phase 0: Discovery & Setup
 
 Detect the project environment before any scanning or remediation.
@@ -98,15 +99,6 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 - Check for `.changelog/` directory → `HAS_CHANGELOG`
 - Check for existing `../better-*` worktrees: `git worktree list`. If found, inform the user and ask whether to resume (use existing worktree) or clean up (remove it and start fresh)
 
-### 0e: Browser Authentication (GitHub only)
-If `VCS_HOST` is `github`, proactively verify browser authentication for the Copilot review loop later:
-1. Navigate to the repo URL using `browser_navigate` via Playwright MCP
-2. Take a snapshot and check for user avatar/menu indicating logged-in state
-3. If NOT logged in: navigate to `https://github.com/login`, inform the user **"Please log in to GitHub in the browser. I'll wait for you to complete authentication."**, and use `AskUserQuestion` to wait for the user to confirm they've logged in
-4. Do NOT close the browser — it stays open for the entire session
-5. Record `BROWSER_AUTHENTICATED = true` once confirmed
-
-This ensures the browser is ready before we need it in Phase 6, avoiding interruptions mid-flow.
 
 <audit_instructions>
 
@@ -329,6 +321,34 @@ After all agents complete:
 4. Shut down all agents via `SendMessage` with `type: "shutdown_request"`
 5. Clean up team via `TeamDelete`
 
+## Phase 4b: Internal Code Review
+
+Before creating PRs, run a deep code review on all remediation changes to catch issues that automated agents may have introduced.
+
+1. Generate the diff of all changes in the worktree:
+   ```bash
+   cd {WORKTREE_DIR} && git diff {DEFAULT_BRANCH}...HEAD
+   ```
+2. Review the diff against the code review checklist:
+   ```
+   !`cat ~/.claude/lib/code-review-checklist.md`
+   ```
+3. For each issue found:
+   - Fix in a new commit: `fix: {description of review finding}`
+   - Re-run `{BUILD_CMD}` and `{TEST_CMD}` to verify
+4. Present a summary of review findings and fixes to the user via `AskUserQuestion`:
+   ```
+   AskUserQuestion([{
+     question: "Code review complete. {N} issues found and fixed. {list}. Proceed to PR creation?",
+     options: [
+       { label: "Proceed", description: "Create per-category PRs" },
+       { label: "Show diff", description: "Show the full diff for manual review before proceeding" },
+       { label: "Abort", description: "Stop here — I'll review manually" }
+     ]
+   }])
+   ```
+5. If "Show diff" selected, print the diff and re-ask. If "Abort", stop and print the worktree path.
+
 ## Phase 5: Per-Category PR Creation
 
 Instead of one mega PR, create **separate branches and PRs for each category**. This enables independent review, targeted CI, and granular merge decisions.
@@ -459,34 +479,17 @@ Maximum 5 iterations per PR to prevent infinite loops.
 
 **Sub-agent delegation** (prevents context exhaustion): delegate each PR's review loop to a **separate general-purpose sub-agent** via the Agent tool. Launch sub-agents in parallel (one per PR). Each sub-agent runs the full loop (request → wait → check → fix → re-request) autonomously and returns only the final status.
 
-### 6.0: Verify browser authentication
-
-If `BROWSER_AUTHENTICATED` is not true (e.g., Phase 0e was skipped or failed):
-1. Navigate to the first PR URL using `browser_navigate`
-2. Check for user avatar/menu
-3. If not logged in: navigate to `https://github.com/login`, inform the user **"Please log in to GitHub in the browser. I'll wait for you to confirm."**, and use `AskUserQuestion` to wait
-
-### 6.1: Determine review request method
-
-**Try the API first** on any one PR:
-```bash
-gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
-  -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
-```
-
-If this returns 422 ("not a collaborator"), record `REVIEW_METHOD=playwright`. Otherwise record `REVIEW_METHOD=api`.
-
-### 6.2: Launch parallel sub-agents (one per PR)
+### 6.1: Launch parallel sub-agents (one per PR)
 
 For each PR, spawn a general-purpose sub-agent using the shared review loop template:
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
-Pass each sub-agent the PR-specific variables: `{PR_NUMBER}`, `{OWNER}/{REPO}`, `better/{CATEGORY_SLUG}`, `{BUILD_CMD}`, and `{REVIEW_METHOD}`.
+Pass each sub-agent the PR-specific variables: `{PR_NUMBER}`, `{OWNER}/{REPO}`, `better/{CATEGORY_SLUG}`, and `{BUILD_CMD}`.
 
 Launch all PR sub-agents in parallel. Wait for all to complete.
 
-### 6.3: Handle sub-agent results
+### 6.2: Handle sub-agent results
 
 For each sub-agent result:
 - **clean**: mark PR as ready to merge
@@ -494,9 +497,28 @@ For each sub-agent result:
 - **max-iterations-reached**: inform the user "Reached max review iterations (5) on PR #{number}. Remaining issues may need manual review."
 - **error**: inform the user and ask whether to retry or skip
 
+### 6.3: Merge Gate (MANDATORY)
+
+**Do NOT merge any PR until Copilot review has completed (approved or commented) on ALL PRs, or the user explicitly approves skipping.**
+
+Present the review status summary to the user via `AskUserQuestion`:
+```
+AskUserQuestion([{
+  question: "Copilot review status:\n{for each PR: #number - status (approved/comments/pending/timeout)}\n\nHow would you like to proceed?",
+  options: [
+    { label: "Merge approved PRs", description: "Merge only PRs with passing review" },
+    { label: "Merge all", description: "Merge all PRs regardless of review status" },
+    { label: "Wait", description: "Wait longer for pending reviews" },
+    { label: "Don't merge", description: "Leave PRs open for manual review" }
+  ]
+}])
+```
+
+Only proceed with merging based on the user's selection. Never auto-merge without user confirmation.
+
 ### 6.4: Merge
 
-For each PR that has passed CI and review (in dependency order if applicable):
+For each PR approved for merge (in dependency order if applicable):
 ```bash
 gh pr merge {PR_NUMBER} --merge
 ```
@@ -524,11 +546,16 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
    ```bash
    git worktree remove {WORKTREE_DIR}
    ```
-2. Delete local branches (only if merged):
+2. Delete local AND remote branches (only if merged):
    ```bash
    git branch -d better/{DATE}
    git branch -d better/security better/code-quality better/dry better/arch-bugs better/stack-specific
    ```
+   ```bash
+   git push origin --delete better/{DATE}
+   git push origin --delete better/security better/code-quality better/dry better/arch-bugs better/stack-specific
+   ```
+   Ignore errors from `--delete` if a branch doesn't exist remotely.
 3. Restore stashed changes (if stashed in Phase 3a):
    ```bash
    git stash pop
@@ -563,7 +590,6 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 - **Copilot review loop exceeds 5 iterations per PR**: stop iterating on that PR, inform user, proceed to merge
 - **Existing worktree found at startup**: ask user — resume (reuse worktree) or cleanup (remove and start fresh)
 - **No findings above LOW**: skip Phases 3-7, print "No actionable findings" with the LOW summary
-- **Browser not authenticated**: use `AskUserQuestion` to ask the user to log in — never skip this or close the browser
 - **Merge conflict after prior PR merged**: rebase the branch onto the updated default branch, push with `--force-with-lease`, re-run CI
 
 !`cat ~/.claude/lib/graphql-escaping.md`
