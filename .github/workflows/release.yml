@@ -113,9 +113,10 @@ jobs:
 ${COMMIT_LOG}"
           fi
 
-          echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          DELIM="changelog_$(date +%s)"
+          echo "changelog<<${DELIM}" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$CHANGELOG" >> "$GITHUB_OUTPUT"
+          echo "${DELIM}" >> "$GITHUB_OUTPUT"
 
       - name: Create Release
         if: steps.tag-check.outputs.exists == 'false'
@@ -154,5 +155,9 @@ ${COMMIT_LOG}"
             git commit -m "docs: archive changelog for v${CURRENT_VERSION} [skip ci]"
             git push origin main
 
-            git push --force-with-lease origin main:release || echo "Warning: failed to sync main to release branch; continuing without failing the release job."
+            if git merge-base --is-ancestor origin/release HEAD; then
+              git push origin main:release
+            else
+              echo "Warning: release branch has diverged from main; skipping sync to avoid rewriting history."
+            fi
           fi
