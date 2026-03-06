@@ -96,6 +96,7 @@ Check every file against this checklist. The checklist is organized into tiers �
 - New API client functions should use the same encoding/escaping as existing ones (e.g., if other endpoints use `encodeURIComponent`, new ones must too)
 - If the PR adds a new endpoint, trace where existing endpoints are registered and verify the new one is wired in all runtime adapters (serverless handler map, framework route file, API gateway config, local dev server) — a route registered in one adapter but missing from another will silently 404 in the missing runtime
 - If the PR adds a new call to an external service that has established mock/test infrastructure (mock mode flags, test helpers, dev stubs), verify the new call uses the same patterns — bypassing them makes the new code path untestable in offline/dev environments and inconsistent with existing integrations
+- If the PR adds a new UI component or client-side consumer against an existing API endpoint, read the actual endpoint handler or response shape — verify every field name, nesting level, identifier property, and response envelope path used in the consumer matches what the producer returns. This is the #1 source of "renders empty" bugs in new views built against existing APIs
 
 **Error path completeness**
 - Trace each error path end-to-end: does the error reach the user with a helpful message and correct HTTP status? Or does it get swallowed, logged silently, or surface as a generic 500?
