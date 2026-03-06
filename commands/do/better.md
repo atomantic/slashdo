@@ -58,7 +58,7 @@ When compacting during this workflow, always preserve:
 - All PR numbers and URLs created so far
 - `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR` values
 - `VCS_HOST`, `CLI_TOOL`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
-- `TEST_ENHANCEMENT_STATS` (vacuous fixed, weak strengthened, new cases, new files)
+- `VACUOUS_TESTS_FIXED`, `WEAK_TESTS_STRENGTHENED`, `NEW_TEST_CASES`, `NEW_TEST_FILES`
 - `CREATED_CATEGORY_SLUGS` (list of branch slugs created in Phase 5)
 
 
@@ -470,15 +470,15 @@ After the test agent completes:
    cd {WORKTREE_DIR} && {TEST_CMD}
    ```
 2. If tests fail, fix in a new commit
-3. Count new/fixed tests and record as `TEST_ENHANCEMENT_STATS`:
-   - Vacuous tests fixed
-   - Weak tests strengthened
-   - New test cases added
-   - New test files created
+3. Count new/fixed tests and record four variables:
+   - `VACUOUS_TESTS_FIXED` — number of vacuous tests fixed
+   - `WEAK_TESTS_STRENGTHENED` — number of weak tests strengthened
+   - `NEW_TEST_CASES` — number of new test cases added
+   - `NEW_TEST_FILES` — number of new test files created
 4. **Update `FILE_OWNER_MAP`** — Phase 4c may have created or modified test files that were not in the Phase 2 map. Before Phase 5 assembles branches:
    - List all files changed by Phase 4c commits: `git diff --name-only "$PHASE_4C_START_SHA"..HEAD`
    - For each file not already in `FILE_OWNER_MAP`, assign it to the `tests` category
-   - For each file already owned by another category, leave it in that category (the test changes are co-located with the code they test and will ship in the same PR)
+   - For each file already owned by another category, leave it in that category (co-located test changes ship with the code they test — the `tests` branch only contains standalone test files not owned by other categories)
 
 ## Phase 5: Per-Category PR Creation
 
@@ -488,7 +488,7 @@ Instead of one mega PR, create **separate branches and PRs for each category**. 
 
 Using the `FILE_OWNER_MAP` from Phase 2 (updated in Phase 4c.3), create one branch per category.
 
-Initialize `CREATED_CATEGORY_SLUGS` as an empty list. As each category branch is created below, append its slug to this list. Phase 7 uses this list for cleanup.
+Initialize `CREATED_CATEGORY_SLUGS=""` (empty space-delimited string). After each category branch is successfully created and pushed below, append its slug: `CREATED_CATEGORY_SLUGS="$CREATED_CATEGORY_SLUGS $SLUG"`. Phase 7 uses this for cleanup.
 
 For each category that has findings:
 1. Switch to `{DEFAULT_BRANCH}`: `git checkout {DEFAULT_BRANCH}`
@@ -684,11 +684,11 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
    git branch -d better/{DATE}
    # CREATED_CATEGORY_SLUGS is a space-delimited string, e.g. "security code-quality tests"
    for slug in $CREATED_CATEGORY_SLUGS; do
-     git branch -d "better/$slug" 2>/dev/null || true
-     git push origin --delete "better/$slug" 2>/dev/null || true
+     git branch -d "better/$slug" || echo "warning: local branch better/$slug not found or not fully merged"
+     git push origin --delete "better/$slug" 2>/dev/null || echo "warning: remote branch better/$slug not found"
    done
    ```
-   The `|| true` guards prevent errors from interrupting cleanup when a branch was never created or was already deleted.
+   The guards prevent errors from interrupting cleanup. Warnings are printed so leftover branches are visible.
 3. Restore stashed changes (if stashed in Phase 3a):
    ```bash
    git stash pop
