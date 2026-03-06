@@ -476,7 +476,7 @@ After the test agent completes:
    - New test cases added
    - New test files created
 4. **Update `FILE_OWNER_MAP`** — Phase 4c may have created or modified test files that were not in the Phase 2 map. Before Phase 5 assembles branches:
-   - List all files changed by Phase 4c commits: `git diff --name-only {PHASE_4C_START_SHA}..HEAD`
+   - List all files changed by Phase 4c commits: `git diff --name-only "$PHASE_4C_START_SHA"..HEAD`
    - For each file not already in `FILE_OWNER_MAP`, assign it to the `tests` category
    - For each file already owned by another category, leave it in that category (the test changes are co-located with the code they test and will ship in the same PR)
 
@@ -682,7 +682,8 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 2. Delete local AND remote branches (only categories that were created and merged). Use the tracked list of branches from Phase 5 rather than a fixed list:
    ```bash
    git branch -d better/{DATE}
-   for slug in {CREATED_CATEGORY_SLUGS}; do
+   # CREATED_CATEGORY_SLUGS is a space-delimited string, e.g. "security code-quality tests"
+   for slug in $CREATED_CATEGORY_SLUGS; do
      git branch -d "better/$slug" 2>/dev/null || true
      git push origin --delete "better/$slug" 2>/dev/null || true
    done
@@ -710,11 +711,11 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 | Tests              | ...      | ...   | ...     | #number  | pass   | approved |
 | TOTAL              | ...      | ...   | ...     | N PRs    |        |          |
 
-Test Enhancement Stats (from TEST_ENHANCEMENT_STATS):
-- Vacuous tests fixed: {TEST_ENHANCEMENT_STATS.vacuous_fixed}
-- Weak tests strengthened: {TEST_ENHANCEMENT_STATS.weak_strengthened}
-- New test cases added: {TEST_ENHANCEMENT_STATS.new_cases}
-- New test files created: {TEST_ENHANCEMENT_STATS.new_files}
+Test Enhancement Stats:
+- Vacuous tests fixed: {VACUOUS_TESTS_FIXED}
+- Weak tests strengthened: {WEAK_TESTS_STRENGTHENED}
+- New test cases added: {NEW_TEST_CASES}
+- New test files created: {NEW_TEST_FILES}
 ```
 
 ## Error Recovery
