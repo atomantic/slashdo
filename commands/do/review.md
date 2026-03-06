@@ -166,6 +166,9 @@ Check every file against this checklist. The checklist is organized into tiers �
 **Security-sensitive configuration parsing**
 - If the PR reads environment variables or config values that affect security behavior (proxy trust depth, rate limit thresholds, CORS origins, token expiry), verify the parsing enforces the expected type and range — e.g., integer-only via `parseInt` with `Number.isInteger` check, non-negative bounds, and a logged fallback to a safe default on invalid input. `Number()` on arbitrary strings accepts floats, negatives, and empty-string-as-zero, all of which can silently weaken security controls
 
+**Multi-source data aggregation**
+- If the PR aggregates items from multiple sources into a single collection (merging accounts, combining API results, flattening caches), verify each item retains its source identifier through the aggregation — downstream operations that need to route back to the correct source (updates, deletes, detail views) will silently break or operate on the wrong source if the origin is lost
+
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
 
