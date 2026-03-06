@@ -148,8 +148,9 @@ Check every file against this checklist. The checklist is organized into tiers �
 **Data model vs access pattern alignment**
 - If the PR adds queries that claim ordering (e.g., "recent", "top"), verify the underlying key/index design actually supports that ordering natively — random UUIDs and non-time-sortable keys require full scans and in-memory sorting, which degrades at scale
 
-**Deletion/lifecycle cleanup completeness**
+**Deletion/lifecycle cleanup and aggregate reset completeness**
 - If the PR adds a delete or destroy function, trace all resources created during the entity's lifecycle (data directories, git branches, child records, temporary files, worktrees) and verify each is cleaned up on deletion. Compare with existing delete functions in the codebase for completeness patterns
+- If the PR adds a state transition that resets an aggregate value (counter, score, flag count), trace all individual records that contribute to that aggregate and verify they are also cleared, archived, or versioned — a reset counter with stale contributing records causes inconsistency and blocks duplicate-prevention checks on re-entry
 
 **Update schema depth**
 - If the PR derives an update/patch schema from a create schema (e.g., `.partial()`, `Partial<T>`), verify that nested objects also become partial — shallow partial on deeply-required schemas rejects valid partial updates where the caller only wants to change one nested field
@@ -168,6 +169,9 @@ Check every file against this checklist. The checklist is organized into tiers �
 
 **Multi-source data aggregation**
 - If the PR aggregates items from multiple sources into a single collection (merging accounts, combining API results, flattening caches), verify each item retains its source identifier through the aggregation — downstream operations that need to route back to the correct source (updates, deletes, detail views) will silently break or operate on the wrong source if the origin is lost
+
+**Abstraction layer fidelity**
+- If the PR calls a third-party API through an internal wrapper/abstraction layer, trace whether the wrapper requests and forwards all fields the handler depends on — third-party APIs often have optional response attributes that require explicit opt-in (e.g., cancellation reasons, extended metadata). Code branching on fields the wrapper doesn't forward will silently receive `undefined` and take the wrong path. Also verify that test mocks match what the real wrapper returns, not what the underlying API could theoretically return
 
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
