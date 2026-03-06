@@ -250,8 +250,8 @@ For each file touched by multiple categories, document why it was assigned to on
    - Security → Security & Secrets → `security`
    - Code Quality → Code Quality & Style → `code-quality`
    - DRY & YAGNI → DRY & YAGNI → `dry`
-   - Architecture → Architecture & SOLID → `arch-bugs`
-   - Bugs & Perf → Bugs, Performance & Error Handling → `arch-bugs`
+   - Architecture → Architecture & SOLID → `architecture`
+   - Bugs & Perf → Bugs, Performance & Error Handling → `bugs-perf`
    - Stack-Specific → Stack-Specific → `stack-specific`
    - Tests → Test Quality & Coverage → `tests`
 
@@ -384,6 +384,14 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
 
 After internal code review passes, evaluate and enhance the project's test suite. This phase acts on Agent 7's findings AND ensures all remediation work from Phase 3 has proper test coverage.
 
+### 4c.0: Record Start SHA
+
+Before any test enhancement commits, capture the current HEAD so Phase 4c changes can be diffed later:
+```bash
+cd {WORKTREE_DIR}
+PHASE_4C_START_SHA="$(git rev-parse HEAD)"
+```
+
 ### 4c.1: Test Audit Triage
 
 Review Agent 7 findings from Phase 1 and categorize them:
@@ -476,7 +484,7 @@ Using the `FILE_OWNER_MAP` from Phase 2, create one branch per category:
 For each category that has findings:
 1. Switch to `{DEFAULT_BRANCH}`: `git checkout {DEFAULT_BRANCH}`
 2. Create a category branch: `git checkout -b better/{CATEGORY_SLUG}`
-   - Use slugs: `security`, `code-quality`, `dry`, `arch-bugs`, `stack-specific`, `tests`
+   - Use slugs: `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `tests`
 3. For each file assigned to this category in `FILE_OWNER_MAP`:
    - **Modified files**: `git checkout origin/better/{DATE} -- {file_path}`
    - **New files (Added)**: `git checkout origin/better/{DATE} -- {file_path}`
@@ -665,11 +673,11 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 2. Delete local AND remote branches (only if merged):
    ```bash
    git branch -d better/{DATE}
-   git branch -d better/security better/code-quality better/dry better/arch-bugs better/stack-specific better/tests
+   git branch -d better/security better/code-quality better/dry better/architecture better/bugs-perf better/stack-specific better/tests
    ```
    ```bash
    git push origin --delete better/{DATE}
-   git push origin --delete better/security better/code-quality better/dry better/arch-bugs better/stack-specific better/tests
+   git push origin --delete better/security better/code-quality better/dry better/architecture better/bugs-perf better/stack-specific better/tests
    ```
    Ignore errors from `--delete` if a branch doesn't exist remotely.
 3. Restore stashed changes (if stashed in Phase 3a):
