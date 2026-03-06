@@ -163,6 +163,9 @@ Check every file against this checklist. The checklist is organized into tiers �
 **Read-after-write consistency**
 - If the PR writes to a data store and then immediately queries that store (especially scans, aggregations, or replica reads), check whether the store's consistency model guarantees visibility of the write. If not, flag the read as potentially stale and suggest computing from in-memory state, using consistent-read options, or adding a delay/caveat
 
+**Security-sensitive configuration parsing**
+- If the PR reads environment variables or config values that affect security behavior (proxy trust depth, rate limit thresholds, CORS origins, token expiry), verify the parsing enforces the expected type and range — e.g., integer-only via `parseInt` with `Number.isInteger` check, non-negative bounds, and a logged fallback to a safe default on invalid input. `Number()` on arbitrary strings accepts floats, negatives, and empty-string-as-zero, all of which can silently weaken security controls
+
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
 
