@@ -170,6 +170,9 @@ Check every file against this checklist. The checklist is organized into tiers �
 **Multi-source data aggregation**
 - If the PR aggregates items from multiple sources into a single collection (merging accounts, combining API results, flattening caches), verify each item retains its source identifier through the aggregation — downstream operations that need to route back to the correct source (updates, deletes, detail views) will silently break or operate on the wrong source if the origin is lost
 
+**Field-set enumeration consistency**
+- If the PR adds an operation that targets a set of entity fields (enrichment, validation, migration, sync), trace every other location that independently enumerates those fields — UI predicates, scan/query filters, API documentation, response shapes, and test assertions. Each must cover the same field set; a missed field causes silent skips or false UI state. Prefer deriving enumerations from a single source of truth (constant array, schema keys) over maintaining independent lists
+
 **Abstraction layer fidelity**
 - If the PR calls a third-party API through an internal wrapper/abstraction layer, trace whether the wrapper requests and forwards all fields the handler depends on — third-party APIs often have optional response attributes that require explicit opt-in (e.g., cancellation reasons, extended metadata). Code branching on fields the wrapper doesn't forward will silently receive `undefined` and take the wrong path. Also verify that test mocks match what the real wrapper returns, not what the underlying API could theoretically return
 
