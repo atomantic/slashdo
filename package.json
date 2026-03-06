@@ -1,6 +1,6 @@
 {
   "name": "slash-do",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "Curated slash commands for AI coding assistants — Claude Code, OpenCode, Gemini CLI, and Codex",
   "author": "Adam Eivy <adam@eivy.com>",
   "license": "MIT",
