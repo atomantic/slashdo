@@ -198,7 +198,7 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - Tests missing negative cases (invalid input, error paths, boundary conditions)
    - Tests with shared mutable state between cases (`beforeEach` that doesn't reset, module-level variables)
 
-   Report each finding with `[VACUOUS]`, `[WEAK]`, or `[MISSING]` prefix to distinguish quality issues from coverage gaps. Include the specific test name and file:line for existing test issues.
+   Report each finding with a severity prefix `**[CRITICAL]**`, `**[HIGH]**`, `**[MEDIUM]**`, or `**[LOW]**` followed immediately by a quality prefix `[VACUOUS]`, `[WEAK]`, or `[MISSING]` (for example, `**[HIGH][VACUOUS]**`) to distinguish quality issues from coverage gaps while keeping the format consistent with other agents. Include the specific test name and file:line for existing test issues.
 
 Wait for ALL agents to complete before proceeding.
 
@@ -450,8 +450,14 @@ Write tests for these remediated files:
 
 After writing/fixing each test file:
 1. Run `{TEST_CMD}` to verify all tests pass
-2. For each NEW test: temporarily break the code under test (e.g., return null, swap a conditional) and verify the test FAILS. Revert the break after confirming. This is the key quality gate — a test that doesn't fail when the code is broken is worthless.
-3. Commit passing tests: `test: {description of what's tested}`
+2. For each NEW test, verify that it fails when the behavior under test is wrong:
+   - Ensure you have no unstaged changes (`git diff` is clean)
+   - Apply a small, obvious, and **uncommitted** change to the code under test (e.g., return a constant, flip a conditional)
+   - Run `{TEST_CMD}` and confirm the new test FAILS
+   - Immediately restore the code: `git checkout -- {file_path}`
+   - Confirm the worktree is clean again (`git diff` shows no changes)
+   This is the key quality gate — a test that does not fail when the code is broken is worthless.
+3. After confirming the code is restored and the worktree is clean, commit passing tests: `test: {description of what's tested}`
 ```
 
 ### 4c.3: Verification
@@ -670,16 +676,15 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
    ```bash
    git worktree remove {WORKTREE_DIR}
    ```
-2. Delete local AND remote branches (only if merged):
+2. Delete local AND remote branches (only categories that were created and merged). Use the tracked list of branches from Phase 5 rather than a fixed list:
    ```bash
    git branch -d better/{DATE}
-   git branch -d better/security better/code-quality better/dry better/architecture better/bugs-perf better/stack-specific better/tests
+   for slug in {CREATED_CATEGORY_SLUGS}; do
+     git branch -d "better/$slug" 2>/dev/null || true
+     git push origin --delete "better/$slug" 2>/dev/null || true
+   done
    ```
-   ```bash
-   git push origin --delete better/{DATE}
-   git push origin --delete better/security better/code-quality better/dry better/architecture better/bugs-perf better/stack-specific better/tests
-   ```
-   Ignore errors from `--delete` if a branch doesn't exist remotely.
+   The `|| true` guards prevent errors from interrupting cleanup when a branch was never created or was already deleted.
 3. Restore stashed changes (if stashed in Phase 3a):
    ```bash
    git stash pop
@@ -702,11 +707,11 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 | Tests              | ...      | ...   | ...     | #number  | pass   | approved |
 | TOTAL              | ...      | ...   | ...     | N PRs    |        |          |
 
-Test Enhancement Stats:
-- Vacuous tests fixed: {N}
-- Weak tests strengthened: {N}
-- New test cases added: {N}
-- New test files created: {N}
+Test Enhancement Stats (from TEST_ENHANCEMENT_STATS):
+- Vacuous tests fixed: {TEST_ENHANCEMENT_STATS.vacuous_fixed}
+- Weak tests strengthened: {TEST_ENHANCEMENT_STATS.weak_strengthened}
+- New test cases added: {TEST_ENHANCEMENT_STATS.new_cases}
+- New test files created: {TEST_ENHANCEMENT_STATS.new_files}
 ```
 
 ## Error Recovery
