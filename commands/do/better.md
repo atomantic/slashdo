@@ -246,7 +246,15 @@ For each file touched by multiple categories, document why it was assigned to on
 ### Test Quality & Coverage
 ```
 
-6. Print a summary table:
+6. Print a summary table (short labels → full category → branch slug):
+   - Security → Security & Secrets → `security`
+   - Code Quality → Code Quality & Style → `code-quality`
+   - DRY & YAGNI → DRY & YAGNI → `dry`
+   - Architecture → Architecture & SOLID → `arch-bugs`
+   - Bugs & Perf → Bugs, Performance & Error Handling → `arch-bugs`
+   - Stack-Specific → Stack-Specific → `stack-specific`
+   - Tests → Test Quality & Coverage → `tests`
+
 ```
 | Category          | CRITICAL | HIGH | MEDIUM | LOW | Total |
 |-------------------|----------|------|--------|-----|-------|
@@ -256,7 +264,7 @@ For each file touched by multiple categories, document why it was assigned to on
 | Architecture      | ...      | ...  | ...    | ... | ...   |
 | Bugs & Perf       | ...      | ...  | ...    | ... | ...   |
 | Stack-Specific    | ...      | ...  | ...    | ... | ...   |
-| Test Quality      | ...      | ...  | ...    | ... | ...   |
+| Tests             | ...      | ...  | ...    | ... | ...   |
 | TOTAL             | ...      | ...  | ...    | ... | ...   |
 ```
 
@@ -452,6 +460,10 @@ After the test agent completes:
    - Weak tests strengthened
    - New test cases added
    - New test files created
+4. **Update `FILE_OWNER_MAP`** — Phase 4c may have created or modified test files that were not in the Phase 2 map. Before Phase 5 assembles branches:
+   - List all files changed by Phase 4c commits: `git diff --name-only {PHASE_4C_START_SHA}..HEAD`
+   - For each file not already in `FILE_OWNER_MAP`, assign it to the `tests` category
+   - For each file already owned by another category, leave it in that category (the test changes are co-located with the code they test and will ship in the same PR)
 
 ## Phase 5: Per-Category PR Creation
 
