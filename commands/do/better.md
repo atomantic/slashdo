@@ -59,6 +59,7 @@ When compacting during this workflow, always preserve:
 - `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR` values
 - `VCS_HOST`, `CLI_TOOL`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
 - `TEST_ENHANCEMENT_STATS` (vacuous fixed, weak strengthened, new cases, new files)
+- `CREATED_CATEGORY_SLUGS` (list of branch slugs created in Phase 5)
 
 
 ## Phase 0: Discovery & Setup
@@ -485,7 +486,9 @@ Instead of one mega PR, create **separate branches and PRs for each category**. 
 
 ### 5a: Build the Category Branches
 
-Using the `FILE_OWNER_MAP` from Phase 2, create one branch per category:
+Using the `FILE_OWNER_MAP` from Phase 2 (updated in Phase 4c.3), create one branch per category.
+
+Initialize `CREATED_CATEGORY_SLUGS` as an empty list. As each category branch is created below, append its slug to this list. Phase 7 uses this list for cleanup.
 
 For each category that has findings:
 1. Switch to `{DEFAULT_BRANCH}`: `git checkout {DEFAULT_BRANCH}`
