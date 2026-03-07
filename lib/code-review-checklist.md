@@ -186,4 +186,5 @@
 
    **Style & conventions**
    - Naming and patterns consistent with the rest of the codebase
-   - Formatting consistency within each file — new content must match existing indentation, bullet style, heading levels, and structure
+   - Formatting consistency within each file — new content must match existing indentation, bullet style, heading levels, and structure. For structured files that follow a convention across sibling files (changelogs, config files, migration files), verify new entries use the same section headers, field names, and ordering as existing siblings
+   - Shell/workflow instructions with destructive operations (branch deletion, file removal, force operations) must verify preconditions first — e.g., ensure you're not on a branch being deleted, confirm the target exists, and don't suppress stderr from commands where failures indicate real problems (auth errors, network issues)
