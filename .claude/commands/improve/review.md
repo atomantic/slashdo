@@ -142,8 +142,6 @@ Print a summary of what was learned:
 ```
 ## Review Learning Summary
 
-**PR**: {owner}/{repo}#{number} — {PR title}
-**Reviewer(s)**: {list of reviewers who left comments}
 **Actionable comments**: {N} comments across {M} themes
 
 ### Themes Identified
@@ -158,7 +156,7 @@ Print a summary of what was learned:
 - **Unchanged**: {N} themes already covered
 
 ### New/Modified Items
-{list each new or modified checklist item with a brief explanation of what PR feedback inspired it}
+{list each new or modified checklist item with a brief generic explanation of the pattern it catches}
 
 ### Process Improvements
 - **Depth gaps found**: {N} — added to review.md deep checks
@@ -226,6 +224,7 @@ cp commands/do/review.md ~/.claude/commands/do/review.md
 ## Guidelines
 
 - This command is **read-only on the PR** — it never pushes code, resolves threads, or modifies the reviewed repo
+- **No project references anywhere** — never mention the source PR, repo, owner, or project name in file edits, commit messages, or the summary report. All output must be fully generic so the checklist and process files contain no trace of where the learning came from
 - The checklist should work for ANY codebase — never add project-specific checks
 - Prefer fewer, broader items over many narrow ones — a good checklist item catches a class of bugs, not one specific instance
 - When in doubt about whether something is too specific, generalize it one level: "PostgreSQL index" → "database index" → "query performance"

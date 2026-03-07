@@ -94,6 +94,9 @@ Check every file against this checklist. The checklist is organized into tiers �
 **Cross-file consistency**
 - If a new function/endpoint follows a pattern from an existing similar one, verify ALL aspects match (validation, error codes, response shape, cleanup). Partial copying is the #1 source of review feedback.
 - New API client functions should use the same encoding/escaping as existing ones (e.g., if other endpoints use `encodeURIComponent`, new ones must too)
+- If the PR adds a new endpoint, trace where existing endpoints are registered and verify the new one is wired in all runtime adapters (serverless handler map, framework route file, API gateway config, local dev server) — a route registered in one adapter but missing from another will silently 404 in the missing runtime
+- If the PR adds a new call to an external service that has established mock/test infrastructure (mock mode flags, test helpers, dev stubs), verify the new call uses the same patterns — bypassing them makes the new code path untestable in offline/dev environments and inconsistent with existing integrations
+- If the PR adds a new UI component or client-side consumer against an existing API endpoint, read the actual endpoint handler or response shape — verify every field name, nesting level, identifier property, and response envelope path used in the consumer matches what the producer returns. This is the #1 source of "renders empty" bugs in new views built against existing APIs
 
 **Error path completeness**
 - Trace each error path end-to-end: does the error reach the user with a helpful message and correct HTTP status? Or does it get swallowed, logged silently, or surface as a generic 500?
@@ -148,8 +151,9 @@ Check every file against this checklist. The checklist is organized into tiers �
 **Data model vs access pattern alignment**
 - If the PR adds queries that claim ordering (e.g., "recent", "top"), verify the underlying key/index design actually supports that ordering natively — random UUIDs and non-time-sortable keys require full scans and in-memory sorting, which degrades at scale
 
-**Deletion/lifecycle cleanup completeness**
+**Deletion/lifecycle cleanup and aggregate reset completeness**
 - If the PR adds a delete or destroy function, trace all resources created during the entity's lifecycle (data directories, git branches, child records, temporary files, worktrees) and verify each is cleaned up on deletion. Compare with existing delete functions in the codebase for completeness patterns
+- If the PR adds a state transition that resets an aggregate value (counter, score, flag count), trace all individual records that contribute to that aggregate and verify they are also cleared, archived, or versioned — a reset counter with stale contributing records causes inconsistency and blocks duplicate-prevention checks on re-entry
 
 **Update schema depth**
 - If the PR derives an update/patch schema from a create schema (e.g., `.partial()`, `Partial<T>`), verify that nested objects also become partial — shallow partial on deeply-required schemas rejects valid partial updates where the caller only wants to change one nested field
@@ -162,6 +166,22 @@ Check every file against this checklist. The checklist is organized into tiers �
 
 **Read-after-write consistency**
 - If the PR writes to a data store and then immediately queries that store (especially scans, aggregations, or replica reads), check whether the store's consistency model guarantees visibility of the write. If not, flag the read as potentially stale and suggest computing from in-memory state, using consistent-read options, or adding a delay/caveat
+
+**Security-sensitive configuration parsing**
+- If the PR reads environment variables or config values that affect security behavior (proxy trust depth, rate limit thresholds, CORS origins, token expiry), verify the parsing enforces the expected type and range — e.g., integer-only via `parseInt` with `Number.isInteger` check, non-negative bounds, and a logged fallback to a safe default on invalid input. `Number()` on arbitrary strings accepts floats, negatives, and empty-string-as-zero, all of which can silently weaken security controls
+
+**Multi-source data aggregation**
+- If the PR aggregates items from multiple sources into a single collection (merging accounts, combining API results, flattening caches), verify each item retains its source identifier through the aggregation — downstream operations that need to route back to the correct source (updates, deletes, detail views) will silently break or operate on the wrong source if the origin is lost
+
+**Field-set enumeration consistency**
+- If the PR adds an operation that targets a set of entity fields (enrichment, validation, migration, sync), trace every other location that independently enumerates those fields — UI predicates, scan/query filters, API documentation, response shapes, and test assertions. Each must cover the same field set; a missed field causes silent skips or false UI state. Prefer deriving enumerations from a single source of truth (constant array, schema keys) over maintaining independent lists
+
+**Abstraction layer fidelity**
+- If the PR calls a third-party API through an internal wrapper/abstraction layer, trace whether the wrapper requests and forwards all fields the handler depends on — third-party APIs often have optional response attributes that require explicit opt-in (e.g., cancellation reasons, extended metadata). Code branching on fields the wrapper doesn't forward will silently receive `undefined` and take the wrong path. Also verify that test mocks match what the real wrapper returns, not what the underlying API could theoretically return
+
+**Data model / status lifecycle changes**
+- If the PR changes the set of valid statuses, enum values, or entity lifecycle states, sweep all dependent artifacts: API doc summaries and enum declarations, UI filter/tab options, conditional rendering branches (which actions to show per state), integration guide examples, route names derived from old status names, and test assertions. Each artifact that references the old value set must be updated — partial updates leave stale filters, invalid actions, and misleading documentation
+- If the PR renames a concept (e.g., "flagged" → "rejected"), trace all manifestations beyond user-facing labels: route paths, component/file names, variable names, CSS classes, and test descriptions. Internal identifiers using the old name create confusion even when the UI is correct
 
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
