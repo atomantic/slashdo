@@ -682,14 +682,14 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
    ```
 2. Delete local AND remote branches (only categories that were created and merged). Use the tracked list of branches from Phase 5 rather than a fixed list:
    ```bash
-   git branch -d better/{DATE}
+   git branch -D better/{DATE}
    # CREATED_CATEGORY_SLUGS is a space-delimited string, e.g. "security code-quality tests"
    for slug in $CREATED_CATEGORY_SLUGS; do
-     git branch -d "better/$slug" || echo "warning: local branch better/$slug not found or not fully merged"
-     git push origin --delete "better/$slug" 2>/dev/null || echo "warning: remote branch better/$slug not found"
+     git branch -D "better/$slug" || echo "warning: local branch better/$slug not found"
+     git push origin --delete "better/$slug" || echo "warning: remote branch better/$slug not found or already deleted"
    done
    ```
-   The guards prevent errors from interrupting cleanup. Warnings are printed so leftover branches are visible.
+   `-D` (force delete) is used because the staging branch `better/{DATE}` is not merged — its file contents are cherry-picked into category branches. The guards prevent errors from interrupting cleanup. Warnings are printed so leftover branches are visible.
 3. Restore stashed changes (if stashed in Phase 3a):
    ```bash
    git stash pop
