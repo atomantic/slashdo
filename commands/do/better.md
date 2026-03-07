@@ -453,13 +453,17 @@ Write tests for these remediated files:
 After writing/fixing each test file:
 1. Run `{TEST_CMD}` to verify all tests pass
 2. For each NEW test, verify that it fails when the behavior under test is wrong:
-   - Ensure you have no unstaged changes (`git diff` is clean)
+   - Stage your test changes so they are protected: `git add path/to/test_file*`
+   - Confirm your staged diff only includes the intended test changes: `git diff --cached`
+   - Confirm there are no other unstaged changes in the worktree: `git diff` is clean
    - Apply a small, obvious, and **uncommitted** change to the code under test (e.g., return a constant, flip a conditional)
    - Run `{TEST_CMD}` and confirm the new test FAILS
-   - Immediately restore the code: `git checkout -- .`
-   - Confirm the worktree is clean again (`git diff` shows no changes)
+   - Immediately restore only the temporary code change (do **not** touch the staged tests), for example:
+     - `git restore path/to/code_under_test` **or**
+     - `git checkout HEAD -- path/to/code_under_test`
+   - Confirm the worktree has no remaining unstaged changes (`git diff` shows no changes) and that your staged test changes are still present (`git diff --cached`)
    This is the key quality gate — a test that does not fail when the code is broken is worthless.
-3. After confirming the code is restored and the worktree is clean, commit passing tests: `test: {description of what's tested}`
+3. After confirming the temporary code change is reverted and only the intended test changes are staged, commit the passing tests: `test: {description of what's tested}`
 ```
 
 ### 4c.3: Verification
@@ -489,7 +493,7 @@ Instead of one mega PR, create **separate branches and PRs for each category**. 
 
 Using the `FILE_OWNER_MAP` from Phase 2 (updated in Phase 4c.3), create one branch per category.
 
-Initialize `CREATED_CATEGORY_SLUGS=""` (empty space-delimited string). After each category branch is successfully created and pushed below, append its slug: `CREATED_CATEGORY_SLUGS="$CREATED_CATEGORY_SLUGS {CATEGORY_SLUG}"`. Phase 7 uses this for cleanup.
+Initialize `CREATED_CATEGORY_SLUGS=""` (empty space-delimited string). After each category branch is successfully created and pushed below, append its slug: `CREATED_CATEGORY_SLUGS="$CREATED_CATEGORY_SLUGS {CATEGORY_SLUG}"`. Phase 7 uses this as the set of candidate branches for cleanup; when deleting branches, either run cleanup only after all desired merges are complete or explicitly verify that each branch in `CREATED_CATEGORY_SLUGS` has been merged before deleting it.
 
 For each category that has findings:
 1. Switch to `{DEFAULT_BRANCH}`: `git checkout {DEFAULT_BRANCH}`
