@@ -456,7 +456,7 @@ After writing/fixing each test file:
    - Ensure you have no unstaged changes (`git diff` is clean)
    - Apply a small, obvious, and **uncommitted** change to the code under test (e.g., return a constant, flip a conditional)
    - Run `{TEST_CMD}` and confirm the new test FAILS
-   - Immediately restore the code: `git checkout -- {file_path}`
+   - Immediately restore the code: `git checkout -- .`
    - Confirm the worktree is clean again (`git diff` shows no changes)
    This is the key quality gate — a test that does not fail when the code is broken is worthless.
 3. After confirming the code is restored and the worktree is clean, commit passing tests: `test: {description of what's tested}`
@@ -682,6 +682,7 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
    ```
 2. Delete local AND remote branches (only categories that were created and merged). Use the tracked list of branches from Phase 5 rather than a fixed list:
    ```bash
+   git checkout {DEFAULT_BRANCH}
    git branch -D better/{DATE}
    # CREATED_CATEGORY_SLUGS is a space-delimited string, e.g. "security code-quality tests"
    for slug in $CREATED_CATEGORY_SLUGS; do
