@@ -690,11 +690,11 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
    git branch -D better/{DATE}
    # CREATED_CATEGORY_SLUGS is a space-delimited string, e.g. "security code-quality tests"
    for slug in $CREATED_CATEGORY_SLUGS; do
-     git branch -D "better/$slug" || echo "warning: local branch better/$slug not found"
+     git branch -d "better/$slug" || echo "warning: local branch better/$slug not found or not fully merged — skipping (use -D to force)"
      git push origin --delete "better/$slug" || echo "warning: remote branch better/$slug not found or already deleted"
    done
    ```
-   `-D` (force delete) is used because the staging branch `better/{DATE}` is not merged — its file contents are cherry-picked into category branches. The guards prevent errors from interrupting cleanup. Warnings are printed so leftover branches are visible.
+   `-D` (force delete) is used only for the staging branch `better/{DATE}` because it is intentionally unmerged — its file contents are cherry-picked into category branches. Category branches use `-d` (safe delete) so that unmerged work is not accidentally lost; if a category branch was not merged, the warning will surface it. The guards prevent errors from interrupting cleanup.
 3. Restore stashed changes (if stashed in Phase 3a):
    ```bash
    git stash pop
