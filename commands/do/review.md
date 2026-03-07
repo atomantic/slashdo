@@ -179,6 +179,10 @@ Check every file against this checklist. The checklist is organized into tiers �
 **Abstraction layer fidelity**
 - If the PR calls a third-party API through an internal wrapper/abstraction layer, trace whether the wrapper requests and forwards all fields the handler depends on — third-party APIs often have optional response attributes that require explicit opt-in (e.g., cancellation reasons, extended metadata). Code branching on fields the wrapper doesn't forward will silently receive `undefined` and take the wrong path. Also verify that test mocks match what the real wrapper returns, not what the underlying API could theoretically return
 
+**Data model / status lifecycle changes**
+- If the PR changes the set of valid statuses, enum values, or entity lifecycle states, sweep all dependent artifacts: API doc summaries and enum declarations, UI filter/tab options, conditional rendering branches (which actions to show per state), integration guide examples, route names derived from old status names, and test assertions. Each artifact that references the old value set must be updated — partial updates leave stale filters, invalid actions, and misleading documentation
+- If the PR renames a concept (e.g., "flagged" → "rejected"), trace all manifestations beyond user-facing labels: route paths, component/file names, variable names, CSS classes, and test descriptions. Internal identifiers using the old name create confusion even when the UI is correct
+
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
 
