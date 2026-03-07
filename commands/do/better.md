@@ -684,7 +684,7 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
    ```bash
    git worktree remove {WORKTREE_DIR}
    ```
-2. Delete local AND remote branches (only categories that were created and merged). Use the tracked list of branches from Phase 5 rather than a fixed list:
+2. Delete the local staging branch and per-category branches (local + remote). Use the tracked list of branches from Phase 5 rather than a fixed list:
    ```bash
    git checkout {DEFAULT_BRANCH}
    git branch -D better/{DATE}
