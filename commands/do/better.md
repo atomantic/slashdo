@@ -496,8 +496,8 @@ For each category that has findings:
 2. Create a category branch: `git checkout -b better/{CATEGORY_SLUG}`
    - Use slugs: `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `tests`
 3. For each file assigned to this category in `FILE_OWNER_MAP`:
-   - **Modified files**: `git checkout origin/better/{DATE} -- {file_path}`
-   - **New files (Added)**: `git checkout origin/better/{DATE} -- {file_path}`
+   - **Modified files**: `git checkout better/{DATE} -- {file_path}`
+   - **New files (Added)**: `git checkout better/{DATE} -- {file_path}`
    - **Deleted files**: `git rm {file_path}`
 4. Commit all staged changes with a descriptive message:
    ```bash
