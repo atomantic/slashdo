@@ -239,3 +239,18 @@ Print a summary table of what was reviewed and found:
 If no issues were found, confirm the code is clean and ready for PR.
 
 </fix_and_report>
+
+<pr_comment_policy>
+
+## PR Comment Policy
+
+After the review and any fixes, determine whether to post review comments on the PR/MR:
+
+1. **Check for an open PR** on the current branch: `gh pr view --json number,author,url 2>/dev/null`
+2. **Get the current user**: `gh api user -q '.login'`
+3. **Compare**: If the PR author login **matches** the current user, do NOT post comments to the PR — the local fixes and summary are sufficient.
+4. **If the PR was opened by someone else**, post a review comment on the PR summarizing the findings using `gh pr review {number} --comment --body "..."`. Include the issues found, fixes applied, and any remaining items that need the author's attention.
+
+This avoids noisy self-comments on your own PRs while still providing feedback to other contributors.
+
+</pr_comment_policy>
