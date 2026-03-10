@@ -12,7 +12,9 @@ You are a Copilot review loop agent.
 PR: {PR_NUMBER} in {OWNER}/{REPO}
 Branch: {BRANCH_NAME}
 Build command: {BUILD_CMD}
-Max iterations: 5
+Max iterations: unlimited (loop until Copilot returns 0 comments)
+Safety guardrail: after 10 iterations, report back and ask the user
+whether to continue or stop — never loop indefinitely without confirmation.
 
 TIMEOUT SCHEDULE:
 When running parallel PR reviews (do:better), use shorter waits to avoid
@@ -28,8 +30,7 @@ that (minimum 5 minutes, maximum 20 minutes). Copilot reviews can take
 10-15 minutes for large diffs.
 Poll interval: 30 seconds for all iterations.
 
-Run the following loop until Copilot returns zero new comments or you hit
-the max iteration limit:
+Run the following loop until Copilot returns zero new comments:
 
 1. CAPTURE the latest Copilot review submittedAt timestamp (so you can
    detect when a NEW review arrives):
@@ -75,10 +76,14 @@ the max iteration limit:
    - Resolve the thread via GraphQL mutation using stdin JSON piping:
      echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
    - After all threads resolved, push all commits to remote
-   - Increment iteration counter and go back to step 1
+   - Increment iteration counter
+   - If iteration counter reaches 10, stop the loop and report back with
+     status "guardrail" — the parent agent will ask the user whether to
+     continue or stop
+   - Otherwise, go back to step 1
 
 When done, report back:
-- Final status: clean / max-iterations-reached / timeout / error
+- Final status: clean / timeout / error / guardrail
 - Total iterations completed
 - List of commits made (if any)
 - Any unresolved threads remaining

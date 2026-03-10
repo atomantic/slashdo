@@ -186,6 +186,9 @@ Check every file against this checklist. The checklist is organized into tiers â
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure â€” rendering inconsistencies are the most common Copilot review finding
 
+**Query key / stored key precision alignment**
+- If the PR adds queries that construct lookup keys with a different precision, encoding, or format than what the write path persists, the query will silently return zero matches. Trace the key construction in both write and read paths and verify they produce compatible values
+
 </deep_checks>
 
 <verify_findings>
