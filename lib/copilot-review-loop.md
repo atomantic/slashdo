@@ -13,6 +13,8 @@ PR: {PR_NUMBER} in {OWNER}/{REPO}
 Branch: {BRANCH_NAME}
 Build command: {BUILD_CMD}
 Max iterations: unlimited (loop until Copilot returns 0 comments)
+Safety guardrail: after 10 iterations, report back and ask the user
+whether to continue or stop — never loop indefinitely without confirmation.
 
 TIMEOUT SCHEDULE:
 When running parallel PR reviews (do:better), use shorter waits to avoid
