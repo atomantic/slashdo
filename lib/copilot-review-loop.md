@@ -76,10 +76,14 @@ Run the following loop until Copilot returns zero new comments:
    - Resolve the thread via GraphQL mutation using stdin JSON piping:
      echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
    - After all threads resolved, push all commits to remote
-   - Increment iteration counter and go back to step 1
+   - Increment iteration counter
+   - If iteration counter reaches 10, stop the loop and report back with
+     status "guardrail" — the parent agent will ask the user whether to
+     continue or stop
+   - Otherwise, go back to step 1
 
 When done, report back:
-- Final status: clean / timeout / error
+- Final status: clean / timeout / error / guardrail
 - Total iterations completed
 - List of commits made (if any)
 - Any unresolved threads remaining

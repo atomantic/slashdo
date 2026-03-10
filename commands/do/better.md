@@ -613,7 +613,7 @@ After creating all PRs, verify CI passes on each one:
 
 ## Phase 6: Copilot Review Loop (GitHub only)
 
-Loop until Copilot returns zero new comments (no fixed iteration limit). After 10 iterations, pause and ask the user whether to continue or stop to prevent unbounded execution.
+Loop until Copilot returns zero new comments (no fixed iteration limit). Sub-agents enforce a 10-iteration guardrail: at iteration 10 the sub-agent stops and returns a "guardrail" status, prompting the parent agent to ask the user whether to continue or stop.
 
 **Sub-agent delegation** (prevents context exhaustion): delegate each PR's review loop to a **separate general-purpose sub-agent** via the Agent tool. Launch sub-agents in parallel (one per PR). Each sub-agent runs the full loop (request → wait → check → fix → re-request) autonomously and returns only the final status.
 
@@ -633,6 +633,7 @@ For each sub-agent result:
 - **clean**: mark PR as ready to merge
 - **timeout**: inform the user "Copilot review timed out on PR #{number}." and ask whether to continue waiting, re-request, or skip
 - **error**: inform the user and ask whether to retry or skip
+- **guardrail**: the sub-agent hit the 10-iteration limit; ask the user whether to continue with more iterations or stop
 
 ### 6.3: Merge Gate (MANDATORY)
 
