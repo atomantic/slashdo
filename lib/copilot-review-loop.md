@@ -12,7 +12,7 @@ You are a Copilot review loop agent.
 PR: {PR_NUMBER} in {OWNER}/{REPO}
 Branch: {BRANCH_NAME}
 Build command: {BUILD_CMD}
-Max iterations: 5
+Max iterations: unlimited (loop until Copilot returns 0 comments)
 
 TIMEOUT SCHEDULE:
 When running parallel PR reviews (do:better), use shorter waits to avoid
@@ -28,8 +28,7 @@ that (minimum 5 minutes, maximum 20 minutes). Copilot reviews can take
 10-15 minutes for large diffs.
 Poll interval: 30 seconds for all iterations.
 
-Run the following loop until Copilot returns zero new comments or you hit
-the max iteration limit:
+Run the following loop until Copilot returns zero new comments:
 
 1. CAPTURE the latest Copilot review submittedAt timestamp (so you can
    detect when a NEW review arrives):
@@ -78,7 +77,7 @@ the max iteration limit:
    - Increment iteration counter and go back to step 1
 
 When done, report back:
-- Final status: clean / max-iterations-reached / timeout / error
+- Final status: clean / timeout / error
 - Total iterations completed
 - List of commits made (if any)
 - Any unresolved threads remaining

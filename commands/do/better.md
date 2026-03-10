@@ -632,7 +632,7 @@ Launch all PR sub-agents in parallel. Wait for all to complete.
 For each sub-agent result:
 - **clean**: mark PR as ready to merge
 - **timeout**: ask the user whether to continue waiting, re-request, or skip
-- **max-iterations-reached**: inform the user "Reached max review iterations (5) on PR #{number}. Remaining issues may need manual review."
+- **timeout**: inform the user "Copilot review timed out on PR #{number}. May need manual review."
 - **error**: inform the user and ask whether to retry or skip
 
 ### 6.3: Merge Gate (MANDATORY)
