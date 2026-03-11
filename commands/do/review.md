@@ -183,6 +183,12 @@ Check every file against this checklist. The checklist is organized into tiers �
 - If the PR changes the set of valid statuses, enum values, or entity lifecycle states, sweep all dependent artifacts: API doc summaries and enum declarations, UI filter/tab options, conditional rendering branches (which actions to show per state), integration guide examples, route names derived from old status names, and test assertions. Each artifact that references the old value set must be updated — partial updates leave stale filters, invalid actions, and misleading documentation
 - If the PR renames a concept (e.g., "flagged" → "rejected"), trace all manifestations beyond user-facing labels: route paths, component/file names, variable names, CSS classes, and test descriptions. Internal identifiers using the old name create confusion even when the UI is correct
 
+**Type-discriminated entity validation**
+- If the PR modifies entities with a discriminator field (type, kind, category), trace all code paths that change the discriminator value and verify: (1) all invariants of the new type are enforced (required fields, valid ranges), (2) fields specific to the old type are cleared or revalidated, (3) downstream code that branches on the type handles the transition correctly (e.g., trigger/execution paths don't silently fall through to the wrong handler)
+
+**Data migration semantic preservation**
+- If the PR includes a data migration (file format, schema, entity type conversion), trace each field's behavioral meaning before and after migration. Verify: (1) execution semantics are preserved (schedules, enabled states, trigger actions), (2) source values outside the target's supported range are flagged or preserved rather than silently defaulted, (3) the migration runs under appropriate concurrency protection (not inside a read path callable by concurrent requests), (4) migration-time validation matches runtime validation (don't persist values that will fail at execution)
+
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
 
