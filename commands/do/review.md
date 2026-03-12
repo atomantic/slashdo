@@ -119,11 +119,18 @@ Check every file against this checklist. The checklist is organized into tiers �
 **Guard-before-cache ordering**
 - If a handler performs a pre-flight guard check (rate limit, quota, feature flag) before a cache lookup or short-circuit path, verify the guard doesn't block operations that would be served from cache without touching the guarded resource — restructure so cache hits bypass the guard
 
-**Sanitization/validation coverage**
-- If the PR introduces a new validation or sanitization function for a data field, trace every code path that writes to that field (create, update, import, sync, rename) — verify they all use the same sanitization. Partial application is the #1 way invalid data re-enters through an unguarded path
+**Sanitization/validation/normalization coverage**
+- If the PR introduces a new validation or sanitization function for a data field, trace every code path that writes to that field (create, update, import, sync, rename, raw/bulk persist) — verify they all use the same sanitization. Partial application is the #1 way invalid data re-enters through an unguarded path
+- If the PR adds a "raw" or bypass write path (e.g., `raw: true` flag, bulk import, migration backfill), compare the normalization it applies against what the standard read/parse path assumes — ID prefixes, required defaults, shape invariants. Data that passes through the raw path must still be valid when reloaded through the normal path
 
 **Bootstrap/initialization ordering**
 - If the PR adds resilience or self-healing code (dependency installers, auto-repair, migration runners), trace the execution order: does the main code path resolve or import the dependencies BEFORE the resilience code runs? If so, the bootstrapper never executes when it's needed most — restructure so verification/installation precedes resolution
+
+**Self-rescheduling callback resilience**
+- If the PR adds a one-shot timer or deferred callback that re-registers itself for the next cycle, trace what happens when the callback body throws before re-registration — an unhandled error permanently stops the schedule. Verify re-registration is in a finally block or occurs before the main logic
+
+**Periodic operation skip behavior**
+- If the PR adds skip/gate conditions to periodic operations (scheduled jobs, pollers), trace whether a skip still advances the scheduling state (lastRun, nextFireTime). A skipped execution with null/stale timing state causes immediate re-trigger loops
 
 **Lock/flag exit-path completeness**
 - If a function sets a shared flag or lock (in-progress, mutex, status marker), trace every exit path — early returns, error catches, platform-specific guards, and normal completion — to verify the flag is cleared. A missed path leaves the system permanently locked
@@ -184,13 +191,22 @@ Check every file against this checklist. The checklist is organized into tiers �
 - If the PR renames a concept (e.g., "flagged" → "rejected"), trace all manifestations beyond user-facing labels: route paths, component/file names, variable names, CSS classes, and test descriptions. Internal identifiers using the old name create confusion even when the UI is correct
 
 **Type-discriminated entity validation**
-- If the PR modifies entities with a discriminator field (type, kind, category), trace all code paths that change the discriminator value and verify: (1) all invariants of the new type are enforced (required fields, valid ranges), (2) fields specific to the old type are cleared or revalidated, (3) downstream code that branches on the type handles the transition correctly (e.g., trigger/execution paths don't silently fall through to the wrong handler)
+- If the PR modifies entities with a discriminator field (type, kind, category), trace all code paths that change the discriminator value — not just the update handler, but also migration paths, bulk operations, and UI type-switchers. Verify downstream branching logic (execution, rendering, validation) handles all type transitions without falling through to the wrong handler
+
+**Migration/initialization idempotency**
+- If the PR adds a startup-time migration or one-time initialization, verify it is idempotent — what happens when it runs a second time? Check that the migration condition excludes already-migrated records and that completion is recorded (version stamp, flag) to prevent re-entry on every load
 
 **Data migration semantic preservation**
-- If the PR includes a data migration (file format, schema, entity type conversion), trace each field's behavioral meaning before and after migration. Verify: (1) execution semantics are preserved (schedules, enabled states, trigger actions), (2) source values outside the target's supported range are flagged or preserved rather than silently defaulted, (3) the migration runs under appropriate concurrency protection (not inside a read path callable by concurrent requests), (4) migration-time validation matches runtime validation (don't persist values that will fail at execution)
+- If the PR includes a data migration, trace each migrated field's behavioral meaning before and after. Focus on: migration-time validation matching runtime validation (don't persist values that will fail at execution), concurrency protection (migrations triggered by read paths race with concurrent requests), and unsupported source values being flagged rather than silently defaulted
 
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
+
+**Bulk vs single-item operation parity**
+- If the PR modifies a single-item CRUD operation (create, update, delete) to handle new fields or apply new logic, trace the corresponding bulk/batch operation for the same entity — it often has its own independent implementation that won't pick up the change. Verify both paths handle the same fields, apply the same validation, and preserve the same secondary data
+
+**Config value provenance for auto-upgrade**
+- If the PR adds auto-upgrade logic that replaces config values with newer defaults (prompt versions, schema migrations, template updates), verify the code can distinguish "user customized this value" from "this is the previous default." Without provenance tracking (version stamps, customization flags, or comparison against known previous defaults), auto-upgrade will overwrite intentional user customizations or skip legitimate upgrades
 
 **Query key / stored key precision alignment**
 - If the PR adds queries that construct lookup keys with a different precision, encoding, or format than what the write path persists, the query will silently return zero matches. Trace the key construction in both write and read paths and verify they produce compatible values
