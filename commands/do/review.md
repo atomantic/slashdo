@@ -185,6 +185,10 @@ Check every file against this checklist. The checklist is organized into tiers �
 
 **Abstraction layer fidelity**
 - If the PR calls a third-party API through an internal wrapper/abstraction layer, trace whether the wrapper requests and forwards all fields the handler depends on — third-party APIs often have optional response attributes that require explicit opt-in (e.g., cancellation reasons, extended metadata). Code branching on fields the wrapper doesn't forward will silently receive `undefined` and take the wrong path. Also verify that test mocks match what the real wrapper returns, not what the underlying API could theoretically return
+- If the PR passes multiple parameters through a wrapper/abstraction layer to an underlying API, check whether any parameter combinations are mutually exclusive in the underlying API (e.g., projection expressions + count-only select modes) — the wrapper should strip conflicting parameters rather than forwarding all unconditionally, which causes validation errors at the underlying layer
+
+**Summary/aggregation endpoint consistency**
+- If the PR adds a summary or dashboard endpoint that aggregates counts/previews across multiple data sources, trace each category's computation logic against the corresponding detail view it links to — verify they apply the same filters (e.g., orphan exclusion, status filtering), the same ordering guarantees (sort keys that actually exist on the queried index), and that navigation links propagate the aggregated context (e.g., `?status=pending`) so the destination page matches what the summary promised
 
 **Data model / status lifecycle changes**
 - If the PR changes the set of valid statuses, enum values, or entity lifecycle states, sweep all dependent artifacts: API doc summaries and enum declarations, UI filter/tab options, conditional rendering branches (which actions to show per state), integration guide examples, route names derived from old status names, and test assertions. Each artifact that references the old value set must be updated — partial updates leave stale filters, invalid actions, and misleading documentation
