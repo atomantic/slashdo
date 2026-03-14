@@ -141,6 +141,12 @@ Check every file against this checklist. The checklist is organized into tiers �
 **Real-time event vs response timing**
 - If a handler emits push notifications (WebSocket, SSE, pub/sub) AND returns an HTTP response, verify clients won't receive push events before the response that gives them context to interpret those events — especially when the response contains IDs or version numbers the event consumer needs
 
+**Paired lifecycle event completeness**
+- If a function emits a "started" or "begin" event, trace every exit path (success, error, early return, no-op branches for specific entity types) and verify each emits the corresponding "completed" or "failed" event. A missing completion event leaves consumers (UI spinners, progress indicators, orchestrators waiting for all-done) in a permanently stale state. Pay special attention to branches that short-circuit for specific entity subtypes — they often return early without the completion event because the author only considered the primary code path
+
+**Entity identity key consistency**
+- If the PR uses a computed identity key to look up, match, or index entities (e.g., `e.id || e.externalId`, `item.slug ?? item.name`), trace all other code paths that perform the same entity lookup and verify they use the identical key computation. Inconsistent key strategies cause mismatches — one path stores data under key A while another reads under key B, leading to phantom missing records or incorrect counts
+
 **Intent vs implementation (meta-cognitive pass)**
 - For each label, comment, docstring, status message, or inline instruction that describes behavior, verify the code actually implements that behavior. A detection mechanism must query the data it claims to detect; a migration must create the target, not just delete the source
 - If the PR contains inline code examples, command templates, or query snippets, verify they are syntactically valid for their language — run a mental parse of each example. Watch for template placeholder format inconsistencies within and across files
