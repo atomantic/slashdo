@@ -118,15 +118,15 @@ TEST_CMD="swift test"
 
 **Xcode project (single platform):**
 ```bash
-BUILD_CMD="xcodebuild -scheme {SCHEME} -destination 'platform=iOS Simulator,name=iPhone 16' build"
-TEST_CMD="xcodebuild -scheme {SCHEME} -destination 'platform=iOS Simulator,name=iPhone 16' test"
+BUILD_CMD="xcodebuild -scheme {SCHEME} -destination 'generic/platform=iOS Simulator' build"
+TEST_CMD="xcodebuild -scheme {SCHEME} -destination 'platform=iOS Simulator,OS=latest,name=Any iOS Simulator Device' test"
 ```
 
 **Xcode project (multi-platform) — build ALL platforms:**
 ```bash
-BUILD_CMD_IOS="xcodebuild -scheme {SCHEME} -destination 'platform=iOS Simulator,name=iPhone 16' build"
+BUILD_CMD_IOS="xcodebuild -scheme {SCHEME} -destination 'generic/platform=iOS Simulator' build"
 BUILD_CMD_MACOS="xcodebuild -scheme {SCHEME} -destination 'platform=macOS' build"
-TEST_CMD_IOS="xcodebuild -scheme {SCHEME} -destination 'platform=iOS Simulator,name=iPhone 16' test"
+TEST_CMD_IOS="xcodebuild -scheme {SCHEME} -destination 'platform=iOS Simulator,OS=latest,name=Any iOS Simulator Device' test"
 TEST_CMD_MACOS="xcodebuild -scheme {SCHEME} -destination 'platform=macOS' test"
 ```
 
@@ -140,7 +140,7 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 - Record `CURRENT_BRANCH` via `git rev-parse --abbrev-ref HEAD`
 - Record `DEFAULT_BRANCH` via `gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'` (or `glab` equivalent)
 - Record `IS_DIRTY` via `git status --porcelain`
-- Check for `.changelog/` directory → `HAS_CHANGELOG`
+- Check for `.changelogs/` or `.changelog/` directory → `HAS_CHANGELOG`
 - Check for existing `../better-*` worktrees: `git worktree list`. If found, inform the user and ask whether to resume (use existing worktree) or clean up (remove it and start fresh)
 
 
