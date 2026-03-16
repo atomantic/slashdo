@@ -21,10 +21,10 @@ fetch_file() {
   local src_path="$1"
   local dest="$2"
   if $LOCAL_MODE && [ -f "$SCRIPT_DIR/$src_path" ]; then
-    cp "$SCRIPT_DIR/$src_path" "$dest" 2>/dev/null
-  else
-    curl -fsSL "$BASE_URL/$src_path" -o "$dest" 2>/dev/null
+    cp "$SCRIPT_DIR/$src_path" "$dest" 2>/dev/null && return 0
   fi
+  # Fallback to curl (remote mode, or local cp failed)
+  curl -fsSL "$BASE_URL/$src_path" -o "$dest" 2>/dev/null
 }
 
 CYAN='\033[0;36m'

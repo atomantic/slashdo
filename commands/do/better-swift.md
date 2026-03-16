@@ -118,19 +118,21 @@ TEST_CMD="swift test"
 
 **Xcode project (single platform):**
 ```bash
+# Derive an available simulator dynamically:
+SIM_DEST=$(xcrun simctl list devices available -j | python3 -c "import json,sys; devs=[d['name'] for rt in json.load(sys.stdin)['devices'].values() for d in rt if d['isAvailable']]; print(devs[0] if devs else 'iPhone 16')")
 BUILD_CMD="xcodebuild -scheme {SCHEME} -destination 'generic/platform=iOS Simulator' build"
-TEST_CMD="xcodebuild -scheme {SCHEME} -destination 'platform=iOS Simulator,OS=latest,name=Any iOS Simulator Device' test"
+TEST_CMD="xcodebuild -scheme {SCHEME} -destination 'platform=iOS Simulator,name=$SIM_DEST' test"
 ```
 
-**Xcode project (multi-platform) — build ALL platforms:**
-```bash
-BUILD_CMD_IOS="xcodebuild -scheme {SCHEME} -destination 'generic/platform=iOS Simulator' build"
-BUILD_CMD_MACOS="xcodebuild -scheme {SCHEME} -destination 'platform=macOS' build"
-TEST_CMD_IOS="xcodebuild -scheme {SCHEME} -destination 'platform=iOS Simulator,OS=latest,name=Any iOS Simulator Device' test"
-TEST_CMD_MACOS="xcodebuild -scheme {SCHEME} -destination 'platform=macOS' test"
-```
+**Xcode project (multi-platform) — build and test for each platform in `PLATFORMS`:**
+For each platform in `PLATFORMS`, derive the build and test commands:
+- **iOS**: `BUILD_CMD_IOS="xcodebuild -scheme {SCHEME} -destination 'generic/platform=iOS Simulator' build"` / `TEST_CMD_IOS="xcodebuild -scheme {SCHEME} -destination 'platform=iOS Simulator,name=$SIM_DEST' test"`
+- **macOS**: `BUILD_CMD_MACOS="xcodebuild -scheme {SCHEME} -destination 'platform=macOS' build"` / `TEST_CMD_MACOS="xcodebuild ... test"`
+- **watchOS**: `BUILD_CMD_WATCHOS="xcodebuild -scheme {SCHEME} -destination 'generic/platform=watchOS Simulator' build"`
+- **tvOS**: `BUILD_CMD_TVOS="xcodebuild -scheme {SCHEME} -destination 'generic/platform=tvOS Simulator' build"`
+- **visionOS**: `BUILD_CMD_VISIONOS="xcodebuild -scheme {SCHEME} -destination 'generic/platform=visionOS Simulator' build"`
 
-Set `BUILD_CMD` to run ALL platform builds sequentially (joined with `&&`). Set `TEST_CMD` to run ALL platform tests. This ensures changes don't break any supported platform.
+Only generate commands for platforms declared in `PLATFORMS`. Set `BUILD_CMD` to run all platform builds sequentially (joined with `&&`). Set `TEST_CMD` to run all platform tests. This ensures changes don't break any supported platform.
 
 If the project has a `Makefile` or `fastlane/Fastfile`, check for custom build/test lanes and prefer those if they already handle multi-platform builds.
 
