@@ -728,7 +728,7 @@ Only if ALL category branches pass build on ALL platforms:
    agvtool new-marketing-version {NEW_VERSION}
    # Bump CFBundleVersion (build number)
    agvtool next-version -all
-   git add *.plist *.pbxproj  # agvtool modifies plist and pbxproj files
+   git add $(git diff --name-only -- '*.plist' '*.pbxproj')  # stage only files agvtool actually modified
    git commit -m "chore: bump version to {NEW_VERSION}"
    git push
    ```
