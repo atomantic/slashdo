@@ -278,7 +278,7 @@ If no issues were found, confirm the code is clean and ready for PR.
 
 After the review and any fixes, determine whether to post review comments on the PR/MR:
 
-1. **Check for an open PR** on the current branch: `gh pr view --json number,author,url 2>/dev/null`
+1. **Check for an open PR** on the current branch: `gh pr view --json number,author --jq '{number, author: .author.login}' 2>/dev/null`. If the command fails (no PR exists), skip posting.
 2. **Get the current user**: `gh api user -q '.login'`
 3. **Compare**: If the PR author login **matches** the current user, do NOT post comments to the PR — the local fixes and summary are sufficient.
 4. **If the PR was opened by someone else**, post a review comment on the PR summarizing the findings using `gh pr review {number} --comment --body "..."`. Include the issues found, fixes applied, and any remaining items that need the author's attention.
