@@ -8,6 +8,25 @@ REPO="atomantic/slashdo"
 BRANCH="main"
 BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"
 
+# Detect local repo: if this script lives alongside commands/ and lib/, use local files
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCAL_MODE=false
+if [ -d "$SCRIPT_DIR/commands/do" ] && [ -d "$SCRIPT_DIR/lib" ]; then
+  LOCAL_MODE=true
+fi
+
+# Fetch a file: local cp if available, otherwise curl from GitHub
+# Usage: fetch_file <repo_relative_path> <destination>
+fetch_file() {
+  local src_path="$1"
+  local dest="$2"
+  if [ "$LOCAL_MODE" = true ] && [ -f "$SCRIPT_DIR/$src_path" ]; then
+    cp "$SCRIPT_DIR/$src_path" "$dest" 2>/dev/null && return 0
+  fi
+  # Fallback to curl (remote mode, or local cp failed)
+  curl -fsSL "$BASE_URL/$src_path" -o "$dest" 2>/dev/null
+}
+
 CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
 GREEN='\033[0;32m'
@@ -27,7 +46,7 @@ banner() {
 }
 
 COMMANDS=(
-  better fpr goals help omd
+  better better-swift fpr goals help omd
   pr push release replan review rpr update
 )
 
@@ -36,7 +55,7 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
 LIBS=(
   code-review-checklist copilot-review-loop graphql-escaping
-  remediation-agent-template
+  remediation-agent-template swift-review-checklist
 )
 
 HOOKS=(slashdo-check-update slashdo-statusline)
@@ -62,7 +81,7 @@ install_claude() {
 
   for cmd in "${COMMANDS[@]}"; do
     printf "    /do:%-20s" "$cmd"
-    if curl -fsSL "$BASE_URL/commands/do/$cmd.md" -o "$target_cmd/$cmd.md" 2>/dev/null; then
+    if fetch_file "commands/do/$cmd.md" "$target_cmd/$cmd.md"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
@@ -71,7 +90,7 @@ install_claude() {
 
   for lib in "${LIBS[@]}"; do
     printf "    lib/%-20s" "$lib.md"
-    if curl -fsSL "$BASE_URL/lib/$lib.md" -o "$target_lib/$lib.md" 2>/dev/null; then
+    if fetch_file "lib/$lib.md" "$target_lib/$lib.md"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
@@ -80,7 +99,7 @@ install_claude() {
 
   for hook in "${HOOKS[@]}"; do
     printf "    hook/%-19s" "$hook.js"
-    if curl -fsSL "$BASE_URL/hooks/$hook.js" -o "$target_hooks/$hook.js" 2>/dev/null; then
+    if fetch_file "hooks/$hook.js" "$target_hooks/$hook.js"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
@@ -197,7 +216,7 @@ install_opencode() {
 
   for cmd in "${COMMANDS[@]}"; do
     printf "    /do-%-20s" "$cmd"
-    if curl -fsSL "$BASE_URL/commands/do/$cmd.md" -o "/tmp/slashdo-$cmd.md" 2>/dev/null; then
+    if fetch_file "commands/do/$cmd.md" "/tmp/slashdo-$cmd.md"; then
       # Rewrite lib paths for OpenCode
       sed 's|~/.claude/lib/|~/.config/opencode/lib/|g' "/tmp/slashdo-$cmd.md" > "$target_cmd/do-$cmd.md"
       rm -f "/tmp/slashdo-$cmd.md"
@@ -209,7 +228,7 @@ install_opencode() {
 
   for lib in "${LIBS[@]}"; do
     printf "    lib/%-20s" "$lib.md"
-    if curl -fsSL "$BASE_URL/lib/$lib.md" -o "$target_lib/$lib.md" 2>/dev/null; then
+    if fetch_file "lib/$lib.md" "$target_lib/$lib.md"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
@@ -233,7 +252,7 @@ install_gemini() {
 
   for cmd in "${COMMANDS[@]}"; do
     printf "    /do:%-20s" "$cmd"
-    if curl -fsSL "$BASE_URL/commands/do/$cmd.md" -o "/tmp/slashdo-$cmd.md" 2>/dev/null; then
+    if fetch_file "commands/do/$cmd.md" "/tmp/slashdo-$cmd.md"; then
       # Convert YAML frontmatter to TOML and rewrite lib paths
       awk '
         BEGIN { in_fm=0 }
@@ -254,7 +273,7 @@ install_gemini() {
 
   for lib in "${LIBS[@]}"; do
     printf "    lib/%-20s" "$lib.md"
-    if curl -fsSL "$BASE_URL/lib/$lib.md" -o "$target_lib/$lib.md" 2>/dev/null; then
+    if fetch_file "lib/$lib.md" "$target_lib/$lib.md"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
@@ -280,6 +299,11 @@ if [ ${#envs[@]} -eq 0 ]; then
   exit 1
 fi
 
+if [ "$LOCAL_MODE" = true ]; then
+  printf "  Source: ${GREEN}local${RESET} (${DIM}$SCRIPT_DIR${RESET})\n"
+else
+  printf "  Source: ${GREEN}github${RESET} (${DIM}$BASE_URL${RESET})\n"
+fi
 printf "  Detected: ${GREEN}%s${RESET}\n\n" "${envs[*]}"
 
 for env in "${envs[@]}"; do

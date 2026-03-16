@@ -523,7 +523,7 @@ If a branch fails because it imports from a new module created in another branch
 ### 5b: Version Bump
 
 Only if ALL category branches pass build:
-1. Pick the first category branch (e.g., `better/security`) for the version bump
+1. Set `FIRST_CATEGORY` to the first category slug that has a branch (e.g., `security` if it exists, otherwise the next in order)
 2. Analyze all commits across ALL category branches to determine the aggregate SemVer bump:
    - Any `breaking:` or `BREAKING CHANGE` → **major**
    - Any `feat:` → **minor**
@@ -732,7 +732,7 @@ Test Enhancement Stats:
 - **CI failure on PR**: investigate logs, fix in a new commit, push, re-check (max 3 attempts per PR)
 - **Cross-PR dependency breakage**: add backward-compatible re-exports or move shared files to the PR that creates them
 - **Copilot timeout** (review not received within decreasing timeout window): inform user, offer to merge without review approval or wait longer
-- **Copilot review loop exceeds 5 iterations per PR**: stop iterating on that PR, inform user, proceed to merge
+- **Copilot review loop exceeds 10 iterations per PR**: sub-agent hits guardrail and reports back; ask user whether to continue or stop
 - **Existing worktree found at startup**: ask user — resume (reuse worktree) or cleanup (remove and start fresh)
 - **No findings above LOW**: skip Phases 3-7, print "No actionable findings" with the LOW summary
 - **Merge conflict after prior PR merged**: rebase the branch onto the updated default branch, push with `--force-with-lease`, re-run CI

@@ -119,11 +119,18 @@ Check every file against this checklist. The checklist is organized into tiers �
 **Guard-before-cache ordering**
 - If a handler performs a pre-flight guard check (rate limit, quota, feature flag) before a cache lookup or short-circuit path, verify the guard doesn't block operations that would be served from cache without touching the guarded resource — restructure so cache hits bypass the guard
 
-**Sanitization/validation coverage**
-- If the PR introduces a new validation or sanitization function for a data field, trace every code path that writes to that field (create, update, import, sync, rename) — verify they all use the same sanitization. Partial application is the #1 way invalid data re-enters through an unguarded path
+**Sanitization/validation/normalization coverage**
+- If the PR introduces a new validation or sanitization function for a data field, trace every code path that writes to that field (create, update, import, sync, rename, raw/bulk persist) — verify they all use the same sanitization. Partial application is the #1 way invalid data re-enters through an unguarded path
+- If the PR adds a "raw" or bypass write path (e.g., `raw: true` flag, bulk import, migration backfill), compare the normalization it applies against what the standard read/parse path assumes — ID prefixes, required defaults, shape invariants. Data that passes through the raw path must still be valid when reloaded through the normal path
 
 **Bootstrap/initialization ordering**
 - If the PR adds resilience or self-healing code (dependency installers, auto-repair, migration runners), trace the execution order: does the main code path resolve or import the dependencies BEFORE the resilience code runs? If so, the bootstrapper never executes when it's needed most — restructure so verification/installation precedes resolution
+
+**Self-rescheduling callback resilience**
+- If the PR adds a one-shot timer or deferred callback that re-registers itself for the next cycle, trace what happens when the callback body throws before re-registration — an unhandled error permanently stops the schedule. Verify re-registration is in a finally block or occurs before the main logic
+
+**Periodic operation skip behavior**
+- If the PR adds skip/gate conditions to periodic operations (scheduled jobs, pollers), trace whether a skip still advances the scheduling state (lastRun, nextFireTime). A skipped execution with null/stale timing state causes immediate re-trigger loops
 
 **Lock/flag exit-path completeness**
 - If a function sets a shared flag or lock (in-progress, mutex, status marker), trace every exit path — early returns, error catches, platform-specific guards, and normal completion — to verify the flag is cleared. A missed path leaves the system permanently locked
@@ -133,6 +140,12 @@ Check every file against this checklist. The checklist is organized into tiers �
 
 **Real-time event vs response timing**
 - If a handler emits push notifications (WebSocket, SSE, pub/sub) AND returns an HTTP response, verify clients won't receive push events before the response that gives them context to interpret those events — especially when the response contains IDs or version numbers the event consumer needs
+
+**Paired lifecycle event completeness**
+- If a function emits a "started" or "begin" event, trace every exit path (success, error, early return, no-op branches for specific entity types) and verify each emits the corresponding "completed" or "failed" event. A missing completion event leaves consumers (UI spinners, progress indicators, orchestrators waiting for all-done) in a permanently stale state. Pay special attention to branches that short-circuit for specific entity subtypes — they often return early without the completion event because the author only considered the primary code path
+
+**Entity identity key consistency**
+- If the PR uses a computed identity key to look up, match, or index entities (e.g., `e.id || e.externalId`, `item.slug ?? item.name`), trace all other code paths that perform the same entity lookup and verify they use the identical key computation. Inconsistent key strategies cause mismatches — one path stores data under key A while another reads under key B, leading to phantom missing records or incorrect counts
 
 **Intent vs implementation (meta-cognitive pass)**
 - For each label, comment, docstring, status message, or inline instruction that describes behavior, verify the code actually implements that behavior. A detection mechanism must query the data it claims to detect; a migration must create the target, not just delete the source
@@ -178,13 +191,32 @@ Check every file against this checklist. The checklist is organized into tiers �
 
 **Abstraction layer fidelity**
 - If the PR calls a third-party API through an internal wrapper/abstraction layer, trace whether the wrapper requests and forwards all fields the handler depends on — third-party APIs often have optional response attributes that require explicit opt-in (e.g., cancellation reasons, extended metadata). Code branching on fields the wrapper doesn't forward will silently receive `undefined` and take the wrong path. Also verify that test mocks match what the real wrapper returns, not what the underlying API could theoretically return
+- If the PR passes multiple parameters through a wrapper/abstraction layer to an underlying API, check whether any parameter combinations are mutually exclusive in the underlying API (e.g., projection expressions + count-only select modes) — the wrapper should strip conflicting parameters rather than forwarding all unconditionally, which causes validation errors at the underlying layer
+
+**Summary/aggregation endpoint consistency**
+- If the PR adds a summary or dashboard endpoint that aggregates counts/previews across multiple data sources, trace each category's computation logic against the corresponding detail view it links to — verify they apply the same filters (e.g., orphan exclusion, status filtering), the same ordering guarantees (sort keys that actually exist on the queried index), and that navigation links propagate the aggregated context (e.g., `?status=pending`) so the destination page matches what the summary promised
 
 **Data model / status lifecycle changes**
 - If the PR changes the set of valid statuses, enum values, or entity lifecycle states, sweep all dependent artifacts: API doc summaries and enum declarations, UI filter/tab options, conditional rendering branches (which actions to show per state), integration guide examples, route names derived from old status names, and test assertions. Each artifact that references the old value set must be updated — partial updates leave stale filters, invalid actions, and misleading documentation
 - If the PR renames a concept (e.g., "flagged" → "rejected"), trace all manifestations beyond user-facing labels: route paths, component/file names, variable names, CSS classes, and test descriptions. Internal identifiers using the old name create confusion even when the UI is correct
 
+**Type-discriminated entity validation**
+- If the PR modifies entities with a discriminator field (type, kind, category), trace all code paths that change the discriminator value — not just the update handler, but also migration paths, bulk operations, and UI type-switchers. Verify downstream branching logic (execution, rendering, validation) handles all type transitions without falling through to the wrong handler
+
+**Migration/initialization idempotency**
+- If the PR adds a startup-time migration or one-time initialization, verify it is idempotent — what happens when it runs a second time? Check that the migration condition excludes already-migrated records and that completion is recorded (version stamp, flag) to prevent re-entry on every load
+
+**Data migration semantic preservation**
+- If the PR includes a data migration, trace each migrated field's behavioral meaning before and after. Focus on: migration-time validation matching runtime validation (don't persist values that will fail at execution), concurrency protection (migrations triggered by read paths race with concurrent requests), and unsupported source values being flagged rather than silently defaulted
+
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
+
+**Bulk vs single-item operation parity**
+- If the PR modifies a single-item CRUD operation (create, update, delete) to handle new fields or apply new logic, trace the corresponding bulk/batch operation for the same entity — it often has its own independent implementation that won't pick up the change. Verify both paths handle the same fields, apply the same validation, and preserve the same secondary data
+
+**Config value provenance for auto-upgrade**
+- If the PR adds auto-upgrade logic that replaces config values with newer defaults (prompt versions, schema migrations, template updates), verify the code can distinguish "user customized this value" from "this is the previous default." Without provenance tracking (version stamps, customization flags, or comparison against known previous defaults), auto-upgrade will overwrite intentional user customizations or skip legitimate upgrades
 
 **Query key / stored key precision alignment**
 - If the PR adds queries that construct lookup keys with a different precision, encoding, or format than what the write path persists, the query will silently return zero matches. Trace the key construction in both write and read paths and verify they produce compatible values
@@ -239,3 +271,18 @@ Print a summary table of what was reviewed and found:
 If no issues were found, confirm the code is clean and ready for PR.
 
 </fix_and_report>
+
+<pr_comment_policy>
+
+## PR Comment Policy
+
+After the review and any fixes, determine whether to post review comments on the PR/MR:
+
+1. **Check for an open PR** on the current branch: `gh pr view --json number,author --jq '{number, author: .author.login}' 2>/dev/null`. If the command fails (no PR exists), skip posting.
+2. **Get the current user**: `gh api user -q '.login'`
+3. **Compare**: If the PR author login **matches** the current user, do NOT post comments to the PR — the local fixes and summary are sufficient.
+4. **If the PR was opened by someone else**, post a review comment on the PR summarizing the findings using `gh pr review {number} --comment --body "..."`. Include the issues found, fixes applied, and any remaining items that need the author's attention.
+
+This avoids noisy self-comments on your own PRs while still providing feedback to other contributors.
+
+</pr_comment_policy>

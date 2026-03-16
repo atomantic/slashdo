@@ -23,7 +23,7 @@ banner() {
 }
 
 COMMANDS=(
-  better fpr goals help omd
+  better better-swift fpr goals help omd
   pr push release replan review rpr update
 )
 
@@ -32,7 +32,7 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
 LIBS=(
   code-review-checklist copilot-review-loop graphql-escaping
-  remediation-agent-template
+  remediation-agent-template swift-review-checklist
 )
 
 HOOKS=(slashdo-check-update slashdo-statusline)
