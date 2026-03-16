@@ -120,7 +120,17 @@ TEST_CMD="swift test"
 
 First, derive an available simulator dynamically:
 ```bash
-SIM_DEST=$(xcrun simctl list devices available -j | python3 -c "import json,sys; devs=[d['name'] for rt in json.load(sys.stdin)['devices'].values() for d in rt if d['isAvailable']]; print(devs[0] if devs else 'iPhone 16')")
+SIM_DEST=$(xcrun simctl list devices available -j | python3 -c "
+import json, sys
+devices = json.load(sys.stdin)['devices']
+# Pick the first available iPhone from the latest runtime to avoid ambiguity
+for rt in sorted(devices.keys(), reverse=True):
+    for d in devices[rt]:
+        if d['isAvailable'] and 'iPhone' in d['name']:
+            print(f\"{d['name']},OS={rt.split('.')[-3].replace('SimRuntime-iOS-','').replace('-','.')}\")
+            sys.exit(0)
+print('iPhone 16')
+")
 ```
 
 Then construct the build and test commands. Execute these directly (not via shell variable expansion) to avoid quoting issues:
@@ -728,7 +738,7 @@ Only if ALL category branches pass build on ALL platforms:
    agvtool new-marketing-version {NEW_VERSION}
    # Bump CFBundleVersion (build number)
    agvtool next-version -all
-   git add $(git diff --name-only -- '*.plist' '*.pbxproj')  # stage only files agvtool actually modified
+   git diff --name-only -z -- '*.plist' '*.pbxproj' | xargs -0 git add  # stage only files agvtool modified
    git commit -m "chore: bump version to {NEW_VERSION}"
    git push
    ```
