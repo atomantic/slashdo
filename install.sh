@@ -20,7 +20,7 @@ fi
 fetch_file() {
   local src_path="$1"
   local dest="$2"
-  if $LOCAL_MODE && [ -f "$SCRIPT_DIR/$src_path" ]; then
+  if [ "$LOCAL_MODE" = true ] && [ -f "$SCRIPT_DIR/$src_path" ]; then
     cp "$SCRIPT_DIR/$src_path" "$dest" 2>/dev/null && return 0
   fi
   # Fallback to curl (remote mode, or local cp failed)
@@ -299,7 +299,7 @@ if [ ${#envs[@]} -eq 0 ]; then
   exit 1
 fi
 
-if $LOCAL_MODE; then
+if [ "$LOCAL_MODE" = true ]; then
   printf "  Source: ${GREEN}local${RESET} (${DIM}$SCRIPT_DIR${RESET})\n"
 else
   printf "  Source: ${GREEN}github${RESET} (${DIM}$BASE_URL${RESET})\n"

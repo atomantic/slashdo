@@ -117,11 +117,16 @@ TEST_CMD="swift test"
 ```
 
 **Xcode project (single platform):**
+
+First, derive an available simulator dynamically:
 ```bash
-# Derive an available simulator dynamically:
 SIM_DEST=$(xcrun simctl list devices available -j | python3 -c "import json,sys; devs=[d['name'] for rt in json.load(sys.stdin)['devices'].values() for d in rt if d['isAvailable']]; print(devs[0] if devs else 'iPhone 16')")
-BUILD_CMD="xcodebuild -scheme {SCHEME} -destination 'generic/platform=iOS Simulator' build"
-TEST_CMD="xcodebuild -scheme {SCHEME} -destination 'platform=iOS Simulator,name=$SIM_DEST' test"
+```
+
+Then construct the build and test commands. Execute these directly (not via shell variable expansion) to avoid quoting issues:
+```bash
+xcodebuild -scheme {SCHEME} -destination "generic/platform=iOS Simulator" build
+xcodebuild -scheme {SCHEME} -destination "platform=iOS Simulator,name=$SIM_DEST" test
 ```
 
 **Xcode project (multi-platform) — build and test for each platform in `PLATFORMS`:**
