@@ -212,6 +212,10 @@ Check every file against this checklist. The checklist is organized into tiers �
 **Formatting & structural consistency**
 - If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
 
+**Dependent operation ordering**
+- If a handler orchestrates multiple operations (primary write + side effects like rewards, uploads, notifications), trace the dependency graph — verify side effects only execute after the primary operation confirms success. Watch for `Promise.all` grouping operations that should be sequential because one depends on the other's outcome, and for resource allocation (file uploads, external API calls) happening before a gate operation (lock acquisition, uniqueness check, validation) that may reject the request
+- If the PR handles file uploads or binary data, verify the server validates content independently of client-supplied metadata — check MIME type via magic bytes, size via buffer length, and content validity via actual parsing rather than trusting request headers or middleware-provided fields
+
 **Bulk vs single-item operation parity**
 - If the PR modifies a single-item CRUD operation (create, update, delete) to handle new fields or apply new logic, trace the corresponding bulk/batch operation for the same entity — it often has its own independent implementation that won't pick up the change. Verify both paths handle the same fields, apply the same validation, and preserve the same secondary data
 
