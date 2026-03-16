@@ -255,6 +255,8 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - `withAnimation` wrapping async operations — only synchronous state changes animate
    - Race conditions: concurrent `Task`s modifying shared `@State` without actor isolation
    - `Task.detached` with `[self]` (strong capture) — use `[weak self]` for cancelable work
+   - Keychain operations (`SecItemAdd`/`SecItemCopyMatching`) that silently fail in Simulator test environments — add in-memory key cache as fallback so encrypt-then-decrypt roundtrips don't break in tests
+   - `.foregroundStyle(.accentColor)` doesn't compile — `ShapeStyle` has no `.accentColor`; use `Color.accentColor` explicitly
 
 ### Batch 2 (2 agents after Batch 1 completes):
 
@@ -277,6 +279,17 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - Missing `Settings` scene for macOS apps
    - watchOS complications not updated, widget timelines not refreshed
    - visionOS: missing `.windowStyle(.volumetric)` or `.immersionStyle()` where appropriate
+
+   **Build system & project configuration (when XcodeGen/Tuist detected):**
+   - `GENERATE_INFOPLIST_FILE: false` with custom Info.plist missing standard keys (`CFBundleIdentifier`, `CFBundleExecutable`, `CFBundlePackageType`) — causes "Missing bundle ID" on simulator install despite correct `PRODUCT_BUNDLE_IDENTIFIER`. Fix: set `GENERATE_INFOPLIST_FILE: true` to let Xcode merge custom keys with generated ones
+   - Preview Content directory with `buildPhase: none` excluding Swift files that are needed at runtime (e.g., `PreviewSampleData.swift` used via launch arguments) — only exclude the `.xcassets`, not the whole directory
+   - `UILaunchScreen` key manually added to Info.plist but lost on `xcodegen generate` — XcodeGen regenerates the plist from `info.properties` only; put `UILaunchScreen: {}` in `project.yml` not the plist file. Missing this causes iOS letterbox/compatibility mode
+   - Info.plist keys required for TestFlight upload that don't cause build failures: `UISupportedInterfaceOrientations` must include all 4 orientations for iPad multitasking (or declare `UIRequiresFullScreen`), and `CFBundleDocumentTypes` requires `LSSupportsOpeningDocumentsInPlace` — these are rejected server-side by `altool`, not at build time
+   - CI upload actions (`apple-actions/upload-testflight-build`) that report success even when `altool` returns "UPLOAD FAILED" in XML plist output — always check raw upload logs, not just job status
+
+   **iCloud & data persistence (when iCloud entitlements detected):**
+   - `url(forUbiquityContainerIdentifier:)` returning non-nil does NOT mean the container is accessible — always verify with `createDirectory` + `contentsOfDirectory` using `do/catch` (not `try?`) and fall back to local Documents directory on failure
+   - `try?` on iCloud file operations silently swallowing permission errors — app appears to work but reads/writes to inaccessible path with empty results
 
    **SwiftUI best practices (ALL projects):**
    - Deprecated APIs: `NavigationView` (use `NavigationStack`/`NavigationSplitView`), `onChange(of:perform:)` one-parameter form (use two-parameter), `.onAppear` for async work (use `.task`)
