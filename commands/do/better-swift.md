@@ -584,6 +584,7 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
    - Return to the **main worktree** (the original repo checkout) for merge and cleanup:
      ```bash
      cd {ORIGINAL_REPO_DIR}
+     git checkout {CURRENT_BRANCH}
      git merge better-swift/{DATE}
      git worktree remove {WORKTREE_DIR}
      git branch -D better-swift/{DATE}

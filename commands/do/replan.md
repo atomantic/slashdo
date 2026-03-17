@@ -161,7 +161,8 @@ If tactical items (checkboxes, implementation details) were found in GOALS.md:
 Stage and commit all changes:
 ```bash
 git add PLAN.md DONE.md
-# Also add any docs/ files if documentation was extracted
+# Also add GOALS.md if it was modified, and any docs/ files if documentation was extracted
+git diff --name-only --cached | grep -q GOALS.md || git add GOALS.md 2>/dev/null || true
 git commit -m "docs: replan — archive {N} completed items, update priorities"
 ```
 
