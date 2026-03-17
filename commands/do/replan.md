@@ -158,11 +158,12 @@ If tactical items (checkboxes, implementation details) were found in GOALS.md:
 
 ## Phase 7: Commit
 
-Stage and commit all changes:
+Stage and commit all files modified during this replan:
 ```bash
 git add PLAN.md DONE.md
-# Also add GOALS.md if it was modified, and any docs/ files if documentation was extracted
-git diff --name-only --cached | grep -q GOALS.md || git add GOALS.md 2>/dev/null || true
+# Also stage GOALS.md and docs/ if they were modified
+git add GOALS.md 2>/dev/null || true
+git add docs/ 2>/dev/null || true
 git commit -m "docs: replan — archive {N} completed items, update priorities"
 ```
 

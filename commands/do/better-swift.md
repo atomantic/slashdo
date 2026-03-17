@@ -575,17 +575,17 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
    ```
 5. If "Show diff" selected, print the diff and re-ask. If "Abort", stop and print the worktree path.
 6. If "Commit directly" selected:
-   - In `{WORKTREE_DIR}` (which has `better-swift/{DATE}` checked out):
+   - Commit in the worktree (which has `better-swift/{DATE}` checked out):
      ```bash
      cd {WORKTREE_DIR}
      git add -A
-     git commit -m "fix: better-swift audit remediation — {N} findings across {M} categories"
+     git commit -m "fix: better-swift audit remediation — {N} findings across {CATEGORY_COUNT} categories"
      ```
-   - Return to the **main worktree** (the original repo checkout) for merge and cleanup:
+   - Return to the main repo checkout, verify the correct branch, merge, and clean up only on success:
      ```bash
-     cd {ORIGINAL_REPO_DIR}
+     cd {WORKTREE_DIR}/..
      git checkout {CURRENT_BRANCH}
-     git merge better-swift/{DATE}
+     git merge better-swift/{DATE} || { echo "Merge conflict — resolve in $(pwd) then re-run cleanup"; exit 1; }
      git worktree remove {WORKTREE_DIR}
      git branch -D better-swift/{DATE}
      ```
