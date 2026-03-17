@@ -396,7 +396,7 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
      git worktree remove {WORKTREE_DIR}
      git branch -D better/{DATE}
      ```
-   - Restore stash if needed, update PLAN.md, then **skip to Phase 7** (no PRs, no Copilot review, no CI polling, no category branch cleanup since none were created)
+   - Restore stash if needed (`git stash pop`), update PLAN.md, print final summary, then **stop** — this completes the workflow (Phases 5, 6, and 7 are skipped entirely since no PRs or category branches were created)
 
 ## Phase 4c: Test Enhancement
 
