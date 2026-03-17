@@ -567,7 +567,7 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
      question: "Code review complete. {N} issues found and fixed. {list}. All {PLATFORMS} platforms build and test successfully. Proceed to PR creation?",
      options: [
        { label: "Proceed", description: "Create per-category PRs" },
-       { label: "Commit directly", description: "Commit all changes to this branch — no PRs, no review loops" },
+       { label: "Commit directly", description: "Merge worktree changes into {CURRENT_BRANCH} — no PRs, no review loops" },
        { label: "Show diff", description: "Show the full diff for manual review before proceeding" },
        { label: "Abort", description: "Stop here — I'll review manually" }
      ]
@@ -583,7 +583,12 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
      git checkout {CURRENT_BRANCH}
      git merge better/{DATE}
      ```
-   - Clean up the worktree and branch, restore stash if needed, update PLAN.md, then **skip to Phase 7 cleanup** (no PRs, no Copilot review, no CI polling)
+   - Clean up the worktree and staging branch from `{CURRENT_BRANCH}` (do NOT check out `{DEFAULT_BRANCH}` — the merge target is `{CURRENT_BRANCH}`):
+     ```bash
+     git worktree remove {WORKTREE_DIR}
+     git branch -D better-swift/{DATE}
+     ```
+   - Restore stash if needed, update PLAN.md, then **skip to Phase 7** (no PRs, no Copilot review, no CI polling, no category branch cleanup since none were created)
 
 ## Phase 4c: Test Enhancement
 
