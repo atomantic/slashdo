@@ -579,7 +579,7 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
    - Commit in the worktree (which has `better-swift/{DATE}` checked out):
      ```bash
      cd {WORKTREE_DIR}
-     git add -A
+     git add <list of files changed during remediation>
      git commit -m "fix: better-swift audit remediation — {N} findings across {CATEGORY_COUNT} categories"
      ```
    - Return to the main repo checkout, verify the correct branch, merge, and clean up only on success:

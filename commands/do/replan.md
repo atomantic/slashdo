@@ -71,14 +71,16 @@ AskUserQuestion([{
     { label: "Archive confirmed-done", description: "Move {N} confirmed items to DONE.md" },
     { label: "Archive likely-done too", description: "Also move {M} likely-done items to DONE.md" },
     { label: "Remove stale items", description: "Delete {S} stale items from PLAN.md" },
-    { label: "Add suggested items", description: "Add {P} new items to PLAN.md" },
-    { label: "Show me the details", description: "Print full evidence before I decide" },
-    { label: "Just clean up formatting", description: "Only reformat PLAN.md, don't change content" }
+    { label: "Add suggested items", description: "Add {P} new items to PLAN.md" }
   ]
 }])
 ```
 
-If "Show me the details" is selected, print the full evidence and re-ask.
+**Exclusive options** (present only if the user asks, as a separate follow-up):
+- "Show me the details" — print full evidence, then re-ask the above
+- "Just clean up formatting" — only reformat PLAN.md, skip all archive/remove/add actions
+
+If the user selects "Show me the details" as a response, print the full evidence and re-ask.
 
 For suggested new items: if the user selects "Add suggested items", present each suggestion individually so they can accept, reject, or modify each one.
 
@@ -160,8 +162,9 @@ If tactical items (checkboxes, implementation details) were found in GOALS.md:
 
 Stage and commit all files modified during this replan:
 ```bash
-git add PLAN.md DONE.md
-# Also stage GOALS.md and docs/ if they were modified
+git add PLAN.md
+# Stage optional files only if they exist and were modified
+git add DONE.md 2>/dev/null || true
 git add GOALS.md 2>/dev/null || true
 git add docs/ 2>/dev/null || true
 git commit -m "docs: replan — archive {N} completed items, update priorities"
