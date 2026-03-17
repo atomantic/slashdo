@@ -56,7 +56,7 @@ When compacting during this workflow, always preserve:
 - All CRITICAL/HIGH findings with file:line references
 - The current phase number and what phases remain
 - All PR numbers and URLs created so far
-- `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR` values
+- `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR`, `REPO_DIR` values
 - `VCS_HOST`, `CLI_TOOL`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
 - `PHASE_4C_START_SHA` (needed for FILE_OWNER_MAP update in Phase 4c.3)
 - `VACUOUS_TESTS_FIXED`, `WEAK_TESTS_STRENGTHENED`, `NEW_TEST_CASES`, `NEW_TEST_FILES`
@@ -96,6 +96,7 @@ Derive build and test commands from the project type:
 Record as `BUILD_CMD` and `TEST_CMD`.
 
 ### 0d: State Snapshot
+- Record `REPO_DIR` via `git rev-parse --show-toplevel`
 - Record `CURRENT_BRANCH` via `git rev-parse --abbrev-ref HEAD`
 - Record `DEFAULT_BRANCH` via `gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'` (or `glab` equivalent)
 - Record `IS_DIRTY` via `git status --porcelain`
@@ -375,12 +376,36 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
      question: "Code review complete. {N} issues found and fixed. {list}. Proceed to PR creation?",
      options: [
        { label: "Proceed", description: "Create per-category PRs" },
+       { label: "Commit directly", description: "Merge worktree changes into {CURRENT_BRANCH} — no PRs, no review loops" },
        { label: "Show diff", description: "Show the full diff for manual review before proceeding" },
        { label: "Abort", description: "Stop here — I'll review manually" }
      ]
    }])
    ```
 5. If "Show diff" selected, print the diff and re-ask. If "Abort", stop and print the worktree path.
+6. If "Commit directly" selected:
+   - All remediation and review fixes are already committed incrementally in the worktree branch `better/{DATE}`. If any uncommitted changes remain, stage and commit them now:
+     ```bash
+     cd {WORKTREE_DIR}
+     git diff --quiet && git diff --cached --quiet || {
+       git add <list of remaining changed files>
+       git commit -m "fix: better audit remediation — remaining changes"
+     }
+     ```
+   - Return to the main repo checkout, merge the worktree branch, and clean up on success:
+     ```bash
+     cd {REPO_DIR}
+     git checkout {CURRENT_BRANCH}
+     if git merge better/{DATE}; then
+       git worktree remove {WORKTREE_DIR}
+       git branch -D better/{DATE}
+     else
+       echo "Merge conflict — resolve in {REPO_DIR}, then run:"
+       echo "  git worktree remove {WORKTREE_DIR}"
+       echo "  git branch -D better/{DATE}"
+     fi
+     ```
+   - Restore stash if needed (`git stash pop`), update PLAN.md, print final summary, then **stop** — this completes the workflow (Phases 5, 6, and 7 are skipped entirely since no PRs or category branches were created)
 
 ## Phase 4c: Test Enhancement
 

@@ -1,212 +1,181 @@
 ---
-description: Review and clean up PLAN.md, extract docs from completed work
+description: Automated audit/triage of PLAN.md — archive completed items to DONE.md, suggest new work, keep PLAN.md lean
 ---
 
 # Replan Command
 
-You are tasked with reviewing and updating the PLAN.md file to keep it clean, current, and action-oriented.
+Automatically audit PLAN.md against the codebase, prune completed/stale items, archive what's done, suggest new work, and leave PLAN.md lean and actionable.
 
-**This is an interactive process.** Do NOT assume items are still pending or still relevant. Verify with the user.
+**Philosophy:** PLAN.md should be short enough to paste into a prompt. Completed items belong in a done log, not cluttering the active plan.
 
 ## Boundary Rule: PLAN.md vs GOALS.md
 
 **PLAN.md is tactical. GOALS.md is strategic.**
 
-PLAN.md answers: *What are we building next? What's the backlog? What's done?*
+PLAN.md answers: *What are we building next? What's the backlog?*
 GOALS.md answers: *Why does this project exist? What does success look like? What will we never do?*
 
-**PLAN.md owns:**
-- Checkbox task lists (`- [ ] Add feature X`)
-- Implementation details, subtasks, and technical steps
-- Known issues and testing gaps
-- Prioritized next-action lists
-- Completed work archive
-- Documentation index
-
-**PLAN.md must NOT duplicate:**
+**PLAN.md must NOT contain:**
 - Mission statements, core tenets, or non-goals (those belong in GOALS.md)
-- Milestone definitions written as outcome prose (GOALS.md territory)
+- Completed items (those belong in `DONE.md`)
+- Detailed documentation (those belong in `docs/`)
 
-**Cross-reference:** PLAN.md should link to GOALS.md for strategic context, and GOALS.md should link back to PLAN.md for tactical details.
+## Phase 1: Automated Evidence Gathering
 
-## Your Responsibilities
+Launch these agents in parallel — no user interaction needed yet.
 
-### 1. Gather Evidence
+**Agent 1: Git History Analysis**
+- `git log --oneline -50` — identify commits that completed plan items
+- `git log --since="2 weeks ago" --oneline` — surface recent work not yet reflected in the plan
+- Cross-reference commit messages against pending PLAN.md items to auto-detect completions
 
-Before touching PLAN.md, gather signals about what's actually happened since the plan was last updated. Run these in parallel:
-
-**Agent 1: Git History**
-```bash
-git log --oneline -30
-```
-Look for commits that may have completed items listed in PLAN.md.
-
-**Agent 2: Codebase Scan**
-Search for evidence that "pending" items may already be implemented:
-- Grep for function names, component names, or feature keywords mentioned in pending items
+**Agent 2: Codebase Verification**
+- For each pending item in PLAN.md, grep for function names, component names, or feature keywords
 - Check test files for coverage of features listed as untested
 - Look at recently modified files for signs of completed work
+- Build a confidence score per item: `confirmed-done`, `likely-done`, `still-pending`, `stale`
 
-**Agent 3: GOALS.md Boundary Check**
+**Agent 3: Opportunity Scanner**
+- Scan for TODOs, FIXMEs, HACKs in the codebase that aren't in PLAN.md
+- Look for test coverage gaps (files with no corresponding test)
+- Check for outdated dependencies (`npm outdated`, `cargo outdated`, etc. as appropriate)
+- Review GOALS.md (if it exists) for strategic goals not yet represented in the plan
+- Identify code quality opportunities (large files, complex functions, missing error handling)
+- Formulate 1-3 suggested new items to propose to the user
+
+**Agent 4: GOALS.md Boundary Check**
 If `GOALS.md` exists:
-- Read it and check for checkbox task lists or implementation details that leaked in
+- Check for checkbox task lists or implementation details that leaked in
 - Note any items that should be absorbed into PLAN.md
 
-### 2. Interactive Item Review
+## Phase 2: Auto-Triage (No User Input)
 
-**This is the most important step. Do NOT skip it.**
+Using agent results, automatically classify every PLAN.md item:
 
-Walk through PLAN.md with the user, section by section. For each section that has pending items, present your findings and ask the user to confirm status.
+| Status | Criteria | Action |
+|--------|----------|--------|
+| `confirmed-done` | Git commit + code exists + tests pass | Move to DONE.md |
+| `likely-done` | Strong evidence but not 100% certain | Present to user for confirmation |
+| `stale` | No commits, no code, no recent discussion; item is >30 days old with zero progress | Flag for removal |
+| `still-pending` | No evidence of completion | Keep in PLAN.md |
 
-**For each group of related pending items**, use `AskUserQuestion` to verify. Batch related items together (don't ask one-by-one for 20 items). For example:
+## Phase 3: Single Interactive Checkpoint
+
+Present ONE consolidated summary to the user. Keep it tight:
 
 ```
-I found these items still marked as pending under "Testing Gaps":
-- [ ] Server route unit tests
-- [ ] Aggregate calculation tests
-- [ ] Visual regression tests for charts
-
-Git history shows commits for "add server route tests" on Feb 15.
-I also found test files at packages/server/test/routes/.
-
-Which of these are actually done?
+AskUserQuestion([{
+  question: "Replan audit complete. Here's what I found:\n\n**Auto-archiving to DONE.md** ({N} items):\n{list of confirmed-done items}\n\n**Likely done — confirm?** ({M} items):\n{list with evidence}\n\n**Flagged as stale** ({S} items):\n{list with last-activity dates}\n\n**New suggestions** ({P} items):\n{numbered list of proposed new items with rationale}\n\nHow should I proceed?",
+  multiSelect: true,
+  options: [
+    { label: "Archive confirmed-done", description: "Move {N} confirmed items to DONE.md" },
+    { label: "Archive likely-done too", description: "Also move {M} likely-done items to DONE.md" },
+    { label: "Remove stale items", description: "Delete {S} stale items from PLAN.md" },
+    { label: "Add suggested items", description: "Add {P} new items to PLAN.md" }
+  ]
+}])
 ```
 
-**How to batch the review:**
-- Group items by section (Next Up, Remaining Work, Future, etc.)
-- Present each group with any evidence you found (git commits, files that exist, grep matches)
-- Ask the user to confirm: which are done, which are still needed, which should be removed or rephrased
-- Use multiSelect questions when asking about multiple items (let the user check off what's done)
-- If a section has no evidence of changes, still ask briefly: "These items under [section] — still accurate, or any updates?"
+**Exclusive options** (present only if the user asks, as a separate follow-up):
+- "Show me the details" — print full evidence, then re-ask the above
+- "Just clean up formatting" — only reformat PLAN.md, skip all archive/remove/add actions
 
-**For known issues**, ask whether they're still reproducible or have been fixed.
+If the user selects "Show me the details" as a response, print the full evidence and re-ask.
 
-**For "Next Actions" / priority ordering**, ask if the priorities still reflect the user's current thinking.
+For suggested new items: if the user selects "Add suggested items", present each suggestion individually so they can accept, reject, or modify each one.
 
-### 3. Extract Documentation from Completed Work
+## Phase 4: Archive to DONE.md
 
-For each completed item with substantial documentation:
-- Determine the appropriate docs location (create docs/ directory if needed)
-- Extract the detailed documentation sections
-- Move them to appropriate docs files with proper formatting
-- Follow existing documentation patterns if they exist
+`DONE.md` lives at project root. It's the append-only log of completed work.
 
-**Common docs files to consider:**
-- `docs/ARCHITECTURE.md` - System design, data flow, architecture
-- `docs/API.md` - API endpoints, schemas, events
-- `docs/TROUBLESHOOTING.md` - Common issues and solutions
-- `docs/features/*.md` - Individual feature documentation
-- `README.md` - User-facing documentation
+### Format
 
-### 4. Clean Up PLAN.md
-
-Using the verified information from the interactive review:
-- Mark confirmed-completed items as [x] and move to archive
-- Remove items the user confirmed are no longer relevant
-- Update wording for items the user rephrased
-- Replace detailed documentation with brief summaries + doc links
-- Remove redundant or outdated information
-
-**Example transformation:**
 ```markdown
-Before:
-- [x] Feature X: Authentication System
+# Done Log
 
-### Architecture
-- **Auth Service**: Core authentication logic
-- **JWT Tokens**: Token generation and validation
-[... 50 more lines of detailed docs ...]
+Completed items archived from PLAN.md. For release notes, see `.changelogs/`.
 
-After:
-- [x] Feature X: Authentication System - JWT-based auth with session management. See [Authentication](./docs/features/authentication.md)
+## 2026-03-16
+
+- Implemented feature X — added auth middleware and JWT validation
+- Fixed bug Y — null check on user profile load
+- Refactored Z — extracted shared utilities from monolithic handler
+
+## 2026-03-10
+
+- Added CI pipeline for staging deploys
+- Test coverage for API routes
 ```
 
-### 5. Update Documentation Index
-- Ensure PLAN.md references all relevant docs files
-- Add any new docs files you created
-- Verify all links are correct
-- Add a Documentation section if it doesn't exist
+### Rules
 
-### 6. Rewrite Next Actions
+- Group by date (newest first)
+- One line per item — concise description of what was done, not the original checkbox text
+- If the completed item had substantial documentation (>20 lines), extract it to `docs/` and add a link: `- Feature X — see [docs/features/x.md](./docs/features/x.md)`
+- Do NOT duplicate changelog entries — DONE.md captures plan-item completion, changelogs capture release-level changes
 
-Based on the interactive review, rebuild the "Next Actions" section:
-- Ask the user: "Based on what's left, what are your top 3-5 priorities right now?"
-- Present a suggested ordering based on what you learned, but let the user override
-- Make action items specific and actionable
+## Phase 5: Rebuild PLAN.md
 
-### 7. Absorb GOALS.md Violations
+Rewrite PLAN.md to be lean and actionable:
 
-If you found checkbox items or tactical details in GOALS.md during step 1:
-- Show the user what you found
-- Offer to move them into the appropriate PLAN.md section
-- Update GOALS.md to remove the tactical items (replace with outcome prose or remove entirely)
+### Target Structure
 
-### 8. Commit Your Changes
-After reorganizing (if in a git repository):
-- Commit changes with a clear message like:
-  ```
-  docs: reorganize PLAN.md and extract completed work to docs
-
-  - Moved completed feature docs to docs/features/
-  - Updated PLAN.md to focus on next actions
-  - Added Next Actions section
-  ```
-
-## Guidelines
-
-- **Verify, don't assume**: The whole point of this command is to sync PLAN.md with reality. Never mark items as done or still-pending without checking.
-- **Be thorough**: Read all completed items and assess documentation value
-- **Be surgical**: Only move substantial documentation (>20 lines), keep brief summaries in PLAN
-- **Be organized**: Group related content in docs files with clear headings
-- **Be consistent**: Match the style and format of existing docs files
-- **Be helpful**: Make it easy to find information by adding clear references
-- **Respect boundaries**: Tactical items in PLAN.md, strategic items in GOALS.md
-- **Batch intelligently**: Don't ask 20 individual questions — group related items and ask about sections at a time. Aim for 3-6 interactive checkpoints, not 20.
-
-## Example Output Structure
-
-After running `/replan`, the PLAN.md should have:
 ```markdown
-# Project Name - Development Plan
+# Development Plan
 
-The tactical backlog. For mission and milestones, see [GOALS.md](./GOALS.md).
-
-## Documentation
-- [Architecture Overview](./docs/ARCHITECTURE.md)
-- [API Reference](./docs/API.md)
+For project mission and milestones, see [GOALS.md](./GOALS.md).
+For completed work, see [DONE.md](./DONE.md).
 
 ## Next Up
-- [ ] Feature C: Brief description with subtasks
 
-## Remaining Work
-### Known Issues
-- ...
-### Testing Gaps
-- [ ] ...
+1. **Item A**: Brief actionable description
+2. **Item B**: Brief actionable description
+3. **Item C**: Brief actionable description
 
-## Future (v2.0+)
-- [ ] Feature D: Brief description of planned work
+## Backlog
 
-## Next Actions
+- [ ] Item D: Description
+- [ ] Item E: Description
 
-1. **Task 1**: Brief description of what needs to be done
-2. **Task 2**: Brief description of next task
-3. **Task 3**: Brief description of another task
+## Future / Ideas
 
-## Completed Work (Archive)
-<details>
-<summary>v0.x Features</summary>
-- [x] Feature A - See [Feature A Docs](./docs/features/feature-a.md)
-- [x] Feature B - See [Feature B Docs](./docs/features/feature-b.md)
-</details>
+- Item F: One-line description
+- Item G: One-line description
 ```
+
+### Guidelines
+
+- **"Next Up" is ordered** — numbered list, max 5 items, these are the immediate priorities
+- **"Backlog" is unordered** — checkbox items that are planned but not prioritized
+- **"Future / Ideas" has no checkboxes** — these are possibilities, not commitments
+- **No completed items** — they're in DONE.md
+- **No detailed docs** — link to `docs/` files instead
+- **No section if it's empty** — don't include "Backlog" with zero items
+
+## Phase 6: Absorb GOALS.md Violations
+
+If tactical items (checkboxes, implementation details) were found in GOALS.md:
+- Move them into the appropriate PLAN.md section
+- Update GOALS.md to remove tactical content
+
+## Phase 7: Commit
+
+Stage and commit all files modified during this replan:
+```bash
+git add PLAN.md
+# Stage optional files only if they exist and were modified
+git add DONE.md 2>/dev/null || true
+git add GOALS.md 2>/dev/null || true
+git add docs/ 2>/dev/null || true
+git commit -m "docs: replan — archive {N} completed items, update priorities"
+```
+
+Do NOT push unless explicitly asked.
 
 ## Notes
 
-- Don't delete information - move it to appropriate docs files
-- Keep related information consolidated in single docs files
-- Create feature-specific docs in docs/features/ for complex systems
-- Preserve all historical information but organize it better
-- If no PLAN.md exists, inform the user rather than creating one
-- Adapt to the existing structure and conventions of the project
-- If GOALS.md has task lists that belong in PLAN.md, migrate them
+- If no PLAN.md exists, inform the user and offer to create one from codebase analysis
+- The opportunity scanner suggestion is the key differentiator — every replan should surface at least one new idea
+- DONE.md is append-only — never delete entries from it
+- Keep PLAN.md under ~50 lines whenever possible — it should be scannable in seconds
+- Adapt to existing project structure and conventions
