@@ -375,12 +375,23 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
      question: "Code review complete. {N} issues found and fixed. {list}. Proceed to PR creation?",
      options: [
        { label: "Proceed", description: "Create per-category PRs" },
+       { label: "Commit directly", description: "Commit all changes to this branch — no PRs, no review loops" },
        { label: "Show diff", description: "Show the full diff for manual review before proceeding" },
        { label: "Abort", description: "Stop here — I'll review manually" }
      ]
    }])
    ```
 5. If "Show diff" selected, print the diff and re-ask. If "Abort", stop and print the worktree path.
+6. If "Commit directly" selected:
+   - Stay in the worktree branch `better/{DATE}`
+   - Stage all changes: `git add -A` in `{WORKTREE_DIR}`
+   - Commit with a summary message: `fix: better audit remediation — {N} findings across {M} categories`
+   - Switch back to `{CURRENT_BRANCH}` and merge the worktree branch:
+     ```bash
+     git checkout {CURRENT_BRANCH}
+     git merge better/{DATE}
+     ```
+   - Clean up the worktree and branch, restore stash if needed, update PLAN.md, then **skip to Phase 7 cleanup** (no PRs, no Copilot review, no CI polling)
 
 ## Phase 4c: Test Enhancement
 
