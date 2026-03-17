@@ -383,16 +383,16 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
    ```
 5. If "Show diff" selected, print the diff and re-ask. If "Abort", stop and print the worktree path.
 6. If "Commit directly" selected:
-   - Stay in the worktree branch `better/{DATE}`
-   - Stage all changes: `git add -A` in `{WORKTREE_DIR}`
-   - Commit with a summary message: `fix: better audit remediation — {N} findings across {M} categories`
-   - Switch back to `{CURRENT_BRANCH}` and merge the worktree branch:
+   - In `{WORKTREE_DIR}` (which has `better/{DATE}` checked out):
      ```bash
-     git checkout {CURRENT_BRANCH}
-     git merge better/{DATE}
+     cd {WORKTREE_DIR}
+     git add -A
+     git commit -m "fix: better audit remediation — {N} findings across {M} categories"
      ```
-   - Clean up the worktree and staging branch from `{CURRENT_BRANCH}` (do NOT check out `{DEFAULT_BRANCH}` — the merge target is `{CURRENT_BRANCH}`):
+   - Return to the **main worktree** (the original repo checkout) for merge and cleanup:
      ```bash
+     cd {ORIGINAL_REPO_DIR}
+     git merge better/{DATE}
      git worktree remove {WORKTREE_DIR}
      git branch -D better/{DATE}
      ```
