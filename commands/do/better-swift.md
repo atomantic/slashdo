@@ -576,19 +576,26 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
    ```
 5. If "Show diff" selected, print the diff and re-ask. If "Abort", stop and print the worktree path.
 6. If "Commit directly" selected:
-   - Commit in the worktree (which has `better-swift/{DATE}` checked out):
+   - All remediation and review fixes are already committed incrementally in the worktree branch `better-swift/{DATE}`. If any uncommitted changes remain, stage and commit them now:
      ```bash
      cd {WORKTREE_DIR}
-     git add <list of files changed during remediation>
-     git commit -m "fix: better-swift audit remediation — {N} findings across {CATEGORY_COUNT} categories"
+     git diff --quiet && git diff --cached --quiet || {
+       git add <list of remaining changed files>
+       git commit -m "fix: better-swift audit remediation — remaining changes"
+     }
      ```
-   - Return to the main repo checkout, verify the correct branch, merge, and clean up only on success:
+   - Return to the main repo checkout, merge the worktree branch, and clean up on success:
      ```bash
      cd {REPO_DIR}
      git checkout {CURRENT_BRANCH}
-     git merge better-swift/{DATE} || { echo "Merge conflict — resolve in $(pwd) then re-run cleanup"; exit 1; }
-     git worktree remove {WORKTREE_DIR}
-     git branch -D better-swift/{DATE}
+     if git merge better-swift/{DATE}; then
+       git worktree remove {WORKTREE_DIR}
+       git branch -D better-swift/{DATE}
+     else
+       echo "Merge conflict — resolve in {REPO_DIR}, then run:"
+       echo "  git worktree remove {WORKTREE_DIR}"
+       echo "  git branch -D better-swift/{DATE}"
+     fi
      ```
    - Restore stash if needed (`git stash pop`), update PLAN.md, print final summary, then **stop** — this completes the workflow (Phases 5, 6, and 7 are skipped entirely since no PRs or category branches were created)
 
