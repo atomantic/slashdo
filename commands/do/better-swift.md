@@ -56,7 +56,7 @@ When compacting during this workflow, always preserve:
 - All CRITICAL/HIGH findings with file:line references
 - The current phase number and what phases remain
 - All PR numbers and URLs created so far
-- `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR` values
+- `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR`, `REPO_DIR` values
 - `VCS_HOST`, `CLI_TOOL`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
 - `PLATFORMS` (list of supported platforms: iOS, macOS, etc.)
 - `DEPLOYMENT_TARGETS` (minimum OS versions per platform)
@@ -154,6 +154,7 @@ If the project has a `Makefile` or `fastlane/Fastfile`, check for custom build/t
 Record as `BUILD_CMD` and `TEST_CMD`.
 
 ### 0d: State Snapshot
+- Record `REPO_DIR` via `git rev-parse --show-toplevel`
 - Record `CURRENT_BRANCH` via `git rev-parse --abbrev-ref HEAD`
 - Record `DEFAULT_BRANCH` via `gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'` (or `glab` equivalent)
 - Record `IS_DIRTY` via `git status --porcelain`
@@ -583,7 +584,7 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
      ```
    - Return to the main repo checkout, verify the correct branch, merge, and clean up only on success:
      ```bash
-     cd {WORKTREE_DIR}/..
+     cd {REPO_DIR}
      git checkout {CURRENT_BRANCH}
      git merge better-swift/{DATE} || { echo "Merge conflict — resolve in $(pwd) then re-run cleanup"; exit 1; }
      git worktree remove {WORKTREE_DIR}

@@ -1,5 +1,5 @@
 ---
-description: Review and clean up PLAN.md, extract docs from completed work
+description: Automated audit/triage of PLAN.md — archive completed items to DONE.md, suggest new work, keep PLAN.md lean
 ---
 
 # Replan Command
