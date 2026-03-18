@@ -18,6 +18,8 @@ Address the latest code review feedback on the current branch's pull request usi
    ```
    Save results to `/tmp/pr_threads.json` for parsing.
 
+   **Thread-count tracking**: Count and report total unresolved threads upfront (e.g., "Found 7 unresolved review threads"). After resolution, report how many were addressed vs. remaining (e.g., "Resolved 5/7 threads, 2 left unaddressed"). This prevents partial sessions from going unnoticed across context resets.
+
 4. **Spawn parallel sub-agents to address feedback**:
    - For small PRs (1-3 unresolved threads), handle fixes inline instead of spawning agents
    - For larger PRs, spawn one `Agent` call (general-purpose type) per review thread (or group closely related threads on the same file into one agent)
@@ -40,14 +42,14 @@ Address the latest code review feedback on the current branch's pull request usi
    - Stage all changed files and commit with a descriptive message summarizing what was addressed. Do not include co-author info.
    - Push to the branch.
 
-8. **Resolve conversations**: For each addressed thread, resolve it via GraphQL mutation using stdin JSON. **Never use `$variables` in the query — inline the thread ID directly**:
+8. **Resolve conversations**: For each addressed thread, resolve it via GraphQL mutation using stdin JSON. Track resolution count against the total from step 3. **Never use `$variables` in the query — inline the thread ID directly**:
    ```bash
    echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"THREAD_ID_HERE\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
    ```
 
 9. **Request another Copilot review** (only if `is_fork_pr=false`): After pushing fixes, request a fresh Copilot code review and repeat from step 3 until the review passes clean. **Skip for fork-to-upstream PRs.**
 
-10. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix.
+10. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input).
 
 !`cat ~/.claude/lib/graphql-escaping.md`
 
