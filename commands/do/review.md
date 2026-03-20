@@ -73,7 +73,7 @@ With the flow understood, evaluate the changed code against these principles:
 - Function and variable names should communicate intent. If you need to read the implementation to understand what a name means, it's poorly named.
 - Boolean variables/params should read as predicates (`isReady`, `hasAccess`), not ambiguous nouns.
 
-Only flag principle violations that are **concrete and actionable** in the changed code. Do not flag pre-existing design issues in untouched code unless the changes make them worse.
+Only flag principle violations that are **concrete and actionable** in the changed code. If a review finding identifies a real issue — even in code not directly modified by this PR — evaluate it honestly and fix it. Never dismiss findings as "out of scope" or "not modified in this PR." Don't leave trash on the floor.
 
 </review_instructions>
 

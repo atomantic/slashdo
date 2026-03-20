@@ -70,6 +70,7 @@ Run the following loop until Copilot returns zero new comments:
 4. FIX all unresolved review comments:
    For each unresolved thread:
    - Read the referenced file and understand the feedback
+   - Evaluate if the finding is a real issue — if it is, fix it regardless of whether the current PR modified that code. Never dismiss as "out of scope." Don't leave trash on the floor.
    - Make the code fix
    - Run the build command
    - If build passes, commit: address review: <summary>

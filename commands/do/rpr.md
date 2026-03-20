@@ -84,3 +84,4 @@ The review is complete when a new `copilot-pull-request-reviewer` review node ap
 - Only resolve threads where you've actually addressed the feedback
 - If feedback is unclear or incorrect, leave a reply comment instead of resolving
 - Always run tests before committing — never push code with known failures
+- **Never dismiss findings as "out of scope" or "not modified in this PR."** If a review identifies a real issue, fix it — regardless of whether the current PR touched that code. Evaluate every finding on its merits. Don't leave trash on the floor.
