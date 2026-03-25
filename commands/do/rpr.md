@@ -1,6 +1,11 @@
 ---
 description: Resolve PR review feedback with parallel agents
+argument-hint: "[--interactive]"
 ---
+
+**Default mode: fully autonomous.** Fetches review feedback, fixes issues, pushes, resolves threads, and loops Copilot reviews without prompting. Auto-skips on timeout/errors after retries.
+
+**`--interactive` mode:** Pauses on Copilot review timeout and repeated errors to ask the user how to proceed.
 
 # Resolve PR Review Feedback
 
@@ -75,9 +80,9 @@ gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullReques
 
 **Dynamic poll timing**: Before your first poll, check how long the most recent Copilot review on this PR took by comparing consecutive Copilot review `submittedAt` timestamps (or PR creation time for the first review). Use that duration as your expected wait. If no prior review exists, default to 5 minutes. Set poll interval to 60 seconds and max wait to **2x the expected duration** (minimum 5 minutes, maximum 20 minutes). Copilot reviews can take **10-15 minutes** for large diffs — do NOT give up early.
 
-The review is complete when a new `copilot-pull-request-reviewer` review node appears. If no review appears after max wait, **ask the user** whether to continue waiting, re-request, or skip.
+The review is complete when a new `copilot-pull-request-reviewer` review node appears. If no review appears after max wait: **Default mode**: auto-skip and continue. **Interactive mode (`--interactive`)**: ask the user whether to continue waiting, re-request, or skip.
 
-**Error detection**: After a review appears, check its `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If found, this is NOT a successful review — log a warning, re-request the review (same API call above), and resume polling. Allow up to 3 error retries before asking the user whether to continue or skip.
+**Error detection**: After a review appears, check its `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If found, this is NOT a successful review — log a warning, re-request the review (same API call above), and resume polling. Allow up to 3 error retries. After 3 failures: **Default mode**: auto-skip and continue. **Interactive mode (`--interactive`)**: ask the user whether to continue or skip.
 
 ## Notes
 

@@ -1,10 +1,15 @@
 ---
 description: Automated audit/triage of PLAN.md — archive completed items to DONE.md, suggest new work, keep PLAN.md lean
+argument: --interactive to pause for user approval before applying changes (default is fully autonomous)
 ---
 
 # Replan Command
 
 Automatically audit PLAN.md against the codebase, prune completed/stale items, archive what's done, suggest new work, and leave PLAN.md lean and actionable.
+
+**Default mode: fully autonomous.** Scans the codebase, archives done items, removes stale items, adds suggested new items, and commits — no user interaction.
+
+**`--interactive` mode:** Pauses after evidence gathering to present findings and get user approval before making changes.
 
 **Philosophy:** PLAN.md should be short enough to paste into a prompt. Completed items belong in a done log, not cluttering the active plan.
 
@@ -22,7 +27,7 @@ GOALS.md answers: *Why does this project exist? What does success look like? Wha
 
 ## Phase 1: Automated Evidence Gathering
 
-Launch these agents in parallel — no user interaction needed yet.
+Launch these agents in parallel — no user interaction needed.
 
 **Agent 1: Git History Analysis**
 - `git log --oneline -50` — identify commits that completed plan items
@@ -41,31 +46,51 @@ Launch these agents in parallel — no user interaction needed yet.
 - Check for outdated dependencies (`npm outdated`, `cargo outdated`, etc. as appropriate)
 - Review GOALS.md (if it exists) for strategic goals not yet represented in the plan
 - Identify code quality opportunities (large files, complex functions, missing error handling)
-- Formulate 1-3 suggested new items to propose to the user
+- Formulate 1-3 suggested new items
 
 **Agent 4: GOALS.md Boundary Check**
 If `GOALS.md` exists:
 - Check for checkbox task lists or implementation details that leaked in
 - Note any items that should be absorbed into PLAN.md
 
-## Phase 2: Auto-Triage (No User Input)
+## Phase 2: Auto-Triage
 
-Using agent results, automatically classify every PLAN.md item:
+Using agent results, classify every PLAN.md item:
 
 | Status | Criteria | Action |
 |--------|----------|--------|
-| `confirmed-done` | Git commit + code exists + tests pass | Move to DONE.md |
-| `likely-done` | Strong evidence but not 100% certain | Present to user for confirmation |
-| `stale` | No commits, no code, no recent discussion; item is >30 days old with zero progress | Flag for removal |
+| `confirmed-done` | Git commit + code exists + tests pass | Archive to DONE.md |
+| `likely-done` | Strong evidence but not 100% certain | Archive to DONE.md |
+| `stale` | No commits, no code, no recent discussion; item is >30 days old with zero progress | Remove from PLAN.md |
 | `still-pending` | No evidence of completion | Keep in PLAN.md |
 
-## Phase 3: Single Interactive Checkpoint
+## Phase 3: Apply Changes (or Checkpoint if Interactive)
 
-Present ONE consolidated summary to the user. Keep it tight:
+### Default Mode (autonomous)
+
+Apply all changes immediately without prompting:
+
+1. Archive `confirmed-done` and `likely-done` items to DONE.md
+2. Remove `stale` items from PLAN.md
+3. Add suggested new items to the appropriate PLAN.md section
+4. Absorb any tactical items found in GOALS.md
+5. Print a brief summary of what was done:
+
+```
+Replan complete:
+- Archived {N} completed items to DONE.md
+- Removed {S} stale items
+- Added {P} new suggested items
+- {any GOALS.md boundary fixes}
+```
+
+### Interactive Mode (`--interactive`)
+
+Present ONE consolidated summary to the user:
 
 ```
 AskUserQuestion([{
-  question: "Replan audit complete. Here's what I found:\n\n**Auto-archiving to DONE.md** ({N} items):\n{list of confirmed-done items}\n\n**Likely done — confirm?** ({M} items):\n{list with evidence}\n\n**Flagged as stale** ({S} items):\n{list with last-activity dates}\n\n**New suggestions** ({P} items):\n{numbered list of proposed new items with rationale}\n\nHow should I proceed?",
+  question: "Replan audit complete. Here's what I found:\n\n**Auto-archiving to DONE.md** ({N} items):\n{list of confirmed-done items}\n\n**Likely done — archive?** ({M} items):\n{list with evidence}\n\n**Flagged as stale** ({S} items):\n{list with last-activity dates}\n\n**New suggestions** ({P} items):\n{numbered list of proposed new items with rationale}\n\nHow should I proceed?",
   multiSelect: true,
   options: [
     { label: "Archive confirmed-done", description: "Move {N} confirmed items to DONE.md" },

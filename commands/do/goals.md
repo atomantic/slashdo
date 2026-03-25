@@ -1,13 +1,18 @@
 ---
 description: Scan codebase to infer project goals, clarify with user, and generate GOALS.md
-argument-hint: "[--refresh] [focus hint, e.g. 'just the CLI']"
+argument-hint: "[--interactive] [--refresh] [focus hint, e.g. 'just the CLI']"
 ---
 
 # Goals — Generate a GOALS.md from Codebase Analysis
 
-Scan the codebase to infer the project's goals, purpose, and direction, then collaborate with the user to produce a comprehensive `GOALS.md` at the repo root.
+Scan the codebase to infer the project's goals, purpose, and direction, then generate a comprehensive `GOALS.md` at the repo root.
+
+**Default mode: fully autonomous.** Scans the codebase, synthesizes goals, and writes GOALS.md without prompting. HIGH and MEDIUM confidence goals are included; LOW confidence goals are included but marked as inferred.
+
+**`--interactive` mode:** Pauses after synthesis to validate purpose, prioritize goals, confirm non-goals, and refine wording with the user.
 
 Parse `$ARGUMENTS` for:
+- **`--interactive`**: pause after synthesis for user validation and refinement
 - **`--refresh`**: re-scan and update an existing GOALS.md rather than creating from scratch
 - **Focus hints**: e.g., "focus on API goals", "just the CLI"
 
@@ -94,29 +99,35 @@ For each goal, assign a confidence level:
 - **MEDIUM** — strongly implied by patterns, architecture, or recent work
 - **LOW** — inferred/speculative, needs user confirmation
 
-## Phase 3: User Clarification
+## Phase 3: Validation
+
+### Default Mode (autonomous)
+
+Skip user clarification. Include all HIGH and MEDIUM confidence goals directly. Include LOW confidence goals but mark them with `(inferred)` so the user can review after generation. Proceed directly to Phase 4.
+
+### Interactive Mode (`--interactive`)
 
 Present the draft to the user and ask targeted questions to resolve uncertainty. Use `AskUserQuestion` for each area that needs input.
 
-### 3a: Purpose Validation
+#### 3a: Purpose Validation
 Show the inferred one-paragraph purpose statement. Ask if it's accurate or needs refinement.
 
-### 3b: Goal Prioritization
+#### 3b: Goal Prioritization
 Present the inferred goals list. For each LOW or MEDIUM confidence goal, ask the user:
 - Is this actually a goal?
 - How would you rephrase it?
 - What priority is it (primary, secondary, stretch)?
 
-### 3c: Missing Goals
+#### 3c: Missing Goals
 Ask: "Are there any goals I missed that aren't yet reflected in the codebase?" Present 2-3 suggested possibilities based on common patterns for this type of project, to prompt the user's thinking.
 
-### 3d: Non-Goals Validation
+#### 3d: Non-Goals Validation
 Present the inferred non-goals. Ask: "Are these accurate? Anything to add or remove?"
 
-### 3e: Target Users
+#### 3e: Target Users
 Present the inferred target user description. Ask if it's accurate.
 
-### 3f: Success Criteria (optional)
+#### 3f: Success Criteria (optional)
 Ask: "Would you like to define measurable success criteria for any of these goals?" Offer examples relevant to the project type (e.g., "support N concurrent users", "< Xms response time", "100% test coverage on core module").
 
 ## Phase 4: Document Generation
@@ -190,9 +201,9 @@ If `--refresh` was passed and `GOALS.md` already exists:
 1. Read the existing `GOALS.md`
 2. Compare existing goals against current codebase state
 3. Identify goals whose status has changed (new progress, completed, abandoned)
-4. Present changes to the user for confirmation
-5. Update the document in-place, preserving user-written content where possible
-6. If any checkbox task lists are found in the existing GOALS.md, flag them and offer to move them to PLAN.md
+4. **Default mode**: Update the document in-place automatically, preserving user-written content where possible. Print a summary of what changed.
+   **Interactive mode (`--interactive`)**: Present changes to the user for confirmation before updating.
+5. If any checkbox task lists are found in the existing GOALS.md, move them to PLAN.md automatically (default) or offer to move them (interactive)
 
 ## Phase 5: Finalize
 
@@ -211,8 +222,8 @@ If `--refresh` was passed and `GOALS.md` already exists:
 ## Notes
 
 - This command is project-agnostic — it reads whatever project signals exist
-- The goal is collaboration: scan first, then refine with the user — never assume
-- LOW confidence inferences should always be validated with the user before inclusion
+- In default mode, scan and generate autonomously; in interactive mode, collaborate with the user
+- LOW confidence inferences are included as `(inferred)` in default mode; validated with the user in interactive mode
 - Preserve the user's voice — if they provide rephrased goals, use their wording verbatim
 - If the project is brand new with minimal code, lean more heavily on user input and less on codebase inference
 - If `gh` CLI is not authenticated, skip issue/PR scanning gracefully — don't halt
