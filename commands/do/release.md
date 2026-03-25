@@ -1,6 +1,11 @@
 ---
 description: Create a release PR using the project's documented release workflow
+argument-hint: "[--interactive]"
 ---
+
+**Default mode: fully autonomous.** Auto-detects branches, determines version bump from commits, runs review, creates and merges the release PR without prompting.
+
+**`--interactive` mode:** Pauses for branch confirmation, version approval, and merge confirmation.
 
 ## Detect Release Workflow
 
@@ -11,7 +16,7 @@ Before doing anything, determine the project's source and target branches for re
    - **GitHub Actions workflows** — check `.github/workflows/release.yml` (or similar) for `on: push: branches:` to find the branch that triggers the release pipeline
    - **Project conventions** (already in context) — look for git workflow sections, branch descriptions, or release instructions
    - **Versioning docs** — check `docs/VERSIONING.md`, `CONTRIBUTING.md`, or `RELEASING.md`
-   - **Branch convention** — if a `release` branch exists, the target is `release`; otherwise ask the user
+   - **Branch convention** — if a `release` branch exists, the target is `release`; otherwise create it from the last release tag (see step 3 below). In `--interactive` mode, ask the user to confirm
 3. **Ensure the target branch exists** — if not, create it from the last release tag:
    ```bash
    git branch release $(git describe --tags --abbrev=0)
@@ -21,7 +26,7 @@ Before doing anything, determine the project's source and target branches for re
 
 Print the detected workflow: `Detected release flow: {source} → {target}`
 
-If ambiguous, ask the user to confirm before proceeding.
+**Default mode**: If ambiguous, use the most likely branch (prefer `release` if it exists). If the target branch does not exist, create it from the last release tag (see step 3 above). If detection still yields `target == source`, abort with an error — a release PR cannot merge a branch into itself. **Interactive mode (`--interactive`)**: Ask the user to confirm before proceeding.
 
 **Important**: The PR direction is `{source}` → `{target}` (e.g., `main` → `release`). This gives Copilot the full diff of all changes since the last release for review. Do NOT create a branch from source and PR back into it — that only shows the version bump commit.
 
@@ -40,7 +45,7 @@ If ambiguous, ask the user to confirm before proceeding.
      - `feat:` → **minor** bump
      - `fix:`, `chore:`, `docs:`, `refactor:`, `perf:`, `style:`, `test:`, `ci:` → **patch** bump
    - Use the **highest applicable level** across all commits
-   - Present the proposed version to the user for confirmation
+   - **Default mode**: Use the determined version automatically. **Interactive mode (`--interactive`)**: Present the proposed version to the user for confirmation
 
 2. **Bump version**: Run `npm version <major|minor|patch> --no-git-tag-version` to update `package.json` and `package-lock.json`
 
@@ -82,7 +87,7 @@ Checklist to apply to each file:
 
 !`cat ~/.claude/lib/code-review-checklist.md`
 
-Verification — confirm before proceeding:
+Verification — self-check before proceeding (no user prompt needed):
 - [ ] Read every changed file in full (not just diffs)
 - [ ] Checked each file against the relevant checklist tiers
 - [ ] Quoted specific code for each finding

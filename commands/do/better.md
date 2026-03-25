@@ -1,13 +1,18 @@
 ---
 description: Unified DevSecOps audit, remediation, test enhancement, per-category PRs, CI verification, and Copilot review loop with worktree isolation
-argument-hint: "[--scan-only] [--no-merge] [path filter or focus areas]"
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [path filter or focus areas]"
 ---
 
 # Better — Unified DevSecOps Pipeline
 
 Run the full DevSecOps lifecycle: audit the codebase with 7 deduplicated agents, consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run Copilot review loops, and merge.
 
+**Default mode: fully autonomous.** Uses Balanced model profile, proceeds through all phases without prompting, auto-merges PRs with clean reviews.
+
+**`--interactive` mode:** Pauses for model profile selection, review findings approval, guardrail decisions, and merge confirmation.
+
 Parse `$ARGUMENTS` for:
+- **`--interactive`**: pause at each decision point for user approval
 - **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation
 - **`--no-merge`**: run through PR creation (Phase 5), skip Copilot review and merge
 - **Path filter**: limit scanning scope to specific directories or files
@@ -15,7 +20,13 @@ Parse `$ARGUMENTS` for:
 
 ## Configuration
 
-Before starting the pipeline, present the user with configuration options using `AskUserQuestion`:
+### Default Mode (autonomous)
+
+Use the **Balanced** model profile automatically (`AUDIT_MODEL=sonnet`, `REMEDIATION_MODEL=sonnet`).
+
+### Interactive Mode (`--interactive`)
+
+Present the user with configuration options using `AskUserQuestion`:
 
 ```
 AskUserQuestion([
@@ -370,7 +381,8 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
 3. For each issue found:
    - Fix in a new commit: `fix: {description of review finding}`
    - Re-run `{BUILD_CMD}` and `{TEST_CMD}` to verify
-4. Present a summary of review findings and fixes to the user via `AskUserQuestion`:
+4. **Default mode**: Print a brief summary of findings and fixes, then proceed to PR creation automatically.
+   **Interactive mode (`--interactive`)**: Present a summary to the user via `AskUserQuestion`:
    ```
    AskUserQuestion([{
      question: "Code review complete. {N} issues found and fixed. {list}. Proceed to PR creation?",
@@ -382,7 +394,7 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
      ]
    }])
    ```
-5. If "Show diff" selected, print the diff and re-ask. If "Abort", stop and print the worktree path.
+5. (Interactive only) If "Show diff" selected, print the diff and re-ask. If "Abort", stop and print the worktree path.
 6. If "Commit directly" selected:
    - All remediation and review fixes are already committed incrementally in the worktree branch `better/{DATE}`. If any uncommitted changes remain, stage and commit them now:
      ```bash
@@ -638,7 +650,7 @@ After creating all PRs, verify CI passes on each one:
 
 ## Phase 6: Copilot Review Loop (GitHub only)
 
-Loop until Copilot returns zero new comments (no fixed iteration limit). Sub-agents enforce a 10-iteration guardrail: at iteration 10 the sub-agent stops and returns a "guardrail" status, prompting the parent agent to ask the user whether to continue or stop.
+Loop until Copilot returns zero new comments (no fixed iteration limit). Sub-agents enforce a 10-iteration guardrail: at iteration 10 the sub-agent stops and returns a "guardrail" status. **Default mode**: auto-stop at the guardrail. **Interactive mode (`--interactive`)**: prompt the parent agent to ask the user whether to continue or stop.
 
 **Sub-agent delegation** (prevents context exhaustion): delegate each PR's review loop to a **separate general-purpose sub-agent** via the Agent tool. Launch sub-agents in parallel (one per PR). Each sub-agent runs the full loop (request → wait → check → fix → re-request) autonomously and returns only the final status.
 
@@ -656,13 +668,19 @@ Launch all PR sub-agents in parallel. Wait for all to complete.
 
 For each sub-agent result:
 - **clean**: mark PR as ready to merge
-- **timeout**: inform the user "Copilot review timed out on PR #{number}." and ask whether to continue waiting, re-request, or skip
-- **error**: inform the user and ask whether to retry or skip
-- **guardrail**: the sub-agent hit the 10-iteration limit; ask the user whether to continue with more iterations or stop
+- **timeout**: **Default mode**: skip the timed-out PR and continue. **Interactive mode**: inform the user and ask whether to continue waiting, re-request, or skip
+- **error**: **Default mode**: retry up to 3 times, then skip. **Interactive mode**: inform the user and ask whether to retry or skip
+- **guardrail**: the sub-agent hit the 10-iteration limit. **Default mode**: auto-stop and mark as best-effort. **Interactive mode**: ask the user whether to continue with more iterations or stop
 
 ### 6.3: Merge Gate (MANDATORY)
 
-**Do NOT merge any PR until Copilot review has completed (approved or commented) on ALL PRs, or the user explicitly approves skipping.**
+**Do NOT merge any PR until its own Copilot review has completed (approved or commented with zero unresolved issues).**
+
+### Default Mode (autonomous)
+
+Print the review status summary, then auto-merge all PRs whose reviews completed cleanly. PRs that timed out, hit guardrails, or still have unresolved comments are left open for manual review. Print which PRs were merged and which were left open.
+
+### Interactive Mode (`--interactive`)
 
 Present the review status summary to the user via `AskUserQuestion`:
 ```
@@ -677,7 +695,7 @@ AskUserQuestion([{
 }])
 ```
 
-Only proceed with merging based on the user's selection. Never auto-merge without user confirmation.
+Only proceed with merging based on the user's selection.
 
 ### 6.4: Merge
 

@@ -73,7 +73,7 @@ With the flow understood, evaluate the changed code against these principles:
 - Function and variable names should communicate intent. If you need to read the implementation to understand what a name means, it's poorly named.
 - Boolean variables/params should read as predicates (`isReady`, `hasAccess`), not ambiguous nouns.
 
-Only flag principle violations that are **concrete and actionable** in the changed code. Do not flag pre-existing design issues in untouched code unless the changes make them worse.
+For this review, only flag principle and design violations that are **concrete and actionable** in the code changed by this PR. However, if you discover a clear, real bug or correctness issue — even in code not directly modified here — call it out and help ensure it gets fixed (in this PR or a follow-up). Never dismiss serious problems as "out of scope" or "not modified in this PR."
 
 </review_instructions>
 
@@ -97,6 +97,27 @@ Check every file against this checklist. The checklist is organized into tiers �
 - If the PR adds a new endpoint, trace where existing endpoints are registered and verify the new one is wired in all runtime adapters (serverless handler map, framework route file, API gateway config, local dev server) — a route registered in one adapter but missing from another will silently 404 in the missing runtime
 - If the PR adds a new call to an external service that has established mock/test infrastructure (mock mode flags, test helpers, dev stubs), verify the new call uses the same patterns — bypassing them makes the new code path untestable in offline/dev environments and inconsistent with existing integrations
 - If the PR adds a new UI component or client-side consumer against an existing API endpoint, read the actual endpoint handler or response shape — verify every field name, nesting level, identifier property, and response envelope path used in the consumer matches what the producer returns. This is the #1 source of "renders empty" bugs in new views built against existing APIs
+
+**Push/real-time event scoping**
+- If the PR adds or modifies WebSocket, SSE, or pub/sub event emission, trace the event scope: does the event reach only the originating session/user, or is it broadcast to all connected clients? Check payloads for sensitive content (user inputs, images, tokens) that should not leak across sessions. If the consumer filters by a correlation ID, verify the producer includes one and that the ID is generated server-side or validated against the session
+
+**Cleanup/teardown side effect audit**
+- If the PR adds cleanup, teardown, or garbage-collection functions, trace whether the cleanup performs implicit state mutations (auto-merge into main, auto-commit of unreviewed changes, cascade writes to shared state). Verify the cleanup aborts safely if a prerequisite step fails (e.g., saving dirty state before deletion) rather than proceeding with data loss
+
+**Specification/standard conformance**
+- If the PR implements or extends a parser for a well-known format (cron expressions, date formats, URLs, semver, MIME types), verify boundary handling matches the specification — especially field-specific ranges (month starts at 1, not 0), normalization conventions (cron DOW 0 and 7 both mean Sunday), and step/range semantics that differ per field type
+
+**Temporal context consistency**
+- If the PR adds timezone-aware logic alongside existing non-timezone-aware comparisons in the same code flow (e.g., a weekday gate using UTC while cron matching uses user timezone), check that all temporal comparisons in the flow use the same timezone context — mixed contexts cause operations to trigger on the wrong local day/hour
+
+**Status/health endpoint freshness**
+- If the PR adds or modifies a status or health-check endpoint, trace whether it returns live probe results or cached data. Cached health checks mask real-time failures — a cache keyed by URL that survives URL reconfiguration reports stale status. Verify health endpoints bypass caches or use sufficiently short TTLs
+
+**Boolean/type fidelity through serialization boundaries**
+- If the PR persists boolean flags to text-based storage (markdown metadata, flat files, query strings, form data), trace the round-trip: write path → storage format → read/parse path → consumption site. Boolean `false` serialized as the string `"false"` is truthy in JavaScript — verify all consumption sites use strict equality or a dedicated coercion function, and that the same coercion is applied consistently
+
+**Cross-layer invariant enforcement**
+- If the PR introduces or modifies an invariant relationship between configuration flags (e.g., "flag A implies flag B"), trace enforcement through every layer: UI toggle handlers, form submission payloads, API validation schemas, server default-application functions, and persistence round-trip. If any layer allows the invariant to be violated, cascading defaults produce contradictory state
 
 **Error path completeness**
 - Trace each error path end-to-end: does the error reach the user with a helpful message and correct HTTP status? Or does it get swallowed, logged silently, or surface as a generic 500?

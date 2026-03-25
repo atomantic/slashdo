@@ -1,6 +1,11 @@
 ---
 description: Resolve PR review feedback with parallel agents
+argument-hint: "[--interactive]"
 ---
+
+**Default mode: fully autonomous.** Fetches review feedback, fixes issues, pushes, resolves threads, and loops Copilot reviews without prompting. Auto-skips on timeout/errors after retries.
+
+**`--interactive` mode:** Pauses on Copilot review timeout and repeated errors to ask the user how to proceed.
 
 # Resolve PR Review Feedback
 
@@ -17,6 +22,8 @@ Address the latest code review feedback on the current branch's pull request usi
    echo '{"query":"{ repository(owner: \"OWNER\", name: \"REPO\") { pullRequest(number: PR_NUM) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
    ```
    Save results to `/tmp/pr_threads.json` for parsing.
+
+   **Thread-count tracking**: Count and report total unresolved threads upfront (e.g., "Found 7 unresolved review threads"). After resolution, report how many were addressed vs. remaining (e.g., "Resolved 5/7 threads, 2 left unaddressed"). This prevents partial sessions from going unnoticed across context resets.
 
 4. **Spawn parallel sub-agents to address feedback**:
    - For small PRs (1-3 unresolved threads), handle fixes inline instead of spawning agents
@@ -40,14 +47,14 @@ Address the latest code review feedback on the current branch's pull request usi
    - Stage all changed files and commit with a descriptive message summarizing what was addressed. Do not include co-author info.
    - Push to the branch.
 
-8. **Resolve conversations**: For each addressed thread, resolve it via GraphQL mutation using stdin JSON. **Never use `$variables` in the query — inline the thread ID directly**:
+8. **Resolve conversations**: For each addressed thread, resolve it via GraphQL mutation using stdin JSON. Track resolution count against the total from step 3. **Never use `$variables` in the query — inline the thread ID directly**:
    ```bash
    echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"THREAD_ID_HERE\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
    ```
 
 9. **Request another Copilot review** (only if `is_fork_pr=false`): After pushing fixes, request a fresh Copilot code review and repeat from step 3 until the review passes clean. **Skip for fork-to-upstream PRs.**
 
-10. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix.
+10. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input).
 
 !`cat ~/.claude/lib/graphql-escaping.md`
 
@@ -73,12 +80,13 @@ gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullReques
 
 **Dynamic poll timing**: Before your first poll, check how long the most recent Copilot review on this PR took by comparing consecutive Copilot review `submittedAt` timestamps (or PR creation time for the first review). Use that duration as your expected wait. If no prior review exists, default to 5 minutes. Set poll interval to 60 seconds and max wait to **2x the expected duration** (minimum 5 minutes, maximum 20 minutes). Copilot reviews can take **10-15 minutes** for large diffs — do NOT give up early.
 
-The review is complete when a new `copilot-pull-request-reviewer` review node appears. If no review appears after max wait, **ask the user** whether to continue waiting, re-request, or skip.
+The review is complete when a new `copilot-pull-request-reviewer` review node appears. If no review appears after max wait: **Default mode**: auto-skip and continue. **Interactive mode (`--interactive`)**: ask the user whether to continue waiting, re-request, or skip.
 
-**Error detection**: After a review appears, check its `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If found, this is NOT a successful review — log a warning, re-request the review (same API call above), and resume polling. Allow up to 3 error retries before asking the user whether to continue or skip.
+**Error detection**: After a review appears, check its `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If found, this is NOT a successful review — log a warning, re-request the review (same API call above), and resume polling. Allow up to 3 error retries. After 3 failures: **Default mode**: auto-skip and continue. **Interactive mode (`--interactive`)**: ask the user whether to continue or skip.
 
 ## Notes
 
 - Only resolve threads where you've actually addressed the feedback
 - If feedback is unclear or incorrect, leave a reply comment instead of resolving
 - Always run tests before committing — never push code with known failures
+- **Never dismiss findings as "out of scope" or "not modified in this PR."** If a review identifies a real issue, fix it — regardless of whether the current PR touched that code. Evaluate every finding on its merits. Don't leave trash on the floor.
