@@ -1,6 +1,6 @@
 ---
 description: Automated audit/triage of PLAN.md — archive completed items to DONE.md, suggest new work, keep PLAN.md lean
-argument: --interactive to pause for user approval before applying changes (default is fully autonomous)
+argument-hint: "[--interactive]"
 ---
 
 # Replan Command
