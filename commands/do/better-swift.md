@@ -888,11 +888,11 @@ For each sub-agent result:
 
 ### 6.3: Merge Gate (MANDATORY)
 
-**Do NOT merge any PR until Copilot review has completed (approved or commented) on ALL PRs.**
+**Do NOT merge any PR until its own Copilot review has completed (approved or commented with zero unresolved issues).**
 
 ### Default Mode (autonomous)
 
-Print the review status summary, then auto-merge all PRs with clean reviews. PRs that timed out or hit guardrails are left open for manual review. Print which PRs were merged and which were left open.
+Print the review status summary, then auto-merge all PRs whose reviews completed cleanly. PRs that timed out, hit guardrails, or still have unresolved comments are left open for manual review. Print which PRs were merged and which were left open.
 
 ### Interactive Mode (`--interactive`)
 

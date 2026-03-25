@@ -16,7 +16,7 @@ Before doing anything, determine the project's source and target branches for re
    - **GitHub Actions workflows** — check `.github/workflows/release.yml` (or similar) for `on: push: branches:` to find the branch that triggers the release pipeline
    - **Project conventions** (already in context) — look for git workflow sections, branch descriptions, or release instructions
    - **Versioning docs** — check `docs/VERSIONING.md`, `CONTRIBUTING.md`, or `RELEASING.md`
-   - **Branch convention** — if a `release` branch exists, the target is `release`; otherwise ask the user
+   - **Branch convention** — if a `release` branch exists, the target is `release`; otherwise create it from the last release tag (see step 3 below). In `--interactive` mode, ask the user to confirm
 3. **Ensure the target branch exists** — if not, create it from the last release tag:
    ```bash
    git branch release $(git describe --tags --abbrev=0)
@@ -26,7 +26,7 @@ Before doing anything, determine the project's source and target branches for re
 
 Print the detected workflow: `Detected release flow: {source} → {target}`
 
-**Default mode**: If ambiguous, use the most likely branch (prefer `release` if it exists, otherwise `main`). **Interactive mode (`--interactive`)**: Ask the user to confirm before proceeding.
+**Default mode**: If ambiguous, use the most likely branch (prefer `release` if it exists). If the target branch does not exist, create it from the last release tag (see step 3 above). If detection still yields `target == source`, abort with an error — a release PR cannot merge a branch into itself. **Interactive mode (`--interactive`)**: Ask the user to confirm before proceeding.
 
 **Important**: The PR direction is `{source}` → `{target}` (e.g., `main` → `release`). This gives Copilot the full diff of all changes since the last release for review. Do NOT create a branch from source and PR back into it — that only shows the version bump commit.
 

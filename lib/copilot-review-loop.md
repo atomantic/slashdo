@@ -56,8 +56,8 @@ Run the following loop until Copilot returns zero new comments:
    - Error detection: if the review body contains "Copilot encountered an
      error" or "unable to review this pull request", re-request (step 1)
      and resume polling. Max 3 error retries before reporting failure.
-   - If no review appears after max wait, report the timeout — the parent
-     agent will ask the user what to do
+   - If no review appears after max wait, report the timeout.
+     **Default mode**: skip and continue. **Interactive mode (`--interactive`)**: ask the user what to do
 
 3. CHECK for unresolved comments:
    - Filter review threads for isResolved: false
@@ -70,7 +70,7 @@ Run the following loop until Copilot returns zero new comments:
 4. FIX all unresolved review comments:
    For each unresolved thread:
    - Read the referenced file and understand the feedback
-   - Evaluate if the finding is a real issue — if it is, fix it regardless of whether the current PR modified that code. Never dismiss as "out of scope." Don't leave trash on the floor.
+   - Evaluate if the finding is a real issue — if it is, fix it regardless of whether the current PR modified that code. Never dismiss findings as "out of scope" or "pre-existing."
    - Make the code fix
    - Run the build command
    - If build passes, commit: address review: <summary>
@@ -79,8 +79,8 @@ Run the following loop until Copilot returns zero new comments:
    - After all threads resolved, push all commits to remote
    - Increment iteration counter
    - If iteration counter reaches 10, stop the loop and report back with
-     status "guardrail" — the parent agent will ask the user whether to
-     continue or stop
+     status "guardrail". **Default mode**: auto-stop and mark as best-effort.
+     **Interactive mode (`--interactive`)**: ask the user whether to continue or stop
    - Otherwise, go back to step 1
 
 When done, report back:
@@ -90,4 +90,8 @@ When done, report back:
 - Any unresolved threads remaining
 ```
 
-Launch the sub-agent and wait for its result. If the sub-agent reports a timeout or error, **ask the user** whether to continue waiting, re-request the review, or skip — never proceed without user approval when the review loop fails.
+Launch the sub-agent and wait for its result.
+
+**Default mode**: If the sub-agent reports a timeout or error, skip the timed-out review and continue autonomously.
+
+**Interactive mode (`--interactive`)**: If the sub-agent reports a timeout or error, ask the user whether to continue waiting, re-request the review, or skip.

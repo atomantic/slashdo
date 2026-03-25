@@ -1,5 +1,5 @@
 ---
-description: Scan codebase to infer project goals, clarify with user, and generate GOALS.md
+description: Scan codebase to infer project goals and generate GOALS.md (default: fully autonomous; use --interactive to review with user)
 argument-hint: "[--interactive] [--refresh] [focus hint, e.g. 'just the CLI']"
 ---
 
