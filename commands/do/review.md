@@ -175,7 +175,7 @@ Check every file against this checklist. The checklist is organized into tiers �
 - If the PR adds or reorders sequential steps/instructions, verify the ordering matches execution dependencies — readers following steps in order must not perform an action before its prerequisite
 
 **Transactional write integrity**
-- If the PR performs multi-item writes (database transactions, batch operations), verify each write includes condition expressions that prevent stale-read races (TOCTOU) — an unconditioned write after a read can upsert deleted records, double-count aggregates, or drive counters negative. Trace the gap between read and write for each operation
+- If the PR performs multi-item writes (database transactions, batch operations), verify each write includes condition expressions that prevent stale-read races (TOCTOU) — an unconditioned write after a read can upsert deleted records, double-count aggregates, or drive counters negative. Trace the gap between read and write for each operation. Also verify that update/modify operations won't silently create records when the target key doesn't exist — database update operations often have implicit upsert semantics (e.g., DynamoDB UpdateItem, MongoDB update with upsert) that create partial records for invalid IDs; add existence condition expressions when the operation should only modify existing records
 - If the PR catches transaction/conditional failures, verify the error is translated to a client-appropriate status (409, 404) rather than bubbling as 500 — expected concurrency failures are not server errors
 
 **Batch/paginated API consumption**
@@ -239,6 +239,9 @@ Check every file against this checklist. The checklist is organized into tiers �
 
 **Bulk vs single-item operation parity**
 - If the PR modifies a single-item CRUD operation (create, update, delete) to handle new fields or apply new logic, trace the corresponding bulk/batch operation for the same entity — it often has its own independent implementation that won't pick up the change. Verify both paths handle the same fields, apply the same validation, and preserve the same secondary data
+
+**Bulk operation selection lifecycle**
+- If the PR adds operations that act on a user-selected subset of items (bulk actions, batch operations), trace the complete lifecycle of the selection state: when is it cleared (data refresh, item deletion), when is it not cleared but should be (filter/sort/page changes), and whether the operation re-validates the selection at execution time (especially after confirmation dialogs where the underlying data may change between display and confirmation)
 
 **Config value provenance for auto-upgrade**
 - If the PR adds auto-upgrade logic that replaces config values with newer defaults (prompt versions, schema migrations, template updates), verify the code can distinguish "user customized this value" from "this is the previous default." Without provenance tracking (version stamps, customization flags, or comparison against known previous defaults), auto-upgrade will overwrite intentional user customizations or skip legitimate upgrades
