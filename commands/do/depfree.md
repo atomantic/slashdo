@@ -291,10 +291,11 @@ Steps:
 </task>
 
 <guardrails>
-- The replacement must be functionally equivalent — same behavior, same edge cases
+- The replacement must preserve behavior for all currently-used call sites and documented invariants
+- You may omit handling for input shapes or edge cases that are provably unreachable based on {USAGE_DETAILS}, but do not narrow behavior for any actual call site
 - Do NOT introduce new dependencies to replace old ones
 - Do NOT use `git add -A` or `git add .` — stage specific files only
-- Keep replacement code minimal. If the original library handled edge cases we don't need, skip those edge cases
+- Keep replacement code minimal
 - If replacement is more complex than estimated (>2x the estimated lines), report back and skip — do not force a bad replacement
 - Place shared utility replacements in a sensible location (e.g., `src/utils/`, `lib/`, `internal/`) following existing project conventions
 - Commit each replacement independently: `refactor: replace {package} with owned {utility/code}`
@@ -309,12 +310,15 @@ After all replacement agents complete:
 1. Remove all replaced packages from the lock file:
    ```bash
    cd {WORKTREE_DIR}
-   # Node.js
-   npm install  # or yarn install / pnpm install — regenerates lock file
-   # Rust
-   cargo update
-   # Python
-   pip freeze > requirements.txt  # or update pyproject.toml lock
+   # Node.js: refresh lockfile only, without running lifecycle scripts
+   npm install --package-lock-only --ignore-scripts
+   # Or: yarn install --mode=update-lockfile --ignore-scripts
+   # Or: pnpm install --lockfile-only --ignore-scripts
+   # Rust: let a check refresh Cargo.lock to reflect manifest changes only
+   cargo check
+   # Python: use the project's lock tool to refresh
+   # poetry lock --no-update
+   # pip-compile requirements.in
    ```
 2. Commit the lock file update:
    ```bash

@@ -454,7 +454,7 @@ PHASE_4C_START_SHA="$(git rev-parse HEAD)"
 
 ### 4c.1: Test Audit Triage
 
-Review Agent 7 findings from Phase 1 and categorize them:
+Review Agent 8 (Test Quality & Coverage) findings from Phase 1 and categorize them:
 
 1. **`[VACUOUS]` findings** — tests that exist but don't test real behavior. These are the highest priority because they create a false sense of safety.
 2. **`[WEAK]` findings** — tests that partially cover behavior but miss important cases. Strengthen with additional assertions and edge cases.
