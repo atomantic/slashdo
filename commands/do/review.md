@@ -175,7 +175,7 @@ Check every file against this checklist. The checklist is organized into tiers �
 - If the PR adds or reorders sequential steps/instructions, verify the ordering matches execution dependencies — readers following steps in order must not perform an action before its prerequisite
 
 **Transactional write integrity**
-- If the PR performs multi-item writes (database transactions, batch operations), verify each write includes condition expressions that prevent stale-read races (TOCTOU) — an unconditioned write after a read can upsert deleted records, double-count aggregates, or drive counters negative. Trace the gap between read and write for each operation
+- If the PR performs multi-item writes (database transactions, batch operations), verify each write includes condition expressions that prevent stale-read races (TOCTOU) — an unconditioned write after a read can upsert deleted records, double-count aggregates, or drive counters negative. Trace the gap between read and write for each operation. Also verify that update/modify operations won't silently create records when the target key doesn't exist — database update operations often have implicit upsert semantics (e.g., DynamoDB UpdateItem, MongoDB update with upsert) that create partial records for invalid IDs; add existence condition expressions when the operation should only modify existing records
 - If the PR catches transaction/conditional failures, verify the error is translated to a client-appropriate status (409, 404) rather than bubbling as 500 — expected concurrency failures are not server errors
 
 **Batch/paginated API consumption**
@@ -213,6 +213,10 @@ Check every file against this checklist. The checklist is organized into tiers �
 **Abstraction layer fidelity**
 - If the PR calls a third-party API through an internal wrapper/abstraction layer, trace whether the wrapper requests and forwards all fields the handler depends on — third-party APIs often have optional response attributes that require explicit opt-in (e.g., cancellation reasons, extended metadata). Code branching on fields the wrapper doesn't forward will silently receive `undefined` and take the wrong path. Also verify that test mocks match what the real wrapper returns, not what the underlying API could theoretically return
 - If the PR passes multiple parameters through a wrapper/abstraction layer to an underlying API, check whether any parameter combinations are mutually exclusive in the underlying API (e.g., projection expressions + count-only select modes) — the wrapper should strip conflicting parameters rather than forwarding all unconditionally, which causes validation errors at the underlying layer
+- If the PR calls framework or library functions with discriminated input formats (e.g., content paths vs script paths, different loader functions per format), trace each call site to verify the function variant used actually handles the input format being passed — especially fallback/default branches in multi-format dispatchers, where the fallback commonly uses the wrong function. Also verify positional argument order matches the called function's parameter order (not assumed from variable names) and that the object type passed matches what the API expects (e.g., asset object vs class reference, property access vs method call)
+
+**Parameter consumption tracing**
+- If the PR adds a function with validated input parameters (schema validation, input decorators, type annotations), trace each validated parameter through to where it's actually consumed in the implementation. Parameters that pass validation but are never read create dead API surface — callers believe they're configuring behavior that's silently ignored. Either wire the parameter through or remove it from the public API
 
 **Summary/aggregation endpoint consistency**
 - If the PR adds a summary or dashboard endpoint that aggregates counts/previews across multiple data sources, trace each category's computation logic against the corresponding detail view it links to — verify they apply the same filters (e.g., orphan exclusion, status filtering), the same ordering guarantees (sort keys that actually exist on the queried index), and that navigation links propagate the aggregated context (e.g., `?status=pending`) so the destination page matches what the summary promised
@@ -239,6 +243,9 @@ Check every file against this checklist. The checklist is organized into tiers �
 
 **Bulk vs single-item operation parity**
 - If the PR modifies a single-item CRUD operation (create, update, delete) to handle new fields or apply new logic, trace the corresponding bulk/batch operation for the same entity — it often has its own independent implementation that won't pick up the change. Verify both paths handle the same fields, apply the same validation, and preserve the same secondary data
+
+**Bulk operation selection lifecycle**
+- If the PR adds operations that act on a user-selected subset of items (bulk actions, batch operations), trace the complete lifecycle of the selection state: when is it cleared (data refresh, item deletion), when is it not cleared but should be (filter/sort/page changes), and whether the operation re-validates the selection at execution time (especially after confirmation dialogs where the underlying data may change between display and confirmation)
 
 **Config value provenance for auto-upgrade**
 - If the PR adds auto-upgrade logic that replaces config values with newer defaults (prompt versions, schema migrations, template updates), verify the code can distinguish "user customized this value" from "this is the previous default." Without provenance tracking (version stamps, customization flags, or comparison against known previous defaults), auto-upgrade will overwrite intentional user customizations or skip legitimate upgrades

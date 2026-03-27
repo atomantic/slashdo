@@ -5,7 +5,7 @@ argument-hint: "[--interactive] [--scan-only] [--no-merge] [path filter or focus
 
 # Better — Unified DevSecOps Pipeline
 
-Run the full DevSecOps lifecycle: audit the codebase with 7 deduplicated agents, consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run Copilot review loops, and merge.
+Run the full DevSecOps lifecycle: audit the codebase with 8 deduplicated agents, consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run Copilot review loops, and merge.
 
 **Default mode: fully autonomous.** Uses Balanced model profile, proceeds through all phases without prompting, auto-merges PRs with clean reviews.
 
@@ -47,7 +47,7 @@ Record the selection as `MODEL_PROFILE` and derive agent models from this table:
 
 | Agent Role | Quality | Balanced | Budget |
 |------------|---------|----------|--------|
-| Audit agents (7 Explore agents, Phase 1) | opus | sonnet | haiku |
+| Audit agents (8 Explore agents, Phase 1) | opus | sonnet | haiku |
 | Remediation agents (general-purpose, Phase 3) | opus | sonnet | sonnet |
 
 Derive two variables:
@@ -121,7 +121,7 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 
 Project conventions are already in your context. Pass relevant conventions to each agent.
 
-Launch 7 Explore agents in two batches. Each agent must report findings in this format:
+Launch 8 Explore agents in two batches. Each agent must report findings in this format:
 ```
 - **[CRITICAL/HIGH/MEDIUM/LOW]** `file:line` - Description. Suggested fix: ... Complexity: Simple/Medium/Complex
 ```
@@ -174,7 +174,7 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    Resilience: external calls without timeouts, missing fallback for unavailable downstream services, retry without backoff ceiling/jitter, missing health check endpoints
    Observability: production paths without structured logging, error logs missing reproduction context (request ID, input params), async flows without correlation IDs
 
-### Batch 2 (2 agents after Batch 1 completes):
+### Batch 2 (3 agents after Batch 1 completes):
 
 **Model**: Same `AUDIT_MODEL` as Batch 1.
 
@@ -188,14 +188,27 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - **Database migrations**: exclusive-lock ALTER TABLE on large tables, CREATE INDEX without CONCURRENTLY, missing down migrations or untested rollback paths
    - General: framework-specific security issues, language-specific gotchas, domain-specific compliance, environment variable hygiene (missing `.env.example`, required env vars not validated at startup, secrets in config files that should be in env)
 
-7. **Test Quality & Coverage**
+7. **Dependency Freedom**
+   Audit all third-party dependencies for necessity. Every small library is an attack surface — supply chain compromises are real and common.
+   Focus:
+   - Extract the full dependency list from the project manifest (`package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `Gemfile`, etc.)
+   - Classify each dependency into tiers:
+     - **Acceptable**: large, widely-audited libraries (react, express, d3, three.js, next, vue, fastify, typescript, eslint, prisma, tailwindcss, tokio, serde, django, flask, pandas, etc.) — skip these
+     - **Suspect**: smaller libraries where we may only use 1-2 functions, wrappers over built-in APIs, single-purpose utilities
+     - **Removable**: libraries where the used functionality is <50 lines to implement, wraps a now-native API (e.g., `crypto.randomUUID()` replacing uuid, `structuredClone` replacing lodash.cloneDeep, `Array.prototype.flat` replacing array-flatten, `node:fs/promises` replacing fs-extra for most uses), unmaintained with known vulnerabilities, or micro-packages (is-odd, is-number, left-pad tier)
+   - For each suspect/removable dependency: search all source files for imports, list every function/class/type used, count call sites, assess replacement complexity (Trivial <20 lines, Moderate 20-100, Complex 100-300, Infeasible 300+)
+   - Check maintenance status: last publish date, open security issues, known CVEs
+   - Report format: `**[SEVERITY]** {package-name} — {Tier}. Uses: {functions}. Call sites: {N} in {M} files. Replacement: {complexity}. Reason: {why removable}`
+   - Severity mapping: unmaintained with CVEs → CRITICAL, unmaintained without CVEs → HIGH, replaceable single-function usage → MEDIUM, suspect but complex replacement → LOW
+
+8. **Test Quality & Coverage**
    Uses Batch 1 findings as context to prioritize.
    Focus areas:
 
    **Coverage gaps:**
    - Missing test files for critical modules, untested edge cases, tests that only cover happy paths
    - Areas with high complexity (identified by agents 1-5) but no tests
-   - Remediation changes from agents 1-6 that lack corresponding test coverage
+   - Remediation changes from agents 1-7 that lack corresponding test coverage
 
    **Vacuous tests (tests that don't actually test anything):**
    - Tests that assert on mocked return values instead of real behavior (testing the mock, not the code)
@@ -257,6 +270,7 @@ For each file touched by multiple categories, document why it was assigned to on
 ### Architecture & SOLID
 ### Bugs, Performance & Error Handling
 ### Stack-Specific
+### Dependency Freedom
 ### Test Quality & Coverage
 ```
 
@@ -267,6 +281,7 @@ For each file touched by multiple categories, document why it was assigned to on
    - Architecture → Architecture & SOLID → `architecture`
    - Bugs & Perf → Bugs, Performance & Error Handling → `bugs-perf`
    - Stack-Specific → Stack-Specific → `stack-specific`
+   - Dep Freedom → Dependency Freedom → `deps`
    - Tests → Test Quality & Coverage → `tests`
 
 ```
@@ -278,6 +293,7 @@ For each file touched by multiple categories, document why it was assigned to on
 | Architecture      | ...      | ...  | ...    | ... | ...   |
 | Bugs & Perf       | ...      | ...  | ...    | ... | ...   |
 | Stack-Specific    | ...      | ...  | ...    | ... | ...   |
+| Dep Freedom       | ...      | ...  | ...    | ... | ...   |
 | Tests             | ...      | ...  | ...    | ... | ...   |
 | TOTAL             | ...      | ...  | ...    | ... | ...   |
 ```
@@ -332,6 +348,7 @@ If no shared utilities were identified, skip this step.
    - Architecture & SOLID
    - Bugs, Performance & Error Handling
    - Stack-Specific
+   - Dependency Freedom
 3. Only create tasks for categories that have actionable findings
 4. Spawn up to 5 general-purpose agents as teammates. **Pass `REMEDIATION_MODEL` as the `model` parameter on each agent.** If `REMEDIATION_MODEL` is `opus`, omit the parameter to inherit from session.
 
@@ -339,9 +356,13 @@ If no shared utilities were identified, skip this step.
 
 !`cat ~/.claude/lib/remediation-agent-template.md`
 
+### Dependency Freedom agent — special instructions:
+The Dependency Freedom remediation agent has a unique task: for each removable dependency, it must (1) write replacement code (utility function or inline native API call), (2) update ALL import/require statements across the codebase, (3) remove the package from the manifest, and (4) regenerate the lock file (`npm install` / `cargo update` / etc.). After all replacements, verify no source file still references the removed package. See `/do:depfree` Phase 3b for the full agent template.
+
 ### Conflict avoidance:
 - Review all findings before task assignment. If two categories touch the same file, assign both sets of findings to the same agent.
 - Security agent gets priority on validation logic; DRY agent gets priority on import consolidation.
+- Dependency Freedom agent gets priority on files that are solely import/usage sites of a removed package.
 
 </plan_and_remediate>
 
@@ -433,7 +454,7 @@ PHASE_4C_START_SHA="$(git rev-parse HEAD)"
 
 ### 4c.1: Test Audit Triage
 
-Review Agent 7 findings from Phase 1 and categorize them:
+Review Agent 8 (Test Quality & Coverage) findings from Phase 1 and categorize them:
 
 1. **`[VACUOUS]` findings** — tests that exist but don't test real behavior. These are the highest priority because they create a false sense of safety.
 2. **`[WEAK]` findings** — tests that partially cover behavior but miss important cases. Strengthen with additional assertions and edge cases.
@@ -535,7 +556,7 @@ Initialize `CREATED_CATEGORY_SLUGS=""` (empty space-delimited string). After eac
 For each category that has findings:
 1. Switch to `{DEFAULT_BRANCH}`: `git checkout {DEFAULT_BRANCH}`
 2. Create a category branch: `git checkout -b better/{CATEGORY_SLUG}`
-   - Use slugs: `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `tests`
+   - Use slugs: `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`
 3. For each file assigned to this category in `FILE_OWNER_MAP`:
    - **Modified files**: `git checkout better/{DATE} -- {file_path}`
    - **New files (Added)**: `git checkout better/{DATE} -- {file_path}`
@@ -757,6 +778,7 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 | Architecture       | ...      | ...   | ...     | #number  | pass   | approved |
 | Bugs & Perf        | ...      | ...   | ...     | #number  | pass   | approved |
 | Stack-Specific     | ...      | ...   | ...     | #number  | pass   | approved |
+| Dep Freedom        | ...      | ...   | ...     | #number  | pass   | approved |
 | Tests              | ...      | ...   | ...     | #number  | pass   | approved |
 | TOTAL              | ...      | ...   | ...     | N PRs    |        |          |
 
@@ -791,6 +813,7 @@ Test Enhancement Stats:
 - When extracting modules, always add backward-compatible re-exports in the original module to prevent cross-PR breakage
 - Version bump happens exactly once on the first category branch based on aggregate commit analysis
 - Only CRITICAL, HIGH, and MEDIUM findings are auto-remediated for code categories; LOW findings remain tracked in PLAN.md
+- Dependency Freedom findings replace unnecessary third-party packages with owned code — see `/do:depfree` for standalone usage
 - Test Quality & Coverage findings are remediated in Phase 4c with a dedicated test enhancement agent that verifies tests fail when code is broken
 - GitLab projects skip the Copilot review loop entirely (Phase 6) and stop after MR creation
 - CI must pass on each PR before requesting Copilot review or merging
