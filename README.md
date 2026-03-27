@@ -24,7 +24,7 @@
 <p align="center">
   <img src="https://img.shields.io/npm/v/slash-do?style=flat-square&color=blue" alt="npm version" />
   <img src="https://img.shields.io/badge/environments-4-green?style=flat-square" alt="environments" />
-  <img src="https://img.shields.io/badge/commands-12-orange?style=flat-square" alt="commands" />
+  <img src="https://img.shields.io/badge/commands-13-orange?style=flat-square" alt="commands" />
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="license" />
 </p>
 
@@ -60,8 +60,9 @@ All commands live under the `do:` namespace:
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
 | `/do:release` | Create a release PR with version bump and changelog |
 | `/do:review` | Deep code review against best practices |
-| `/do:better` | Full DevSecOps audit with 7-agent scan and remediation |
+| `/do:better` | Full DevSecOps audit with 8-agent scan and remediation |
 | `/do:better-swift` | SwiftUI DevSecOps audit with multi-platform coverage |
+| `/do:depfree` | Audit dependencies, remove unnecessary ones, write replacement code |
 | `/do:goals` | Generate GOALS.md from codebase analysis |
 | `/do:replan` | Review and clean up PLAN.md |
 | `/do:omd` | Audit and optimize markdown files |
