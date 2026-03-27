@@ -475,7 +475,7 @@ gh pr merge {PR_NUMBER} --merge
    ```bash
    git checkout {DEFAULT_BRANCH}
    git branch -D depfree/{DATE}
-   git push origin --delete depfree/{DATE}
+   git push origin --delete depfree/{DATE} || echo "warning: remote branch depfree/{DATE} not found or already deleted"
    ```
 3. Restore stashed changes if applicable:
    ```bash
