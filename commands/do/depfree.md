@@ -368,7 +368,16 @@ Confirm no source file still references a removed package:
 ```bash
 cd {WORKTREE_DIR}
 for pkg in {REMOVED_PACKAGES}; do
-  grep -r "$pkg" --include='*.{ts,js,tsx,jsx,py,rs,go,rb}' . && echo "WARN: $pkg still referenced"
+  grep -r "$pkg" \
+    --include='*.ts' \
+    --include='*.js' \
+    --include='*.tsx' \
+    --include='*.jsx' \
+    --include='*.py' \
+    --include='*.rs' \
+    --include='*.go' \
+    --include='*.rb' \
+    . && echo "WARN: $pkg still referenced"
 done
 ```
 Fix any remaining references.
