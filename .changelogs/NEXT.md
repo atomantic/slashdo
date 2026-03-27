@@ -1,6 +1,7 @@
 # Unreleased Changes
 
 ## Added
+- New `/do:depfree` command: audits third-party dependencies and removes unnecessary ones by writing replacement code, reducing supply chain attack surface
 
 ## Changed
 - Improved review checklist: added checks for implicit upsert semantics on update operations, bulk operation selection lifecycle (clear/invalidate/re-validate), UI rendering gate alignment across multi-part components, and input collection deduplication
