@@ -147,6 +147,7 @@
    - Subprocess output buffered in memory without size limits — a noisy or stuck child process can cause unbounded memory growth. Cap in-memory buffers and truncate or stream to disk for long-running commands
    - Platform-specific assumptions — hardcoded shell interpreters, `path.join()` backslashes breaking ESM imports. Use `pathToFileURL()` for dynamic imports
    - Naive whitespace splitting of command strings (`str.split(/\s+/)`) breaks quoted arguments — use a proper argv parser or explicitly disallow quoted/multi-word arguments when validating shell commands
+   - Shell expansions (brace `{a,b}`, glob `*`, tilde `~`, variable `$VAR`) suppressed by quoting context — single quotes prevent all expansion, so patterns like `--include='*.{ts,js}'` pass the literal braces to the command instead of expanding. Use multiple flags, unquoted brace expansion (bash-only), or other command-specific syntax when expansion is required
 
    **Search & navigation** _[applies when: code implements search results or deep-linking]_
    - Search results linking to generic list pages instead of deep-linking to the specific record
