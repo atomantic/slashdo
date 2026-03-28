@@ -215,7 +215,7 @@ cp commands/do/review.md ~/.claude/commands/do/review.md
 | review-surface-scan.md | N | N | N | N |
 | review-security-audit.md | N | N | N | N |
 | review-cross-file-tracing.md | N | N | N | N |
-| review.md (orchestrator) | — | — | — | — |
+| commands/do/review.md (orchestrator) | — | — | — | — |
 
 ### New/Modified Items
 {list each item with brief explanation of the pattern it catches and which agent owns it}
@@ -238,7 +238,7 @@ cp commands/do/review.md ~/.claude/commands/do/review.md
 ## Phase 6: Commit
 
 After all changes:
-1. Stage only the modified files under `lib/` and `commands/`
+1. Stage all modified files (under `lib/`, `commands/`, and `.claude/commands/`)
 2. Commit: `chore: improve review system from PR feedback`
 3. Do NOT push unless the user explicitly asks
 
