@@ -56,7 +56,7 @@ const ENVIRONMENTS = {
     libDir: null,
     hooksDir: null,
     versionFile: path.join(HOME, '.codex', '.slashdo-version'),
-    format: 'skill-md',
+    format: 'yaml-frontmatter',
     ext: null,
     namespacing: 'directory',
     libPathPrefix: null,

@@ -65,12 +65,6 @@ function toTomlHeader(fm) {
   return lines.join('\n');
 }
 
-function toSkillHeader(fm) {
-  const lines = [];
-  if (fm.description) lines.push(`# ${fm.description}`);
-  return lines.join('\n');
-}
-
 function getTargetFilename(relPath, env) {
   const basename = path.basename(relPath, '.md');
   const dir = path.dirname(relPath);
@@ -114,10 +108,7 @@ function transformCommand(content, env, sourceLibDir) {
     case 'toml':
       header = toTomlHeader(frontmatter);
       break;
-    case 'skill-md':
-      header = toSkillHeader(frontmatter);
-      break;
-    default:
+default:
       header = toYamlFrontmatter(frontmatter);
   }
 

@@ -167,7 +167,7 @@ describe('transformCommand', () => {
     libPathPrefix: '~/.gemini/lib/',
   };
   const codexEnv = {
-    format: 'skill-md',
+    format: 'yaml-frontmatter',
     supportsCatInclusion: false,
     libPathPrefix: null,
   };
@@ -189,10 +189,11 @@ describe('transformCommand', () => {
     assert.ok(result.includes('+++'));
   });
 
-  it('produces skill-md format for codex', () => {
+  it('produces yaml-frontmatter format for codex', () => {
     const content = '---\ndescription: Test cmd\n---\nBody';
     const result = transformCommand(content, codexEnv);
-    assert.ok(result.startsWith('# Test cmd'));
+    assert.ok(result.startsWith('---\n'));
+    assert.ok(result.includes('description: Test cmd'));
     assert.ok(result.includes('Body'));
   });
 

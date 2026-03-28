@@ -8,4 +8,6 @@
 
 ## Fixed
 
+- Codex SKILL.md files now include YAML frontmatter (`---`) instead of bare markdown headings, fixing "missing YAML frontmatter" errors on Codex launch
+
 ## Removed
