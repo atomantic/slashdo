@@ -154,7 +154,7 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 
 For each finding:
 ```
-file:line — [CRITICAL|IMPROVEMENT] description
+file:line — [CRITICAL|IMPROVEMENT|UNCERTAIN] description
 Evidence: `quoted code line(s)`
 ```
 

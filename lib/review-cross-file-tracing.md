@@ -219,7 +219,7 @@ You review code by tracing data and control flow ACROSS files. You catch issues 
 
 For each finding:
 ```
-file:line — [CRITICAL|IMPROVEMENT] description
+file:line — [CRITICAL|IMPROVEMENT|UNCERTAIN] description
 Cross-file trace: file_a:line → file_b:line (what flows between them)
 Evidence: `quoted code from each file`
 ```
