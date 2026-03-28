@@ -30,7 +30,7 @@ describe('getEnv', () => {
   it('returns codex env config', () => {
     const env = getEnv('codex');
     assert.equal(env.name, 'Codex');
-    assert.equal(env.format, 'skill-md');
+    assert.equal(env.format, 'yaml-frontmatter');
     assert.equal(env.namespacing, 'directory');
   });
 

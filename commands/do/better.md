@@ -35,7 +35,7 @@ AskUserQuestion([
     header: "Model",
     multiSelect: false,
     options: [
-      { label: "Quality", description: "Opus for all agents — fewest false positives, best fixes (highest cost, 7+ Opus agents)" },
+      { label: "Quality", description: "Opus for all agents — fewest false positives, best fixes (highest cost, 8+ Opus agents)" },
       { label: "Balanced (Recommended)", description: "Sonnet for audit and remediation — good quality at moderate cost" },
       { label: "Budget", description: "Haiku for audit, Sonnet for remediation — fastest and cheapest" }
     ]
@@ -442,7 +442,7 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
 
 ## Phase 4c: Test Enhancement
 
-After internal code review passes, evaluate and enhance the project's test suite. This phase acts on Agent 7's findings AND ensures all remediation work from Phase 3 has proper test coverage.
+After internal code review passes, evaluate and enhance the project's test suite. This phase acts on Agent 8's findings AND ensures all remediation work from Phase 3 has proper test coverage.
 
 ### 4c.0: Record Start SHA
 
