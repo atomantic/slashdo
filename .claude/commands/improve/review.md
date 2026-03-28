@@ -251,5 +251,5 @@ After all changes:
 - When in doubt about specificity, generalize one level: "PostgreSQL index" → "database index" → "query performance"
 - If the PR review feedback is all noise (no actionable items), report that and exit without changes
 - Structural recommendations (new agents, merges, splits) are logged in the report but never auto-implemented — they require user approval
-- The master checklist is the canonical reference; agent files are focused extracts. Every item in an agent file should have a corresponding (possibly broader) item in the master
+- The master checklist is the canonical reference; agent files are focused extracts. New agent items should normally have a corresponding (possibly broader) item in the master; if they don't, either add one or explicitly document why the item is agent-specific
 - When moving items between agents, verify the item's reading strategy matches the destination agent's mandate
