@@ -176,7 +176,7 @@ describe('transformCommand', () => {
     const content = '---\ndescription: Test cmd\n---\nBody text';
     const result = transformCommand(content, claudeEnv);
     assert.ok(result.startsWith('---\n'));
-    assert.ok(result.includes('description: Test cmd'));
+    assert.ok(result.includes('description: "Test cmd"'));
     assert.ok(result.includes('Body text'));
   });
 
@@ -193,8 +193,15 @@ describe('transformCommand', () => {
     const content = '---\ndescription: Test cmd\n---\nBody';
     const result = transformCommand(content, codexEnv);
     assert.ok(result.startsWith('---\n'));
-    assert.ok(result.includes('description: Test cmd'));
+    assert.ok(result.includes('description: "Test cmd"'));
     assert.ok(result.includes('Body'));
+  });
+
+  it('quotes yaml-frontmatter values with colons for codex', () => {
+    const content = '---\ndescription: Test: cmd\nargument-hint: [foo:bar]\n---\nBody';
+    const result = transformCommand(content, codexEnv);
+    assert.ok(result.includes('description: "Test: cmd"'));
+    assert.ok(result.includes('argument-hint: "[foo:bar]"'));
   });
 
   it('rewrites lib paths for environments with supportsCatInclusion', () => {

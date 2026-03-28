@@ -49,7 +49,7 @@ function inlineLibContent(body, libDir) {
 function toYamlFrontmatter(fm) {
   const lines = ['---'];
   for (const [key, val] of Object.entries(fm)) {
-    lines.push(`${key}: ${val}`);
+    lines.push(`${key}: ${JSON.stringify(String(val))}`);
   }
   lines.push('---');
   return lines.join('\n');

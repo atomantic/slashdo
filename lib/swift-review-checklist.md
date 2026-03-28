@@ -106,6 +106,13 @@
    - `UserInterfaceIdiom` checks without handling `.mac` / `.pad` / `.vision` appropriately
    - Touch-specific gestures (drag, long press) without pointer/hover alternatives for macOS
    - Missing `#if targetEnvironment(macCatalyst)` handling when running iPad apps on Mac
+   - **macOS window lifecycle (App Store Guideline 4):**
+     - Missing `NSApplicationDelegate` with `applicationShouldTerminateAfterLastWindowClosed` returning `false` — app quits when the user closes the window instead of staying in the Dock
+     - Missing `applicationShouldHandleReopen(_:hasVisibleWindows:)` — clicking the Dock icon or Finder menu does nothing when the main window is closed
+     - `WindowGroup` without a stable `id:` parameter (e.g., `WindowGroup(id: "main")`) — prevents programmatic window reopening via `openWindow(id:)`
+     - Missing "Show Main Window" menu command (typically Cmd+0) in the Window menu — users have no way to recover the main window from the menu bar
+     - Missing `reopenWindow` closure bridge between `NSApplicationDelegate` and SwiftUI's `@Environment(\.openWindow)` — AppKit delegate can't create new SwiftUI windows
+     - Menu bar commands (File > New, Edit actions) that don't ensure the main window is visible before acting — commands fire but the user sees nothing
 
    **Data persistence** _[applies when: code uses Core Data, SwiftData, or file storage]_
    - `@FetchRequest` or `@Query` without sort descriptors — undefined ordering across launches

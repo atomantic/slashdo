@@ -306,6 +306,7 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - Touch-specific interactions without pointer alternatives
    - Fixed sizes that don't adapt to Mac window resizing
    - Missing `Settings` scene for macOS apps
+   - **macOS window lifecycle (App Store Guideline 4):** Missing `NSApplicationDelegate` with `applicationShouldTerminateAfterLastWindowClosed` returning `false` (app quits on window close instead of staying in Dock). Missing `applicationShouldHandleReopen(_:hasVisibleWindows:)` (Dock click does nothing when window is closed). `WindowGroup` without stable `id:` parameter prevents programmatic reopening via `openWindow(id:)`. Missing "Show Main Window" menu command (Cmd+0) in Window menu. Missing `reopenWindow` closure bridge between AppDelegate and SwiftUI `openWindow`. Menu bar commands that don't ensure main window is visible before acting = **[HIGH]**
    - watchOS complications not updated, widget timelines not refreshed
    - visionOS: missing `.windowStyle(.volumetric)` or `.immersionStyle()` where appropriate
 
