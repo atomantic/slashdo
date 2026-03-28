@@ -1,4 +1,6 @@
-# Unreleased Changes
+# Release v2.4.0
+
+Released: 2026-03-28
 
 ## Added
 - Multi-agent review architecture: `/do:review` now dispatches 3 parallel agents (surface scan, security audit, cross-file tracing) instead of one monolithic reviewer
@@ -14,3 +16,6 @@
 ## Fixed
 
 ## Removed
+
+## Full Changelog
+**Full Diff**: https://github.com/atomantic/slashdo/compare/v2.3.0...v2.4.0
