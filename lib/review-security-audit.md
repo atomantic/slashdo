@@ -67,9 +67,10 @@ For each changed file:
 
 For each finding:
 ```
-file:line — [CRITICAL|IMPROVEMENT] description
+file:line — [CRITICAL|IMPROVEMENT|NEEDS-TRACE] description
 Evidence: `quoted code line(s)`
 Attack scenario: brief exploitation description
 ```
 
 Security findings default to CRITICAL unless exploitation requires unlikely preconditions.
+Use [NEEDS-TRACE] for cross-file security flows that require the cross-file agent to verify.
