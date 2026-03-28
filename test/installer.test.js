@@ -222,7 +222,7 @@ describe('install with env formats', () => {
   it('installs with directory namespacing (codex style)', () => {
     const { tmpDir, env } = makeTmpEnv({
       namespacing: 'directory',
-      format: 'skill-md',
+      format: 'yaml-frontmatter',
       ext: null,
       libDir: null,
       libPathPrefix: null,
