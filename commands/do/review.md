@@ -15,253 +15,75 @@ If there are no changes, inform the user and stop.
 
 ## Apply Project Conventions
 
-CLAUDE.md is already loaded into your context. Use its rules (code style, error handling, logging, security model, scope exclusions) as overrides to generic best practices throughout this review. For example, if CLAUDE.md says "no auth needed — internal tool", do not flag missing authentication.
-
-<review_instructions>
+CLAUDE.md is already loaded into your context. Use its rules (code style, error handling, logging, security model, scope exclusions) as overrides to generic best practices throughout this review. Pass relevant convention overrides to each agent so they don't flag things the project intentionally allows (e.g., "no auth needed — internal tool").
 
 ## PR-Level Coherence Check
 
-Before reviewing individual files, understand what this change set claims to do:
+Before dispatching agents, understand what this change set claims to do:
 
 1. Read commit messages (`git log {base}...HEAD --oneline`)
-2. After reviewing all files, verify: does the changed code actually deliver what the commits claim? Flag any claims not backed by code (e.g., "adds rate limiting" but only adds a comment).
+2. Note the claims — verify after agents return whether the code actually delivers them.
 
-## Large PR Strategy
+## Dispatch Review Agents
 
-If the diff touches more than 15 files, split the review into batches:
-1. Group files by module/directory
-2. Review each batch, printing findings as you go
-3. Delegate files beyond the first 15 to a subagent if context is getting full
+Read the three agent instruction files, then spawn **all three in parallel** using the Agent tool. Each agent reviews ALL changed files independently.
 
-## Deep File Review
+<surface_scan_agent>
 
-For **each changed file** in the diff, read the **entire file** (not just diff hunks). Reviewing only the diff misses context bugs where new code interacts incorrectly with existing code.
+### 1. Surface Scan Agent
 
-### Understand the Code Flow
+Catches per-file bugs: runtime crashes, hygiene, domain-specific issues, quality, and convention violations.
 
-Before checking individual files against the checklist, **map the flow of changed code across all files**. This means:
+!`cat ~/.claude/lib/review-surface-scan.md`
 
-1. **Trace call chains** — for each new or modified function/method, identify every caller and callee across the changed files. Read those files too if needed. You cannot evaluate whether code is duplicated or well-structured without knowing how it connects.
-2. **Identify shared data paths** — trace data from entry point (route handler, event listener, CLI arg) through transforms, storage, and output. Understand what each layer is responsible for.
-3. **Map responsibilities** — for each changed module/file, state its single responsibility in one sentence. If you can't, it may be doing too much.
+</surface_scan_agent>
 
-### Evaluate Software Engineering Principles
+<security_agent>
 
-With the flow understood, evaluate the changed code against these principles:
+### 2. Security Audit Agent
 
-**DRY (Don't Repeat Yourself)**
-- Look for logic duplicated across changed files or between changed and existing code. Grep for similar function signatures, repeated conditional blocks, or copy-pasted patterns with minor variations.
-- If two functions do nearly the same thing with small differences, they should likely share a common implementation with the differences parameterized.
-- Duplicated validation, error formatting, or data transformation are common violations.
+Catches trust boundary violations, injection, SSRF, data exposure, and access control gaps.
 
-**YAGNI (You Ain't Gonna Need It)**
-- Flag abstractions, config options, parameters, or extension points that serve no current use case. Code should solve the problem at hand, not hypothetical future problems.
-- Unnecessary wrapper functions, premature generalization (e.g., a factory that produces one type), and unused feature flags are common violations.
+!`cat ~/.claude/lib/review-security-audit.md`
 
-**SOLID Principles**
-- **Single Responsibility** — each module/function should have one reason to change. If a function handles both business logic and I/O formatting, flag it.
-- **Open/Closed** — new behavior should be addable without modifying existing working code where practical (e.g., strategy patterns, plugin hooks).
-- **Liskov Substitution** — if subclasses or interface implementations exist, verify they are fully substitutable without breaking callers.
-- **Interface Segregation** — callers should not depend on methods they don't use. Large config objects or option bags passed through many layers are a smell.
-- **Dependency Inversion** — high-level modules should not import low-level implementation details directly when an abstraction boundary would be cleaner.
+</security_agent>
 
-**Separation of Concerns**
-- Business logic should not be tangled with transport (HTTP, WebSocket), storage (SQL, file I/O), or presentation (HTML, JSON formatting).
-- If a route handler contains business rules beyond simple delegation, flag it.
+<cross_file_agent>
 
-**Naming & Readability**
-- Function and variable names should communicate intent. If you need to read the implementation to understand what a name means, it's poorly named.
-- Boolean variables/params should read as predicates (`isReady`, `hasAccess`), not ambiguous nouns.
+### 3. Cross-File Tracing Agent
 
-For this review, only flag principle and design violations that are **concrete and actionable** in the code changed by this PR. However, if you discover a clear, real bug or correctness issue — even in code not directly modified here — call it out and help ensure it gets fixed (in this PR or a follow-up). Never dismiss serious problems as "out of scope" or "not modified in this PR."
+Catches contract mismatches, broken call chains, stale state propagation, lifecycle gaps, and architectural violations.
 
-</review_instructions>
+!`cat ~/.claude/lib/review-cross-file-tracing.md`
 
-<checklist>
+</cross_file_agent>
 
-### Per-File Checklist
+### How to dispatch
 
-Check every file against this checklist. The checklist is organized into tiers — always check Tiers 1 and 4, and check Tiers 2-3 only when the relevance filter matches the file:
+For each agent, construct its prompt by combining:
+1. The agent's instruction content (from the sections above)
+2. Project convention overrides from CLAUDE.md that affect the review
+3. The list of changed files from the diff stat
+4. Instruction: "Read each changed file in full (not just diff hunks). Apply your checklist. Return structured findings."
 
-!`cat ~/.claude/lib/code-review-checklist.md`
+Spawn all three agents simultaneously. Each returns its findings independently.
 
-</checklist>
+### Large PR handling
 
-<deep_checks>
+If the diff touches more than 20 files, tell each agent to batch files by directory and process groups sequentially within their parallel run. The orchestrator does not manage batching.
 
-### Additional deep checks (read surrounding code to verify):
+## Collect & Deduplicate
 
-**Cross-file consistency**
-- If a new function/endpoint follows a pattern from an existing similar one, verify ALL aspects match (validation, error codes, response shape, cleanup). Partial copying is the #1 source of review feedback.
-- New API client functions should use the same encoding/escaping as existing ones (e.g., if other endpoints use `encodeURIComponent`, new ones must too)
-- If the PR adds a new endpoint, trace where existing endpoints are registered and verify the new one is wired in all runtime adapters (serverless handler map, framework route file, API gateway config, local dev server) — a route registered in one adapter but missing from another will silently 404 in the missing runtime
-- If the PR adds a new call to an external service that has established mock/test infrastructure (mock mode flags, test helpers, dev stubs), verify the new call uses the same patterns — bypassing them makes the new code path untestable in offline/dev environments and inconsistent with existing integrations
-- If the PR adds a new UI component or client-side consumer against an existing API endpoint, read the actual endpoint handler or response shape — verify every field name, nesting level, identifier property, and response envelope path used in the consumer matches what the producer returns. This is the #1 source of "renders empty" bugs in new views built against existing APIs
-- If the PR adds or modifies a discovery/catalog endpoint that enumerates available capabilities (actions, node types, valid options) for a downstream consumer API, trace the full enumerated set against the consumer's actual supported inputs: verify every advertised item can be consumed without error, every consumer-supported item is discoverable, and any identifier transformations (naming conventions, case conversions, key format changes) between discovery output and consumer input preserve the format the consumer expects — mismatches produce runtime errors that no amount of unit testing will catch because the two sides are tested independently
+After all three agents return:
 
-**Push/real-time event scoping**
-- If the PR adds or modifies WebSocket, SSE, or pub/sub event emission, trace the event scope: does the event reach only the originating session/user, or is it broadcast to all connected clients? Check payloads for sensitive content (user inputs, images, tokens) that should not leak across sessions. If the consumer filters by a correlation ID, verify the producer includes one and that the ID is generated server-side or validated against the session
-
-**Cleanup/teardown side effect audit**
-- If the PR adds cleanup, teardown, or garbage-collection functions, trace whether the cleanup performs implicit state mutations (auto-merge into main, auto-commit of unreviewed changes, cascade writes to shared state). Verify the cleanup aborts safely if a prerequisite step fails (e.g., saving dirty state before deletion) rather than proceeding with data loss
-
-**Specification/standard conformance**
-- If the PR implements or extends a parser for a well-known format (cron expressions, date formats, URLs, semver, MIME types), verify boundary handling matches the specification — especially field-specific ranges (month starts at 1, not 0), normalization conventions (cron DOW 0 and 7 both mean Sunday), and step/range semantics that differ per field type
-
-**Temporal context consistency**
-- If the PR adds timezone-aware logic alongside existing non-timezone-aware comparisons in the same code flow (e.g., a weekday gate using UTC while cron matching uses user timezone), check that all temporal comparisons in the flow use the same timezone context — mixed contexts cause operations to trigger on the wrong local day/hour
-
-**Status/health endpoint freshness**
-- If the PR adds or modifies a status or health-check endpoint, trace whether it returns live probe results or cached data. Cached health checks mask real-time failures — a cache keyed by URL that survives URL reconfiguration reports stale status. Verify health endpoints bypass caches or use sufficiently short TTLs
-
-**Boolean/type fidelity through serialization boundaries**
-- If the PR persists boolean flags to text-based storage (markdown metadata, flat files, query strings, form data), trace the round-trip: write path → storage format → read/parse path → consumption site. Boolean `false` serialized as the string `"false"` is truthy in JavaScript — verify all consumption sites use strict equality or a dedicated coercion function, and that the same coercion is applied consistently
-
-**Cross-layer invariant enforcement**
-- If the PR introduces or modifies an invariant relationship between configuration flags (e.g., "flag A implies flag B"), trace enforcement through every layer: UI toggle handlers, form submission payloads, API validation schemas, server default-application functions, and persistence round-trip. If any layer allows the invariant to be violated, cascading defaults produce contradictory state
-
-**Error path completeness**
-- Trace each error path end-to-end: does the error reach the user with a helpful message and correct HTTP status? Or does it get swallowed, logged silently, or surface as a generic 500?
-- For multi-step operations (sync to N repos, batch updates): are per-item failures tracked separately from overall success? Does the status reflect partial failure accurately?
-
-**Concurrency under user interaction**
-- If a component performs optimistic updates with async operations, simulate what happens when the user triggers a second action while the first is in-flight — trace whether rollback/success handlers can clobber concurrent state changes or close over stale snapshots
-
-**State ownership across component boundaries**
-- If a child component maintains local state derived from a parent's data (e.g., optimistic UI copies), trace the ownership boundary: does the child propagate changes back to the parent? What happens on unmount/remount — does the parent's stale cache resurface?
-
-**Data flow audit**
-- For sensitive data (secrets, tokens): trace the value from input → storage → retrieval → response. Verify it is never leaked in ANY response path (GET, PUT, POST, error responses, socket events)
-- For user input → URL/command interpolation: verify encoding/escaping at every boundary
-
-**Access scope changes**
-- If the PR widens access to an endpoint or resource (admin→public, internal→external), trace all shared dependencies the endpoint uses (rate limiters, queues, connection pools, external service quotas) and assess whether they were sized for the previous access level — in-memory/process-local limiters don't enforce limits across horizontally scaled instances
-- If the PR adds endpoints under a restricted route group (admin, internal, scoped), read sibling endpoints in the same route group and verify the new endpoint applies the same authorization gate — missing gates on admin-mounted endpoints are consistently the most dangerous review finding
-
-**Guard-before-cache ordering**
-- If a handler performs a pre-flight guard check (rate limit, quota, feature flag) before a cache lookup or short-circuit path, verify the guard doesn't block operations that would be served from cache without touching the guarded resource — restructure so cache hits bypass the guard
-
-**Sanitization/validation/normalization coverage**
-- If the PR introduces a new validation or sanitization function for a data field, trace every code path that writes to that field (create, update, import, sync, rename, raw/bulk persist) — verify they all use the same sanitization. Partial application is the #1 way invalid data re-enters through an unguarded path
-- If the PR adds a "raw" or bypass write path (e.g., `raw: true` flag, bulk import, migration backfill), compare the normalization it applies against what the standard read/parse path assumes — ID prefixes, required defaults, shape invariants. Data that passes through the raw path must still be valid when reloaded through the normal path
-- If the PR adds a new dispatch branch within a multi-type handler (e.g., coercing a new data shape, handling a new entity subtype), trace sibling branches and verify the new one applies equivalent validation, type-checking, and error-handling constraints — new branches commonly bypass validation that existing branches enforce because the author focuses on happy-path behavior
-
-**Bootstrap/initialization ordering**
-- If the PR adds resilience or self-healing code (dependency installers, auto-repair, migration runners), trace the execution order: does the main code path resolve or import the dependencies BEFORE the resilience code runs? If so, the bootstrapper never executes when it's needed most — restructure so verification/installation precedes resolution
-
-**Self-rescheduling callback resilience**
-- If the PR adds a one-shot timer or deferred callback that re-registers itself for the next cycle, trace what happens when the callback body throws before re-registration — an unhandled error permanently stops the schedule. Verify re-registration is in a finally block or occurs before the main logic
-
-**Periodic operation skip behavior**
-- If the PR adds skip/gate conditions to periodic operations (scheduled jobs, pollers), trace whether a skip still advances the scheduling state (lastRun, nextFireTime). A skipped execution with null/stale timing state causes immediate re-trigger loops
-
-**Lock/flag exit-path completeness**
-- If a function sets a shared flag or lock (in-progress, mutex, status marker), trace every exit path — early returns, error catches, platform-specific guards, and normal completion — to verify the flag is cleared. A missed path leaves the system permanently locked
-
-**Operation-marker ordering**
-- If the PR writes completion markers, success flags, or status files, verify they are written AFTER the operation they attest to, not before. If the operation can fail after the marker write, consumers see false success. Also check that marker-dependent startup logic validates the marker's contents rather than treating presence as unconditional success
-
-**Real-time event vs response timing**
-- If a handler emits push notifications (WebSocket, SSE, pub/sub) AND returns an HTTP response, verify clients won't receive push events before the response that gives them context to interpret those events — especially when the response contains IDs or version numbers the event consumer needs
-
-**Paired lifecycle event completeness**
-- If a function emits a "started" or "begin" event, trace every exit path (success, error, early return, no-op branches for specific entity types) and verify each emits the corresponding "completed" or "failed" event. A missing completion event leaves consumers (UI spinners, progress indicators, orchestrators waiting for all-done) in a permanently stale state. Pay special attention to branches that short-circuit for specific entity subtypes — they often return early without the completion event because the author only considered the primary code path
-
-**Entity identity key consistency**
-- If the PR uses a computed identity key to look up, match, or index entities (e.g., `e.id || e.externalId`, `item.slug ?? item.name`), trace all other code paths that perform the same entity lookup and verify they use the identical key computation. Inconsistent key strategies cause mismatches — one path stores data under key A while another reads under key B, leading to phantom missing records or incorrect counts
-
-**Intent vs implementation (meta-cognitive pass)**
-- For each label, comment, docstring, status message, or inline instruction that describes behavior, verify the code actually implements that behavior. A detection mechanism must query the data it claims to detect; a migration must create the target, not just delete the source
-- If the PR contains inline code examples, command templates, or query snippets, verify they are syntactically valid for their language — run a mental parse of each example. Watch for template placeholder format inconsistencies within and across files
-- If the PR modifies a value (identifier, parameter name, format convention, threshold, timeout) that is referenced in other files, trace all cross-references and verify they agree. This includes: reviewer usernames, API names, placeholder formats, GraphQL field names, operational constants
-- If the PR adds or reorders sequential steps/instructions, verify the ordering matches execution dependencies — readers following steps in order must not perform an action before its prerequisite
-
-**Transactional write integrity**
-- If the PR performs multi-item writes (database transactions, batch operations), verify each write includes condition expressions that prevent stale-read races (TOCTOU) — an unconditioned write after a read can upsert deleted records, double-count aggregates, or drive counters negative. Trace the gap between read and write for each operation. Also verify that update/modify operations won't silently create records when the target key doesn't exist — database update operations often have implicit upsert semantics (e.g., DynamoDB UpdateItem, MongoDB update with upsert) that create partial records for invalid IDs; add existence condition expressions when the operation should only modify existing records
-- If the PR catches transaction/conditional failures, verify the error is translated to a client-appropriate status (409, 404) rather than bubbling as 500 — expected concurrency failures are not server errors
-
-**Batch/paginated API consumption**
-- If the PR calls batch or paginated external APIs (database batch gets, paginated queries, bulk service calls), verify the caller handles partial results — unprocessed items, continuation tokens, and rate-limited responses must be retried or surfaced, not silently dropped. Check that retry loops include backoff and attempt limits
-- If the PR references resource names from API responses (table names, queue names), verify lookups account for environment-prefixed names rather than hardcoding bare names
-
-**Data model vs access pattern alignment**
-- If the PR adds queries that claim ordering (e.g., "recent", "top"), verify the underlying key/index design actually supports that ordering natively — random UUIDs and non-time-sortable keys require full scans and in-memory sorting, which degrades at scale
-
-**Deletion/lifecycle cleanup and aggregate reset completeness**
-- If the PR adds a delete or destroy function, trace all resources created during the entity's lifecycle (data directories, git branches, child records, temporary files, worktrees) and verify each is cleaned up on deletion. Compare with existing delete functions in the codebase for completeness patterns
-- If the PR adds a state transition that resets an aggregate value (counter, score, flag count), trace all individual records that contribute to that aggregate and verify they are also cleared, archived, or versioned — a reset counter with stale contributing records causes inconsistency and blocks duplicate-prevention checks on re-entry
-
-**Update schema depth**
-- If the PR derives an update/patch schema from a create schema (e.g., `.partial()`, `Partial<T>`), verify that nested objects also become partial — shallow partial on deeply-required schemas rejects valid partial updates where the caller only wants to change one nested field
-
-**Mutation return value freshness**
-- If a function mutates an entity and returns it, verify the returned object reflects the post-mutation state, not a pre-read snapshot. Also check whether dependent scheduling/evaluation state (backoff, timers, status flags) is reset when a "force" or "trigger" operation is invoked
-
-**Responsibility relocation audit**
-- If the PR moves a responsibility from one module to another (e.g., a database write from a handler to middleware, a computation from client to server), trace all code at the old location that depended on the timing, return value, or side effects of the moved operation — guards, response fields, in-memory state updates, and downstream scheduling that assumed co-located execution. Verify the new execution point preserves these contracts or that dependents are updated. Check for dead code left behind at the old location
-
-**Read-after-write consistency**
-- If the PR writes to a data store and then immediately queries that store (especially scans, aggregations, or replica reads), check whether the store's consistency model guarantees visibility of the write. If not, flag the read as potentially stale and suggest computing from in-memory state, using consistent-read options, or adding a delay/caveat
-
-**Security-sensitive configuration parsing**
-- If the PR reads environment variables or config values that affect security behavior (proxy trust depth, rate limit thresholds, CORS origins, token expiry), verify the parsing enforces the expected type and range — e.g., integer-only via `parseInt` with `Number.isInteger` check, non-negative bounds, and a logged fallback to a safe default on invalid input. `Number()` on arbitrary strings accepts floats, negatives, and empty-string-as-zero, all of which can silently weaken security controls
-
-**Multi-source data aggregation**
-- If the PR aggregates items from multiple sources into a single collection (merging accounts, combining API results, flattening caches), verify each item retains its source identifier through the aggregation — downstream operations that need to route back to the correct source (updates, deletes, detail views) will silently break or operate on the wrong source if the origin is lost
-
-**Field-set enumeration consistency**
-- If the PR adds an operation that targets a set of entity fields (enrichment, validation, migration, sync), trace every other location that independently enumerates those fields — UI predicates, scan/query filters, API documentation, response shapes, and test assertions. Each must cover the same field set; a missed field causes silent skips or false UI state. Prefer deriving enumerations from a single source of truth (constant array, schema keys) over maintaining independent lists
-
-**Abstraction layer fidelity**
-- If the PR calls a third-party API through an internal wrapper/abstraction layer, trace whether the wrapper requests and forwards all fields the handler depends on — third-party APIs often have optional response attributes that require explicit opt-in (e.g., cancellation reasons, extended metadata). Code branching on fields the wrapper doesn't forward will silently receive `undefined` and take the wrong path. Also verify that test mocks match what the real wrapper returns, not what the underlying API could theoretically return
-- If the PR passes multiple parameters through a wrapper/abstraction layer to an underlying API, check whether any parameter combinations are mutually exclusive in the underlying API (e.g., projection expressions + count-only select modes) — the wrapper should strip conflicting parameters rather than forwarding all unconditionally, which causes validation errors at the underlying layer
-- If the PR calls framework or library functions with discriminated input formats (e.g., content paths vs script paths, different loader functions per format), trace each call site to verify the function variant used actually handles the input format being passed — especially fallback/default branches in multi-format dispatchers, where the fallback commonly uses the wrong function. Also verify positional argument order matches the called function's parameter order (not assumed from variable names) and that the object type passed matches what the API expects (e.g., asset object vs class reference, property access vs method call)
-
-**Parameter consumption tracing**
-- If the PR adds a function with validated input parameters (schema validation, input decorators, type annotations), trace each validated parameter through to where it's actually consumed in the implementation. Parameters that pass validation but are never read create dead API surface — callers believe they're configuring behavior that's silently ignored. Either wire the parameter through or remove it from the public API
-
-**Summary/aggregation endpoint consistency**
-- If the PR adds a summary or dashboard endpoint that aggregates counts/previews across multiple data sources, trace each category's computation logic against the corresponding detail view it links to — verify they apply the same filters (e.g., orphan exclusion, status filtering), the same ordering guarantees (sort keys that actually exist on the queried index), and that navigation links propagate the aggregated context (e.g., `?status=pending`) so the destination page matches what the summary promised
-
-**Data model / status lifecycle changes**
-- If the PR changes the set of valid statuses, enum values, or entity lifecycle states, sweep all dependent artifacts: API doc summaries and enum declarations, UI filter/tab options, conditional rendering branches (which actions to show per state), integration guide examples, route names derived from old status names, and test assertions. Each artifact that references the old value set must be updated — partial updates leave stale filters, invalid actions, and misleading documentation
-- If the PR renames a concept (e.g., "flagged" → "rejected"), trace all manifestations beyond user-facing labels: route paths, component/file names, variable names, CSS classes, and test descriptions. Internal identifiers using the old name create confusion even when the UI is correct
-
-**Type-discriminated entity validation**
-- If the PR modifies entities with a discriminator field (type, kind, category), trace all code paths that change the discriminator value — not just the update handler, but also migration paths, bulk operations, and UI type-switchers. Verify downstream branching logic (execution, rendering, validation) handles all type transitions without falling through to the wrong handler
-
-**Migration/initialization idempotency**
-- If the PR adds a startup-time migration or one-time initialization, verify it is idempotent — what happens when it runs a second time? Check that the migration condition excludes already-migrated records and that completion is recorded (version stamp, flag) to prevent re-entry on every load
-
-**Data migration semantic preservation**
-- If the PR includes a data migration, trace each migrated field's behavioral meaning before and after. Focus on: migration-time validation matching runtime validation (don't persist values that will fail at execution), concurrency protection (migrations triggered by read paths race with concurrent requests), and unsupported source values being flagged rather than silently defaulted
-
-**Formatting & structural consistency**
-- If the PR adds content to an existing file (list items, sections, config entries), verify the new content matches the file's existing indentation, bullet style, heading levels, and structure — rendering inconsistencies are the most common Copilot review finding
-
-**Dependent operation ordering**
-- If a handler orchestrates multiple operations (primary write + side effects like rewards, uploads, notifications), trace the dependency graph — verify side effects only execute after the primary operation confirms success. Watch for `Promise.all` grouping operations that should be sequential because one depends on the other's outcome, and for resource allocation (file uploads, external API calls) happening before a gate operation (lock acquisition, uniqueness check, validation) that may reject the request
-- If the PR handles file uploads or binary data, verify the server validates content independently of client-supplied metadata — check MIME type via magic bytes, size via buffer length, and content validity via actual parsing rather than trusting request headers or middleware-provided fields
-
-**Bulk vs single-item operation parity**
-- If the PR modifies a single-item CRUD operation (create, update, delete) to handle new fields or apply new logic, trace the corresponding bulk/batch operation for the same entity — it often has its own independent implementation that won't pick up the change. Verify both paths handle the same fields, apply the same validation, and preserve the same secondary data
-
-**Bulk operation selection lifecycle**
-- If the PR adds operations that act on a user-selected subset of items (bulk actions, batch operations), trace the complete lifecycle of the selection state: when is it cleared (data refresh, item deletion), when is it not cleared but should be (filter/sort/page changes), and whether the operation re-validates the selection at execution time (especially after confirmation dialogs where the underlying data may change between display and confirmation)
-
-**Config value provenance for auto-upgrade**
-- If the PR adds auto-upgrade logic that replaces config values with newer defaults (prompt versions, schema migrations, template updates), verify the code can distinguish "user customized this value" from "this is the previous default." Without provenance tracking (version stamps, customization flags, or comparison against known previous defaults), auto-upgrade will overwrite intentional user customizations or skip legitimate upgrades
-
-**Query key / stored key precision alignment**
-- If the PR adds queries that construct lookup keys with a different precision, encoding, or format than what the write path persists, the query will silently return zero matches. Trace the key construction in both write and read paths and verify they produce compatible values
-
-</deep_checks>
-
-<verify_findings>
+1. **Merge** all findings into a single list, tagged by source agent
+2. **Deduplicate**: if two agents flagged the same `file:line` with overlapping descriptions, keep the most detailed version and note both agents found it
+3. **PR coherence**: verify commits deliver what they claim — flag discrepancies as IMPROVEMENT findings
+4. **CLAUDE.md filter**: remove findings that conflict with explicit project conventions
 
 ## Verify Findings
 
-For each issue found, ground it in evidence before classifying:
+For each finding, ground it in evidence before classifying:
 1. **Quote the specific code line(s)** that demonstrate the issue
 2. **Explain why it's a problem** in one sentence given the surrounding context
 3. If the fix involves async/state changes, **trace the execution path** to confirm the issue is real
@@ -269,16 +91,12 @@ For each issue found, ground it in evidence before classifying:
 
 After verifying all findings, run the project's build and test commands to confirm no false positives.
 
-</verify_findings>
+## Fix Issues
 
-<fix_and_report>
-
-## Fix Issues Found
-
-For each verified issue:
+For each verified finding:
 1. Classify severity: **CRITICAL** (runtime crash, data leak, security) vs **IMPROVEMENT** (consistency, robustness, conventions)
 2. Fix all CRITICAL issues immediately
-3. For IMPROVEMENT issues, fix them too — the goal is to eliminate Copilot review round-trips
+3. For IMPROVEMENT issues, fix them too — the goal is to eliminate review round-trips
 4. After fixes, run the project's test suite and build command (per project conventions already in context)
 5. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
 6. Commit fixes: `refactor: address code review findings`
@@ -290,23 +108,21 @@ Print a summary table of what was reviewed and found:
 ```
 ## Review Summary
 
-| Category | Files Checked | Issues Found | Fixed |
-|----------|--------------|-------------|-------|
-| Hygiene  | N            | N           | N     |
-| ...      | ...          | ...         | ...   |
+| Agent | Files Checked | Issues Found | Fixed |
+|-------|--------------|-------------|-------|
+| Surface Scan | N | N | N |
+| Security Audit | N | N | N |
+| Cross-File Tracing | N | N | N |
+| **Total** | **N** | **N** | **N** |
 
 ### Issues Fixed
-- file:line — description of fix
+- file:line — description of fix (agent: Surface/Security/Cross-File)
 
 ### Accepted As-Is (with rationale)
 - file:line — description and why it's acceptable
 ```
 
 If no issues were found, confirm the code is clean and ready for PR.
-
-</fix_and_report>
-
-<pr_comment_policy>
 
 ## PR Comment Policy
 
@@ -318,5 +134,3 @@ After the review and any fixes, determine whether to post review comments on the
 4. **If the PR was opened by someone else**, post a review comment on the PR summarizing the findings using `gh pr review {number} --comment --body "..."`. Include the issues found, fixes applied, and any remaining items that need the author's attention.
 
 This avoids noisy self-comments on your own PRs while still providing feedback to other contributors.
-
-</pr_comment_policy>
