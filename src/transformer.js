@@ -108,7 +108,7 @@ function transformCommand(content, env, sourceLibDir) {
     case 'toml':
       header = toTomlHeader(frontmatter);
       break;
-default:
+    default:
       header = toYamlFrontmatter(frontmatter);
   }
 
