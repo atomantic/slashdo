@@ -457,10 +457,10 @@ Create the PR:
 ```bash
 HEAVY_SUFFIX=""
 if [ "$HEAVY_MODE" = "true" ]; then HEAVY_SUFFIX=" (heavy mode)"; fi
-gh pr create --head depfree/{DATE} --base {DEFAULT_BRANCH} \
-  --title "refactor: remove {N} unnecessary dependencies${HEAVY_SUFFIX}" \
-  --body "$(cat <<EOF
-## Depfree Audit — Dependency Removal${HEAVY_SUFFIX}
+
+PR_TITLE="refactor: remove {N} unnecessary dependencies${HEAVY_SUFFIX}"
+PR_BODY="$(cat <<'EOF'
+## Depfree Audit — Dependency Removal__HEAVY__
 
 ### Summary
 Removed {N} unnecessary third-party dependencies and replaced with owned code.
@@ -484,6 +484,11 @@ Estimated supply chain attack surface reduction: {N} packages ({transitive count
 - [ ] Lock file updated
 EOF
 )"
+PR_BODY="${PR_BODY//__HEAVY__/$HEAVY_SUFFIX}"
+
+gh pr create --head depfree/{DATE} --base {DEFAULT_BRANCH} \
+  --title "$PR_TITLE" \
+  --body "$PR_BODY"
 ```
 
 **GitLab:**
