@@ -245,11 +245,33 @@ Report format:
 
 Wait for all agents to complete before proceeding.
 
+### 1d: Transitive Dependency Check
+
+Before planning replacements, check whether any REMOVE candidate is also a transitive dependency of a package we are keeping. Removing a direct dependency that remains in the lock file as a transitive dep of a kept package provides zero supply chain benefit — the code is still downloaded, installed, and executable.
+
+For each REMOVE candidate:
+
+1. Check if it appears as a transitive dependency of any Tier 1 or kept Tier 2 package:
+   - **Node.js (npm)**: `npm ls {package}` — if the package appears under a kept dependency's tree, it is transitive
+   - **Node.js (yarn)**: `yarn why {package}` — check if any kept dependency requires it
+   - **Node.js (pnpm)**: `pnpm why {package}` — same check
+   - **Rust**: `cargo tree -i {package}` — check if a kept crate depends on it
+   - **Python**: `pip show {package}` → `Required-by:` field, cross-reference with kept packages
+   - **Go**: `go mod graph | grep {package}` — check if a kept module requires it
+   - **Ruby**: `bundle info {gem} --reverse-dependencies` — check kept gems
+2. If the package IS a transitive dependency of a kept package:
+   - Downgrade recommendation from REMOVE to **KEEP (transitive)**
+   - Record the dependency chain (e.g., `zustand → tunnel-rat → @react-three/fiber → kept`)
+   - Rationale: removing the direct dependency entry just removes our explicit version pin. The package remains in the lock file, still runs in our process, and can still be compromised. The only effect is losing control over which version is installed.
+3. Exception: if the direct dependency pulls a **different major version** than the transitive one, removal still eliminates that version from the dependency tree. In this case, keep the REMOVE recommendation but note the version difference.
+
+Update `DEPENDENCY_MAP` with transitive check results before proceeding to Phase 2.
+
 
 ## Phase 2: Replacement Plan
 
 1. Read the existing `PLAN.md` (create if it doesn't exist)
-2. Filter to only REMOVE recommendations from Phase 1c
+2. Filter to only REMOVE recommendations from Phase 1c/1d (exclude any downgraded to KEEP (transitive) in Phase 1d)
 3. For EVALUATE recommendations: **Default mode** — treat as KEEP (conservative). **Heavy mode** — treat as REMOVE (aggressive). **Interactive mode** — present to user via `AskUserQuestion` for each. If both `--interactive` and `--heavy` are set, still prompt for each EVALUATE item (interactive takes precedence), but present REMOVE as the default suggestion
 4. Group removable dependencies by replacement strategy:
    - **Native replacement**: built-in API replaces the library (e.g., `crypto.randomUUID()`)
@@ -268,6 +290,11 @@ Estimated replacement code: ~{lines} lines across {files} new/modified files.
 | Package | Tier | Used Functions | Call Sites | Replacement | Complexity | Risk |
 |---------|------|---------------|------------|-------------|------------|------|
 | ...     | ...  | ...           | ...        | ...         | ...        | ...  |
+
+### Dependencies Kept — Transitive (would remain in lock file)
+| Package | Tier | Kept Via (dependency chain) |
+|---------|------|-----------------------------|
+| ...     | ...  | ...                         |
 
 ### Dependencies Kept (with rationale)
 | Package | Tier | Reason Kept |
