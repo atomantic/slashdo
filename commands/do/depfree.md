@@ -254,17 +254,17 @@ Before planning replacements, check whether any REMOVE candidate is also a trans
 For each REMOVE candidate:
 
 1. Check if it appears as a transitive dependency of any Tier 1 or kept Tier 2 package:
-   - **Node.js (npm)**: `npm ls {package}` — if the package appears under a kept dependency's tree, it is transitive
+   - **Node.js (npm)**: `npm ls {package}` — check the output for dependents *other than the project root*. Since REMOVE candidates are direct dependencies, they always appear at the top level; the signal is whether a kept dependency *also* depends on them (shown as a nested entry under that kept package's tree)
    - **Node.js (yarn)**: `yarn why {package}` — check if any kept dependency requires it
    - **Node.js (pnpm)**: `pnpm why {package}` — same check
    - **Rust**: `cargo tree -i {package}` — check if a kept crate depends on it
    - **Python**: use a reverse dependency tree, e.g. `pipdeptree -r -p {package}` or `uv pip tree --invert | grep {package}`, and check whether any kept package depends on it (record the full chain)
    - **Go**: `go mod graph | grep {package}` — check if a kept module requires it
-   - **Ruby**: `bundle info {gem} --reverse-dependencies` — check kept gems
+   - **Ruby**: `bundle why {gem}` — shows the dependency chain explaining why the gem is in the bundle; check if any kept gem appears in the chain
 2. If the package IS a transitive dependency of a kept package, determine the **removal motivation**:
    - **Supply chain only** — the package was flagged purely for attack surface reduction (e.g., small/unmaintained utility). Downgrade to **KEEP (transitive)** because removing the direct entry doesn't remove the code from the lock file or the runtime.
    - **Consolidation** — the package overlaps in purpose with another kept dependency and removal unifies the codebase around one solution (e.g., zustand→redux, moment→dayjs, lodash→native utils). Keep the **REMOVE** recommendation — the value is in eliminating redundant usage from *our* code, not in shrinking the lock file. Record the consolidation target (e.g., "consolidate state management into redux").
-   - Record the dependency chain in either case (e.g., `zustand → tunnel-rat → @react-three/fiber → kept`)
+   - Record the dependency chain in either case, root-to-leaf (e.g., `@react-three/fiber → tunnel-rat → zustand`)
 3. Exception: if the direct dependency pulls a **different major version** than the transitive one, removal still eliminates that version from the dependency tree. In this case, keep the REMOVE recommendation but note the version difference.
 
 Update `DEPENDENCY_MAP` with transitive check results before proceeding to Phase 2.
