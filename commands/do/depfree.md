@@ -7,7 +7,7 @@ argument-hint: "[--interactive] [--scan-only] [--no-merge] [--heavy] [specific p
 
 Audit all third-party dependencies, classify them as acceptable (large, widely-audited) or suspect (small, replaceable), analyze actual usage of suspect dependencies, and replace them with owned code where feasible.
 
-Every small library is an attack surface. Supply chain compromises are real and common. Large, widely-audited libraries (express, react, d3, three.js, next, vue, fastify, lodash-es, etc.) are acceptable. But for smaller libraries or libraries where only one helper function is used, we should write the code ourselves.
+Every small library is an attack surface. Supply chain compromises are real and common. In default mode, large, widely-audited libraries (express, react, d3, three.js, next, vue, fastify, lodash-es, etc.) are acceptable. But for smaller libraries or libraries where only one helper function is used, we should write the code ourselves. In heavy mode, the acceptability bar is much higher — see the Heavy Mode section below.
 
 **Default mode: fully autonomous.** Uses Balanced model profile, proceeds through all phases without prompting.
 
@@ -53,7 +53,7 @@ When the resolved model is `opus`, **omit** the `model` parameter on the Agent c
 
 ## Heavy Mode (`--heavy`)
 
-Heavy mode shifts the philosophy from "remove obvious attack surface" to "own everything we feasibly can." The only dependencies that survive are foundational frameworks and language-level runtimes — the kind maintained by large teams with dedicated security processes. Everything else is a candidate for replacement.
+Heavy mode shifts the philosophy from "remove obvious attack surface" to "own everything we feasibly can." The only dependencies that survive are foundational frameworks, core platform tooling, and language-level runtimes — the kind maintained by large teams with dedicated security processes. Everything else is a candidate for replacement.
 
 Key behavioral changes when `HEAVY_MODE` is `true`:
 
@@ -151,7 +151,7 @@ Large, widely-audited, foundational libraries. Examples by ecosystem:
 - **Ruby**: rails, rspec, sidekiq, puma, devise
 - Any dependency with >10M weekly downloads (npm) or equivalent popularity metric for the ecosystem
 
-**Heavy mode (`HEAVY_MODE=true`) — Tier 1 is restricted to foundational frameworks and runtimes only:**
+**Heavy mode (`HEAVY_MODE=true`) — Tier 1 is restricted to foundational frameworks, core platform tooling, and runtimes:**
 - **Node.js**: react, next, vue, express, fastify, typescript, webpack, vite, tailwindcss, postcss, prisma, drizzle
 - **Rust**: tokio, serde, hyper, sqlx, axum, actix-web
 - **Python**: django, flask, fastapi, sqlalchemy, pandas, numpy, scipy, pydantic
