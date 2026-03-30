@@ -14,7 +14,7 @@ List all available `/do:*` commands with their descriptions.
 |---|---|
 | `/do:better` | Unified DevSecOps audit, remediation, per-category PRs, CI verification, and Copilot review loop |
 | `/do:better-swift` | SwiftUI-optimized DevSecOps audit with multi-platform coverage (iOS, macOS, watchOS, tvOS, visionOS) |
-| `/do:depfree` | Audit third-party dependencies and remove unnecessary ones by writing replacement code |
+| `/do:depfree` | Audit third-party dependencies and remove unnecessary ones by writing replacement code. Use `--heavy` for aggressive mode that replaces all non-foundational libraries |
 | `/do:fpr` | Commit, push to fork, and open a PR against the upstream repo |
 | `/do:goals` | Scan codebase to infer project goals, clarify with user, and generate GOALS.md |
 | `/do:help` | List all available slashdo commands |
