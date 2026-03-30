@@ -256,7 +256,7 @@ For each REMOVE candidate:
    - **Node.js (yarn)**: `yarn why {package}` — check if any kept dependency requires it
    - **Node.js (pnpm)**: `pnpm why {package}` — same check
    - **Rust**: `cargo tree -i {package}` — check if a kept crate depends on it
-   - **Python**: `pip show {package}` → `Required-by:` field, cross-reference with kept packages
+   - **Python**: use a reverse dependency tree, e.g. `pipdeptree -r -p {package}` or `uv pip tree --invert | grep {package}`, and check whether any kept package depends on it (record the full chain)
    - **Go**: `go mod graph | grep {package}` — check if a kept module requires it
    - **Ruby**: `bundle info {gem} --reverse-dependencies` — check kept gems
 2. If the package IS a transitive dependency of a kept package:
