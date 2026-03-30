@@ -230,6 +230,7 @@ Each agent should:
    - **Infeasible** (300+ lines or requires deep domain expertise): keep the dependency
 5. Check if the package has known vulnerabilities: `npm audit`, `cargo audit`, `pip-audit`, etc.
 6. Check last publish date and maintenance status
+7. Check for **consolidation opportunities**: does this package overlap in purpose with another dependency in the project? (e.g., two state managers, two HTTP clients, two date libraries, two test runners). If so, flag which kept dependency could absorb this one's usage
 
 Report format:
 ```
@@ -240,6 +241,7 @@ Report format:
   - Replacement complexity: {Trivial|Moderate|Complex|Infeasible}
   - Maintenance: {last publish date, open issues, known CVEs}
   - Recommendation: **REMOVE** / **KEEP** / **EVALUATE**
+  - Consolidation target: {kept dependency that covers the same purpose, if any — e.g., "redux" for zustand, "dayjs" for moment}
   - Replacement sketch: {brief description of how to replace, if REMOVE}
 ```
 
@@ -259,10 +261,10 @@ For each REMOVE candidate:
    - **Python**: use a reverse dependency tree, e.g. `pipdeptree -r -p {package}` or `uv pip tree --invert | grep {package}`, and check whether any kept package depends on it (record the full chain)
    - **Go**: `go mod graph | grep {package}` — check if a kept module requires it
    - **Ruby**: `bundle info {gem} --reverse-dependencies` — check kept gems
-2. If the package IS a transitive dependency of a kept package:
-   - Downgrade recommendation from REMOVE to **KEEP (transitive)**
-   - Record the dependency chain (e.g., `zustand → tunnel-rat → @react-three/fiber → kept`)
-   - Rationale: removing the direct dependency entry just removes our explicit version pin. The package remains in the lock file, still runs in our process, and can still be compromised. The only effect is losing control over which version is installed.
+2. If the package IS a transitive dependency of a kept package, determine the **removal motivation**:
+   - **Supply chain only** — the package was flagged purely for attack surface reduction (e.g., small/unmaintained utility). Downgrade to **KEEP (transitive)** because removing the direct entry doesn't remove the code from the lock file or the runtime.
+   - **Consolidation** — the package overlaps in purpose with another kept dependency and removal unifies the codebase around one solution (e.g., zustand→redux, moment→dayjs, lodash→native utils). Keep the **REMOVE** recommendation — the value is in eliminating redundant usage from *our* code, not in shrinking the lock file. Record the consolidation target (e.g., "consolidate state management into redux").
+   - Record the dependency chain in either case (e.g., `zustand → tunnel-rat → @react-three/fiber → kept`)
 3. Exception: if the direct dependency pulls a **different major version** than the transitive one, removal still eliminates that version from the dependency tree. In this case, keep the REMOVE recommendation but note the version difference.
 
 Update `DEPENDENCY_MAP` with transitive check results before proceeding to Phase 2.
@@ -291,7 +293,12 @@ Estimated replacement code: ~{lines} lines across {files} new/modified files.
 |---------|------|---------------|------------|-------------|------------|------|
 | ...     | ...  | ...           | ...        | ...         | ...        | ...  |
 
-### Dependencies Kept — Transitive (would remain in lock file)
+### Dependencies to Remove — Consolidation (transitive dep of kept package, but redundant with another kept dep)
+| Package | Tier | Consolidation Target | Transitive Via |
+|---------|------|---------------------|----------------|
+| ...     | ...  | ...                 | ...            |
+
+### Dependencies Kept — Transitive (would remain in lock file, no consolidation value)
 | Package | Tier | Kept Via (dependency chain) |
 |---------|------|-----------------------------|
 | ...     | ...  | ...                         |
