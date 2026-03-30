@@ -230,6 +230,7 @@ Each agent should:
    - **Infeasible** (300+ lines or requires deep domain expertise): keep the dependency
 5. Check if the package has known vulnerabilities: `npm audit`, `cargo audit`, `pip-audit`, etc.
 6. Check last publish date and maintenance status
+7. Check for **consolidation opportunities**: does this package overlap in purpose with another dependency in the project? (e.g., two state managers, two HTTP clients, two date libraries, two test runners). If so, flag which kept dependency could absorb this one's usage
 
 Report format:
 ```
@@ -240,16 +241,39 @@ Report format:
   - Replacement complexity: {Trivial|Moderate|Complex|Infeasible}
   - Maintenance: {last publish date, open issues, known CVEs}
   - Recommendation: **REMOVE** / **KEEP** / **EVALUATE**
+  - Consolidation target: {kept dependency that covers the same purpose, if any — e.g., "redux" for zustand, "dayjs" for moment}
   - Replacement sketch: {brief description of how to replace, if REMOVE}
 ```
 
 Wait for all agents to complete before proceeding.
 
+### 1d: Transitive Dependency Check
+
+Before planning replacements, check whether any REMOVE candidate is also a transitive dependency of a package we are keeping. Removing a direct dependency that remains in the lock file as a transitive dep of a kept package provides zero supply chain benefit — the code is still downloaded, installed, and executable.
+
+For each REMOVE candidate:
+
+1. Check if it appears as a transitive dependency of any Tier 1 or kept Tier 2 package:
+   - **Node.js (npm)**: `npm ls {package}` — check the output for dependents *other than the project root*. Since REMOVE candidates are direct dependencies, they always appear at the top level; the signal is whether a kept dependency *also* depends on them (shown as a nested entry under that kept package's tree)
+   - **Node.js (yarn)**: `yarn why {package}` — check if any kept dependency requires it
+   - **Node.js (pnpm)**: `pnpm why {package}` — same check
+   - **Rust**: `cargo tree -i {package}` — check if a kept crate depends on it
+   - **Python**: use a reverse dependency tree, e.g. `pipdeptree -r -p {package}` or `uv pip tree --invert | grep {package}`, and check whether any kept package depends on it (record the full chain)
+   - **Go**: `go mod graph | grep {package}` — check if a kept module requires it
+   - **Ruby**: `bundle why {gem}` — shows the dependency chain explaining why the gem is in the bundle; check if any kept gem appears in the chain
+2. If the package IS a transitive dependency of a kept package, determine the **removal motivation**:
+   - **Supply chain only** — the package was flagged purely for attack surface reduction (e.g., small/unmaintained utility). Downgrade to **KEEP (transitive)** because removing the direct entry doesn't remove the code from the lock file or the runtime.
+   - **Consolidation** — the package overlaps in purpose with another kept dependency and removal unifies the codebase around one solution (e.g., zustand→redux, moment→dayjs, lodash→native utils). Keep the **REMOVE** recommendation — the value is in eliminating redundant usage from *our* code, not in shrinking the lock file. Record the consolidation target (e.g., "consolidate state management into redux").
+   - Record the dependency chain in either case, root-to-leaf (e.g., `@react-three/fiber → tunnel-rat → zustand`)
+3. Exception: if the direct dependency pulls a **different major version** than the transitive one, removal still eliminates that version from the dependency tree. In this case, keep the REMOVE recommendation but note the version difference.
+
+Update `DEPENDENCY_MAP` with transitive check results before proceeding to Phase 2.
+
 
 ## Phase 2: Replacement Plan
 
 1. Read the existing `PLAN.md` (create if it doesn't exist)
-2. Filter to only REMOVE recommendations from Phase 1c
+2. Filter to only REMOVE recommendations from Phase 1c/1d (exclude any downgraded to KEEP (transitive) in Phase 1d)
 3. For EVALUATE recommendations: **Default mode** — treat as KEEP (conservative). **Heavy mode** — treat as REMOVE (aggressive). **Interactive mode** — present to user via `AskUserQuestion` for each. If both `--interactive` and `--heavy` are set, still prompt for each EVALUATE item (interactive takes precedence), but present REMOVE as the default suggestion
 4. Group removable dependencies by replacement strategy:
    - **Native replacement**: built-in API replaces the library (e.g., `crypto.randomUUID()`)
@@ -268,6 +292,16 @@ Estimated replacement code: ~{lines} lines across {files} new/modified files.
 | Package | Tier | Used Functions | Call Sites | Replacement | Complexity | Risk |
 |---------|------|---------------|------------|-------------|------------|------|
 | ...     | ...  | ...           | ...        | ...         | ...        | ...  |
+
+### Dependencies to Remove — Consolidation (transitive dep of kept package, but redundant with another kept dep)
+| Package | Tier | Consolidation Target | Transitive Via |
+|---------|------|---------------------|----------------|
+| ...     | ...  | ...                 | ...            |
+
+### Dependencies Kept — Transitive (would remain in lock file, no consolidation value)
+| Package | Tier | Kept Via (dependency chain) |
+|---------|------|-----------------------------|
+| ...     | ...  | ...                         |
 
 ### Dependencies Kept (with rationale)
 | Package | Tier | Reason Kept |
