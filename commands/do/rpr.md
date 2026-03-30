@@ -17,7 +17,7 @@ Address the latest code review feedback on the current branch's pull request usi
 
 2. **Check for existing code review** (only if `is_fork_pr=false`): Before requesting a new review, check if there's already a completed Copilot review with unresolved threads or a pending Copilot review in progress. Query the PR's reviews and threads:
    ```bash
-   gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviews(last: 5) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }'
+   gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviewRequests(first: 10) { nodes { requestedReviewer { ... on Bot { login } } } } reviews(last: 5) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }'
    ```
    - **If unresolved Copilot review threads exist**: Skip requesting a new review — proceed directly to step 3 to address the existing feedback.
    - **If a Copilot review is currently pending** (copilot appears in `requested_reviewers` but no review node yet): Poll for completion using the "Poll for review completion" section below, then proceed to step 3.
