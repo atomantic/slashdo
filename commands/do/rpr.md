@@ -15,7 +15,16 @@ Address the latest code review feedback on the current branch's pull request usi
 
 1. **Get the current PR and determine repo ownership**: Use `gh pr view --json number,url,reviewDecision,reviews,headRefName,baseRefName` to find the PR for this branch. Parse owner/name from `gh repo view --json owner,name`. Also check the PR's base repository owner — if the PR targets an upstream repo you don't own (i.e., a fork-to-upstream PR), note this as `is_fork_pr=true`. You can detect this by comparing the PR URL's owner against your authenticated user (`gh api user --jq .login`).
 
-2. **Request Copilot code review** (only if `is_fork_pr=false`): Follow the "Requesting GitHub Copilot Code Review" section below to request a review, then poll until the review is complete before proceeding. **Skip this step entirely for fork-to-upstream PRs** — you don't have permission to request reviewers on repos you don't own.
+2. **Check for existing code review** (only if `is_fork_pr=false`): Before requesting a new review, check if there's already a completed Copilot review or a pending Copilot review in progress. Query the PR's review requests and recent reviews:
+   ```bash
+   gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviewRequests(first: 10) { nodes { requestedReviewer { ... on Bot { login } } } } reviews(last: 20) { nodes { state body author { login } submittedAt } } } } }'
+   ```
+   - **If at least one completed Copilot review exists** (a review in `reviews.nodes` authored by `copilot-pull-request-reviewer`): Skip requesting a new review — proceed directly to step 3 to fetch and address the existing feedback threads.
+   - **If a Copilot review is currently pending** (Copilot appears in `reviewRequests.nodes[].requestedReviewer` as `copilot-pull-request-reviewer`): Treat the review as in progress. Poll for completion using the "Poll for review completion" section below, and consider it complete once a new Copilot review appears in `reviews.nodes` with a `submittedAt` timestamp later than the latest Copilot review timestamp you observed before starting to poll. Then proceed to step 3.
+   - **If no Copilot review exists and no Copilot review is currently requested**: Request a new Copilot review per the "Requesting GitHub Copilot Code Review" section below, poll until complete, then proceed.
+   - **Skip this step entirely for fork-to-upstream PRs** — you don't have permission to request reviewers on repos you don't own.
+
+   **While waiting for review**: During any review polling wait, check CI status in parallel (see "CI Health Check During Review Polling" section below). If CI is failing, fix the failures, commit, and push before the review completes. This avoids wasting a review cycle on code that won't pass CI anyway.
 
 3. **Fetch review comments**: Use `gh api graphql` with stdin JSON to get all unresolved review threads. **CRITICAL: Do NOT use `$variables` in GraphQL queries — shell expansion consumes `$` signs.** Always inline values and pipe JSON via stdin:
    ```bash
@@ -47,16 +56,18 @@ Address the latest code review feedback on the current branch's pull request usi
    - Stage all changed files and commit with a descriptive message summarizing what was addressed. Do not include co-author info.
    - Push to the branch.
 
-8. **Resolve conversations**: For each addressed thread, resolve it via GraphQL mutation using stdin JSON. Track resolution count against the total from step 3. **Never use `$variables` in the query — inline the thread ID directly**:
+7. **Resolve conversations**: For each addressed thread, resolve it via GraphQL mutation using stdin JSON. Track resolution count against the total from step 3. **Never use `$variables` in the query — inline the thread ID directly**:
    ```bash
    echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"THREAD_ID_HERE\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
    ```
 
-9. **Request another Copilot review** (only if `is_fork_pr=false`): After pushing fixes, request a fresh Copilot code review and repeat from step 3 until the review passes clean. **Skip for fork-to-upstream PRs.**
+8. **Request another Copilot review** (only if `is_fork_pr=false`): After pushing fixes, request a fresh Copilot code review and repeat from step 3 until the review passes clean. **Skip for fork-to-upstream PRs.**
+
+   **While waiting for review**: Check CI status in parallel during polling (see "CI Health Check During Review Polling" section below). Fix any CI failures before the review completes.
 
    **Repeated-comment dedup**: When fetching threads after a new Copilot review round, compare each new unresolved thread's comment body and file/line against threads from the previous round that were intentionally left unresolved (replied to as non-issues or disagreements). If all new unresolved threads are repeats of previously-dismissed feedback, treat the review as clean (no new actionable comments) and exit the loop.
 
-10. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input).
+9. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input).
 
 !`cat ~/.claude/lib/graphql-escaping.md`
 
@@ -85,6 +96,27 @@ gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullReques
 The review is complete when a new `copilot-pull-request-reviewer` review node appears. If no review appears after max wait: **Default mode**: auto-skip and continue. **Interactive mode (`--interactive`)**: ask the user whether to continue waiting, re-request, or skip.
 
 **Error detection**: After a review appears, check its `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If found, this is NOT a successful review — log a warning, re-request the review (same API call above), and resume polling. Allow up to 3 error retries. After 3 failures: **Default mode**: auto-skip and continue. **Interactive mode (`--interactive`)**: ask the user whether to continue or skip.
+
+## CI Health Check During Review Polling
+
+While polling for a Copilot review to complete, use the wait time productively by checking CI status:
+
+1. **Check for running/completed checks** on the current commit:
+   ```bash
+   gh pr checks --json name,state,conclusion,detailsUrl
+   ```
+2. **If any check has failed**: Extract the run ID from the failed check's `detailsUrl` and fetch logs:
+   ```bash
+   RUN_ID="$(gh pr checks --json name,conclusion,detailsUrl \
+     --jq '.[] | select(.conclusion=="FAILURE") | .detailsUrl | capture("/runs/(?<id>[0-9]+)") | .id' \
+     | head -n1)"
+   gh run view "$RUN_ID" --log-failed
+   ```
+   Fix the failure, run tests locally to confirm, commit, and push. The Copilot review request will automatically apply to the new commit on most repos — if not, re-request after the push.
+3. **If checks are still pending**: No action needed — continue polling for the review. Check CI status again on subsequent poll iterations.
+4. **If all checks pass**: No action needed — continue polling for the review.
+
+This ensures CI failures are caught and fixed early rather than discovered after a full review cycle.
 
 ## Notes
 
