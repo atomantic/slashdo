@@ -61,7 +61,7 @@ Key behavioral changes when `HEAVY_MODE` is `true`:
 2. **EVALUATE recommendations become REMOVE** — the bias flips from "when in doubt, keep" to "when in doubt, replace."
 3. **Complexity ceiling rises** — replacements up to 300 lines are acceptable (vs the default where agents bail at ~2x estimate). Only truly infeasible replacements (deep domain expertise, crypto primitives, protocol parsers) are skipped.
 4. **Maintenance status is irrelevant** — even well-maintained small libraries are candidates. The question is "can we own this code?" not "is this library risky?"
-5. **DevDependencies get equal priority** — build tools and test utilities are audited with the same aggression as production deps.
+5. **DevDependencies get equal priority** — build tools and test utilities are audited with the same aggression as production dependencies (overriding the default Phase 1a deprioritization of devDependencies).
 
 ## Compaction Guidance
 
@@ -159,7 +159,8 @@ Large, widely-audited, foundational libraries. Examples by ecosystem:
 - **Ruby**: rails, puma
 - Download count is NOT a factor — popularity does not exempt a library from replacement
 - Libraries that are wrappers, utilities, CLIs, or single-purpose tools are Tier 2 or 3 regardless of popularity
-- Examples of libraries that DROP from Tier 1 in heavy mode: lodash, chalk, commander, yargs, dotenv, uuid, axios, node-fetch, glob, minimatch, semver, debug, winston, morgan, cors, helmet, body-parser, cookie-parser, compression, color, ora, inquirer, boxen, marked, highlight.js, moment, dayjs, date-fns, underscore, ramda, rxjs (if only basic operators used), jest (if vitest is also present — deduplicate), mocha, d3 (unless the visualization requires it), three (unless 3D rendering is core), eslint, prettier (keep if in CI — these are hard to replace), rspec, sidekiq, devise, requests, httpx, pytest, clap, reqwest, tracing
+- Linting/formatting tools (eslint, prettier) in heavy mode: remain Tier 1 when required by CI or organization-wide standards (do not attempt replacement); otherwise treat as Tier 2 (audit usage, but do not rewrite their behavior)
+- Examples of libraries that DROP from Tier 1 in heavy mode: lodash, chalk, commander, yargs, dotenv, uuid, axios, node-fetch, glob, minimatch, semver, debug, winston, morgan, cors, helmet, body-parser, cookie-parser, compression, color, ora, inquirer, boxen, marked, highlight.js, moment, dayjs, date-fns, underscore, ramda, rxjs (if only basic operators used), jest (if vitest is also present — deduplicate), mocha, d3 (unless the visualization requires it), three (unless 3D rendering is core), rspec, sidekiq, devise, requests, httpx, pytest, clap, reqwest, tracing
 
 **Tier 2 — SUSPECT (audit usage):**
 Smaller libraries that may be doing something we can write ourselves.
@@ -454,10 +455,12 @@ Create the PR:
 
 **GitHub:**
 ```bash
+HEAVY_SUFFIX=""
+if [ "$HEAVY_MODE" = "true" ]; then HEAVY_SUFFIX=" (heavy mode)"; fi
 gh pr create --head depfree/{DATE} --base {DEFAULT_BRANCH} \
-  --title "refactor: remove {N} unnecessary dependencies{' (heavy mode)' if HEAVY_MODE}" \
-  --body "$(cat <<'EOF'
-## Depfree Audit — Dependency Removal{' (Heavy Mode)' if HEAVY_MODE}
+  --title "refactor: remove {N} unnecessary dependencies${HEAVY_SUFFIX}" \
+  --body "$(cat <<EOF
+## Depfree Audit — Dependency Removal${HEAVY_SUFFIX}
 
 ### Summary
 Removed {N} unnecessary third-party dependencies and replaced with owned code.
@@ -585,5 +588,5 @@ Transitive deps eliminated: ~{count} (estimated)
 - Replacement code should be minimal and focused — don't over-engineer utilities that replace single-purpose packages
 - **Default mode**: when in doubt, keep the dependency. A maintained library is better than a buggy reimplementation
 - **Heavy mode**: when in doubt, replace it. Write owned code unless the replacement requires crypto primitives, binary protocol parsing, or deep domain expertise that would be unsafe to reimplement
-- devDependencies are lower priority since they don't ship to production, but unmaintained build tools still pose supply chain risk
+- **Default mode**: devDependencies are lower priority since they don't ship to production. **Heavy mode**: devDependencies are audited on par with production deps — unmaintained build tools still pose supply chain risk
 - For monorepos, audit the root manifest and each workspace package manifest
