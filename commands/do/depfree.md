@@ -250,7 +250,7 @@ Wait for all agents to complete before proceeding.
 
 1. Read the existing `PLAN.md` (create if it doesn't exist)
 2. Filter to only REMOVE recommendations from Phase 1c
-3. For EVALUATE recommendations: **Default mode** — treat as KEEP (conservative). **Heavy mode** — treat as REMOVE (aggressive). **Interactive mode** — present to user via `AskUserQuestion` for each
+3. For EVALUATE recommendations: **Default mode** — treat as KEEP (conservative). **Heavy mode** — treat as REMOVE (aggressive). **Interactive mode** — present to user via `AskUserQuestion` for each. If both `--interactive` and `--heavy` are set, still prompt for each EVALUATE item (interactive takes precedence), but present REMOVE as the default suggestion
 4. Group removable dependencies by replacement strategy:
    - **Native replacement**: built-in API replaces the library (e.g., `crypto.randomUUID()`)
    - **Inline replacement**: write a small utility function (e.g., ANSI color wrapper)
