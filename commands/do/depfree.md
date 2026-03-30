@@ -1,13 +1,13 @@
 ---
 description: Audit third-party dependencies and remove unnecessary ones by writing replacement code
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [specific packages to evaluate]"
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [--heavy] [specific packages to evaluate]"
 ---
 
 # Depfree — Dependency Freedom Audit
 
 Audit all third-party dependencies, classify them as acceptable (large, widely-audited) or suspect (small, replaceable), analyze actual usage of suspect dependencies, and replace them with owned code where feasible.
 
-Every small library is an attack surface. Supply chain compromises are real and common. Large, widely-audited libraries (express, react, d3, three.js, next, vue, fastify, lodash-es, etc.) are acceptable. But for smaller libraries or libraries where only one helper function is used, we should write the code ourselves.
+Every small library is an attack surface. Supply chain compromises are real and common. In default mode, large, widely-audited libraries (express, react, d3, three.js, next, vue, fastify, lodash-es, etc.) are acceptable. But for smaller libraries or libraries where only one helper function is used, we should write the code ourselves. In heavy mode, the acceptability bar is much higher — see the Heavy Mode section below.
 
 **Default mode: fully autonomous.** Uses Balanced model profile, proceeds through all phases without prompting.
 
@@ -17,7 +17,10 @@ Parse `$ARGUMENTS` for:
 - **`--interactive`**: pause at each decision point for user approval
 - **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation
 - **`--no-merge`**: run through PR creation, skip merge
+- **`--heavy`**: aggressive mode — only keep foundational frameworks and language runtimes; replace everything else that is feasibly replaceable (see Heavy Mode below)
 - **Specific packages**: limit audit scope to named packages (e.g., "chalk dotenv")
+
+Set `HEAVY_MODE` to `true` if `--heavy` was passed, `false` otherwise.
 
 ## Configuration
 
@@ -48,6 +51,18 @@ Record the selection as `MODEL_PROFILE` and derive:
 
 When the resolved model is `opus`, **omit** the `model` parameter on the Agent call so the agent inherits the session's Opus version.
 
+## Heavy Mode (`--heavy`)
+
+Heavy mode shifts the philosophy from "remove obvious attack surface" to "own everything we feasibly can." The only dependencies that survive are foundational frameworks, core platform tooling, and language-level runtimes — the kind maintained by large teams with dedicated security processes. Everything else is a candidate for replacement.
+
+Key behavioral changes when `HEAVY_MODE` is `true`:
+
+1. **Tier 1 is narrowed** to only foundational frameworks and language runtimes (see Phase 1b overrides below). Libraries like lodash, chalk, dotenv, commander, yargs, uuid, axios, etc. are NOT Tier 1 in heavy mode — they move to Tier 2 or 3.
+2. **EVALUATE recommendations become REMOVE** — the bias flips from "when in doubt, keep" to "when in doubt, replace."
+3. **Complexity ceiling rises** — replacements up to 300 lines are acceptable (vs the default where agents bail at ~2x estimate). Only truly infeasible replacements (deep domain expertise, crypto primitives, protocol parsers) are skipped.
+4. **Maintenance status is irrelevant** — even well-maintained small libraries are candidates. The question is "can we own this code?" not "is this library risky?"
+5. **DevDependencies get equal priority** — build tools and test utilities are audited with the same aggression as production dependencies (overriding the default Phase 1a deprioritization of devDependencies).
+
 ## Compaction Guidance
 
 When compacting during this workflow, always preserve:
@@ -57,6 +72,7 @@ When compacting during this workflow, always preserve:
 - All PR numbers and URLs created so far
 - `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR`, `REPO_DIR` values
 - `VCS_HOST`, `CLI_TOOL`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
+- `HEAVY_MODE` flag
 
 
 ## Phase 0: Discovery & Setup
@@ -126,6 +142,8 @@ For each dependency, classify it into one of three tiers:
 
 **Tier 1 — ACCEPTABLE (keep without question):**
 Large, widely-audited, foundational libraries. Examples by ecosystem:
+
+**Default mode:**
 - **Node.js**: react, next, vue, express, fastify, hono, typescript, eslint, prettier, webpack, vite, jest, vitest, mocha, d3, three, prisma, drizzle, @types/*, tailwindcss, postcss
 - **Rust**: tokio, serde, clap, reqwest, hyper, tracing, sqlx, axum, actix-web
 - **Python**: django, flask, fastapi, sqlalchemy, pandas, numpy, scipy, pytest, requests, httpx, pydantic
@@ -133,8 +151,21 @@ Large, widely-audited, foundational libraries. Examples by ecosystem:
 - **Ruby**: rails, rspec, sidekiq, puma, devise
 - Any dependency with >10M weekly downloads (npm) or equivalent popularity metric for the ecosystem
 
+**Heavy mode (`HEAVY_MODE=true`) — Tier 1 is restricted to foundational frameworks, core platform tooling, and runtimes:**
+- **Node.js**: react, next, vue, express, fastify, typescript, webpack, vite, tailwindcss, postcss, prisma, drizzle
+- **Rust**: tokio, serde, hyper, sqlx, axum, actix-web
+- **Python**: django, flask, fastapi, sqlalchemy, pandas, numpy, scipy, pydantic
+- **Go**: standard library only
+- **Ruby**: rails, puma
+- Download count is NOT a factor — popularity does not exempt a library from replacement
+- Libraries that are wrappers, utilities, CLIs, or single-purpose tools are Tier 2 or 3 regardless of popularity
+- Linting/formatting tools (eslint, prettier) in heavy mode: remain Tier 1 when required by CI or organization-wide standards (do not attempt replacement); otherwise treat as Tier 2 (audit usage, but do not rewrite their behavior)
+- Examples of libraries that DROP from Tier 1 in heavy mode: lodash, chalk, commander, yargs, dotenv, uuid, axios, node-fetch, glob, minimatch, semver, debug, winston, morgan, cors, helmet, body-parser, cookie-parser, compression, color, ora, inquirer, boxen, marked, highlight.js, moment, dayjs, date-fns, underscore, ramda, rxjs (if only basic operators used), jest (if vitest is also present — deduplicate), mocha, d3 (unless the visualization requires it), three (unless 3D rendering is core), rspec, sidekiq, devise, requests, httpx, pytest, clap, reqwest, tracing
+
 **Tier 2 — SUSPECT (audit usage):**
-Smaller libraries that may be doing something we can write ourselves. Indicators:
+Smaller libraries that may be doing something we can write ourselves.
+
+**Default mode indicators:**
 - <1M weekly downloads (npm) or equivalent
 - Single-purpose utility (does one thing)
 - We only use 1-2 functions from it
@@ -142,8 +173,19 @@ Smaller libraries that may be doing something we can write ourselves. Indicators
 - Libraries that replicate functionality available in newer language/runtime versions
 - Abandoned or unmaintained (no commits in 12+ months, open security issues)
 
+**Heavy mode additional indicators** (these move libraries INTO Tier 2 that would otherwise be Tier 1):
+- Any library maintained by an individual or small team (not a major org/foundation)
+- Any library where we use <50% of its API surface
+- Utility collections where we use a handful of functions (lodash, ramda, underscore)
+- HTTP clients when the runtime has built-in fetch (axios, node-fetch, got, superagent)
+- Logging libraries (winston, pino, morgan, debug) — evaluate if a thin wrapper over console suffices
+- CLI argument parsers (commander, yargs, minimist) — evaluate if process.argv parsing is feasible
+- Test runners if multiple are present — deduplicate to one
+
 **Tier 3 — REMOVABLE (strong candidate for replacement):**
 Libraries where the cost of owning the code is clearly lower than the supply chain risk:
+
+**Default mode:**
 - We use a single function that's <50 lines to implement
 - The library wraps a built-in API with minimal added value
 - The library is unmaintained with known vulnerabilities
@@ -153,6 +195,23 @@ Libraries where the cost of owning the code is clearly lower than the supply cha
 - Deep merge/clone when `structuredClone` suffices
 - `dotenv` when the runtime supports `--env-file` natively
 - `is-odd`, `is-number`, `left-pad` tier micro-packages
+
+**Heavy mode — Tier 3 expands significantly:**
+All of the above, PLUS:
+- Any library where the replacement is <=300 lines of owned code (up from ~50 in default)
+- Utility libraries where we use any subset of functions, even if heavily used (write an owned utils module)
+- HTTP client wrappers — replace with native `fetch` + a thin owned wrapper
+- Color/terminal libraries regardless of how many functions we use (chalk, colors, kleur, ansi-colors) — write an ANSI utility
+- Argument parsers for CLIs with <20 flags — write a simple parser
+- Environment loaders (dotenv, envalid, env-var) — use runtime flags or write a loader
+- Date libraries if we use <10 functions (moment, dayjs, date-fns) — write owned date helpers
+- Glob/path matching (glob, minimatch, micromatch) if usage is simple — use native `fs.glob` (Node 22+) or write a matcher
+- String utilities (camelcase, slugify, pluralize, humanize) — write the specific transformations used
+- Validation libraries where we use <30% of their schemas (joi, yup, zod) — write focused validators
+- Retry/backoff libraries (p-retry, async-retry) — write a retry function
+- Deep equality/diff (deep-equal, fast-deep-equal, deep-diff) — write what's needed for actual use cases
+- Event emitter libraries (eventemitter3, mitt) — use native EventEmitter or EventTarget
+- Markdown parsers if only rendering basic markdown — consider native or minimal owned parser
 
 Record the full classification as `DEPENDENCY_MAP`.
 
@@ -191,7 +250,7 @@ Wait for all agents to complete before proceeding.
 
 1. Read the existing `PLAN.md` (create if it doesn't exist)
 2. Filter to only REMOVE recommendations from Phase 1c
-3. For EVALUATE recommendations: **Default mode** — treat as KEEP (conservative). **Interactive mode** — present to user via `AskUserQuestion` for each
+3. For EVALUATE recommendations: **Default mode** — treat as KEEP (conservative). **Heavy mode** — treat as REMOVE (aggressive). **Interactive mode** — present to user via `AskUserQuestion` for each. If both `--interactive` and `--heavy` are set, still prompt for each EVALUATE item (interactive takes precedence), but present REMOVE as the default suggestion
 4. Group removable dependencies by replacement strategy:
    - **Native replacement**: built-in API replaces the library (e.g., `crypto.randomUUID()`)
    - **Inline replacement**: write a small utility function (e.g., ANSI color wrapper)
@@ -296,7 +355,7 @@ Steps:
 - Do NOT introduce new dependencies to replace old ones
 - Do NOT use `git add -A` or `git add .` — stage specific files only
 - Keep replacement code minimal
-- If replacement is more complex than estimated (>2x the estimated lines), report back and skip — do not force a bad replacement
+- If replacement is more complex than estimated (>2x the estimated lines), report back and skip — do not force a bad replacement. In `HEAVY_MODE`, the ceiling is 300 lines per replacement — only skip if replacement requires deep domain expertise (crypto primitives, binary protocol parsers, codec implementations) or exceeds 300 lines
 - Place shared utility replacements in a sensible location (e.g., `src/utils/`, `lib/`, `internal/`) following existing project conventions
 - Commit each replacement independently: `refactor: replace {package} with owned {utility/code}`
 </guardrails>
@@ -396,10 +455,15 @@ Create the PR:
 
 **GitHub:**
 ```bash
-gh pr create --head depfree/{DATE} --base {DEFAULT_BRANCH} \
-  --title "refactor: remove {N} unnecessary dependencies" \
-  --body "$(cat <<'EOF'
-## Depfree Audit — Dependency Removal
+HEAVY_SUFFIX=""
+HEAVY_HEADING=""
+if [ "$HEAVY_MODE" = "true" ]; then
+  HEAVY_SUFFIX=" (heavy mode)"
+  HEAVY_HEADING=" (Heavy Mode)"
+fi
+
+PR_TITLE="refactor: remove {N} unnecessary dependencies${HEAVY_SUFFIX}"
+PR_BODY="## Depfree Audit — Dependency Removal${HEAVY_HEADING}
 
 ### Summary
 Removed {N} unnecessary third-party dependencies and replaced with owned code.
@@ -420,9 +484,11 @@ Estimated supply chain attack surface reduction: {N} packages ({transitive count
 - [ ] Build passes
 - [ ] All tests pass
 - [ ] No phantom references to removed packages
-- [ ] Lock file updated
-EOF
-)"
+- [ ] Lock file updated"
+
+gh pr create --head depfree/{DATE} --base {DEFAULT_BRANCH} \
+  --title "$PR_TITLE" \
+  --body "$PR_BODY"
 ```
 
 **GitLab:**
@@ -522,8 +588,10 @@ Transitive deps eliminated: ~{count} (estimated)
 
 - This command complements `/do:better` — run `depfree` for dependency hygiene, `better` for code quality
 - All remediation happens in an isolated worktree — the user's working directory is never modified
-- The threshold for "acceptable" libraries is deliberately generous — the goal is to remove obvious attack surface, not to rewrite everything
+- **Default mode**: the threshold for "acceptable" libraries is deliberately generous — the goal is to remove obvious attack surface, not to rewrite everything
+- **Heavy mode**: the threshold narrows to foundational frameworks only — the goal is to own as much code as feasibly possible, eliminating supply chain risk from individual maintainers and small projects
 - Replacement code should be minimal and focused — don't over-engineer utilities that replace single-purpose packages
-- When in doubt, keep the dependency. A maintained library is better than a buggy reimplementation
-- devDependencies are lower priority since they don't ship to production, but unmaintained build tools still pose supply chain risk
+- **Default mode**: when in doubt, keep the dependency. A maintained library is better than a buggy reimplementation
+- **Heavy mode**: when in doubt, replace it. Write owned code unless the replacement requires crypto primitives, binary protocol parsing, or deep domain expertise that would be unsafe to reimplement
+- **Default mode**: devDependencies are lower priority since they don't ship to production. **Heavy mode**: devDependencies are audited on par with production deps — unmaintained build tools still pose supply chain risk
 - For monorepos, audit the root manifest and each workspace package manifest
