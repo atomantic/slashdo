@@ -15,13 +15,13 @@ Address the latest code review feedback on the current branch's pull request usi
 
 1. **Get the current PR and determine repo ownership**: Use `gh pr view --json number,url,reviewDecision,reviews,headRefName,baseRefName` to find the PR for this branch. Parse owner/name from `gh repo view --json owner,name`. Also check the PR's base repository owner — if the PR targets an upstream repo you don't own (i.e., a fork-to-upstream PR), note this as `is_fork_pr=true`. You can detect this by comparing the PR URL's owner against your authenticated user (`gh api user --jq .login`).
 
-2. **Check for existing code review** (only if `is_fork_pr=false`): Before requesting a new review, check if there's already a completed Copilot review with unresolved threads or a pending Copilot review in progress. Query the PR's reviews and threads:
+2. **Check for existing code review** (only if `is_fork_pr=false`): Before requesting a new review, check if there's already a completed Copilot review or a pending Copilot review in progress. Query the PR's review requests and recent reviews:
    ```bash
-   gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviewRequests(first: 10) { nodes { requestedReviewer { ... on Bot { login } } } } reviews(last: 20) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }'
+   gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviewRequests(first: 10) { nodes { requestedReviewer { ... on Bot { login } } } } reviews(last: 20) { nodes { state body author { login } submittedAt } } } } }'
    ```
-   - **If unresolved Copilot review threads exist**: Skip requesting a new review — proceed directly to step 3 to address the existing feedback.
-   - **If a Copilot review is currently pending** (Copilot appears in `reviewRequests.nodes[].requestedReviewer` but there is not yet a corresponding review in `reviews.nodes`): Poll for completion using the "Poll for review completion" section below, then proceed to step 3.
-   - **If no Copilot review exists or all previous threads are resolved**: Request a new Copilot review per the "Requesting GitHub Copilot Code Review" section below, poll until complete, then proceed.
+   - **If at least one completed Copilot review exists** (a review in `reviews.nodes` authored by `copilot-pull-request-reviewer`): Skip requesting a new review — proceed directly to step 3 to fetch and address the existing feedback threads.
+   - **If a Copilot review is currently pending** (Copilot appears in `reviewRequests.nodes[].requestedReviewer` as `copilot-pull-request-reviewer`): Treat the review as in progress. Poll for completion using the "Poll for review completion" section below, and consider it complete once a new Copilot review appears in `reviews.nodes` with a `submittedAt` timestamp later than the latest Copilot review timestamp you observed before starting to poll. Then proceed to step 3.
+   - **If no Copilot review exists and no Copilot review is currently requested**: Request a new Copilot review per the "Requesting GitHub Copilot Code Review" section below, poll until complete, then proceed.
    - **Skip this step entirely for fork-to-upstream PRs** — you don't have permission to request reviewers on repos you don't own.
 
    **While waiting for review**: During any review polling wait, check CI status in parallel (see "CI Health Check During Review Polling" section below). If CI is failing, fix the failures, commit, and push before the review completes. This avoids wasting a review cycle on code that won't pass CI anyway.
