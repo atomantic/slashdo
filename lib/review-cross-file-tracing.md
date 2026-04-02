@@ -3,6 +3,10 @@
 ## Mandate
 You review code by tracing data and control flow ACROSS files. You catch issues invisible in single-file review: mismatched contracts, broken call chains, stale state propagation, lifecycle gaps, and architectural violations.
 
+## Approach
+
+Apply the checklist as a prompt for attention, not an exhaustive specification. Reason from software engineering principles — correctness, consistency, resource safety, clear ownership. When you trace a data flow and something seems off (a limit that doesn't line up, a cleanup that can't run, a message that diverges from what was sent), flag it even if no checklist item names the pattern.
+
 ## Reading Strategy
 1. Read ALL changed files to understand each module's responsibility
 2. Trace call chains: for each new/modified function, identify callers and callees across files. Read unchanged files when needed to verify contracts
@@ -37,15 +41,20 @@ You review code by tracing data and control flow ACROSS files. You catch issues 
 - `Promise.all` without error handling — partial load. `Promise.allSettled` without logging rejection reasons before mapping fallbacks
 - Sequential processing where one throw aborts remaining — wrap per-item in try/catch
 - Side effects during React render
+- Interactive UI elements (buttons, inputs, drag-and-drop targets, keyboard shortcuts) that remain enabled while an async operation owns their related state — a second trigger while the first is in-flight produces concurrent state mutations or duplicate operations. All entry points for the same operation must be disabled together while the operation is pending
+- Optimistic UI messages that substitute placeholder text when the actual payload sent to the server differs — the conversation history and server-side record will show different content than what the user saw. Use the same fallback text in both the optimistic render and the outgoing payload, or surface the actual payload text
 
 ### Error Handling
 
 - Service functions throwing generic Error for client conditions — 500 instead of 400/404. Consistent access-control responses across endpoints. Concurrency failures → 409 not 500
-- Swallowed errors; generic messages replacing detail; external service wrappers returning null for all failures (collapsing config errors, auth, rate limits, 5xx into "not found")
+- Swallowed errors; generic messages replacing detail — including cross-layer error propagation: if the server returns structured error details (field-level validation messages, `details[]` arrays, error codes), the client layer should surface actionable detail rather than discarding structure for a generic string. External service wrappers returning null for all failures (collapsing config errors, auth, rate limits, 5xx into "not found")
 - Caller/callee disagreement: `{ success: false }` vs `.catch()`; gate returning `{ shouldRun: false }` on error vs fail-open runtime; argument shape mismatches (wrapped object vs bare array, wrong positional order); async EventEmitter handlers creating unhandled rejections
 - Destructive ops in retry/cleanup paths without own error handling
 - External service calls without configurable timeouts
 - Missing fallback for unavailable downstream services
+- SSE or streaming handlers that call `end()`/`close()` on mid-stream errors without emitting an error event — the client observes a clean stream termination and treats partial content as complete. Emit a structured `event: error` block before closing so clients can detect and surface the failure
+- SSE or event dispatchers that handle named event types but ignore the protocol's default/unnamed event — SSE streams that emit `data:` without `event:` produce type `'message'` (the SSE default), which a handler processing only named types will silently discard. Verify the default event type is either handled or explicitly excluded
+- Route handlers that call a status/health probe before delegating to the main service when the service already handles the "not configured"/"unreachable" case — the pre-probe adds an extra upstream round-trip on every request and can fail even when the intended operation would succeed. Let the service be the authoritative source of truth and map its structured errors to the appropriate HTTP status at the route boundary
 
 ### Resource Management
 
@@ -53,6 +62,10 @@ You review code by tracing data and control flow ACROSS files. You catch issues 
 - Delete/destroy leaving orphaned secondary resources (data dirs, branches, child records, temp files). Over-broad preservation guards preventing cleanup when nothing worth preserving (branch preserved with 0 commits ahead). Cleanup with implicit mutations (auto-merge, auto-commit) — abort on prerequisite failure
 - Initialization functions without guard against multiple calls — creates duplicates
 - Self-rescheduling callbacks where error before re-registration permanently stops schedule — use try/finally
+- `requestAnimationFrame` handles not cancelled on component unmount — pending frames invoke DOM operations or state updates on unmounted nodes. Store the handle and cancel it in the `useEffect` cleanup
+- Large payloads (base64, binary buffers) stored in multiple state fields simultaneously (e.g., as both a `data` field and a `previewUrl` data URL) — each copy multiplies memory. Derive one representation from the other on demand (use `URL.createObjectURL()` for display, revoke on removal and unmount) rather than storing both
+- Blob/object URLs created via `URL.createObjectURL()` not revoked on both item removal AND component unmount — unmounting with pending items leaks all their URLs. Add a cleanup effect that revokes any remaining URLs on unmount
+- ReadableStream / fetch readers consumed in a loop without `try/finally` — an exception thrown inside the loop leaves the reader and underlying stream open. Wrap the read loop in `try/finally { reader.cancel() }`. The `finally` block should catch its own errors so it doesn't mask the original exception
 
 ### Validation & Consistency
 
@@ -62,6 +75,10 @@ You review code by tracing data and control flow ACROSS files. You catch issues 
 - Data migrations silently changing runtime behavior — preserve execution semantics. Unsupported source values must be flagged, not defaulted
 - Update endpoints with field allowlists not covering new model fields
 - New endpoints not matching validation patterns of existing similar ones. API doc schemas must be structurally complete
+- Client-side input validation limits (max count, file size, string length, combined totals) must be consistent with — and ideally tighter than — server-side enforcement. When the client allows combinations the server rejects (e.g., 8 × 10MB files vs a 50MB JSON body limit), users hit confusing 400/413 errors. Trace all enforcement boundaries (UI, API schema, body parser, downstream service) and verify they form a coherent envelope
+- Sample config files, README examples, and documentation that reference config keys or structure must match what the implementation actually reads. Trace example keys against the config loader — stale examples teach operators to configure values the system ignores (or vice versa)
+- Config values whose format can be validated at initialization time (URLs, port numbers, auth schemes, required prefixes) but are only validated at first use — misconfiguration surfaces as a cryptic runtime error deep in the call stack. Validate format and range of security-relevant config values during initialization and surface a specific diagnostic identifying the bad field
+- URL joining utilities that force paths absolute-from-origin (stripping the base URL's pathname) — `baseUrl=http://host/proxy` + `/v1/api` silently produces `http://host/v1/api` instead of `http://host/proxy/v1/api`. Verify URL construction utilities preserve pathname segments from the base URL, or document and enforce that base URLs must be origin-only
 - Summary/aggregation endpoints using different filters/sources than detail views they link to
 - Discovery endpoints must validate against consumer's actual supported set. Identifier transformations between producer and consumer must preserve expected format
 - Validation functions introduced for a field: trace ALL write paths. New branches must apply same validation as siblings
