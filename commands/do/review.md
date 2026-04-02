@@ -26,7 +26,7 @@ Before dispatching agents, understand what this change set claims to do:
 
 ## Dispatch Review Agents
 
-Read the three agent instruction files, then spawn **all three in parallel** using the Agent tool. Each agent reviews ALL changed files independently.
+Read the three agent instruction files, then spawn **all three in parallel** using the Agent tool with `model: "opus"`. Each agent reviews ALL changed files independently. Opus-class reasoning catches issues that require drawing on broad software engineering principles, not just pattern-matching against checklists.
 
 <surface_scan_agent>
 

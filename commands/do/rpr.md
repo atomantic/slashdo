@@ -39,6 +39,7 @@ Address the latest code review feedback on the current branch's pull request usi
    - For larger PRs, spawn one `Agent` call (general-purpose type) per review thread (or group closely related threads on the same file into one agent)
    - Spawn one additional `Agent` call for an **independent code quality review** of all files changed in the PR (`gh pr diff --name-only`)
    - Launch all Agent calls **in parallel** (multiple tool calls in a single response) and wait for all to return
+   - **Model selection**: Use `model: "sonnet"` for all sub-agents — thread fixes and code quality reviews are well-scoped tasks that don't require Opus. Only escalate to `model: "opus"` if a thread involves genuinely complex architectural reasoning that Sonnet cannot resolve.
    - Each thread-fixing agent should:
      - Read the file and understand the context of the feedback
      - Make the requested code changes if they are accurate and warranted
