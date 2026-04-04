@@ -33,9 +33,10 @@ Print the detected workflow: `Detected release flow: {source} → {target}`
 ## Pre-Release Checks
 
 1. **Ensure you're on the source branch** — checkout if needed
-2. **Pull latest** — `git pull --rebase --autostash`
-3. **Run tests** — execute the project's test suite (per project conventions already in context, or check package.json)
-4. **Run build** — execute the project's build command if one exists
+2. **Pull latest source** — `git pull --rebase --autostash`
+3. **Pull latest target** — `git fetch origin {target} && (git show-ref --verify --quiet refs/heads/{target} && git checkout {target} || git checkout -b {target} --track origin/{target}) && git pull --rebase --autostash origin {target} && git checkout {source}` — this ensures the local target branch matches `origin/{target}` before any diff or PR creation, even on a fresh clone where the target branch may only exist on the remote. Without this, the diff may be stale or include already-released changes.
+4. **Run tests** — execute the project's test suite (per project conventions already in context, or check package.json)
+5. **Run build** — execute the project's build command if one exists
 
 ## Determine Version and Finalize Changelog
 
