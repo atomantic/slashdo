@@ -76,6 +76,7 @@ When compacting during this workflow, always preserve:
 - `PHASE_4C_START_SHA` (needed for FILE_OWNER_MAP update in Phase 4c.3)
 - `VACUOUS_TESTS_FIXED`, `WEAK_TESTS_STRENGTHENED`, `NEW_TEST_CASES`, `NEW_TEST_FILES`
 - `CREATED_CATEGORY_SLUGS` (list of branch slugs created in Phase 5)
+- `GOTCHA_ENTRIES_IN_SCOPE` (list of swift-gotchas catalogue entry numbers relevant to this project, recorded in Phase 0e)
 
 
 ## Phase 0: Discovery & Setup
@@ -115,6 +116,12 @@ Detect additional Swift project characteristics:
 - Combine usage (`import Combine`, `@Published`, `AnyPublisher`)
 - Swift concurrency adoption (`async`, `await`, `actor`, `@MainActor`)
 - Widget extensions, App Intents, or other extension targets
+- **CloudKit usage** (`import CloudKit`, `CKContainer`, `cloudKitDatabase:` in `ModelConfiguration`) — flag for Agent 5 lazy-init audit
+- **iCloud entitlements** (`com.apple.developer.icloud-container-identifiers` in `.entitlements`) — flag for Agent 6 ubiquity container audit
+- **Localization** (`Localizable.xcstrings` file present, `String(localized:)` calls, `LocalizedStringKey` parameters) — flag for Agent 6 localization audit
+- **StoreKit / IAPs** (`import StoreKit`, `.storekit` config file, `Product.products(for:)`) — flag for Agent 6 IAP audit
+- **CI/CD release path** (`.github/workflows/*.yml` referencing `apple-actions/upload-testflight-build` or `xcrun altool`) — flag for Agent 6 TestFlight upload validation audit
+- **Code signing in CI** (CI workflow uses `CODE_SIGNING_ALLOWED=NO` for tests) — Agent 5 must aggressively check CloudKit eager-init crash patterns
 
 Record as `PROJECT_TYPE` = "SwiftUI" with characteristics map.
 
@@ -172,12 +179,41 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 - Check for `.changelogs/` or `.changelog/` directory → `HAS_CHANGELOG`
 - Check for existing `../better-*` worktrees: `git worktree list`. If found, inform the user and ask whether to resume (use existing worktree) or clean up (remove it and start fresh)
 
+### 0e: Known Gotchas Catalogue
+
+This command ships with a catalogue of real-world Swift / iOS / macOS failure modes at `~/.claude/lib/swift-gotchas.md`. Each entry documents trigger conditions, root cause, the verified fix, and verification steps for a bug that has shipped to production at least once.
+
+Before launching audit agents in Phase 1, scan the project for these signals and record which catalogue entries are in scope. Pass this list to each downstream audit agent so they know which entries to consult.
+
+| Entry | Catalogue # | Triggers when project has | Audit agent that uses it |
+|-------|-------------|---------------------------|--------------------------|
+| CKContainer eager-init crash | 1 | CloudKit + CI runs `xcodebuild test ... CODE_SIGNING_ALLOWED=NO` | Agent 5 (Bugs) |
+| SwiftData missing inverse relationship | 2 | `@Model` with `@Relationship` properties | Agent 5 (Bugs) + Agent 7 (Tests) |
+| SwiftData CloudKit cross-Apple-ID sharing gap | 3 | SwiftData + `cloudKitDatabase: .automatic` + household/team/share keywords | Agent 4 (Architecture) + Agent 5 (Bugs) |
+| iCloud ubiquity container silent failure | 4 | iCloud entitlement + `url(forUbiquityContainerIdentifier:)` | Agent 5 (Bugs) + Agent 6 (Platform) |
+| iCloud symlink content corruption | 5 | Code mirrors content into `~/Library/Mobile Documents/` paths | Agent 5 (Bugs) |
+| SwiftUI xcstrings localization | 6 | `Localizable.xcstrings` OR `String(localized:)` calls | Agent 6 (Platform) |
+| XcodeGen project generation | 7 | `project.yml` present | Agent 6 (Platform) |
+| TestFlight upload validation | 8 | CI workflow uses `apple-actions/upload-testflight-build` or `xcrun altool` | Agent 6 (Platform) |
+| App Group provisioning auth failure | 9 | App Groups, Push, or extension targets in `.entitlements` | Agent 6 (Platform) |
+| iOS first-IAP submission rejection | 10 | `import StoreKit` AND `Product.products(for:)` calls | Agent 6 (Platform) |
+| `.foregroundStyle(.accentColor)` compile failure | 11 | SwiftUI code using `.foregroundStyle(.accentColor)` | Agent 5 (Bugs) |
+| Keychain test failures (CryptoKit) | 12 | `SecItemAdd`/`SecItemCopyMatching` + symmetric key generation | Agent 5 (Bugs) |
+
+Record the matching entry numbers as `GOTCHA_ENTRIES_IN_SCOPE` (e.g., `[1, 2, 6, 7, 8, 11]`). Audit agents in Phase 1 will be instructed to `Read ~/.claude/lib/swift-gotchas.md` once and check each in-scope entry's trigger conditions against the codebase.
+
 
 <audit_instructions>
 
 ## Phase 1: Unified Audit
 
 Project conventions are already in your context. Pass relevant conventions to each agent.
+
+Before launching audit agents, load the gotcha catalogue into your context so you can pass relevant entries to each agent:
+
+!`cat ~/.claude/lib/swift-gotchas.md`
+
+Use `GOTCHA_ENTRIES_IN_SCOPE` (recorded in Phase 0e) to filter which entries are relevant for this project. Pass each downstream agent ONLY the entries that match its category (per the table in Phase 0e), not the whole catalogue.
 
 Launch 7 Explore agents in two batches. Each agent must report findings in this format:
 ```
@@ -286,6 +322,10 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - `Task.detached` with `[self]` (strong capture) — use `[weak self]` for cancelable work
    - Keychain operations (`SecItemAdd`/`SecItemCopyMatching`) that silently fail in Simulator test environments — add in-memory key cache as fallback so encrypt-then-decrypt roundtrips don't break in tests
    - `.foregroundStyle(.accentColor)` doesn't compile — `ShapeStyle` has no `.accentColor`; use `Color.accentColor` explicitly
+   - **CloudKit eager-init crash in unsigned test builds — gotcha catalogue #1 (CRITICAL):** `CKContainer(identifier:)` does NOT throw or return nil when the iCloud entitlement is missing — it OS-faults via `EXC_BREAKPOINT`/`SIGTRAP`. `CODE_SIGNING_ALLOWED=NO` strips entitlements from sim builds. Any stored property like `private let container = CKContainer(identifier: "iCloud.foo.bar")` runs at object construction, so the moment any code touches a CloudKit singleton (even just to hold a reference), the host app crashes during XCTest bootstrap with "Early unexpected exit, operation never finished bootstrapping." Feature flags do NOT protect against this — construction happens before the flag check. Fix: convert all `CKContainer`/`CKDatabase`/`CKQuerySubscription` stored properties to `lazy var`. Audit all `@MainActor` singletons and `DataStore`-style references for stored CloudKit properties. Severity: **[CRITICAL]** if CI uses `CODE_SIGNING_ALLOWED=NO`. Full catalogue entry: `~/.claude/lib/swift-gotchas.md` § 1.
+   - **SwiftData missing inverse relationship crash — gotcha catalogue #2 (CRITICAL):** every `@Relationship` property must have a matching inverse on the target model. Missing inverse causes `ModelContainer` init to throw `SwiftDataError.loadIssueModelContainer` — and crucially, this fails for BOTH persistent AND in-memory configurations. The error message does NOT identify which relationship is broken. Map every `@Relationship` across all `@Model` classes; if a child model declares `var parent: Parent?` then the parent must declare a matching `var children: [Child]? = nil`. SwiftData CAN auto-infer inverses when both sides declare relationships, but it CANNOT create the inverse when only one side declares it. CloudKit (`cloudKitDatabase: .automatic`) requires inverses to be explicit. Full catalogue entry: `~/.claude/lib/swift-gotchas.md` § 2.
+   - **iCloud ubiquity container silent failure — gotcha catalogue #4:** `FileManager.url(forUbiquityContainerIdentifier:)` returning a non-nil URL does NOT mean the container is accessible — it only means the entitlement is configured. Pattern to flag: `if let iCloudURL = fm.url(forUbiquityContainerIdentifier: ...) { ... try? fm.createDirectory(...) ... self.dataDirectory = iCloudURL ... }` — the `try?` swallows permission errors and the app silently operates on an inaccessible directory. Required pattern: after `createDirectory`, verify accessibility via `contentsOfDirectory(at:includingPropertiesForKeys:)` inside `do/catch` (not `try?`), and fall back to local Documents on any failure. Full catalogue entry: `~/.claude/lib/swift-gotchas.md` § 4.
+   - **SwiftData CloudKit cross-Apple-ID sharing gap — gotcha catalogue #3:** `ModelConfiguration(cloudKitDatabase:)` only has `.private(...)` and `.automatic` — there is NO `.shared` case. Apps that need cross-user collaboration (family/team apps) will silently sync only across the user's own devices. Flag any app that has `cloudKitDatabase: .automatic` AND mentions "household", "family", "team", "shared", or "invite" in code/comments — they likely need a `CKShare`-on-custom-zone overlay pattern. Common compile errors that indicate this gap: `type 'CKShare.Metadata' has no member 'activityType'`, `(saved, _) = try await db.modifyRecords(...)` (modern async API returns dictionaries, not tuples of arrays). Full catalogue entry: `~/.claude/lib/swift-gotchas.md` § 3.
 
 ### Batch 2 (2 agents after Batch 1 completes):
 
@@ -312,14 +352,40 @@ Skip step 4 if steps 1-3 reveal the code is correct.
 
    **Build system & project configuration (when XcodeGen/Tuist detected):**
    - `GENERATE_INFOPLIST_FILE: false` with custom Info.plist missing standard keys (`CFBundleIdentifier`, `CFBundleExecutable`, `CFBundlePackageType`) — causes "Missing bundle ID" on simulator install despite correct `PRODUCT_BUNDLE_IDENTIFIER`. Fix: set `GENERATE_INFOPLIST_FILE: true` to let Xcode merge custom keys with generated ones
-   - Preview Content directory with `buildPhase: none` excluding Swift files that are needed at runtime (e.g., `PreviewSampleData.swift` used via launch arguments) — only exclude the `.xcassets`, not the whole directory
-   - `UILaunchScreen` key manually added to Info.plist but lost on `xcodegen generate` — XcodeGen regenerates the plist from `info.properties` only; put `UILaunchScreen: {}` in `project.yml` not the plist file. Missing this causes iOS letterbox/compatibility mode
-   - Info.plist keys required for TestFlight upload that don't cause build failures: `UISupportedInterfaceOrientations` must include all 4 orientations for iPad multitasking (or declare `UIRequiresFullScreen`), and `CFBundleDocumentTypes` requires `LSSupportsOpeningDocumentsInPlace` — these are rejected server-side by `altool`, not at build time
-   - CI upload actions (`apple-actions/upload-testflight-build`) that report success even when `altool` returns "UPLOAD FAILED" in XML plist output — always check raw upload logs, not just job status
+   - Preview Content directory with `buildPhase: none` excluding Swift files that are needed at runtime (e.g., `PreviewSampleData.swift` used via launch arguments) — only exclude the `.xcassets`, not the whole directory. In Release builds on CI, `DEVELOPMENT_ASSET_PATHS` files may be stripped — move runtime-needed Swift files OUT of `Preview Content/` into the main source tree
+   - `UILaunchScreen` key manually added to Info.plist but lost on `xcodegen generate` — XcodeGen regenerates the plist from `info.properties` only; put `UILaunchScreen: {}` in `project.yml` not the plist file. Missing this causes iOS letterbox/compatibility mode (tiny centered window, large black borders). Also remove `INFOPLIST_KEY_UILaunchScreen_Generation: true` if both are present — they create a nested `UILaunchScreen > UILaunchScreen` structure
+   - **Never manually edit the Info.plist file when using XcodeGen's `info.path`** — `xcodegen generate` overwrites the plist from scratch using only `info.properties`. Any custom keys must live in `project.yml` or they're silently deleted
+   - Info.plist keys required for TestFlight upload that don't cause build failures (these are rejected SERVER-SIDE by `altool`, not at build time):
+     - `UISupportedInterfaceOrientations` must include all 4 orientations for iPad multitasking, OR declare `UIRequiresFullScreen: true` (even iPhone-only apps need this — error code 409). For XcodeGen: set `INFOPLIST_KEY_UISupportedInterfaceOrientations` and `INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad` build settings
+     - `CFBundleDocumentTypes` declared without `LSSupportsOpeningDocumentsInPlace` — currently a warning (code 90737), may become a fatal error
+   - CI upload actions (`apple-actions/upload-testflight-build@v3`) that report success even when `altool` returns "UPLOAD FAILED" in XML plist output — flag any release workflow that doesn't grep raw upload logs for `UPLOAD FAILED|product-errors|product-warnings`. Always check TestFlight after CI completes to confirm the build actually arrived
+   - **Adding new capabilities to an existing app — gotcha catalogue #9:** `xcodebuild archive -allowProvisioningUpdates` may fail with misleading "Authentication failed: Make sure a bearer token was provided" when adding App Groups, Push, etc. — the App Store Connect API key has upload permissions but NOT provisioning profile management permissions. Flag CI workflows that add new entitlements without corresponding documentation that someone has manually fixed provisioning in Xcode GUI first
+   - For XcodeGen multi-platform targets with widget extensions, the widget dependency needs `platformFilter: iOS` since widgets are primarily iOS
+   - Build system & TestFlight gotchas — full catalogue entries: `~/.claude/lib/swift-gotchas.md` § 7 (XcodeGen), § 8 (TestFlight upload), § 9 (App Group provisioning)
 
    **iCloud & data persistence (when iCloud entitlements detected):**
    - `url(forUbiquityContainerIdentifier:)` returning non-nil does NOT mean the container is accessible — always verify with `createDirectory` + `contentsOfDirectory` using `do/catch` (not `try?`) and fall back to local Documents directory on failure
    - `try?` on iCloud file operations silently swallowing permission errors — app appears to work but reads/writes to inaccessible path with empty results
+   - Sparse/dehydrated iCloud files: any directory that was symlinked or rsynced into iCloud Drive can produce files with `st_size > 0` but `st_blocks = 0` that read as empty. Flag any code that mirrors content into iCloud paths without integrity verification (see catalogue § 5)
+
+   **Localization & String Catalogs (when `Localizable.xcstrings` or `String(localized:)` detected):**
+   - **`Text(someStringVariable)` silent failure** — `Text("literal")` accepts `LocalizedStringKey` and auto-localizes from the string catalog, but `Text(someVariable)` where `someVariable: String` does NOT — it renders raw. Any reusable component accepting `title: String` and passing it to `Text(title)` ships untranslated UI unless callers pre-localize via `String(localized:)`. Either change the parameter type to `LocalizedStringKey` (for literal-only callers) or document that callers must pre-localize. This is the #1 silent localization failure
+   - **`String(localized:)` ignores SwiftUI environment locale** — it uses `Bundle.main`'s preferred language, which is controlled by `UserDefaults["AppleLanguages"]`, not `.environment(\.locale, ...)`. Apps with in-app language pickers must either (a) restart after writing to `AppleLanguages`, or (b) build an `appLocalized()` helper that passes the user's chosen locale explicitly via `String(localized: key, locale: .app, comment: ...)`
+   - **AGA `^[...](inflect: true)` requires `LocalizedStringKey`** — Apple's Automatic Grammar Agreement only fires when rendered as `Text(LocalizedStringKey)`. `String(localized: "^[\(count) horse](inflect: true)")` returns a plain `String`, strips the AGA pipeline, and renders the markup literally. AGA `inflect: true` is also unreliable for non-English locales — use explicit `variations.plural` (`one`/`other` keys) in xcstrings for ALL locales including English
+   - **Static cached `DateFormatter` for locale-dependent formats** — `private static let formatter = DateFormatter()` captures the locale at first init and never updates; in-app language switches won't change rendered dates. Use `Date.FormatStyle` (e.g., `date.formatted(.dateTime.month().day())`) which respects current locale, OR construct a fresh formatter per call. Static caching IS safe for locale-independent formats like `yyyyMMdd` (set `locale = Locale(identifier: "en_US_POSIX")` to prevent calendar interference)
+   - **`date.formatted(...)` vs `Text(date, format:)` in views** — the former returns a `String` using `Locale.current` (system locale, non-reactive); the latter uses the SwiftUI environment locale and IS reactive to `.environment(\.locale, ...)` changes. Prefer `Text(date, format: ...)` in view bodies
+   - **Localized strings stored in SwiftData/CoreData** — flag any `@Model` property that holds a translated display string instead of a raw enum value. Storing `"Lektion"` in German and reading in French gives mixed-language UI. Always store raw values (`categoryRaw: String = "lesson"`) and compute `displayName` at render time
+   - **Missing `comment:` parameter on `String(localized:)` calls** — translators have no context, and the xcstrings extraction tool won't auto-populate hints
+   - **Missing `en` entry in xcstrings when other languages are present** — causes English strings to display with raw `^[...]` markup or fall back to keys
+   - **Tab bar / sidebar / navigation labels not translating** — usually caused by Pattern 1 vs 2 confusion: `Label(category.displayName, ...)` won't translate unless `displayName` returns a pre-localized `String`
+   - Full catalogue entry with all 8 sub-gotchas and the `appLocalized()` helper template: `~/.claude/lib/swift-gotchas.md` § 6
+
+   **In-App Purchases & StoreKit (when StoreKit imports detected):**
+   - **Missing "Restore Purchases" button (Guideline 3.1.1 — auto-rejection):** apps that offer IAPs MUST include a distinct, user-tappable Restore button on the same screen where IAPs are shown, not buried in deep settings. Implementation: `try await AppStore.sync()` (StoreKit 2), then refresh purchase state. Show loading state during restore, alerts on success/failure
+   - **Hardcoded fallback price in PurchaseButton** — `Text(price ?? "$0.99")` shows a tappable button when products haven't loaded, leading to "Unable to make IAP purchases" in App Review. Fix: show `ProgressView()` until `Product.products(for:)` resolves, then enable the button
+   - **First-time IAPs in TestFlight cannot be tested** — `product.purchase()` will fail with "Unable to Complete Request" for IAPs that have never been approved by App Review, even though `Product.products(for:)` returns prices correctly. This is a sandbox limitation, not a code bug. Flag any project README or testing doc that says "test IAPs in TestFlight" without mentioning the local `.storekit` configuration file workflow (only works in Xcode debug runs, not archived/TestFlight builds)
+   - **`@available` annotations not matching actual StoreKit version** — StoreKit 2 (`Product`, `Transaction`, `AppStore.sync()`) requires iOS 15+/macOS 12+. Mixing StoreKit 1 (`SKProduct`, `SKPaymentQueue`) and StoreKit 2 in the same purchase flow without clear version gating produces surprising bugs
+   - Full catalogue entry with submission flow (clear "Rejected" IAP localizations, submit IAPs alongside an app version, local `.storekit` testing): `~/.claude/lib/swift-gotchas.md` § 10
 
    **SwiftUI best practices (ALL projects):**
    - Deprecated APIs: `NavigationView` (use `NavigationStack`/`NavigationSplitView`), `onChange(of:perform:)` one-parameter form (use two-parameter), `.onAppear` for async work (use `.task`)
@@ -365,6 +431,18 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - Missing `XCUITest` for critical navigation flows and platform-specific interactions
    - Missing preview coverage: all views should have `#Preview` for each platform × Dark Mode × Dynamic Type extremes
    - Missing error path tests for network failures, decode failures, and permission denials
+   - **Missing `testModelContainerSchemaIsValid()` test** when `@Model` classes are present — every project using SwiftData should construct an in-memory `ModelContainer` with ALL model types in a unit test. This catches missing inverse relationships before they reach production (the actual error message gives no hint which relationship is broken). Required pattern:
+     ```swift
+     func testModelContainerSchemaIsValid() throws {
+         _ = try ModelContainer(
+             for: ModelA.self, ModelB.self, /* every @Model type */,
+             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+         )
+     }
+     ```
+   - **Missing CloudKit lazy-init verification test** — when the project uses CloudKit, add a smoke test that runs the host app under `CODE_SIGNING_ALLOWED=NO` and verifies tests bootstrap successfully. If `CKContainer(identifier:)` is held in any stored property, the host app traps before any test runs
+   - **Missing localization round-trip tests** when `Localizable.xcstrings` is present — for each enum with a `displayName` property, verify it returns a non-empty `String` (not the raw key) for at least one supported locale. This catches `Text(stringVariable)` vs `Text(LocalizedStringKey)` regressions
+   - **Missing IAP product loading test** when StoreKit is imported — verify `Product.products(for: identifiers)` returns the expected set against a `.storekit` configuration file. This catches typos in product identifiers before they reach App Review
 
    **Vacuous tests (tests that don't actually test anything):**
    - Tests that assert on mocked return values instead of real behavior (testing the mock, not the code)
@@ -528,6 +606,25 @@ SWIFT-SPECIFIC GUARDRAILS:
 - Use Swift concurrency (async/await, actors) over GCD/Combine for new code
 - Never introduce AnyView — use @ViewBuilder or Group instead
 - Test both light and dark color schemes when modifying colors
+
+GOTCHA CATALOGUE — REQUIRED READING:
+Before fixing any issue tagged with a gotcha catalogue entry number (#1–#12), READ the corresponding entry in `~/.claude/lib/swift-gotchas.md`. Each entry documents the verified fix from a prior project that actually shipped — apply the fix as written rather than improvising. The relevant entries for this project are: {GOTCHA_ENTRIES_IN_SCOPE}.
+
+The catalogue covers:
+  #1  CKContainer eager-init crash in unsigned test builds       (CloudKit + CI)
+  #2  SwiftData missing inverse relationship crash                (@Model + @Relationship)
+  #3  SwiftData CloudKit cross-Apple-ID sharing gap               (.automatic + sharing)
+  #4  iCloud ubiquity container silent failure                    (iCloud entitlement)
+  #5  iCloud symlink content corruption                           (iCloud Drive mirroring)
+  #6  SwiftUI xcstrings localization silent failures              (Localizable.xcstrings)
+  #7  XcodeGen project generation gotchas                         (project.yml)
+  #8  TestFlight upload validation gotchas                        (CI release path)
+  #9  xcodebuild App Group provisioning auth failure              (new entitlements)
+  #10 iOS first-IAP submission rejection                          (StoreKit / IAPs)
+  #11 .foregroundStyle(.accentColor) compile failure              (any SwiftUI)
+  #12 Keychain test failures in simulator (CryptoKit)             (SecItem* + symmetric keys)
+
+When a finding cites a catalogue entry, READ that entry in `~/.claude/lib/swift-gotchas.md` first, then apply the FIX section as the remediation. Do not paraphrase the fix — these are load-bearing patterns where minor variations regress the bug.
 ```
 
 ### Conflict avoidance:
