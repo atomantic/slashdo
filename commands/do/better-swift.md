@@ -197,7 +197,7 @@ Before launching audit agents in Phase 1, scan the project for these signals and
 | TestFlight upload validation | 8 | CI workflow uses `apple-actions/upload-testflight-build` or `xcrun altool` | Agent 6 (Platform) |
 | App Group provisioning auth failure | 9 | App Groups, Push, or extension targets in `.entitlements` | Agent 6 (Platform) |
 | iOS first-IAP submission rejection | 10 | `import StoreKit` AND `Product.products(for:)` calls | Agent 6 (Platform) |
-| `.foregroundStyle(.accentColor)` compile failure | 11 | Any SwiftUI source | Agent 5 (Bugs) |
+| `.foregroundStyle(.accentColor)` compile failure | 11 | SwiftUI code using `.foregroundStyle(.accentColor)` | Agent 5 (Bugs) |
 | Keychain test failures (CryptoKit) | 12 | `SecItemAdd`/`SecItemCopyMatching` + symmetric key generation | Agent 5 (Bugs) |
 
 Record the matching entry numbers as `GOTCHA_ENTRIES_IN_SCOPE` (e.g., `[1, 2, 6, 7, 8, 11]`). Audit agents in Phase 1 will be instructed to `Read ~/.claude/lib/swift-gotchas.md` once and check each in-scope entry's trigger conditions against the codebase.

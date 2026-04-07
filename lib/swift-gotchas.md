@@ -73,10 +73,17 @@ Audit checklist:
 
 ### Verify
 ```bash
+# Pick an available iOS Simulator dynamically (no hardcoded device name)
+SIM_DEST=$(xcrun simctl list devices available -j \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; \
+      runtimes=sorted([k for k in d if "iOS" in k], reverse=True); \
+      sims=next((d[k] for k in runtimes if d[k]), []); \
+      print("platform=iOS Simulator,id=" + sims[0]["udid"]) if sims else sys.exit(1)')
+
 xcodebuild test \
   -project YourApp.xcodeproj \
   -scheme YourApp \
-  -destination "platform=iOS Simulator,name=iPhone 17 Pro" \
+  -destination "$SIM_DEST" \
   -configuration Debug \
   CODE_SIGNING_ALLOWED=NO \
   -only-testing:YourAppTests
@@ -312,9 +319,9 @@ if let iCloudURL = fm.url(forUbiquityContainerIdentifier: "...") {
 When you migrate content from local storage to iCloud Drive (symlink or rsync), iCloud may create "dehydrated" placeholder files: non-zero `st_size` but `st_blocks=0`. The files appear to exist but read as empty. This silently corrupts data.
 
 ### Fix
-1. Detect sparse files (macOS `stat` syntax):
+1. Detect sparse files (macOS `stat` syntax) — null-delimited so filenames with spaces/newlines are handled correctly:
    ```bash
-   for f in $(find /path/to/content -type f); do
+   find /path/to/content -type f -print0 | while IFS= read -r -d '' f; do
      size=$(stat -f '%z' "$f" 2>/dev/null)
      blocks=$(stat -f '%b' "$f" 2>/dev/null)
      if [ "$size" -gt 0 ] 2>/dev/null && [ "$blocks" = "0" ]; then
