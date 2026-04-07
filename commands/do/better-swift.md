@@ -125,29 +125,6 @@ Detect additional Swift project characteristics:
 
 Record as `PROJECT_TYPE` = "SwiftUI" with characteristics map.
 
-### 0e: Known Gotchas Catalogue
-
-This command ships with a catalogue of real-world Swift / iOS / macOS failure modes at `~/.claude/lib/swift-gotchas.md`. Each entry documents trigger conditions, root cause, the verified fix, and verification steps for a bug that has shipped to production at least once.
-
-Before launching audit agents in Phase 1, scan the project for these signals and record which catalogue entries are in scope. Pass this list to each downstream audit agent so they know which entries to consult.
-
-| Entry | Catalogue # | Triggers when project has | Audit agent that uses it |
-|-------|-------------|---------------------------|--------------------------|
-| CKContainer eager-init crash | 1 | CloudKit + CI runs `xcodebuild test ... CODE_SIGNING_ALLOWED=NO` | Agent 5 (Bugs) |
-| SwiftData missing inverse relationship | 2 | `@Model` with `@Relationship` properties | Agent 5 (Bugs) + Agent 7 (Tests) |
-| SwiftData CloudKit cross-Apple-ID sharing gap | 3 | SwiftData + `cloudKitDatabase: .automatic` + household/team/share keywords | Agent 4 (Architecture) + Agent 5 (Bugs) |
-| iCloud ubiquity container silent failure | 4 | iCloud entitlement + `url(forUbiquityContainerIdentifier:)` | Agent 5 (Bugs) + Agent 6 (Platform) |
-| iCloud symlink content corruption | 5 | Code mirrors content into `~/Library/Mobile Documents/` paths | Agent 5 (Bugs) |
-| SwiftUI xcstrings localization | 6 | `Localizable.xcstrings` OR `String(localized:)` calls | Agent 6 (Platform) |
-| XcodeGen project generation | 7 | `project.yml` present | Agent 6 (Platform) |
-| TestFlight upload validation | 8 | CI workflow uses `apple-actions/upload-testflight-build` or `xcrun altool` | Agent 6 (Platform) |
-| App Group provisioning auth failure | 9 | App Groups, Push, or extension targets in `.entitlements` | Agent 6 (Platform) |
-| iOS first-IAP submission rejection | 10 | `import StoreKit` AND `Product.products(for:)` calls | Agent 6 (Platform) |
-| `.foregroundStyle(.accentColor)` compile failure | 11 | Any SwiftUI source | Agent 5 (Bugs) |
-| Keychain test failures (CryptoKit) | 12 | `SecItemAdd`/`SecItemCopyMatching` + symmetric key generation | Agent 5 (Bugs) |
-
-Record the matching entry numbers as `GOTCHA_ENTRIES_IN_SCOPE` (e.g., `[1, 2, 6, 7, 8, 11]`). Audit agents in Phase 1 will be instructed to `Read ~/.claude/lib/swift-gotchas.md` once and check each in-scope entry's trigger conditions against the codebase.
-
 ### 0c: Build & Test Command Detection
 Derive build and test commands from the build system:
 
@@ -201,6 +178,29 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 - Record `IS_DIRTY` via `git status --porcelain`
 - Check for `.changelogs/` or `.changelog/` directory → `HAS_CHANGELOG`
 - Check for existing `../better-*` worktrees: `git worktree list`. If found, inform the user and ask whether to resume (use existing worktree) or clean up (remove it and start fresh)
+
+### 0e: Known Gotchas Catalogue
+
+This command ships with a catalogue of real-world Swift / iOS / macOS failure modes at `~/.claude/lib/swift-gotchas.md`. Each entry documents trigger conditions, root cause, the verified fix, and verification steps for a bug that has shipped to production at least once.
+
+Before launching audit agents in Phase 1, scan the project for these signals and record which catalogue entries are in scope. Pass this list to each downstream audit agent so they know which entries to consult.
+
+| Entry | Catalogue # | Triggers when project has | Audit agent that uses it |
+|-------|-------------|---------------------------|--------------------------|
+| CKContainer eager-init crash | 1 | CloudKit + CI runs `xcodebuild test ... CODE_SIGNING_ALLOWED=NO` | Agent 5 (Bugs) |
+| SwiftData missing inverse relationship | 2 | `@Model` with `@Relationship` properties | Agent 5 (Bugs) + Agent 7 (Tests) |
+| SwiftData CloudKit cross-Apple-ID sharing gap | 3 | SwiftData + `cloudKitDatabase: .automatic` + household/team/share keywords | Agent 4 (Architecture) + Agent 5 (Bugs) |
+| iCloud ubiquity container silent failure | 4 | iCloud entitlement + `url(forUbiquityContainerIdentifier:)` | Agent 5 (Bugs) + Agent 6 (Platform) |
+| iCloud symlink content corruption | 5 | Code mirrors content into `~/Library/Mobile Documents/` paths | Agent 5 (Bugs) |
+| SwiftUI xcstrings localization | 6 | `Localizable.xcstrings` OR `String(localized:)` calls | Agent 6 (Platform) |
+| XcodeGen project generation | 7 | `project.yml` present | Agent 6 (Platform) |
+| TestFlight upload validation | 8 | CI workflow uses `apple-actions/upload-testflight-build` or `xcrun altool` | Agent 6 (Platform) |
+| App Group provisioning auth failure | 9 | App Groups, Push, or extension targets in `.entitlements` | Agent 6 (Platform) |
+| iOS first-IAP submission rejection | 10 | `import StoreKit` AND `Product.products(for:)` calls | Agent 6 (Platform) |
+| `.foregroundStyle(.accentColor)` compile failure | 11 | Any SwiftUI source | Agent 5 (Bugs) |
+| Keychain test failures (CryptoKit) | 12 | `SecItemAdd`/`SecItemCopyMatching` + symmetric key generation | Agent 5 (Bugs) |
+
+Record the matching entry numbers as `GOTCHA_ENTRIES_IN_SCOPE` (e.g., `[1, 2, 6, 7, 8, 11]`). Audit agents in Phase 1 will be instructed to `Read ~/.claude/lib/swift-gotchas.md` once and check each in-scope entry's trigger conditions against the codebase.
 
 
 <audit_instructions>
