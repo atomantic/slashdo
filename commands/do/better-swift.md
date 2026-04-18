@@ -397,17 +397,41 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - Inconsistent use of `@Observable` (iOS 17+) vs `ObservableObject` — pick one per minimum deployment target
    - Missing Transferable conformance for drag & drop on shareable data types
    - `@AppStorage` with string keys that risk collision — use namespaced enum
-   - View preview providers not covering: Dark Mode, largest Dynamic Type, RTL layout, smallest/largest device for each platform
+   - View preview providers not covering the Dynamic Type test matrix: `.large` (baseline), `.xxxLarge` (largest non-accessibility), `.accessibility5` (AX5). Also Dark Mode, RTL layout, smallest/largest device for each platform
 
    **Accessibility (ALL projects):**
    - Images without `.accessibilityLabel()` or `.accessibilityHidden(true)` for decorative images
    - Custom interactive views missing `.accessibilityAddTraits(.isButton)`
-   - Dynamic Type not supported — hardcoded font sizes instead of `.font(.body)` or `@ScaledMetric`
    - Color-only indicators without shape/text alternatives
    - Tap targets smaller than 44x44pt without `.contentShape()` expansion
    - Missing `.accessibilityElement(children: .combine)` grouping
    - VoiceOver reading order not matching visual order
    - Animations not respecting `@Environment(\.accessibilityReduceMotion)`
+
+   **Dynamic Type responsive-layout audit (iOS, iPadOS, watchOS, visionOS — HIGH priority):**
+   Users can set text size from Settings > Display & Brightness > Text Size AND Settings > Accessibility > Display & Text Size > Larger Text, scaling text up through `AX1`–`AX5`. Most layout bugs only surface at the accessibility tiers (AX1–AX5), not at `xxxLarge`. App Store reviewers routinely test at the largest size — clipped or unreachable UI is a rejection vector.
+
+   **Test matrix — verify every user-facing view renders correctly at these three points:**
+   - `.large` — baseline (default system size)
+   - `.xxxLarge` — largest non-accessibility tier, catches most truncation
+   - `.accessibility5` (AX5) — catches clipping, overflow, broken layouts, and unreachable controls
+
+   **Patterns to flag as findings:**
+   - Hardcoded font sizes (`.font(.system(size: 14))`, `Font.custom(_, size:)` without `relativeTo:`) that won't scale. Fix: use semantic styles (`.font(.body)`, `.headline`, etc.) or `.font(.custom("Name", size: 14, relativeTo: .body))`, or gate numeric spacing with `@ScaledMetric`
+   - Hardcoded spacing / frame sizes (padding, width, height, corner radius on text-bearing containers) that don't grow with text. Fix: `@ScaledMetric(relativeTo: .body) var padding: CGFloat = 16`
+   - Multi-line `Text` without `.fixedSize(horizontal: false, vertical: true)` — SwiftUI prefers horizontal truncation (ellipsis) over wrapping, so long strings clip instead of expanding vertically. **Any `Text` that could realistically produce two or more lines at AX5 needs this modifier.**
+   - Full-screen content views (screens, sheets, detail views) NOT wrapped in a `ScrollView` — at AX5, almost any content taller than ~4 rows overflows. Flag any top-level view body that uses `VStack` / `Form`-less layouts without a scroll container. If the view needs a `Spacer` to push content, wrap in `ScrollView` + `GeometryReader` with a `.frame(minHeight: geo.size.height)` inner container instead of dropping the scroll
+   - Fixed `.frame(height:)` or `.frame(width:height:)` on containers that hold `Text` — flag unless paired with `@ScaledMetric` or `.dynamicTypeSize(...xxxLarge)` cap
+   - `HStack` layouts with multiple text elements and no wrap fallback — at AX sizes these truncate off-screen. Suggest `ViewThatFits { HStack { ... }; VStack { ... } }` or split to `VStack` when `dynamicTypeSize.isAccessibilitySize` is true
+   - `Label`, `Button`, list rows, and tab/toolbar items with adjacent icons + text using fixed `HStack` spacing — verify icons also scale (`Image(systemName:).imageScale(.large)` or `@ScaledMetric` for sized assets)
+   - Views that call `.lineLimit(1)` or `.truncationMode(.tail)` on content users must read in full (titles, button labels, form values) — at AX5 the ellipsis hides critical UI. Allow only for non-critical captions or metadata
+   - Views that use `.minimumScaleFactor(...)` below `0.8` as a "fix" for Dynamic Type — this shrinks text back below the user's chosen size and defeats the accessibility request. Prefer wrapping/scrolling
+   - **Hero typography / fixed-size displays that legitimately can't grow (slider numbers, countdown digits, watch face values, tight chrome)**: use `.dynamicTypeSize(...DynamicTypeSize.xxxLarge)` as an upper cap on that subtree — **cap, don't ignore**. Flag any such element that uses `.dynamicTypeSize(.large)` or a narrower cap, or that uses hardcoded fonts without any cap (silent regression when user bumps text size)
+   - TabView items, NavigationStack titles, and alert buttons that truncate at AX sizes — test with `.dynamicTypeSize(.accessibility5)` in previews
+   - Custom `Text` measurements with `GeometryReader` or `TextRenderer` that assume a fixed size category
+   - Forms and list rows where trailing controls (Toggle, disclosure indicator, value text) collide with leading labels at AX sizes — use `LabeledContent` (iOS 16+) or switch to vertical layout via `if dynamicTypeSize.isAccessibilitySize`
+   - Missing `@Environment(\.dynamicTypeSize) var dynamicTypeSize` branch in custom layouts that need to reflow (e.g., side-by-side → stacked) at accessibility sizes
+   - Launch screens / onboarding / paywall screens specifically — these are the most common rejection points because they're full-bleed and often pixel-designed
 
    **Dark Mode & theming:**
    - Hardcoded colors (`.white`, `.black`, `Color(red:green:blue:)`) instead of semantic colors (`.primary`, `.secondary`, asset catalog colors with dark variant)
@@ -429,7 +453,7 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - Missing view model state transition tests (initial → action → expected state)
    - Missing `@Published` / `@Observable` property change sequence tests
    - Missing `XCUITest` for critical navigation flows and platform-specific interactions
-   - Missing preview coverage: all views should have `#Preview` for each platform × Dark Mode × Dynamic Type extremes
+   - Missing preview coverage: all views should have `#Preview` for each platform × Dark Mode × the Dynamic Type test matrix (`.large`, `.xxxLarge`, `.accessibility5`). Previews with only the default size ship blind to accessibility layout bugs
    - Missing error path tests for network failures, decode failures, and permission denials
    - **Missing `testModelContainerSchemaIsValid()` test** when `@Model` classes are present — every project using SwiftData should construct an in-memory `ModelContainer` with ALL model types in a unit test. This catches missing inverse relationships before they reach production (the actual error message gives no hint which relationship is broken). Required pattern:
      ```swift
