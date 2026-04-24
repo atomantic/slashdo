@@ -36,16 +36,30 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 - Indexing empty arrays; `every`/`some`/`reduce` on empty collections returning vacuously true; declared-but-never-updated state/variables
 - Parallel arrays coupled by index position — use objects/maps keyed by stable identifier
 - Shared mutable references: module-level defaults mutated across calls (use `structuredClone()`); `useCallback`/`useMemo` referencing later `const` (temporal dead zone); spread followed by unconditional assignment clobbering spread values
+- React state invariants (uniqueness, cap/floor, monotonicity) checked against render-time value before `setX(...)` — rapid events or concurrent updates race the check. Move into the functional updater: `setX(prev => prev.includes(id) ? prev : [...prev, id])`
+- `useEffect` depending on state it writes — the write retriggers the effect (infinite loop / request storm). Split into two effects, drop the self-written value from deps, or use a functional setter that doesn't require the current value in deps
 - Functions with >10 branches or >15 cyclomatic complexity — refactor
 
 **API route basics**
-- Route params passed to services without format validation; path containment using string prefix without separator boundary (use `path.relative()`)
+- Route params passed to services without format validation; path containment using string prefix without separator boundary (use `path.relative()`). When sibling endpoints validate body/query fields, the path param must be validated with the same schema — skipping param validation on one endpoint turns schema violations into 404/500 instead of 400
 - Parameterized/wildcard routes registered before specific named routes (`/:id` before `/drafts` matches `/drafts` as `id="drafts"`)
 - Stored or external URLs rendered as clickable links without protocol validation — allowlist `http:`/`https:`
 - Request schema fields for large string/binary payloads (base64, file content, free text) without per-field size limits — a total body-size limit alone doesn't prevent individual oversized fields from consuming excessive memory or exceeding downstream service limits; add per-field `max(N)` constraints with clear error messages
+- Character-class regex validators (`^[a-z0-9-]+$`) claiming to enforce a structured format (slug, kebab-case, reverse-DNS) — they accept leading/trailing separators (`-foo`, `foo-`) and repeated separators (`a--b`). Require alnum boundaries or use a parser
+- `z.string().min(1)` without `.trim()` accepts whitespace-only values for user-visible names — use `z.string().trim().min(1)` when the field represents a human-readable identifier
+- Object spread of a potentially-null/undefined boundary value (`{ ...req.body, id }`) — throws a TypeError and surfaces as 500 instead of 4xx. Use `{ ...(req.body ?? {}), id }` at request/boundary entry points
+
+**Async & state (single-file patterns)**
+- Optimistic UI state (selection, active flag, list membership) updated before an async call and never reverted on failure — the user sees success, the server remains on the old state. Capture the previous value, await in try/catch, and reset on rejection
+- Async functions invoked from sync event handlers (`onClick`, `onKeyDown`), effects, or dispatchers without rejection handling at the call site — even when a shared `request()` toasts the error, the unhandled rejection leaves UI stuck (modal doesn't close, palette doesn't navigate, dirty state doesn't clear). Wrap in try/catch, attach `.catch(...)`, or use `void p.catch(...)`; only run close/navigate/success in the resolve branch
+- Single shared error-state variable reused by multiple independent async flows — one flow's success path clears the other flow's displayed error. Split errors by domain or only overwrite the specific error you own
+- Loading flag covers only the primary fetch — a slow or failed secondary fetch renders a blank page with no indicator. Include every render-gating load in the loading state or provide explicit empty/error states
 
 **Error handling (single-file)**
 - Swallowed errors (empty `.catch(() => {})`); error handlers that exit cleanly (`exit 0`, `return`) without user-visible output; handlers replacing detailed failure info with generic messages
+- Error discrimination by string matching (`err.message.includes('not found')`, regex on error text) — localization, refactors, or wrapper rewrites silently change HTTP status / retry behavior. Use explicit error codes or typed classes
+- Route handlers mapping any exception from a service into a single HTTP status (e.g., `catch { throw new NotFoundError() }`) — hides real server errors (file I/O, parse, write failures) as domain 404s. Map only known codes/classes; let unknown errors surface as 500
+- Error wrappers that re-throw with only `{ status }` and drop `code`/`context`/`cause` — downstream consumers see generic `INTERNAL_ERROR` instead of the specific code. Preserve structured detail when wrapping
 
 ### Domain-Specific (check only when file type matches)
 
@@ -98,7 +112,9 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 - Destructive actions without confirmation step
 
 **Accessibility** _[UI components, interactive elements]_
-- Interactive elements missing accessible names, roles, or ARIA states — including labels removed or replaced with non-descriptive placeholders in conditional/compact rendering modes
+- Interactive elements missing accessible names, roles, or ARIA states — including labels removed or replaced with non-descriptive placeholders in conditional/compact rendering modes. ARIA attributes should match established patterns used elsewhere for the same widget type (disclosure, menu, dialog)
+- ARIA roles applied without the keyboard interactions they imply — `role="menu"`/`menuitem*` expects roving focus, arrow-key navigation, Escape scoped to the menu, and focus management; `role="listbox"` expects Home/End/typeahead; `role="dialog"` expects focus trap + return focus. Either implement the full interaction pattern or drop to a simpler one (native `<button>` + disclosure)
+- Nested inputs handling `Escape`/`Enter`/`ArrowUp`/`ArrowDown` inside a modal/form that also handles the key at the ancestor — the event bubbles and the ancestor fires too (closes modal, submits form). Call `e.stopPropagation()` (and usually `preventDefault()`) in the inner handler
 - Custom toggles from non-semantic elements instead of native inputs
 - Overlay layers with `pointer-events-auto` intercepting clicks beneath; `pointer-events-none` on parent killing child hover handlers
 
@@ -108,7 +124,7 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 ### Always Check — Quality & Conventions
 
 **Intent vs implementation (single-file)**
-- Labels, comments, status messages describing behavior the code doesn't implement
+- Labels, comments, status messages describing behavior the code doesn't implement. Also covers factual doc drift: file paths/extensions (`foo.js` referenced when the file is `foo.jsx`), item counts ("13 widgets" when there are 15), default entity names ("Default" vs actual "Everything"), and route/response-shape comments that don't match what the handler returns. Verify every factual claim in a comment or JSDoc against the code it references
 - Inline code examples or command templates that aren't syntactically valid
 - Sequential numbering with gaps or jumps after edits
 - Template/workflow variables referenced but never assigned — trace each placeholder to a definition
@@ -119,6 +135,9 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 - Lookups checking only one scope when multiple exist (local branches but not remote)
 - Tracking/checkpoint files defaulting to empty on parse failure — fail-open guards
 - Registering references to resources without verifying resource exists
+
+**UX integrity (single-component)**
+- Unsaved changes / dirty state silently discarded when the user switches context in a multi-record editor or closes a sheet — data loss. Dirty-check on switch (inline confirm), auto-save drafts, or disable the switch control while dirty. `beforeunload` does not cover in-app context switches
 
 **AI-generated code quality**
 - New abstractions, wrapper functions, helper files serving only one call site — inline instead
@@ -149,6 +168,7 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 - Missing tests for trust-boundary enforcement
 - Tests exercising code paths the integration layer doesn't expose — pass against mocks but untriggerable in production
 - Test mock state leaking between tests — "clear" resets invocation counts but not configured behavior; use "reset" variants
+- Response/status assertions written as loose ranges (`status >= 400`, `status < 500`, `ok: false`) — a regression that turns a 400 validation failure into a 500 still passes. Assert the specific expected status so tests distinguish validation from server failure
 
 **Automated pipeline discipline**
 - Internal code review must run before creating PRs — never go straight from "tests pass" to PR

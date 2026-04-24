@@ -26,6 +26,7 @@ For each changed file:
 
 - API responses returning full objects with sensitive fields — destructure and omit across ALL paths (GET, PUT, POST, error, socket). Comments claiming data isn't exposed while the code does expose it
 - Server trusting client-provided computed/derived values (scores, totals, correctness flags, file metadata like MIME type and size) — strip and recompute server-side. Validate uploads via magic bytes and buffer length, not headers
+- Server trusting persisted-state flags (builtIn, protected, role, owner, immutable) read from flat-file/JSON/DB records to make authorization or deletion decisions — hand-editing the file or tampered sync can flip the flag and bypass protection. Derive authority on every read from a trusted source: a code-level constant set of built-in ids, session identity, or a server-side role lookup. The persisted representation can cache the flag for display, but must not be the source of truth for security decisions
 - New endpoints under restricted paths (admin, internal) missing authorization — compare with sibling endpoints for same access gate (role check, scope validation). New OAuth scopes must be checked comprehensively — a check testing only one scope misses newly added scopes
 - User-controlled objects merged via `Object.assign`/spread without sanitizing keys — `__proto__`, `constructor`, `prototype` enable prototype pollution. Use `Object.create(null)`, whitelist keys, use `hasOwnProperty` not `in`
 - Push events (WebSocket, SSE, pub/sub) emitted without scoping to originating user/session — sensitive payloads leak to all connected clients. Scope via room/channel isolation or server-side correlation ID
@@ -56,6 +57,7 @@ For each changed file:
 **Sanitization/validation coverage**
 - If a new validation function is introduced for a field: trace ALL write paths (create, update, import, sync, bulk) — partial application means invalid data re-enters through unguarded paths
 - If a "raw" or bypass write path is added: compare normalization against what the read/parse path assumes — data through raw path must be valid on reload
+- Read-path sanitization of persisted data must enforce the SAME bounds as the API schema (length caps, uniqueness, regex, per-item type guards) — hand-edited or migrated data can otherwise introduce values the API rejects on mutate, producing oversized responses, unreachable records (client renders but API rejects), or invariant violations. Drop or truncate out-of-range values rather than passing them through
 - If a new dispatch branch is added within a multi-type handler: verify equivalent validation as sibling branches
 
 **Security-sensitive configuration parsing**
