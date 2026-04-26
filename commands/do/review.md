@@ -22,7 +22,13 @@ CLAUDE.md is already loaded into your context. Use its rules (code style, error 
 Before dispatching agents, understand what this change set claims to do:
 
 1. Read commit messages (`git log {base}...HEAD --oneline`)
-2. Note the claims — verify after agents return whether the code actually delivers them.
+2. Read PLAN.md, .changelog/NEXT.md (or equivalent), and the PR description for capability claims, test counts, and "deep-links to X" / "feature Y now works" assertions
+3. Note the claims — verify after agents return whether the code actually delivers them. Concrete drift to flag:
+   - Test counts in PLAN/changelog vs `find . -name '*.test.*' -exec grep -c '^\(it\|test\)(' {} +` (or project equivalent)
+   - "Deep-links to record X" claims vs whether the destination route handler actually consumes the encoded parameter
+   - "Auto-prune after N days" / "scans only the page returned" claims vs the listing implementation
+   - Comments in code claiming behavior the surrounding code doesn't perform
+   - Field names quoted in docs (request body shape, event payload shape) vs what the code actually reads/emits
 
 ## Dispatch Review Agents
 

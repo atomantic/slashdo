@@ -59,6 +59,7 @@ For each changed file:
 - If a "raw" or bypass write path is added: compare normalization against what the read/parse path assumes — data through raw path must be valid on reload
 - Read-path sanitization of persisted data must enforce the SAME bounds as the API schema (length caps, uniqueness, regex, per-item type guards) — hand-edited or migrated data can otherwise introduce values the API rejects on mutate, producing oversized responses, unreachable records (client renders but API rejects), or invariant violations. Drop or truncate out-of-range values rather than passing them through
 - If a new dispatch branch is added within a multi-type handler: verify equivalent validation as sibling branches
+- Modules that own a persistence schema (write to disk/DB with a known shape) must validate at the persistence boundary — not only at the API/route layer. Direct callers (internal scripts, tests, programmatic batch jobs, future endpoints) bypass route validation and corrupt on-disk state. At minimum, reject invalid enum values, missing required fields, and out-of-range values before writing — so the storage layer enforces its own contract independent of who calls it
 
 **Security-sensitive configuration parsing**
 - Env vars/config affecting security (proxy trust, rate limits, CORS, token expiry): verify type and range enforcement. `Number()` accepts floats, negatives, empty-string-as-zero — use `parseInt` + `Number.isInteger` + range checks with logged safe defaults

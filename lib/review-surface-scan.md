@@ -39,6 +39,9 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 - React state invariants (uniqueness, cap/floor, monotonicity) checked against render-time value before `setX(...)` — rapid events or concurrent updates race the check. Move into the functional updater: `setX(prev => prev.includes(id) ? prev : [...prev, id])`
 - `useEffect` depending on state it writes — the write retriggers the effect (infinite loop / request storm). Split into two effects, drop the self-written value from deps, or use a functional setter that doesn't require the current value in deps
 - Functions with >10 branches or >15 cyclomatic complexity — refactor
+- String accumulation via `+=` inside high-frequency loops (streaming frames, chunked I/O, per-event handlers) is O(n²) for long outputs and triggers React re-renders on growing payloads. Collect chunks into an array and `join('')` at the end while still emitting per-chunk events
+- Server-side string formatting (`toLocaleString`, `toLocaleDateString`, currency/number formatters) that depends on locale/timezone defaults produces non-deterministic outputs across deployments. For data flowing into prompts, logs, or persisted records, format with explicit `Intl.DateTimeFormat({ timeZone: ... })` or ISO strings; reserve locale-aware formatting for user-visible UI layers
+- Required-at-use-time config values (model name, API key, endpoint URL, default selection) that may be null/undefined in source data must be validated at the boundary before invoking the downstream API. Otherwise the API responds with an opaque error far from the user's intent. Emit a clear, actionable error identifying the missing field
 
 **API route basics**
 - Route params passed to services without format validation; path containment using string prefix without separator boundary (use `path.relative()`). When sibling endpoints validate body/query fields, the path param must be validated with the same schema — skipping param validation on one endpoint turns schema violations into 404/500 instead of 400
@@ -48,12 +51,25 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 - Character-class regex validators (`^[a-z0-9-]+$`) claiming to enforce a structured format (slug, kebab-case, reverse-DNS) — they accept leading/trailing separators (`-foo`, `foo-`) and repeated separators (`a--b`). Require alnum boundaries or use a parser
 - `z.string().min(1)` without `.trim()` accepts whitespace-only values for user-visible names — use `z.string().trim().min(1)` when the field represents a human-readable identifier
 - Object spread of a potentially-null/undefined boundary value (`{ ...req.body, id }`) — throws a TypeError and surfaces as 500 instead of 4xx. Use `{ ...(req.body ?? {}), id }` at request/boundary entry points
+- Schemas accepting paired range fields (`startDate`/`endDate`, `min`/`max`, `from`/`to`) without a cross-field refinement (`zod .refine()`) — accepts inconsistent ranges (start > end). Define deterministic rules when only one bound is supplied
+- Outbound payloads (snippets, previews, cached excerpts) stored in persisted records or sent over streaming protocols without size caps — applies the same per-field max constraint as inbound payloads, enforced at capture time so display-layer truncation isn't the only defense
 
 **Async & state (single-file patterns)**
-- Optimistic UI state (selection, active flag, list membership) updated before an async call and never reverted on failure — the user sees success, the server remains on the old state. Capture the previous value, await in try/catch, and reset on rejection
-- Async functions invoked from sync event handlers (`onClick`, `onKeyDown`), effects, or dispatchers without rejection handling at the call site — even when a shared `request()` toasts the error, the unhandled rejection leaves UI stuck (modal doesn't close, palette doesn't navigate, dirty state doesn't clear). Wrap in try/catch, attach `.catch(...)`, or use `void p.catch(...)`; only run close/navigate/success in the resolve branch
+- Optimistic UI state (selection, active flag, list membership) updated before an async call and never reverted on failure — the user sees success, the server remains on the old state. Capture the previous value, await in try/catch, and reset on rejection. Optimistic placeholder IDs ('pending', 'temp_*', client-generated UUIDs) must NOT be echoed back to the server in subsequent requests — the server validates against its real ID format and rejects them as 400s. Disable controls bound to optimistic IDs until the server returns a real one, OR omit the field from outgoing payloads when the local value still matches the optimistic shape
+- Settings whose persistence model is per-record (per-conversation, per-document, per-project) must be persisted on every mutation, not just held in local component state — otherwise refresh resets to the persisted value. Decide explicitly whether the field is per-record, per-session, or per-action — and persist accordingly
+- Async functions invoked from sync event handlers (`onClick`, `onKeyDown`), effects, or dispatchers without rejection handling at the call site — even when a shared `request()` toasts the error, the unhandled rejection leaves UI stuck (modal doesn't close, palette doesn't navigate, dirty state doesn't clear). Wrap in try/catch, attach `.catch(...)`, or use `void p.catch(...)`; only run close/navigate/success in the resolve branch. After awaiting, check `signal.aborted` (or a `mountedRef`) before subsequent state writes — otherwise React warns about updates on unmounted trees and stale state leaks through
 - Single shared error-state variable reused by multiple independent async flows — one flow's success path clears the other flow's displayed error. Split errors by domain or only overwrite the specific error you own
 - Loading flag covers only the primary fetch — a slow or failed secondary fetch renders a blank page with no indicator. Include every render-gating load in the loading state or provide explicit empty/error states
+- Streaming UIs that clear the streaming buffer when a terminal `error` event arrives discard deltas the user already saw. Preserve accumulated content as a partial result with an error indicator so users don't lose what was visible
+- Raw `fetch()` failures (TypeError "Failed to fetch", DNS errors, ECONNREFUSED) at API client boundaries must be translated to a consistent user-friendly message matching the project's established transport-error utility — preserve `AbortError` so callers can still distinguish cancellation from failure
+
+**Streaming response handlers (server-side)**
+- Long-lived streaming handlers (SSE, chunked HTTP) must register a client-disconnect listener (`req.on('close')`/`req.on('aborted')`), set an `aborted` flag, and check it before subsequent writes — otherwise the server keeps emitting frames and incurring `write-after-end` errors after the client navigates away
+- After flushing streaming headers, framework error middleware (asyncHandler, exception filters) cannot send a JSON error — wrap post-handshake logic in try/finally that translates errors into a terminal `event: error` SSE frame and ends the response gracefully (`if (!res.writableEnded && !res.destroyed) res.end()`)
+- Per-request timeouts on streaming responses must remain active for the full duration of stream consumption, not cleared on initial fetch resolution — a stalled upstream that keeps the connection open hangs the consumer indefinitely
+- Honor write backpressure: check the boolean return of `write()` and await `'drain'` when it returns false; otherwise a slow client causes unbounded server-side buffering
+- When attaching paired listeners for backpressure or completion (`drain` + `close`), the cleanup handler must remove ALL of them — asymmetric removal accumulates listeners across slow-client cycles
+- Named lifecycle events on streams (`error`, `done`, `complete`) must be MUTUALLY EXCLUSIVE — after emitting `error`, do NOT also emit `done`. Otherwise clients parsing the last event treat failed runs as completed
 
 **Error handling (single-file)**
 - Swallowed errors (empty `.catch(() => {})`); error handlers that exit cleanly (`exit 0`, `return`) without user-visible output; handlers replacing detailed failure info with generic messages
@@ -103,6 +119,7 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 - Naive whitespace splitting of command strings breaks quoted arguments — use proper argv parser
 - Subprocess output parsed from single stream (stdout or stderr) to detect conditions — check both streams and exit code
 - Shell expansions suppressed by quoting — single quotes prevent all expansion
+- Arguments passed via process argv have OS-imposed length limits (notoriously low on Windows, ~32KB). For variable-length payloads (prompts, JSON blobs, file contents), pipe via stdin instead of constructing a long argv. If argv must be used, enforce a strict cap and fail with a clear message before spawning
 
 **Search & navigation** _[search, deep-linking]_
 - Search results linking to generic list pages instead of deep-linking to specific record
@@ -121,6 +138,9 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 **UI performance** _[UI components with streaming, scroll, or frequent updates]_
 - Event handlers or `useEffect` callbacks firing on every high-frequency event (streaming deltas, scroll, resize, keydown) without throttle, debounce, or `requestAnimationFrame` batching — causes jank and excessive re-renders. Batch with rAF or a time-based limiter when the handler doesn't need to run on every tick
 
+**Wire-protocol parsers** _[SSE/NDJSON/line-delimited frame parsers]_
+- Wire-protocol parsers must (a) handle the spec's full set of separators (e.g., both `\n\n` and `\r\n\r\n` for SSE; multiple `data:` lines joined with `\n`); (b) flush remaining buffered content on EOF — otherwise the last frame is dropped when upstream closes mid-frame; (c) wrap per-frame deserialization (`JSON.parse`) so a single malformed frame doesn't terminate the entire stream
+
 ### Always Check — Quality & Conventions
 
 **Intent vs implementation (single-file)**
@@ -135,6 +155,7 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 - Lookups checking only one scope when multiple exist (local branches but not remote)
 - Tracking/checkpoint files defaulting to empty on parse failure — fail-open guards
 - Registering references to resources without verifying resource exists
+- Composed instructions, prompts, system messages, or rule sets that vary by mode/role/context — unconditional clauses can contradict mode-specific directives (e.g., "always cite sources inline" combined with a `draft` mode that asks for "no preamble, no commentary"). Build the composition conditionally — include each block only for modes that want it — or define an explicit precedence so contradictions are predictable
 
 **UX integrity (single-component)**
 - Unsaved changes / dirty state silently discarded when the user switches context in a multi-record editor or closes a sheet — data loss. Dirty-check on switch (inline confirm), auto-save drafts, or disable the switch control while dirty. `beforeunload` does not cover in-app context switches
@@ -145,6 +166,7 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 - Commit messages claiming a fix while the bug remains
 - Placeholder comments (`// TODO`, `// FIXME`) or stubs presented as complete
 - Unnecessary defensive code for scenarios that provably cannot occur
+- Cleanup callbacks (useEffect return, finalizer, dispose, signal handler) containing only comments are misleading — implement the cleanup or remove the callback entirely
 
 **Configuration & hardcoding**
 - Hardcoded values when config/env var exists; dead config fields; unused function parameters
