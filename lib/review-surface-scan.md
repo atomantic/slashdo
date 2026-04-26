@@ -30,7 +30,7 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 **Runtime correctness**
 - Null/undefined access without guards; off-by-one errors; spread of null (is `{}`), spread of non-objects (string → indexed chars, array → numeric keys) — guard with plain-object check before spreading
 - External/user data (parsed JSON, API responses, file reads) used without structural validation — guard parse failures, missing properties, wrong types, null elements. Optional enrichment failures should not abort the main operation
-- Type coercion: `Number('')` is `0` not empty; `0` is falsy in truthy checks; `NaN` comparisons always false; `"10" < "2"` (lexicographic). Deserialized booleans: `"false"` is truthy — use `=== 'true'`. `isinstance(x, int)` accepts `bool` in Python; `typeof NaN === 'number'` in JS
+- Type coercion: `Number('')` is `0` not empty; `0` is falsy in truthy checks; `NaN` comparisons always false; `"10" < "2"` (lexicographic). Deserialized booleans: `"false"` is truthy — use `=== 'true'`. `isinstance(x, int)` accepts `bool` in Python; `typeof NaN === 'number'` in JS. For env-var numeric parsing in particular, use `Number.parseInt(String(value).trim(), 10)` and gate with `Number.isFinite(parsed)` — `NaN` flowing into subprocess args (`-p NaN`) or formatted strings produces opaque downstream failures (whitespace/inline-comment values are common culprits)
 - Config/option defaults applied with `||` or falsy guards — intentional `0`, `false`, or `''` values are treated as "unset" and replaced by the default. Use `?? default` or explicit `=== undefined` checks when zero, false, or empty string are valid configuration values
 - Functions returning different types depending on input conditions (string in one branch, object in another) — callers must branch on return type; prefer a consistent return shape
 - Indexing empty arrays; `every`/`some`/`reduce` on empty collections returning vacuously true; declared-but-never-updated state/variables
@@ -112,12 +112,14 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 
 **Shell & portability** _[subprocesses, shell scripts, CLI tools]_
 - `set -e` aborting on non-critical failures; broken pipes on non-critical writes — use `|| true`
-- Interactive prompts in non-interactive contexts (CI, cron) — guard with TTY detection
+- Interactive prompts in non-interactive contexts (CI, cron) — guard with TTY detection (`[ -t 0 ]`). Also handle EOF (Ctrl-D, closed stdin) explicitly under `set -e` — a `read` returning non-zero on EOF aborts the script. Use `read ... || true` and check the return; default to a safe value. Validate the full set of expected answers (e.g., `y`/`yes`/`n`/`no` case-insensitive) — treating any non-default input as consent surprises users
 - Detached processes with piped stdio — SIGPIPE on parent exit. Use `'ignore'`
 - Subprocess output buffered without size limits — unbounded memory growth
 - Platform-specific: hardcoded shell interpreters; `path.join()` backslashes breaking ESM imports — use `pathToFileURL()`
 - Naive whitespace splitting of command strings breaks quoted arguments — use proper argv parser
 - Subprocess output parsed from single stream (stdout or stderr) to detect conditions — check both streams and exit code
+- Readiness/health probes that rely solely on subprocess exit code without inspecting output — many CLIs (`psql`, `curl`, `kubectl`) exit 0 for empty results, missing schema, or auth-only handshake. Capture stdout and verify it contains the expected marker. For tools that read user-level config (`.psqlrc`, `~/.curlrc`), pass flags that ignore those files (`-X`, `--no-rcfile`) so the probe behaves the same in every environment
+- Setup/provisioning scripts invoked from hot paths (`npm start`, dev script, container entrypoint) that mutate credentials, privileges, or installed-package state (`ALTER USER`, password resets, brew installs) on every invocation — gate the heavy work behind a cheap readiness check, OR refactor each step to be idempotent and detect already-applied state
 - Shell expansions suppressed by quoting — single quotes prevent all expansion
 - Arguments passed via process argv have OS-imposed length limits (notoriously low on Windows, ~32KB). For variable-length payloads (prompts, JSON blobs, file contents), pipe via stdin instead of constructing a long argv. If argv must be used, enforce a strict cap and fail with a clear message before spawning
 
@@ -199,7 +201,7 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 
 **Style & conventions**
 - Naming and patterns inconsistent with rest of codebase
-- New content not matching existing indentation, bullet style, heading levels
+- New content not matching existing indentation, bullet style, heading levels. Within a single structured file (changelog, README, TOML config), section headers must be unique — duplicate `## Fixed` blocks or repeated table sections are a merge artifact that splits content downstream tools expect to find under one header. Consolidate
 - Shell instructions with destructive operations not verifying preconditions first
 
 ## Output Format
