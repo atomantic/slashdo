@@ -24,7 +24,7 @@
 <p align="center">
   <img src="https://img.shields.io/npm/v/slash-do?style=flat-square&color=blue" alt="npm version" />
   <img src="https://img.shields.io/badge/environments-4-green?style=flat-square" alt="environments" />
-  <img src="https://img.shields.io/badge/commands-14-orange?style=flat-square" alt="commands" />
+  <img src="https://img.shields.io/badge/commands-15-orange?style=flat-square" alt="commands" />
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="license" />
 </p>
 
@@ -56,6 +56,7 @@ All commands live under the `do:` namespace:
 |:---|:---|
 | `/do:push` | Commit and push all work with changelog |
 | `/do:pr` | Open a PR with self-review and Copilot review loop |
+| `/do:pr-better` | Run a full do:better audit on the current branch, commit fixes directly, then open a single PR |
 | `/do:fpr` | Fork PR -- push to fork, PR against upstream |
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
 | `/do:release` | Create a release PR with version bump and changelog |

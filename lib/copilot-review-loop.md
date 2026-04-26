@@ -19,16 +19,16 @@ whether to continue or stop — never loop indefinitely without confirmation.
 TIMEOUT SCHEDULE:
 When running parallel PR reviews (do:better), use shorter waits to avoid
 blocking other PRs:
-- Iteration 1: max wait 5 minutes
-- Iteration 2: max wait 4 minutes
-- Iteration 3: max wait 3 minutes
-- Iteration 4: max wait 2 minutes
-- Iteration 5+: max wait 1 minute
+- Iteration 1: max wait 3 minutes
+- Iteration 2: max wait 2 minutes
+- Iteration 3: max wait 90 seconds
+- Iteration 4: max wait 60 seconds
+- Iteration 5+: max wait 45 seconds
 When running a single-PR review (do:pr, do:release), use dynamic timing:
 check the previous Copilot review duration on this PR and wait up to 2x
-that (minimum 5 minutes, maximum 20 minutes). Copilot reviews can take
-10-15 minutes for large diffs.
-Poll interval: 30 seconds for all iterations.
+that (minimum 2 minutes, maximum 10 minutes). Copilot reviews typically
+complete in 2-5 minutes; large diffs may take longer.
+Poll interval: 15 seconds for all iterations.
 
 Run the following loop until Copilot returns zero new comments:
 
@@ -51,8 +51,8 @@ Run the following loop until Copilot returns zero new comments:
    - For parallel PR reviews (do:better): use the DECREASING TIMEOUT for
      the current iteration number
    - For single-PR reviews (do:pr, do:release): use dynamic timing based on
-     the previous Copilot review duration on this PR (2x that, min 5 min,
-     max 20 min)
+     the previous Copilot review duration on this PR (2x that, min 2 min,
+     max 10 min)
    - Error detection: if the review body contains "Copilot encountered an
      error" or "unable to review this pull request", re-request (step 1)
      and resume polling. Max 3 error retries before reporting failure.
