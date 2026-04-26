@@ -2,6 +2,8 @@
 
 ## Added
 
+- `do:pr-better`: new command that runs the full `do:better` audit/remediation on the current branch, forces the "Commit directly" path so all fixes land on the current branch (no per-category branches/PRs), then hands off to `do:pr` to push and open a single PR with self-review and the Copilot review loop. Refuses incompatible flags (`--scan-only`, `--no-merge`) and refuses to run on the default branch. Wired into `install.sh`, `commands/do/help.md`, and the README commands table
+
 ## Changed
 
 - `do:review`: expanded checklist and agent files with patterns learned from PR review feedback — async fire-and-forget rejections, persisted-data validation parity + authoritative flags, cross-module constant drift, duplicate ID handling, validation consistency across endpoints, ARIA roles requiring keyboard behavior, doc drift on paths/counts/response shapes, and several React-specific patterns (state invariant outside functional updater, useEffect self-dependency loops)

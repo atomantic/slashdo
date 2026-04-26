@@ -20,6 +20,7 @@ List all available `/do:*` commands with their descriptions.
 | `/do:help` | List all available slashdo commands |
 | `/do:omd` | Audit and optimize markdown files (CLAUDE.md, README.md, etc.) against best practices |
 | `/do:pr` | Commit, push, and open a PR against the repo's default branch |
+| `/do:pr-better` | Run a full do:better audit on the current branch, commit fixes directly, then open a single PR |
 | `/do:push` | Commit and push all work with changelog |
 | `/do:release` | Create a release PR using the project's documented release workflow |
 | `/do:replan` | Review and clean up PLAN.md, extract docs from completed work |
