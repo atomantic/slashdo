@@ -162,6 +162,7 @@ Based on `PROJECT_TYPE`, extract the full dependency list:
 For each dependency, first check `PRIOR_DECISIONS` (from Phase 0e). If a valid prior decision exists for the package + major version + mode, carry it forward:
 - `KEPT_TIER1` → classify as **Tier 1** (skip further audit)
 - `KEPT_AUDITED` → classify as **Tier 2** with recommendation **KEEP** (skip Phase 1c usage analysis)
+- `KEPT_TRANSITIVE` → classify as **Tier 2** with recommendation **KEEP (transitive)** (skip Phase 1c usage analysis and Phase 1d transitive check; the prior `Kept Via` chain is recorded)
 - `SKIPPED_INFEASIBLE` → classify as **Tier 2** with recommendation **KEEP** (skip Phase 1c usage analysis)
 
 Record carried-forward decisions in `DEPENDENCY_MAP` with a `from_prior: true` flag. Print one line per skipped dependency: `↻ {package}@{major} — carrying forward prior {decision} ({decision_date})`.
