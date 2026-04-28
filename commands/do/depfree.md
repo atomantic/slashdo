@@ -67,6 +67,7 @@ Key behavioral changes when `HEAVY_MODE` is `true`:
 
 When compacting during this workflow, always preserve:
 - The `DEPENDENCY_MAP` (complete classification of all dependencies)
+- The `PRIOR_DECISIONS` map loaded from `./docs/DEPS.md`
 - All REMOVABLE findings with package names and usage details
 - The current phase number and what phases remain
 - All PR numbers and URLs created so far
@@ -111,6 +112,26 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 - Record `DEFAULT_BRANCH` via `gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'` (or `glab` equivalent)
 - Record `IS_DIRTY` via `git status --porcelain`
 
+### 0e: Load Prior Decisions
+
+Read `{REPO_DIR}/docs/DEPS.md` if it exists. This file records decisions from prior `/do:depfree` runs and is used to skip re-evaluation of dependencies that have already been audited.
+
+Parse the file into `PRIOR_DECISIONS` — a map keyed by package name, with values:
+- `decision`: one of `KEPT_TIER1`, `KEPT_AUDITED`, `KEPT_TRANSITIVE`, `REMOVED`, `REVERTED`, `SKIPPED_INFEASIBLE`
+- `major_version`: the major version that was evaluated (e.g., `18` for react@18.x)
+- `mode`: the mode the decision was made under (`default`, `heavy`, or `both`)
+- `reason`: the rationale recorded
+- `decision_date`: ISO date the decision was made
+
+If the file does not exist, set `PRIOR_DECISIONS` to an empty map. The file will be created in Phase 4c.
+
+A prior decision is **valid for skipping re-evaluation** when ALL of these are true:
+1. The package is still in the manifest at the same major version
+2. The recorded mode matches the current run mode (a `default` decision does NOT skip a `heavy` run; `both` skips either; `heavy` skips a `default` run)
+3. The decision is not `REMOVED` or `REVERTED` (those packages should not be in the manifest; if they are, treat as new)
+
+Otherwise, the dependency is re-evaluated in Phase 1 normally.
+
 
 ## Phase 1: Dependency Inventory
 
@@ -138,7 +159,14 @@ Based on `PROJECT_TYPE`, extract the full dependency list:
 
 ### 1b: Classify Dependencies
 
-For each dependency, classify it into one of three tiers:
+For each dependency, first check `PRIOR_DECISIONS` (from Phase 0e). If a valid prior decision exists for the package + major version + mode, carry it forward:
+- `KEPT_TIER1` → classify as **Tier 1** (skip further audit)
+- `KEPT_AUDITED` → classify as **Tier 2** with recommendation **KEEP** (skip Phase 1c usage analysis)
+- `SKIPPED_INFEASIBLE` → classify as **Tier 2** with recommendation **KEEP** (skip Phase 1c usage analysis)
+
+Record carried-forward decisions in `DEPENDENCY_MAP` with a `from_prior: true` flag. Print one line per skipped dependency: `↻ {package}@{major} — carrying forward prior {decision} ({decision_date})`.
+
+For all other dependencies (no prior decision, major version bump, or mode escalation from default → heavy), classify it into one of three tiers:
 
 **Tier 1 — ACCEPTABLE (keep without question):**
 Large, widely-audited, foundational libraries. Examples by ecosystem:
@@ -217,7 +245,7 @@ Record the full classification as `DEPENDENCY_MAP`.
 
 ### 1c: Usage Analysis (Tier 2 & 3 only)
 
-For each Tier 2 and Tier 3 dependency, launch parallel Explore agents (using `AUDIT_MODEL`) to determine actual usage:
+Skip any dependency with `from_prior: true` (carried forward from Phase 1b). For all remaining Tier 2 and Tier 3 dependencies, launch parallel Explore agents (using `AUDIT_MODEL`) to determine actual usage:
 
 Each agent should:
 1. Search all source files for imports/requires of the package
@@ -455,7 +483,75 @@ After all replacement agents complete:
    - Correct error handling at system boundaries
 3. Fix any issues found, commit each fix separately
 
-### 4c: Verify No Phantom Dependencies
+### 4c: Update DEPS.md
+
+Write the consolidated decision record to `{WORKTREE_DIR}/docs/DEPS.md`. Create the `docs/` directory if it does not exist.
+
+Build the new file from:
+1. **All carried-forward entries** from `PRIOR_DECISIONS` whose packages are still in the manifest at the same major version (preserve `decision_date` and `mode`)
+2. **New decisions** from this run:
+   - Each Tier 1 package → `KEPT_TIER1`
+   - Each Tier 2 package with KEEP recommendation → `KEPT_AUDITED`
+   - Each Tier 2/3 package downgraded to KEEP (transitive) in Phase 1d → `KEPT_TRANSITIVE`
+   - Each successfully removed package → `REMOVED`
+   - Each reverted package (replacement failed in 4a) → `REVERTED`
+   - Each skipped package (replacement infeasible / >2x estimate / >300 lines in heavy) → `SKIPPED_INFEASIBLE`
+3. **Mode merging**: if a prior decision was `default` and this run is `heavy` (or vice versa) and both runs reached the same conclusion for the same package + major version, set `mode` to `both`. Otherwise the new run's mode overwrites.
+
+Use this layout:
+
+```markdown
+# Dependency Audit Decisions
+
+Auto-maintained by `/do:depfree`. Records prior audit decisions so repeat runs
+skip re-evaluation. Re-audit triggers: major version bump, heavy-mode run after
+default-mode decision, or manual deletion of an entry.
+
+Last updated: {YYYY-MM-DD}
+
+## Kept — Tier 1 (foundational)
+
+| Package | Major | Mode | Reviewed | Reason |
+|---------|-------|------|----------|--------|
+| ...     | ...   | ...  | ...      | ...    |
+
+## Kept — Tier 2 (audited)
+
+| Package | Major | Mode | Reviewed | Reason |
+|---------|-------|------|----------|--------|
+
+## Kept — Transitive
+
+| Package | Major | Mode | Reviewed | Kept Via |
+|---------|-------|------|----------|----------|
+
+## Removed
+
+| Package | Major | Mode | Removed | Replacement |
+|---------|-------|------|---------|-------------|
+
+## Reverted (replacement failed, kept in manifest)
+
+| Package | Major | Mode | Reviewed | Reason |
+|---------|-------|------|----------|--------|
+
+## Skipped (replacement infeasible)
+
+| Package | Major | Mode | Reviewed | Reason |
+|---------|-------|------|----------|--------|
+```
+
+Sort each section alphabetically by package name.
+
+Commit the change (only if the file actually changed):
+```bash
+git -C {WORKTREE_DIR} add docs/DEPS.md
+if ! git -C {WORKTREE_DIR} diff --cached --quiet docs/DEPS.md; then
+  git -C {WORKTREE_DIR} commit -m "docs: update DEPS.md with audit decisions"
+fi
+```
+
+### 4d: Verify No Phantom Dependencies
 
 Confirm no source file still references a removed package:
 ```bash
@@ -518,7 +614,8 @@ Estimated supply chain attack surface reduction: {N} packages ({transitive count
 - [ ] Build passes
 - [ ] All tests pass
 - [ ] No phantom references to removed packages
-- [ ] Lock file updated"
+- [ ] Lock file updated
+- [ ] \`docs/DEPS.md\` updated with audit decisions"
 
 gh pr create --head depfree/{DATE} --base {DEFAULT_BRANCH} \
   --title "$PR_TITLE" \
@@ -622,6 +719,7 @@ Transitive deps eliminated: ~{count} (estimated)
 
 - This command complements `/do:better` — run `depfree` for dependency hygiene, `better` for code quality
 - All remediation happens in an isolated worktree — the user's working directory is never modified
+- `docs/DEPS.md` is the persistent decision log. It is read at the start of every run (Phase 0e) to skip re-evaluation of unchanged dependencies, and rewritten at the end of Phase 4c with the merged set of prior + current decisions. Major version bumps and heavy-mode escalations bypass the cache. Manually delete an entry to force re-audit on the next run
 - **Default mode**: the threshold for "acceptable" libraries is deliberately generous — the goal is to remove obvious attack surface, not to rewrite everything
 - **Heavy mode**: the threshold narrows to foundational frameworks only — the goal is to own as much code as feasibly possible, eliminating supply chain risk from individual maintainers and small projects
 - Replacement code should be minimal and focused — don't over-engineer utilities that replace single-purpose packages
