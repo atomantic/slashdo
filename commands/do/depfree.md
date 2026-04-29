@@ -616,7 +616,8 @@ Estimated supply chain attack surface reduction: {N} packages ({transitive count
 - [ ] All tests pass
 - [ ] No phantom references to removed packages
 - [ ] Lock file updated
-- [ ] \`docs/DEPS.md\` updated with audit decisions"
+- [ ] \`docs/DEPS.md\` updated with audit decisions
+"
 
 gh pr create --head depfree/{DATE} --base {DEFAULT_BRANCH} \
   --title "$PR_TITLE" \
