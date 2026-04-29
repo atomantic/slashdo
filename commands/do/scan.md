@@ -65,7 +65,7 @@ The `Read` tool auto-processes certain types as multimodal input. An adversarial
 - SVG: do not Read (SVG can contain `<script>` and Read may render it). Inspection is limited to inventory metadata and to `grep`-based pattern scans (text-only). The I7 subagent contract forbids byte-dump readers (`head -c`, `cat`, `wc`) on this extension.
 
 ### I4 — Symlink-escape invariant
-Before ANY `Read` or grep against ANY file inside `SCAN_DIR` (manifests, orientation files, source files, `.git/*`, everything), resolve the real path and confirm it lies inside `SCAN_DIR`. If it escapes (`..`, absolute symlink to `/etc/...`, etc.), record a finding (category: **symlink escape**, severity: **HIGH**) and skip the read. Use `realpath -- "$path"` and prefix-check against `realpath -- "$SCAN_DIR"`.
+Before ANY `Read` or grep against ANY file inside `SCAN_DIR` (manifests, orientation files, source files, `.git/*`, everything), resolve the real path and confirm it lies inside `SCAN_DIR`. If it escapes (`..`, absolute symlink to `/etc/...`, etc.), record a finding (category: **symlink escape**, severity: **HIGH**) and skip the read. Use `realpath "$path"` and prefix-check against `realpath "$SCAN_DIR"` (paths inside `SCAN_DIR` always start with `/`, so the BSD `realpath` `-` -prefix ambiguity does not apply).
 
 ### I5 — Read-size cap
 ALL Reads of files inside `SCAN_DIR` are capped at **200KB**. Files larger than that are listed with `oversize, not inspected (size: NNN)`. If a Read returns more than 200KB anyway, truncate before processing; do not pass the full content to a subagent or quote it into the report.
@@ -164,7 +164,7 @@ Then validate every returned value against a strict regex (e.g., SemVer for vers
 ### I9 — `--report-path` validation
 The user can pass `--report-path`, but a malicious project's README can socially-engineer the user into a destructive path (`~/.zshrc`, `~/.claude/CLAUDE.md`, `~/.ssh/authorized_keys`, etc.). Validate as follows in Phase 0a:
 
-- Resolve the realpath of the proposed report file's **parent directory** (use `realpath -- "$(dirname -- "$REPORT_PATH")"` — the file itself MUST NOT exist yet, so resolving its own realpath is unreliable on systems where `realpath` requires existence). Then construct the canonical proposed path as `<parent_realpath>/<basename>` and apply the remaining checks against that canonical path. If `--report-path-allow-anywhere` was not passed and the parent directory does not yet exist, the only allowed parent is `~/.claude/scans/`, which the scan may create on demand.
+- First, reject the input outright if `REPORT_PATH` starts with `-` (avoids both shell-option ambiguity and the BSD `realpath`/`basename` `--` portability gap). Then resolve the realpath of the proposed report file's **parent directory** (use `realpath "$(dirname "$REPORT_PATH")"` — the file itself MUST NOT exist yet, so resolving its own realpath is unreliable on systems where `realpath` requires existence). Construct the canonical proposed path as `<parent_realpath>/<basename>` and apply the remaining checks against that canonical path. If `--report-path-allow-anywhere` was not passed and the parent directory does not yet exist, the only allowed parent is `~/.claude/scans/`, which the scan may create on demand.
 - The basename MUST end in `.md`.
 - The canonical file path MUST NOT exist (no overwrites; pick a new name with `-1`, `-2`, ... suffix on collision, up to 100, then abort).
 - The canonical file path MUST live inside `~/.claude/scans/` OR the user must have ALSO passed `--report-path-allow-anywhere` AND the path must not be a dotfile, a file inside `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config`, `~/.claude` (other than `~/.claude/scans/`), or a system path. If any of these checks fails, abort with a clear error.
@@ -198,8 +198,8 @@ When compacting during this workflow, always preserve:
 ## Phase 0: Discovery
 
 ### 0a: Resolve scan target and validate report path
-- Resolve `SCAN_DIR` from positional arg or `pwd` via `realpath -- "$arg"`. Refuse to proceed if `realpath` fails.
-- Compute `BASENAME` as `basename -- "$SCAN_DIR"`. If `BASENAME` contains `/`, `..`, control characters, or is empty, abort.
+- Resolve `SCAN_DIR` from positional arg or `pwd`. If the raw value starts with `-`, prepend `./` first, then call `realpath "$arg"` (no `--`, since BSD `realpath` on macOS does not accept `--` as end-of-options). Refuse to proceed if `realpath` fails or is not on PATH (`/do:scan` requires `realpath` and `basename` to be available; the GNU coreutils versions are recommended for full POSIX-conformance, but BSD versions on macOS work for the path operations used here once `-` -prefixed inputs are sanitized).
+- Compute `BASENAME` from the realpath-resolved `SCAN_DIR` (which is now guaranteed to start with `/`, so `-` -prefixed-arg ambiguity does not apply): `basename "$SCAN_DIR"`. If `BASENAME` contains `/`, `..`, control characters, or is empty, abort.
 - Set `SCAN_DATE` to today's date in YYYY-MM-DD.
 - Default `REPORT_PATH` to `~/.claude/scans/{BASENAME}-{SCAN_DATE}.md`. Create `~/.claude/scans/` if it does not exist (this is the ONE directory the scan is allowed to create).
 - If `--report-path` was passed, apply Invariant **I9** (extension, non-existence, allowed root, parent exists). On failure, abort.
