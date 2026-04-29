@@ -250,7 +250,7 @@ timeout 60 find -P "$SCAN_DIR" -type f \
   -not -path '*/build/*' \
   -not -path '*/vendor/*' \
   -print0 | tr -cd '\0' | wc -c
-timeout 30 du -sh -- "$SCAN_DIR" 2>/dev/null
+timeout 30 du -sh "$SCAN_DIR" 2>/dev/null
 ```
 
 Identify potentially-binary or opaque files:
