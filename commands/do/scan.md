@@ -20,7 +20,7 @@ This command **never executes any code from the scanned directory**. Concretely:
 - No execution of `Makefile`, `setup.py`, `build.rs`, `package.json` `scripts`, shell snippets, or anything else found inside the scanned tree
 - **No `WebFetch` against URLs / IPs found inside the scanned code** — those URLs may themselves be C2 endpoints. URLs are reported as plain text only.
 - `WebFetch` is allowed only against an explicit allowlist of trusted vulnerability registries (see Phase 4)
-- `Bash` is allowed only for read-only file inventory, metadata, and text-content reading commands. The exhaustive allowlist (also enforced verbatim in the I7 subagent contract): `ls`, `find -P`, `file`, `stat`, `wc`, `du`, `head -c`, `grep -F` (or `grep -E` with auditor-authored patterns), `realpath`, `readlink`, `tr` (for byte-stripping in inventory pipelines), `xargs -0` (only with `-0` for NUL-delimited input from `find -print0`), and `timeout` as a wrapper for any of the above. **Avoid `git` commands run against the scanned repo** — `.git/config` can be weaponized (`core.fsmonitor`, `core.hooksPath`, etc., have published CVEs); read git files directly as text instead. If a `git` invocation is unavoidable, harden it per the block in Phase 0d. Never `bash -c "<scanned-content>"` and never piping scanned content into a shell.
+- `Bash` is allowed only for read-only file inventory, metadata, and text-content reading commands. The exhaustive allowlist for **commands that operate on paths inside or derived from `SCAN_DIR`** (also enforced verbatim in the I7 subagent contract): `ls`, `find -P`, `file`, `stat`, `wc`, `du`, `head -c`, `grep -F` (or `grep -E` with auditor-authored patterns), `realpath`, `readlink`, `tr` (for byte-stripping in inventory pipelines), `xargs -0` (only with `-0` for NUL-delimited input from `find -print0`), and `timeout` as a wrapper for any of the above. The orchestrator may additionally use a small set of pure shell utilities that operate only on auditor-controlled strings (never on scanned content) — namely `dirname`, `basename`, `date`, `mkdir -p` (only for creating `~/.claude/scans/`), and string operations — for argument parsing and report-path setup. These are NOT permitted in subagent contracts. **Avoid `git` commands run against the scanned repo** — `.git/config` can be weaponized (`core.fsmonitor`, `core.hooksPath`, etc., have published CVEs); read git files directly as text instead. If a `git` invocation is unavoidable, harden it per the block in Phase 0d. Never `bash -c "<scanned-content>"` and never piping scanned content into a shell.
 
 If a scenario seems to require running scanned code to answer a question, the answer is "we don't answer that question." Report the gap and stop.
 
@@ -545,7 +545,7 @@ For each direct dependency parsed from manifests in Phase 1 (NOT transitive — 
 
 | Host | Allowed path prefix | Notes |
 |------|--------------------|-------|
-| `registry.npmjs.org` | `/{name}` (single path segment, optionally `@scope/name`) | npm package metadata |
+| `registry.npmjs.org` | `/{name}` (one path segment after URL-encoding; for scoped packages, `@scope/name` is encoded to `@scope%2Fname` per the URL-construction rule below — the registry accepts the encoded form) | npm package metadata |
 | `api.osv.dev` | `/v1/query` (POST only) | vuln lookup |
 | `pypi.org` | `/pypi/{name}/json` | PyPI package metadata |
 | `crates.io` | `/api/v1/crates/{name}` | crates.io metadata |
