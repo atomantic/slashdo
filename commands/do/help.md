@@ -26,6 +26,7 @@ List all available `/do:*` commands with their descriptions.
 | `/do:replan` | Review and clean up PLAN.md, extract docs from completed work |
 | `/do:review` | Deep code review of changed files against best practices |
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
+| `/do:scan` | Read-only safety audit of an unfamiliar directory — flags malware patterns, network calls, and vulnerable deps without executing code |
 | `/do:update` | Update slashdo commands to the latest version |
 
 2. **Check for updates**: Run `npm view slash-do version` and compare to the installed version in `~/.claude/.slashdo-version`. If an update is available, mention it.

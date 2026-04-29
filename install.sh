@@ -46,8 +46,8 @@ banner() {
 }
 
 COMMANDS=(
-  better better-swift fpr goals help omd
-  pr pr-better push release replan review rpr update
+  better better-swift depfree fpr goals help omd
+  pr pr-better push release replan review rpr scan update
 )
 
 

@@ -123,7 +123,7 @@ Parse the file into `PRIOR_DECISIONS` — a map keyed by package name, with valu
 - `reason`: the rationale recorded
 - `decision_date`: ISO date the decision was made
 
-If the file does not exist, set `PRIOR_DECISIONS` to an empty map. The file will be created in Phase 4c.
+If the file does not exist, set `PRIOR_DECISIONS` to an empty map. The file will be created in Phase 4c only when remediation runs proceed past the scan-only phases (i.e., `--scan-only` was not passed).
 
 A prior decision is **valid for skipping re-evaluation** when ALL of these are true:
 1. The package is still in the manifest at the same major version
