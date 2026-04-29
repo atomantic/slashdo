@@ -63,6 +63,7 @@ All commands live under the `do:` namespace:
 | `/do:review` | Deep code review against best practices |
 | `/do:better` | Full DevSecOps audit with 8-agent scan and remediation |
 | `/do:better-swift` | SwiftUI DevSecOps audit with multi-platform coverage |
+| `/do:scan` | Read-only safety audit of an unfamiliar directory — flags malware patterns, network calls, and vulnerable deps without executing code |
 | `/do:depfree` | Audit dependencies, remove unnecessary ones, write replacement code |
 | `/do:goals` | Generate GOALS.md from codebase analysis |
 | `/do:replan` | Review and clean up PLAN.md |

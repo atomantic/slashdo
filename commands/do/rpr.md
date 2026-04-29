@@ -87,12 +87,12 @@ Verify the request was accepted by checking that `Copilot` appears in the respon
 
 ### Poll for review completion
 
-Poll using GraphQL to check for a new review with a `submittedAt` timestamp after the request:
+Poll using GraphQL to check for a new review with a `submittedAt` timestamp after the request. Use stdin JSON piping (per the GraphQL escaping guidance) to avoid shell-quoting fragility:
 ```bash
-gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviews(last: 3) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }'
+echo '{"query":"{ repository(owner: \"OWNER\", name: \"REPO\") { pullRequest(number: PR_NUM) { reviews(last: 3) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
 ```
 
-**Dynamic poll timing**: Before your first poll, check how long the most recent Copilot review on this PR took by comparing consecutive Copilot review `submittedAt` timestamps (or PR creation time for the first review). Use that duration as your expected wait. If no prior review exists, default to 2 minutes. Use **progressive poll intervals**: 10s, 10s, 15s, 15s, then 30s thereafter — small diffs often complete in under a minute, so early frequent checks avoid wasting time. Set max wait to **2x the expected duration** (minimum 2 minutes, maximum 10 minutes). Copilot reviews typically complete in **2-5 minutes**; large diffs may take longer — do NOT give up early.
+**Dynamic poll timing**: Before your first poll, check how long the most recent Copilot review on this PR took by comparing consecutive Copilot review `submittedAt` timestamps (or PR creation time for the first review). Use that duration as your expected wait. If no prior review exists, default to **60 seconds**. Use **progressive poll intervals**: 5s, 5s, 10s, 10s, then 15s thereafter — Copilot reviews on small diffs typically land in **30–90 seconds**, so an early first check avoids burning a full minute on a review that's already sitting in the API. Set max wait to **3x the expected duration** (minimum 90 seconds, maximum 5 minutes); only large diffs (200+ changed lines) should ever approach the max. If the review hasn't arrived by then, treat it as stuck rather than slow.
 
 The review is complete when a new `copilot-pull-request-reviewer` review node appears. If no review appears after max wait: **Default mode**: auto-skip and continue. **Interactive mode (`--interactive`)**: ask the user whether to continue waiting, re-request, or skip.
 
