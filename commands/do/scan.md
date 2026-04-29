@@ -164,11 +164,11 @@ Then validate every returned value against a strict regex (e.g., SemVer for vers
 ### I9 — `--report-path` validation
 The user can pass `--report-path`, but a malicious project's README can socially-engineer the user into a destructive path (`~/.zshrc`, `~/.claude/CLAUDE.md`, `~/.ssh/authorized_keys`, etc.). Validate as follows in Phase 0a:
 
-- Resolve realpath of the proposed report path.
-- It MUST end in `.md`.
-- It MUST NOT exist (no overwrites; pick a new name with `-1`, `-2`, ... suffix on collision, up to 100, then abort).
-- Its real path MUST live inside `~/.claude/scans/` OR the user must have ALSO passed `--report-path-allow-anywhere` AND the path must not be a dotfile, a file inside `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config`, `~/.claude` (other than `~/.claude/scans/`), or a system path. If any of these checks fails, abort with a clear error.
-- The parent directory must already exist (don't auto-create arbitrary paths). The single exception is `~/.claude/scans/`, which the scan may create.
+- Resolve the realpath of the proposed report file's **parent directory** (use `realpath -- "$(dirname -- "$REPORT_PATH")"` — the file itself MUST NOT exist yet, so resolving its own realpath is unreliable on systems where `realpath` requires existence). Then construct the canonical proposed path as `<parent_realpath>/<basename>` and apply the remaining checks against that canonical path. If `--report-path-allow-anywhere` was not passed and the parent directory does not yet exist, the only allowed parent is `~/.claude/scans/`, which the scan may create on demand.
+- The basename MUST end in `.md`.
+- The canonical file path MUST NOT exist (no overwrites; pick a new name with `-1`, `-2`, ... suffix on collision, up to 100, then abort).
+- The canonical file path MUST live inside `~/.claude/scans/` OR the user must have ALSO passed `--report-path-allow-anywhere` AND the path must not be a dotfile, a file inside `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config`, `~/.claude` (other than `~/.claude/scans/`), or a system path. If any of these checks fails, abort with a clear error.
+- With `--report-path-allow-anywhere`, the parent directory must already exist (don't auto-create arbitrary paths).
 
 ## Argument parsing
 
