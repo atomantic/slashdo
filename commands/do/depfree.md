@@ -546,8 +546,8 @@ Sort each section alphabetically by package name.
 
 Commit the change (only if the file actually changed):
 ```bash
-git -C {WORKTREE_DIR} add docs/DEPS.md
-if ! git -C {WORKTREE_DIR} diff --cached --quiet docs/DEPS.md; then
+git -C {WORKTREE_DIR} add -- docs/DEPS.md
+if ! git -C {WORKTREE_DIR} diff --cached --quiet -- docs/DEPS.md; then
   git -C {WORKTREE_DIR} commit -m "docs: update DEPS.md with audit decisions"
 fi
 ```
