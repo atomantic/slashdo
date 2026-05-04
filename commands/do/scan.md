@@ -258,7 +258,6 @@ find -P "$SCAN_DIR" -type f \
   -not -path '*/node_modules/*' \
   -not -path '*/.git/objects/*' \
   -not -path '*/.git/lfs/*' \
-  -not -path '*/.git/pack/*' \
   -not -path '*/venv/*' \
   -not -path '*/.venv/*' \
   -not -path '*/target/*' \
