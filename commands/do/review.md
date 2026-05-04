@@ -32,21 +32,31 @@ Before dispatching agents, understand what this change set claims to do:
 
 ## Dispatch Review Agents
 
-Read the three agent instruction files, then spawn **all three in parallel** using the Agent tool with `model: "opus"`. Each agent reviews ALL changed files independently. Opus-class reasoning catches issues that require drawing on broad software engineering principles, not just pattern-matching against checklists.
+Read the five agent instruction files, then spawn **all five in parallel** using the Agent tool with `model: "opus"`. Each agent reviews ALL changed files independently. Opus-class reasoning catches issues that require drawing on broad software engineering principles, not just pattern-matching against checklists.
 
 <surface_scan_agent>
 
-### 1. Surface Scan Agent
+### 1. Surface Scan Agent (Runtime)
 
-Catches per-file bugs: runtime crashes, hygiene, domain-specific issues, quality, and convention violations.
+Catches per-file RUNTIME bugs: crashes, type/coercion errors, async/state, error handling, streaming, plus domain-specific runtime patterns (SQL, shell, wire protocols, accessibility).
 
 !`cat ~/.claude/lib/review-surface-scan.md`
 
 </surface_scan_agent>
 
+<surface_quality_agent>
+
+### 2. Surface Quality Agent
+
+Catches per-file QUALITY issues: intent-vs-implementation drift, AI-generated code patterns, dead config, missing tests, supply chain hygiene, style.
+
+!`cat ~/.claude/lib/review-surface-quality.md`
+
+</surface_quality_agent>
+
 <security_agent>
 
-### 2. Security Audit Agent
+### 3. Security Audit Agent
 
 Catches trust boundary violations, injection, SSRF, data exposure, and access control gaps.
 
@@ -54,15 +64,25 @@ Catches trust boundary violations, injection, SSRF, data exposure, and access co
 
 </security_agent>
 
-<cross_file_agent>
+<cross_file_tracing_agent>
 
-### 3. Cross-File Tracing Agent
+### 4. Cross-File Tracing Agent (State/Lifecycle)
 
-Catches contract mismatches, broken call chains, stale state propagation, lifecycle gaps, and architectural violations.
+Catches STATE/LIFECYCLE issues across files: stale state propagation, lifecycle gaps (mount/unmount, init/cleanup, started/completed), resource leaks, lock/flag exit paths, concurrent-mutation races.
 
 !`cat ~/.claude/lib/review-cross-file-tracing.md`
 
-</cross_file_agent>
+</cross_file_tracing_agent>
+
+<cross_file_contract_agent>
+
+### 5. Cross-File Contract Agent
+
+Catches CONTRACT issues across files: schema/shape agreements, validation parity, error classification, field-set enumerations, intent-vs-implementation claims spanning files, architectural-pattern adherence.
+
+!`cat ~/.claude/lib/review-cross-file-contract.md`
+
+</cross_file_contract_agent>
 
 ### How to dispatch
 
@@ -72,7 +92,7 @@ For each agent, construct its prompt by combining:
 3. The list of changed files from the diff stat
 4. Instruction: "Read each changed file in full (not just diff hunks). Apply your checklist. Return structured findings."
 
-Spawn all three agents simultaneously. Each returns its findings independently.
+Spawn all five agents simultaneously. Each returns its findings independently.
 
 ### Large PR handling
 
@@ -80,10 +100,10 @@ If the diff touches more than 20 files, tell each agent to batch files by direct
 
 ## Collect & Deduplicate
 
-After all three agents return:
+After all five agents return:
 
 1. **Merge** all findings into a single list, tagged by source agent
-2. **Deduplicate**: if two agents flagged the same `file:line` with overlapping descriptions, keep the most detailed version and note both agents found it
+2. **Deduplicate**: if two agents flagged the same `file:line` with overlapping descriptions, keep the most detailed version and note all agents that found it (overlap between Surface Scan and Surface Quality, or between Cross-File Tracing and Cross-File Contract, is expected for borderline issues — that's signal a finding is real, not noise)
 3. **PR coherence**: verify commits deliver what they claim — flag discrepancies as IMPROVEMENT findings
 4. **CLAUDE.md filter**: remove findings that conflict with explicit project conventions
 
@@ -116,13 +136,15 @@ Print a summary table of what was reviewed and found:
 
 | Agent | Files Checked | Issues Found | Fixed |
 |-------|--------------|-------------|-------|
-| Surface Scan | N | N | N |
+| Surface Scan (Runtime) | N | N | N |
+| Surface Quality | N | N | N |
 | Security Audit | N | N | N |
-| Cross-File Tracing | N | N | N |
+| Cross-File Tracing (State) | N | N | N |
+| Cross-File Contract | N | N | N |
 | **Total** | **N** | **N** | **N** |
 
 ### Issues Fixed
-- file:line — description of fix (agent: Surface/Security/Cross-File)
+- file:line — description of fix (agent: Surface-Scan / Surface-Quality / Security / Cross-File-Tracing / Cross-File-Contract)
 
 ### Accepted As-Is (with rationale)
 - file:line — description and why it's acceptable

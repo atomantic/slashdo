@@ -1,7 +1,7 @@
 # Surface Scan Review Agent
 
 ## Mandate
-You review code for per-file correctness: bugs, quality issues, and convention violations visible within a single file. You do NOT trace call chains or data flows across files — another agent handles cross-file analysis.
+You review code for per-file RUNTIME CORRECTNESS: bugs that crash, fail, mishandle data, or produce wrong output at runtime, plus domain-specific runtime patterns. You do NOT trace call chains across files (the cross-file agents handle that) and you do NOT audit code quality / conventions / tests / documentation drift (the surface quality agent handles that).
 
 ## Approach
 
@@ -199,74 +199,6 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). New code 
 - Per-part state in stateful parsers must be reset at part boundaries — fields like `currentFileMimetype`, accumulated headers, decoder state, and offsets that aren't cleared at the start of each new part will leak the previous part's value (e.g., a file part with no `Content-Type` inherits the previous part's mimetype). Reset per-part state at the top of the part-start handler
 - Refactoring a streaming parser to "buffer-then-process" (calling `readAllBytes()` / `Buffer.concat(chunks)` / `await req.text()` before parsing) defeats the streaming contract and re-introduces an OOM/DoS vector for large uploads — verify the new implementation still respects each caller's `maxSize`/body cap WHILE reading (stop collecting once bytes exceed the cap), or restore true streaming. Watch for header comments still claiming "streams" / "never buffers entire body in memory" after such refactors — they become a documentation lie
 - Library wrappers advertising a multer/express-style contract `(req, file, cb)` must pass the real `req` (not `null`) through to filters/hooks; treating the `cb` as synchronous breaks any caller that supplied an async filter (callback fires later, but the wrapper already read pre-callback state). Either enforce synchronous filters with a clear error and document, or `await` a Promise-wrapped callback before continuing
-
-### Always Check — Quality & Conventions
-
-**Intent vs implementation (single-file)**
-- Labels, comments, status messages describing behavior the code doesn't implement. Also covers factual doc drift: file paths/extensions (`foo.js` referenced when the file is `foo.jsx`), item counts ("13 widgets" when there are 15), default entity names ("Default" vs actual "Everything"), and route/response-shape comments that don't match what the handler returns. Verify every factual claim in a comment or JSDoc against the code it references
-- Inline code examples or command templates that aren't syntactically valid
-- Sequential numbering with gaps or jumps after edits
-- Template/workflow variables referenced but never assigned — trace each placeholder to a definition
-- Constraints described in preamble not enforced by conditions in procedural steps
-- Duplicate or contradictory items in sequential lists
-- Completion markers or success flags written before the operation they attest to
-- Existence checks (directory exists, file exists) used as proof of correctness — file can exist with invalid contents
-- Lookups checking only one scope when multiple exist (local branches but not remote)
-- Tracking/checkpoint files defaulting to empty on parse failure — fail-open guards
-- Registering references to resources without verifying resource exists
-- Composed instructions, prompts, system messages, or rule sets that vary by mode/role/context — unconditional clauses can contradict mode-specific directives (e.g., "always cite sources inline" combined with a `draft` mode that asks for "no preamble, no commentary"). Build the composition conditionally — include each block only for modes that want it — or define an explicit precedence so contradictions are predictable
-
-**UX integrity (single-component)**
-- Unsaved changes / dirty state silently discarded when the user switches context in a multi-record editor or closes a sheet — data loss. Dirty-check on switch (inline confirm), auto-save drafts, or disable the switch control while dirty. `beforeunload` does not cover in-app context switches
-- Array index used as React `key={i}` on a list that's sliced (`logs.slice(-40)`), reordered, filtered, or has items dropped from either end shifts keys as items move, causing React to reuse DOM nodes for different entries — flicker, lost focus, stale tooltips, broken animations, selection bleed across rows. Use a stable identifier from the payload (`id`, `timestamp + event`, content hash)
-
-**AI-generated code quality**
-- New abstractions, wrapper functions, helper files serving only one call site — inline instead
-- Feature flags, config options, extension points with only one possible value
-- Commit messages claiming a fix while the bug remains
-- Placeholder comments (`// TODO`, `// FIXME`) or stubs presented as complete
-- Unnecessary defensive code for scenarios that provably cannot occur
-- Cleanup callbacks (useEffect return, finalizer, dispose, signal handler) containing only comments are misleading — implement the cleanup or remove the callback entirely
-
-**Configuration & hardcoding**
-- Hardcoded values when config/env var exists; dead config fields; unused function parameters
-- Duplicated config/constants/helpers across modules — extract to shared module. Watch for behavioral inconsistencies between copies
-- CI pipelines without lockfile pinning or version constraints
-- Production code paths with no structured logging at entry/exit
-- Error logs missing reproduction context (request ID, input params)
-- Async flows without correlation ID propagation
-
-**Supply chain & dependencies**
-- Lockfile committed and CI uses `--frozen-lockfile`; no drift from manifest
-- `npm audit` / `cargo audit` / `pip-audit` — no unaddressed HIGH/CRITICAL vulns
-- No `postinstall` scripts from untrusted packages executing arbitrary code
-- Overly permissive version ranges (`*`, `>=`) on deps with breaking-change history
-
-**Test coverage**
-- New logic/schemas/services without tests when similar existing code has tests
-- New error paths untestable because services throw generic errors
-- Tests re-implementing logic under test instead of importing real exports — pass even when real code regresses. Tests asserting by inspecting source code strings rather than calling functions
-- Tests depending on real wall-clock time or external dependencies (system `git`, `gh`, `python`, etc.) — environment-dependent flakiness; mock the subprocess interface (`child_process.spawn`) instead of relying on the binary being installed
-- Missing tests for trust-boundary enforcement
-- Tests exercising code paths the integration layer doesn't expose — pass against mocks but untriggerable in production
-- Test mock state leaking between tests — "clear" resets invocation counts but not configured behavior; use "reset" variants
-- Response/status assertions written as loose ranges (`status >= 400`, `status < 500`, `ok: false`) — a regression that turns a 400 validation failure into a 500 still passes. Assert the specific expected status so tests distinguish validation from server failure
-- Tests gated by `if (process.platform !== 'darwin') return` (or POSIX-only filesystem tricks like `chmod`-based permission failures) silently skip on CI runners with different platforms — the new code becomes effectively untested. Factor platform-specific behavior into pure functions, mock `fs/promises` directly to throw deterministically, or run multi-platform CI. `vi.spyOn(process, 'platform', 'get')` is brittle because `process.platform` is a value property — use `Object.defineProperty(process, 'platform', { value: '<os>', configurable: true })` and restore the original descriptor in cleanup
-- Tests that allocate temp directories (`mkdtempSync`, `mkdir`), spawn long-lived child processes, or write artifacts must clean up in `afterEach`/`finally` (e.g., `rmSync(dir, { recursive: true, force: true })`). Without cleanup, the OS temp dir accumulates over many test runs; concurrent test orderings can collide on shared paths
-- Tests that mutate global state inside the test body (`vi.useFakeTimers()`/`jest.useFakeTimers()`, monkey-patches, `Object.defineProperty(process, 'platform', ...)`, env-var overrides, `mock.module()` setup, frozen `Date.now`, intercepted `console.log`) and only restore at the END of the happy path leak the mutation into the next test when an assertion throws midway — a flaky cascade where one failure causes unrelated tests to misbehave. Restore in a `try/finally` block inside the test body, OR move setup/teardown into `beforeEach`/`afterEach` for the describe block so the framework guarantees cleanup regardless of assertion outcome
-- Tests whose name or description claims a behavior they don't actually assert (`'forwards lastImageFile'` that only checks `prompt` and `mode`) lie about the contract — the test passes even when the named behavior regresses. Either rename the test to match what's asserted or add the missing assertion
-- Tests asserting a specific validation rejection (negative number, oversized string, invalid format) must provide ALL OTHER required fields in valid form — otherwise the 400 the test sees comes from a different validation path (UUID failure, missing required field) and the intended rule is never exercised. Use a valid fixture for unrelated fields so the rejection is attributable to the field under test
-- Path assertions in tests using forward-slash literal substrings (`expect(p).toContain('/some/sub/path')`) fail on Windows where `path.join` produces backslashes. Use `path.join()` in expectations (`expect(p).toContain(join('some', 'sub', 'path'))`), assert the suffix via `endsWith(join(...))`, or use a separator-agnostic regex (`/some[\/\\]sub[\/\\]path/`) — otherwise the test is silently macOS/Linux-only despite running on a Windows CI matrix
-
-**Automated pipeline discipline**
-- Internal code review must run before creating PRs — never go straight from "tests pass" to PR
-- Copilot review must complete before merging
-- Automated agent output must be reviewed against project conventions
-
-**Style & conventions**
-- Naming and patterns inconsistent with rest of codebase
-- New content not matching existing indentation, bullet style, heading levels. Within a single structured file (changelog, README, TOML config), section headers must be unique — duplicate `## Fixed` blocks or repeated table sections are a merge artifact that splits content downstream tools expect to find under one header. Consolidate
-- Shell instructions with destructive operations not verifying preconditions first
 
 ## Output Format
 
