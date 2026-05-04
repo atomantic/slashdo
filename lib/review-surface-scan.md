@@ -10,11 +10,17 @@ Apply the checklist as a prompt for attention, not an exhaustive specification. 
 ## Reading Strategy
 For each changed file, read the **ENTIRE file** (not just diff hunks). New code interacting incorrectly with existing code in the same file is a common bug source. Review one file at a time.
 
-## Principles to Evaluate
+## Out of Scope (handled by sibling agents)
 
-**YAGNI** — Flag abstractions, config options, parameters, or extension points that serve no current use case. Unnecessary wrapper functions, premature generalization (factory producing one type), unused feature flags.
+The following concerns are explicitly NOT this agent's job — do not flag them here:
 
-**Naming** — Functions and variables should communicate intent without reading the implementation. Booleans should read as predicates (`isReady`, `hasAccess`), not ambiguous nouns.
+- **Code quality / conventions / naming / YAGNI / dead code** — handled by the Surface Quality agent
+- **Tests / documentation drift / commit hygiene** — handled by the Surface Quality agent
+- **Cross-file call chains, state lifecycle, concurrency** — handled by the Cross-File Tracing agent
+- **Schemas / validation / error classification / architectural pattern adherence** — handled by the Cross-File Contract agent
+- **Secrets, auth, supply-chain, prompt-injection** — handled by the Security Audit agent
+
+If a concern fits one of the categories above, drop it from your output rather than co-flagging — that overlap is exactly what this split was intended to remove.
 
 ## Checklist
 
