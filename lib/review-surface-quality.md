@@ -39,6 +39,10 @@ For each changed file, read the **ENTIRE file** (not just diff hunks). Compare c
 - Unsaved changes / dirty state silently discarded when the user switches context in a multi-record editor or closes a sheet — data loss. Dirty-check on switch (inline confirm), auto-save drafts, or disable the switch control while dirty. `beforeunload` does not cover in-app context switches
 - Array index used as React `key={i}` on a list that's sliced (`logs.slice(-40)`), reordered, filtered, or has items dropped from either end shifts keys as items move, causing React to reuse DOM nodes for different entries — flicker, lost focus, stale tooltips, broken animations, selection bleed across rows. Use a stable identifier from the payload (`id`, `timestamp + event`, content hash)
 
+### Code complexity & PR scope
+- Functions with >10 branches or >15 cyclomatic complexity — refactor (extract early-returns, lookup tables, helper functions)
+- Overly broad changes that should be split into separate PRs (mixed refactor + feature, multiple unrelated concerns) — flag as a process smell so reviewers can request a split
+
 ### AI-generated code quality
 - New abstractions, wrapper functions, helper files serving only one call site — inline instead
 - Feature flags, config options, extension points with only one possible value

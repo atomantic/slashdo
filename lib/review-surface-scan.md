@@ -28,7 +28,6 @@ If a concern fits one of the categories above, drop it from your output rather t
 
 **Hygiene**
 - Leftover debug code (`console.log`, `debugger`, TODO/FIXME/HACK), hardcoded secrets/credentials, uncommittable files (.env, node_modules, build artifacts, runtime-generated data/reports)
-- Overly broad changes that should be split into separate PRs
 
 **Imports & references**
 - Every symbol used is imported (missing → runtime crash); no unused imports. Also check references to framework utilities (CSS class names, directive names, component props) — a non-existent utility class or prop name silently does nothing
@@ -45,7 +44,6 @@ If a concern fits one of the categories above, drop it from your output rather t
 - React state invariants (uniqueness, cap/floor, monotonicity) checked against render-time value before `setX(...)` — rapid events or concurrent updates race the check. Move into the functional updater: `setX(prev => prev.includes(id) ? prev : [...prev, id])`
 - Bound-derived state values (current time, scroll position, focused index, selected page) that are bounded by another piece of state (total duration, list length, page count) must be clamped when the bound shrinks. Removing a clip / deleting an item / tightening trims can leave the derived value past its new upper bound, and downstream readers (preview seekers, `arr[index]`, `findClipAt(t)`) return garbage / past-end results / undefined elements. Add a `useEffect` keyed on the bound that clamps the derived value (and pauses playback / clears selection if appropriate)
 - `useEffect` depending on state it writes — the write retriggers the effect (infinite loop / request storm). Split into two effects, drop the self-written value from deps, or use a functional setter that doesn't require the current value in deps
-- Functions with >10 branches or >15 cyclomatic complexity — refactor
 - String accumulation via `+=` inside high-frequency loops (streaming frames, chunked I/O, per-event handlers) is O(n²) for long outputs and triggers React re-renders on growing payloads. Collect chunks into an array and `join('')` at the end while still emitting per-chunk events
 - Sorting an entire collection just to find a single max/min/first-matching element is O(n log n) when a single pass is O(n) — `[...items].sort(byDate)[0]` over thousands of items burns CPU on every render. Use a linear scan that tracks the current best (`reduce`, manual `for` loop with comparator). Especially impactful when invoked per-render or per-component (collection card, list row)
 - Server-side string formatting (`toLocaleString`, `toLocaleDateString`, currency/number formatters) that depends on locale/timezone defaults produces non-deterministic outputs across deployments. For data flowing into prompts, logs, or persisted records, format with explicit `Intl.DateTimeFormat({ timeZone: ... })` or ISO strings; reserve locale-aware formatting for user-visible UI layers
