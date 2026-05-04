@@ -773,7 +773,7 @@ Use this scan as one signal among several — sandboxing (container, VM, disposa
 - Phase 1: manifest & lockfile parsing (read-only)
 - Phase 2: 5 parallel static code pattern scans (grep, no execution)
 - Phase 3: binary / obfuscation inventory (file metadata only)
-- Phase 4: dependency metadata lookups against allowlisted registries (registry.npmjs.org, pypi.org, crates.io, pkg.go.dev, proxy.golang.org, rubygems.org). Note: OSV vulnerability lookup (api.osv.dev) requires POST and is currently unavailable via WebFetch (GET-only); recommend `npm audit` / `pip-audit` / `cargo audit` post-install
+- Phase 4: dependency metadata lookups against allowlisted registries (registry.npmjs.org, pypi.org, crates.io, pkg.go.dev, proxy.golang.org, rubygems.org, api.github.com). Note: OSV vulnerability lookup (api.osv.dev) is in the WebFetch host allowlist but its query API requires POST and is currently unavailable via WebFetch (GET-only); recommend `npm audit` / `pip-audit` / `cargo audit` post-install
 - Phase 5: this report
 ```
 
