@@ -76,7 +76,9 @@ Fork PRs go to upstream maintainers who can't easily ask for changes — getting
    c. For each finding, quote the specific code line and explain why it's a problem
 4. After reviewing all files, verify: does the code actually deliver what the commits claim?
 5. Print a review summary table (see do:review for format)
-6. Fix any issues, recommit, and push before proceeding
+6. **Worthiness check**: Classify all findings before acting on them:
+   - **Fix and recommit** any finding that touches correctness, security, logic, data integrity, or API contracts
+   - **Note but don't block** on pure style nitpicks, naming preferences, or "consider..." suggestions — if ALL findings are this type, proceed without fixing and mention them briefly in the PR description
 7. Only after printing the review summary may you proceed to "Open the PR"
 
 If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.

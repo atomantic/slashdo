@@ -62,7 +62,16 @@ Address the latest code review feedback on the current branch's pull request usi
    echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"THREAD_ID_HERE\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
    ```
 
-8. **Request another Copilot review** (only if `is_fork_pr=false`): After pushing fixes, request a fresh Copilot code review and repeat from step 3 until the review passes clean. **Skip for fork-to-upstream PRs.**
+8. **Decide whether to loop** (only if `is_fork_pr=false`): After pushing fixes, evaluate whether another Copilot review is worth running before requesting one. **Skip for fork-to-upstream PRs.**
+
+   **Worthiness evaluation**: Classify all threads addressed in the last round and decide:
+   - **Stop and merge** if ALL of the following are true:
+     - Every finding was a trivial nitpick — style preferences, naming suggestions, "consider..." language, minor formatting, or repeats of already-dismissed feedback
+     - No finding touched correctness, security, logic, data integrity, or API contracts
+     - You made fewer than 3 actual code changes in the last round
+   - **Request another review** if any finding was substantive — logic bugs, security issues, missing guards, contract violations, or meaningful refactors
+
+   If stopping: print "All remaining findings are nitpicks — skipping further review loop" and proceed to step 9. If looping: request a fresh Copilot review per the "Requesting GitHub Copilot Code Review" section, poll until complete, then repeat from step 3.
 
    **While waiting for review**: Check CI status in parallel during polling (see "CI Health Check During Review Polling" section below). Fix any CI failures before the review completes.
 
