@@ -79,6 +79,10 @@ Address the latest code review feedback on the current branch's pull request usi
 
 9. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input).
 
+10. **Documentation recommendations**: After printing the summary, run the Documentation Recommendations phase against the issues addressed in this session. Surface concrete suggestions for project documentation updates (CLAUDE.md, CONTRIBUTING.md, README.md, in-tree comments) that would prevent the same class of issue in future PRs. **Read-only on project docs — surface suggestions only, never auto-edit.**
+
+!`cat ~/.claude/lib/post-review-doc-recommendations.md`
+
 !`cat ~/.claude/lib/graphql-escaping.md`
 
 ## Requesting GitHub Copilot Code Review

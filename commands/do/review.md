@@ -152,6 +152,12 @@ Print a summary table of what was reviewed and found:
 
 If no issues were found, confirm the code is clean and ready for PR.
 
+## Documentation Recommendations
+
+After the report is printed and fixes are committed, run the Documentation Recommendations phase. Examine the findings (both fixed and accepted-as-is) and surface project-level documentation updates that would prevent the same class of issue in future PRs. **This phase is read-only on project docs — surface suggestions only, never auto-edit CLAUDE.md, README.md, or other docs.**
+
+!`cat ~/.claude/lib/post-review-doc-recommendations.md`
+
 ## PR Comment Policy
 
 After the review and any fixes, determine whether to post review comments on the PR/MR:
