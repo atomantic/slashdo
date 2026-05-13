@@ -9,13 +9,15 @@ Analyze code review feedback on a PR, identify patterns our review system missed
 
 ## Architecture Overview
 
-The `/do:review` system uses 3 parallel agents, each with focused reading strategies:
+The `/do:review` system uses 5 parallel agents, each with focused reading strategies:
 
 | Agent | File | Focus |
 |---|---|---|
-| Surface Scan | `lib/review-surface-scan.md` | Per-file bugs: runtime, hygiene, domain-specific, quality, conventions |
+| Surface Scan | `lib/review-surface-scan.md` | Per-file RUNTIME bugs: crashes, type/coercion, async/state, error handling, streaming, domain-specific runtime patterns |
+| Surface Quality | `lib/review-surface-quality.md` | Per-file QUALITY: intent-vs-implementation drift, AI-generated code patterns, dead config, missing tests, supply chain hygiene, style |
 | Security Audit | `lib/review-security-audit.md` | Trust boundaries, injection, SSRF, data exposure, access control |
-| Cross-File Tracing | `lib/review-cross-file-tracing.md` | Cross-file contracts, state flows, lifecycle, deep tracing checks |
+| Cross-File Tracing | `lib/review-cross-file-tracing.md` | State/lifecycle/concurrency across files: stale state propagation, lifecycle gaps, resource leaks, lock/flag exit paths, races |
+| Cross-File Contract | `lib/review-cross-file-contract.md` | Contracts across files: schema/shape agreements, validation parity, error classification, field-set enumerations, architectural-pattern adherence |
 
 Additionally:
 - `lib/code-review-checklist.md` — master source-of-truth (canonical reference, not directly used by agents)
@@ -89,11 +91,15 @@ For each theme, write a **generic, technology-agnostic checklist item** that wou
 
 For each generalized theme, determine which agent **should have caught it** based on the reading strategy required:
 
-- **Surface Scan** — catchable by reading a single file in isolation (per-file runtime bugs, hygiene, domain-specific issues, quality, conventions)
+- **Surface Scan** — catchable by reading a single file in isolation; per-file RUNTIME bugs (crashes, type/coercion, async/state, error handling, streaming, domain-specific runtime patterns)
+- **Surface Quality** — catchable by reading a single file; intent-vs-implementation drift, AI-generated code patterns, dead config, missing tests, supply chain hygiene, style
 - **Security Audit** — requires adversarial thinking about trust boundaries, injection, data exposure, access control
-- **Cross-File Tracing** — requires tracing call chains, data flows, or contracts across multiple files
+- **Cross-File Tracing** — requires tracing STATE / LIFECYCLE / CONCURRENCY across files (stale state propagation, resource leaks, lock/flag exit paths, races)
+- **Cross-File Contract** — requires tracing CONTRACTS across files (schema/shape agreements, validation parity, error classification, field-set enumerations, architectural-pattern adherence)
 - **None (new agent needed)** — requires a fundamentally different reading strategy not covered by any existing agent
 - **Orchestrator** — requires changes to how agents are dispatched, how findings are collected, or how the review is scoped
+
+The distinction between the two cross-file agents: Tracing follows DATA and CONTROL FLOW (what state propagates when, what cleanup runs, what races); Contract follows SHAPE and AGREEMENT (does field X exist on both sides, does verb Y validate like verb Z, does this error class survive the wrapper). If a finding is about "X happens at the wrong time" → Tracing. If it's about "X and Y disagree on the shape" → Contract.
 
 Record this assignment for each theme — it determines which files to update in Phase 4.
 
@@ -104,9 +110,11 @@ Record this assignment for each theme — it determines which files to update in
 Read all source-of-truth files:
 ```
 lib/code-review-checklist.md          # master checklist
-lib/review-surface-scan.md            # surface scan agent
+lib/review-surface-scan.md            # surface scan agent (runtime)
+lib/review-surface-quality.md         # surface quality agent
 lib/review-security-audit.md          # security agent
-lib/review-cross-file-tracing.md      # cross-file agent
+lib/review-cross-file-tracing.md      # cross-file tracing (state/lifecycle)
+lib/review-cross-file-contract.md     # cross-file contract (schema/shape)
 commands/do/review.md                 # orchestrator
 ```
 
@@ -151,7 +159,7 @@ Rules:
 
 ### 4b: Update agent files
 
-For each theme, update the **assigned agent's instruction file** (`lib/review-surface-scan.md`, `lib/review-security-audit.md`, or `lib/review-cross-file-tracing.md`):
+For each theme, update the **assigned agent's instruction file** (`lib/review-surface-scan.md`, `lib/review-surface-quality.md`, `lib/review-security-audit.md`, `lib/review-cross-file-tracing.md`, or `lib/review-cross-file-contract.md`):
 
 - **New item**: Add under the most appropriate section in the agent file
 - **Broadened item**: Edit the existing item in the agent file to match the broadened master
@@ -184,8 +192,10 @@ After all updates, re-read each modified file and check:
 ```bash
 cp lib/code-review-checklist.md ~/.claude/lib/code-review-checklist.md
 cp lib/review-surface-scan.md ~/.claude/lib/review-surface-scan.md
+cp lib/review-surface-quality.md ~/.claude/lib/review-surface-quality.md
 cp lib/review-security-audit.md ~/.claude/lib/review-security-audit.md
 cp lib/review-cross-file-tracing.md ~/.claude/lib/review-cross-file-tracing.md
+cp lib/review-cross-file-contract.md ~/.claude/lib/review-cross-file-contract.md
 cp commands/do/review.md ~/.claude/commands/do/review.md
 ```
 
@@ -213,15 +223,17 @@ cp commands/do/review.md ~/.claude/commands/do/review.md
 |---|---|---|---|---|
 | code-review-checklist.md | N | N | — | — |
 | review-surface-scan.md | N | N | N | N |
+| review-surface-quality.md | N | N | N | N |
 | review-security-audit.md | N | N | N | N |
 | review-cross-file-tracing.md | N | N | N | N |
+| review-cross-file-contract.md | N | N | N | N |
 | commands/do/review.md (orchestrator) | — | — | — | — |
 
 ### New/Modified Items
 {list each item with brief explanation of the pattern it catches and which agent owns it}
 
 ### Architecture Assessment
-- **Agent balance**: Surface({N} items) / Security({N} items) / Cross-File({N} items)
+- **Agent balance**: Surface-Scan({N}) / Surface-Quality({N}) / Security({N}) / Cross-File-Tracing({N}) / Cross-File-Contract({N})
 - **Scope drift detected**: {yes/no — list any misplaced items that were moved}
 - **Coverage gaps**: {description or "none found"}
 - **Agent overload risk**: {which agent, if any, is approaching the ~80 item threshold}

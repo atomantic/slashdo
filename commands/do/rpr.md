@@ -62,13 +62,26 @@ Address the latest code review feedback on the current branch's pull request usi
    echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"THREAD_ID_HERE\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
    ```
 
-8. **Request another Copilot review** (only if `is_fork_pr=false`): After pushing fixes, request a fresh Copilot code review and repeat from step 3 until the review passes clean. **Skip for fork-to-upstream PRs.**
+8. **Decide whether to loop** (only if `is_fork_pr=false`): After pushing fixes, evaluate whether another Copilot review is worth running before requesting one. **Skip for fork-to-upstream PRs.**
+
+   **Worthiness evaluation**: Classify all threads addressed in the last round and decide:
+   - **Stop and merge** if ALL of the following are true:
+     - Every finding was a trivial nitpick — style preferences, naming suggestions, "consider..." language, minor formatting, or repeats of already-dismissed feedback
+     - No finding touched correctness, security, logic, data integrity, or API contracts
+     - You made fewer than 3 actual code changes in the last round
+   - **Request another review** if any finding was substantive — logic bugs, security issues, missing guards, contract violations, or meaningful refactors
+
+   If stopping: print "All remaining findings are nitpicks — skipping further review loop" and proceed to step 9. If looping: request a fresh Copilot review per the "Requesting GitHub Copilot Code Review" section, poll until complete, then repeat from step 3.
 
    **While waiting for review**: Check CI status in parallel during polling (see "CI Health Check During Review Polling" section below). Fix any CI failures before the review completes.
 
    **Repeated-comment dedup**: When fetching threads after a new Copilot review round, compare each new unresolved thread's comment body and file/line against threads from the previous round that were intentionally left unresolved (replied to as non-issues or disagreements). If all new unresolved threads are repeats of previously-dismissed feedback, treat the review as clean (no new actionable comments) and exit the loop.
 
 9. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input).
+
+10. **Documentation recommendations**: After printing the summary, run the Documentation Recommendations phase against the issues addressed in this session. Surface concrete suggestions for project documentation updates (CLAUDE.md, CONTRIBUTING.md, README.md, in-tree comments) that would prevent the same class of issue in future PRs. **Read-only on project docs — surface suggestions only, never auto-edit.**
+
+!`cat ~/.claude/lib/post-review-doc-recommendations.md`
 
 !`cat ~/.claude/lib/graphql-escaping.md`
 
