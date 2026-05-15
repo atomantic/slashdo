@@ -397,6 +397,25 @@ function install({ env, packageDir, filterNames, dryRun, uninstall }) {
   if (!dryRun && env.versionFile) {
     const pkg = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
     fs.writeFileSync(env.versionFile, pkg.version, 'utf8');
+
+    // Refresh the update-check cache so the statusline drops the ⬆ /do:update badge
+    // immediately, instead of waiting for the next SessionStart background check to
+    // overwrite it (which races with statusline render on the following session).
+    if (env.supportsHooks && env.hooksDir) {
+      try {
+        const cacheDir = path.join(path.dirname(env.hooksDir), 'cache');
+        const cacheFile = path.join(cacheDir, 'slashdo-update-check.json');
+        fs.mkdirSync(cacheDir, { recursive: true });
+        fs.writeFileSync(cacheFile, JSON.stringify({
+          update_available: false,
+          installed: pkg.version,
+          latest: pkg.version,
+          checked: Math.floor(Date.now() / 1000),
+        }));
+      } catch (e) {
+        // Best-effort: never fail the install over cache bookkeeping
+      }
+    }
   }
 
   return results;
