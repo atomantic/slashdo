@@ -10,7 +10,7 @@ Commit changes, push to your fork, and open a pull request against the upstream 
 
 1. **Resolve the fork from the `origin` remote** — by convention `origin` is the user's push target. A bare `gh repo view` can pick the wrong repo when both `origin` and `upstream` remotes exist (or when the user's default login resolves elsewhere), so always pass the origin slug explicitly:
    ```bash
-   ORIGIN_SLUG=$(git remote get-url origin | sed -E 's|.*github\.com[:/]([^/]+/[^/.]+?)(\.git)?$|\1|')
+   ORIGIN_SLUG=$(git remote get-url origin 2>/dev/null | sed -E 's|.*github\.com[:/]||; s|\.git$||; s|/$||')
    gh repo view "$ORIGIN_SLUG" --json isFork,parent,owner,name,defaultBranchRef
    ```
    - If `origin` is not set or the URL is not a GitHub URL: STOP and tell the user to add a GitHub `origin` remote pointing at their fork.
