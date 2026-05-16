@@ -162,6 +162,13 @@ async function main() {
     if (detected.length === 1) {
       selectedEnvs = detected;
       console.log(`Detected: ${ENVIRONMENTS[detected[0]].name}`);
+    } else if (!process.stdin.isTTY) {
+      // Non-interactive caller (CI, install scripts, piped stdin) — readline
+      // would hang forever waiting for input. Default to "install for all
+      // detected envs" so automation gets the intuitive behavior without a
+      // mandatory --env flag.
+      selectedEnvs = detected;
+      console.log(`Non-interactive — installing for all detected environments: ${detected.map(k => ENVIRONMENTS[k].name).join(', ')}`);
     } else {
       const choices = detected.map(k => `${k} (${ENVIRONMENTS[k].name})`);
       const indices = await promptUser('Multiple environments detected. Select which to install:', choices);
