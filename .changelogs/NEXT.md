@@ -8,6 +8,20 @@
 
 ## Fixed
 
+- **CLI no longer hangs when run non-interactively with multiple AI
+  environments detected.** When `bin/cli.js` found more than one supported
+  environment (any combination of `~/.claude`, `~/.config/opencode`,
+  `~/.gemini`, `~/.codex`) it called `readline.createInterface` to ask the
+  user which to install for. Under a non-TTY stdin (CI, install scripts
+  like PortOS's `update.sh`/`setup.sh`, anything piping into `npx
+  slash-do@latest`), readline waited forever and the caller stalled. The
+  CLI now detects `!process.stdin.isTTY`, skips the prompt, and defaults to
+  "install for all detected environments" — matching the intuitive
+  behavior callers want from automation and unblocking pipelines that
+  invoke `npx slash-do@latest` directly. Interactive TTY sessions are
+  unaffected; the prompt still fires when stdin is a terminal. Callers can
+  still pass `--env <envs>` explicitly to override the auto-all default.
+
 ## Removed
 
 ## Full Changelog
