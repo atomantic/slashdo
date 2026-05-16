@@ -798,6 +798,7 @@ Test Enhancement Stats:
 - **Cross-PR dependency breakage**: add backward-compatible re-exports or move shared files to the PR that creates them
 - **Copilot timeout** (review not received within decreasing timeout window): inform user, offer to merge without review approval or wait longer
 - **Copilot review loop exceeds 10 iterations per PR**: sub-agent hits guardrail and reports back; ask user whether to continue or stop
+- **Copilot "too-large"** (PR exceeds Copilot's 20 000-line limit): treat as clean — do NOT re-request, proceed directly to merge
 - **Existing worktree found at startup**: ask user — resume (reuse worktree) or cleanup (remove and start fresh)
 - **No findings above LOW**: skip Phases 3-7, print "No actionable findings" with the LOW summary
 - **Merge conflict after prior PR merged**: rebase the branch onto the updated default branch, push with `--force-with-lease`, re-run CI
