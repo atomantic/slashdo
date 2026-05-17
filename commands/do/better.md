@@ -259,13 +259,13 @@ For each utility: name, purpose, files it replaces, signature sketch.
 For each file touched by multiple categories, document why it was assigned to one.
 
 ### Security & Secrets
-- [ ] **[CRITICAL]** `file:line` - Description — Fix: ... (Complexity: Simple/Medium/Complex)
+- [ ] [<slug>] **[CRITICAL]** `file:line` - Description — Fix: ... (Complexity: Simple/Medium/Complex)
 
 ### Code Quality
-- [ ] **[HIGH]** `file:line` - Description — Fix: ...
+- [ ] [<slug>] **[HIGH]** `file:line` - Description — Fix: ...
 
 ### DRY & YAGNI
-- [ ] **[MEDIUM]** `file:line` - Description — Fix: ...
+- [ ] [<slug>] **[MEDIUM]** `file:line` - Description — Fix: ...
 
 ### Architecture & SOLID
 ### Bugs, Performance & Error Handling
@@ -273,6 +273,8 @@ For each file touched by multiple categories, document why it was assigned to on
 ### Dependency Freedom
 ### Test Quality & Coverage
 ```
+
+**Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct findings via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case derived from the title text, ≤50 chars, unique against every `[slug]` already in PLAN.md and DONE.md. Recommended pattern for audit findings: `<category-prefix>-<file-basename>-<short-hint>` (e.g. `[sec-routes-pr-validation]`, `[dry-cli-output-dedup]`).
 
 6. Print a summary table (short labels → full category → branch slug):
    - Security → Security & Secrets → `security`
@@ -764,7 +766,7 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
    git stash pop
    ```
 4. Update PLAN.md:
-   - Mark completed findings with `[x]`
+   - Mark completed findings by flipping `- [ ]` → `- [x]` — **preserve the `[<slug>]` ID** on each line (only the box character changes, the slug stays). See [lib/plan-id-format.md](../../lib/plan-id-format.md).
    - Add PR links to each category section header
    - Note any skipped findings with reasons
 5. Print the final summary table:

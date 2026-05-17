@@ -63,7 +63,7 @@ Run Phase 4c (test enhancement) **before** the merge-back if the worktree is sti
 Do not create category branches. Do not bump the version (the user's PR is responsible for any version bump via the project's normal release flow). Do not run the Copilot review loop here — `do:pr` will run it once on the combined PR. Do not delete branches you didn't create.
 
 The only Phase 7-equivalent housekeeping that applies:
-- Update PLAN.md to mark completed findings as `[x]` and note any skipped findings with reasons. Stage these changes so the next phase commits them as part of the PR.
+- Update PLAN.md to mark completed findings by flipping `- [ ]` → `- [x]` — **preserve the `[<slug>]` ID** on each line (only the box character changes, the slug stays). Note any skipped findings with reasons. Stage these changes so the next phase commits them as part of the PR. See [lib/plan-id-format.md](../../lib/plan-id-format.md).
 - Print the final summary table from Phase 7 (with PR fields blank — they'll be filled by Phase B).
 
 ## Phase B: Run do:pr

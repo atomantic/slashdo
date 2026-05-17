@@ -25,6 +25,35 @@ GOALS.md answers: *Why does this project exist? What does success look like? Wha
 - Completed items (those belong in `DONE.md`)
 - Detailed documentation (those belong in `docs/`)
 
+## Phase 0: Assign Plan-Item IDs
+
+**`/do:replan` owns the ID-assignment pass.** Every `- [ ]` / `- [x]` checkbox
+in PLAN.md must carry a stable slug ID in `[brackets]` immediately after the
+checkbox. The ID lets concurrent agents claim distinct items by encoding the
+slug in their worktree branch name (`cos/<task>/<plan-id>/<agent>`) and lets
+other agents detect what's in flight by scanning branches/PRs for the slug.
+
+Run this phase BEFORE the evidence-gathering agents below:
+
+1. Read PLAN.md and DONE.md (if it exists). Collect every `[slug]` already
+   present in either file into a `takenIds` set — including IDs on `- [x]`
+   archived-but-still-in-PLAN items and IDs inline on DONE.md entries.
+2. For each `- [ ]` / `- [x]` line in PLAN.md that does NOT already have an
+   ID, derive a slug per the rules in
+   [lib/plan-id-format.md](../../lib/plan-id-format.md):
+   - strip markdown wrappers from the title; lowercase + kebab-case;
+     truncate to 50 chars at the last `-` boundary; append `-2`/`-3`/... on
+     collision against `takenIds`.
+3. Rewrite the line as `- [ ] [<slug>] <rest>` (preserving the checkbox
+   state, indent, and trailing content unchanged). Add the new slug to
+   `takenIds` so subsequent items in the same pass don't collide.
+4. **Never rewrite an existing `[slug]`** — slugs are immutable once
+   assigned. Only items missing an ID get one.
+5. Track the count `{I}` of IDs assigned for the Phase 3 / Phase 7 summary.
+
+If no IDs were assigned (every item already had one), this phase is a no-op
+and produces no commit on its own — proceed to Phase 1.
+
 ## Phase 1: Automated Evidence Gathering
 
 Launch these agents in parallel — no user interaction needed.
@@ -98,6 +127,7 @@ Apply all changes immediately without prompting — **except for `drifted` items
 
 ```
 Replan complete:
+- Assigned {I} new plan-item IDs (Phase 0)
 - Archived {N} completed items to DONE.md
 - Removed {S} stale items
 - Added {P} new suggested items
@@ -164,21 +194,22 @@ Completed items archived from PLAN.md. For release notes, see `.changelogs/`.
 
 ## 2026-03-16
 
-- Implemented feature X — added auth middleware and JWT validation
-- Fixed bug Y — null check on user profile load
-- Refactored Z — extracted shared utilities from monolithic handler
+- **[auth-middleware-jwt] Implemented feature X** — added auth middleware and JWT validation
+- **[user-profile-null-check] Fixed bug Y** — null check on user profile load
+- **[extract-monolithic-handler] Refactored Z** — extracted shared utilities from monolithic handler
 
 ## 2026-03-10
 
-- Added CI pipeline for staging deploys
-- Test coverage for API routes
+- **[staging-ci-pipeline] Added CI pipeline for staging deploys**
+- **[api-route-test-coverage] Test coverage for API routes**
 ```
 
 ### Rules
 
 - Group by date (newest first)
 - One line per item — concise description of what was done, not the original checkbox text
-- If the completed item had substantial documentation (>20 lines), extract it to `docs/` and add a link: `- Feature X — see [docs/features/x.md](./docs/features/x.md)`
+- **Preserve the `[plan-id]` slug** from the PLAN.md line as a bracketed prefix on the archived entry. The bold-wrapped title makes the slug easy to grep across DONE.md and keeps the uniqueness check correct on future replans (retired slugs are not reused).
+- If the completed item had substantial documentation (>20 lines), extract it to `docs/` and add a link: `- **[plan-id] Feature X** — see [docs/features/x.md](./docs/features/x.md)`
 - Do NOT duplicate changelog entries — DONE.md captures plan-item completion, changelogs capture release-level changes
 
 ## Phase 5: Rebuild PLAN.md
@@ -201,8 +232,8 @@ For completed work, see [DONE.md](./DONE.md).
 
 ## Backlog
 
-- [ ] Item D: Description
-- [ ] Item E: Description
+- [ ] [item-d-slug] Item D: Description
+- [ ] [item-e-slug] Item E: Description
 
 ## Future / Ideas
 
@@ -213,11 +244,12 @@ For completed work, see [DONE.md](./DONE.md).
 ### Guidelines
 
 - **"Next Up" is ordered** — numbered list, max 5 items, these are the immediate priorities
-- **"Backlog" is unordered** — checkbox items that are planned but not prioritized
-- **"Future / Ideas" has no checkboxes** — these are possibilities, not commitments
+- **"Backlog" is unordered** — checkbox items that are planned but not prioritized; each carries its `[plan-id]` slug from Phase 0
+- **"Future / Ideas" has no checkboxes** — these are possibilities, not commitments, so they don't need slug IDs
 - **No completed items** — they're in DONE.md
 - **No detailed docs** — link to `docs/` files instead
 - **No section if it's empty** — don't include "Backlog" with zero items
+- **Preserve existing `[plan-id]` slugs verbatim** when items are moved between sections or rewritten — slugs are immutable once assigned (see [lib/plan-id-format.md](../../lib/plan-id-format.md)). Only Phase 0 generates new slugs.
 
 ## Phase 6: Absorb GOALS.md Violations
 
