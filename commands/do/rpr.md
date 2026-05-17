@@ -24,7 +24,7 @@ Address the latest code review feedback on the current branch's pull request usi
    - **If no Copilot review exists and no Copilot review is currently requested**: Request a new Copilot review per the "Requesting GitHub Copilot Code Review" section below, poll until complete, then proceed.
    - **Skip this step entirely for fork-to-upstream PRs** — you don't have permission to request reviewers on repos you don't own.
 
-   **While waiting for review**: During any review polling wait, check CI status in parallel (see "CI Health Check During Review Polling" section below). If CI is failing, fix the failures, commit, and push before the review completes. This avoids wasting a review cycle on code that won't pass CI anyway.
+   **While waiting for review**: The persistent monitor (see "Poll for review completion" below) emits CI bucket transitions as events, so you'll be notified of failures without a separate poll. Fix any CI failures before the review completes (see "CI failure handling").
 
 3. **Fetch review comments**: Use `gh api graphql` with stdin JSON to get all unresolved review threads. **CRITICAL: Do NOT use `$variables` in GraphQL queries — shell expansion consumes `$` signs.** Always inline values and pipe JSON via stdin:
    ```bash
@@ -71,9 +71,9 @@ Address the latest code review feedback on the current branch's pull request usi
      - You made fewer than 3 actual code changes in the last round
    - **Request another review** if any finding was substantive — logic bugs, security issues, missing guards, contract violations, or meaningful refactors
 
-   If stopping: print "All remaining findings are nitpicks — skipping further review loop" and proceed to step 9. If looping: request a fresh Copilot review per the "Requesting GitHub Copilot Code Review" section, poll until complete, then repeat from step 3.
+   If stopping: print "All remaining findings are nitpicks — skipping further review loop" and proceed to step 9. If looping: request a fresh Copilot review per the "Requesting GitHub Copilot Code Review" section, then wait on the *existing* persistent monitor (do not start a second one) for the `copilot review:` event, then repeat from step 3.
 
-   **While waiting for review**: Check CI status in parallel during polling (see "CI Health Check During Review Polling" section below). Fix any CI failures before the review completes.
+   **While waiting for review**: The monitor's CI events surface failures as they happen — see "CI failure handling".
 
    **Repeated-comment dedup**: When fetching threads after a new Copilot review round, compare each new unresolved thread's comment body and file/line against threads from the previous round that were intentionally left unresolved (replied to as non-issues or disagreements). If all new unresolved threads are repeats of previously-dismissed feedback, treat the review as clean (no new actionable comments) and exit the loop.
 
@@ -100,37 +100,63 @@ Verify the request was accepted by checking that `Copilot` appears in the respon
 
 ### Poll for review completion
 
-Poll using GraphQL to check for a new review with a `submittedAt` timestamp after the request. Use stdin JSON piping (per the GraphQL escaping guidance) to avoid shell-quoting fragility:
+**Use ONE persistent `Monitor` for the entire rpr session, not a fresh background poll per loop iteration.** Spawning a new poller per round produces a thicket of subshell tasks (you can end up with 5+ active background bash tasks across a single rpr session) — wasteful, confusing in the task list, and easy to lose track of.
+
+Start the monitor *once* (right after the first review request, or at session entry if a review is already pending). It tracks the most-recent Copilot review timestamp it has observed and emits exactly one event per *new* review that lands. In the same loop, transition-detect CI checks so you also get one event per CI bucket flip — no separate CI poll needed.
+
 ```bash
-echo '{"query":"{ repository(owner: \"OWNER\", name: \"REPO\") { pullRequest(number: PR_NUM) { reviews(last: 3) { nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
+# Replace OWNER/REPO/PR_NUM with literals — no shell variables inside the GraphQL query string.
+# Replace SEED_TS with the latest Copilot review submittedAt you have already seen (or a far-past
+# ISO timestamp like "1970-01-01T00:00:00Z" if none).
+Monitor:
+  description: "PR PR_NUM — Copilot reviews + CI"
+  timeout_ms: 1800000   # 30 min; raise if your reviews are routinely slower
+  persistent: false
+  command: |
+    latest="SEED_TS"
+    ci_prev=""
+    while true; do
+      # New Copilot review since `latest`?
+      new=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 5) { nodes { author { login } submittedAt } } } } }\"}" \
+        | gh api graphql --input - 2>/dev/null \
+        | jq -r --arg t "$latest" '[.data.repository.pullRequest.reviews.nodes[]? | select(.author.login=="copilot-pull-request-reviewer") | select(.submittedAt > $t) | .submittedAt] | min // empty')
+      if [ -n "$new" ]; then
+        echo "copilot review: $new"
+        latest="$new"
+      fi
+      # CI bucket transitions on the same tick.
+      s=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null || echo '[]')
+      cur=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s" 2>/dev/null | sort)
+      comm -13 <(echo "$ci_prev") <(echo "$cur") | sed 's/^/ci: /'
+      ci_prev=$cur
+      sleep 25
+    done
 ```
 
-**Dynamic poll timing**: Before your first poll, check how long the most recent Copilot review on this PR took by comparing consecutive Copilot review `submittedAt` timestamps (or PR creation time for the first review). Use that duration as your expected wait. If no prior review exists, default to **60 seconds**. Use **progressive poll intervals**: 5s, 5s, 10s, 10s, then 15s thereafter — Copilot reviews on small diffs typically land in **30–90 seconds**, so an early first check avoids burning a full minute on a review that's already sitting in the API. Set max wait to **3x the expected duration** (minimum 90 seconds, maximum 5 minutes); only large diffs (200+ changed lines) should ever approach the max. If the review hasn't arrived by then, treat it as stuck rather than slow.
+When you push a fix and want another review, just *request* it (the API call above) and keep working — the existing monitor will emit `copilot review: <timestamp>` when it lands. **Do not start a second monitor**; if you've drifted into "I should poll for the next one," stop and use the running one instead.
 
-The review is complete when a new `copilot-pull-request-reviewer` review node appears. If no review appears after max wait: **Default mode**: auto-skip and continue. **Interactive mode (`--interactive`)**: ask the user whether to continue waiting, re-request, or skip.
+**Stop the monitor only when you're done with the rpr loop** (use `TaskStop` with the monitor's id), or let it time out naturally.
 
-**Error detection**: After a review appears, check its `body` for error text such as "Copilot encountered an error" or "unable to review this pull request". If found, this is NOT a successful review — log a warning, re-request the review (same API call above), and resume polling. Allow up to 3 error retries. After 3 failures: **Default mode**: auto-skip and continue. **Interactive mode (`--interactive`)**: ask the user whether to continue or skip.
+**Dynamic poll timing within the monitor**: a 25s loop covers the typical 30–90s review latency without burning quota. If a review hasn't landed after **3× the historical average latency for this PR** (minimum 90 s, maximum 5 min), surface it via a one-shot status check and treat as stuck rather than slow.
 
-## CI Health Check During Review Polling
+The review is "complete" when a new `copilot review:` event fires. If no event arrives by the deadline you set: **Default mode**: auto-skip and continue. **Interactive mode (`--interactive`)**: ask the user whether to continue waiting, re-request, or skip.
 
-While polling for a Copilot review to complete, use the wait time productively by checking CI status:
+**Error detection**: After a review event fires, fetch the review body and check for error text such as "Copilot encountered an error" or "unable to review this pull request". If found, this is NOT a successful review — log a warning, re-request the review (same API call above), and let the existing monitor catch the retry's completion event. Allow up to 3 error retries. After 3 failures: **Default mode**: auto-skip and continue. **Interactive mode (`--interactive`)**: ask the user whether to continue or skip.
 
-1. **Check for running/completed checks** on the current commit:
+## CI failure handling
+
+The persistent monitor (see "Poll for review completion" above) emits one event per CI check bucket transition — `ci: lint: pass`, `ci: test (20.x): fail`, etc. — without you needing a separate poll. On a failure event:
+
+1. Fetch logs for the failing check:
    ```bash
-   gh pr checks --json name,state,conclusion,detailsUrl
-   ```
-2. **If any check has failed**: Extract the run ID from the failed check's `detailsUrl` and fetch logs:
-   ```bash
-   RUN_ID="$(gh pr checks --json name,conclusion,detailsUrl \
+   RUN_ID="$(gh pr checks PR_NUM --json name,conclusion,detailsUrl \
      --jq '.[] | select(.conclusion=="FAILURE") | .detailsUrl | capture("/runs/(?<id>[0-9]+)") | .id' \
      | head -n1)"
    gh run view "$RUN_ID" --log-failed
    ```
-   Fix the failure, run tests locally to confirm, commit, and push. The Copilot review request will automatically apply to the new commit on most repos — if not, re-request after the push.
-3. **If checks are still pending**: No action needed — continue polling for the review. Check CI status again on subsequent poll iterations.
-4. **If all checks pass**: No action needed — continue polling for the review.
+2. Fix the failure, run tests locally to confirm, commit, and push. The Copilot review request typically re-applies to the new commit; if not, re-request after the push.
 
-This ensures CI failures are caught and fixed early rather than discovered after a full review cycle.
+Fixing CI failures early avoids burning a Copilot review cycle on code that won't ship anyway.
 
 ## Notes
 

@@ -6,6 +6,8 @@
 
 ## Changed
 
+- `do:rpr` now uses a single persistent `Monitor` for the entire session — one stream that emits an event for each new Copilot review AND each CI bucket transition. Previously the skill implicitly encouraged spawning a fresh background poll per review loop iteration, which produced 5+ active subshell tasks across a multi-round PR. The "CI Health Check During Review Polling" section is collapsed into a tighter "CI failure handling" section since the monitor surfaces failures as events without a separate poll.
+
 ## Fixed
 
 ## Removed
