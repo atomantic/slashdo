@@ -32,7 +32,9 @@ Before dispatching agents, understand what this change set claims to do:
 
 ## Dispatch Review Agents
 
-Read the five agent instruction files, then spawn **all five in parallel** using the Agent tool with `model: "opus"`. Each agent reviews ALL changed files independently. Opus-class reasoning catches issues that require drawing on broad software engineering principles, not just pattern-matching against checklists.
+Read the five agent instruction files, then spawn **all five in parallel** using the Agent tool with `model: "opus"`. Each agent reviews ALL changed files independently.
+
+**The agents are deliberately short and principle-led.** Each agent's checklist is a prompt for attention — opus's job is to think about the problem space, not pattern-match against bullets. The most expensive misses in past reviews were *consequence-reasoning* bugs (a fallback path producing a different shape than the happy path; an encoder corrupting a downstream parser; a test asserting a symptom instead of the contract) — none findable by adding more bullets. Trust the agent to reason; the checklist seeds the lens, not the conclusions.
 
 <surface_scan_agent>
 
@@ -90,7 +92,7 @@ For each agent, construct its prompt by combining:
 1. The agent's instruction content (from the sections above)
 2. Project convention overrides from CLAUDE.md that affect the review
 3. The list of changed files from the diff stat
-4. Instruction: "Read each changed file in full (not just diff hunks). Apply your checklist. Return structured findings."
+4. Instruction: "Read each changed file in full (not just diff hunks). Apply your reading lens — the checklist seeds attention but is NOT a script. Reason from principles about each new shape, flow, or contract: what's the smallest input that breaks this? What does the producer believe vs the consumer? What does the fallback path actually deliver? What does the documentation claim vs what the code does? Report findings that demonstrate consequence reasoning, not just pattern matches."
 
 Spawn all five agents simultaneously. Each returns its findings independently.
 

@@ -13,11 +13,17 @@ Commit changes, push to your fork, and open a pull request against the upstream 
    # Strip trailing slash first so a `.git/` suffix still gets removed; then strip `.git`.
    ORIGIN_URL=$(git remote get-url origin 2>/dev/null || true)
    ORIGIN_SLUG=$(printf '%s\n' "$ORIGIN_URL" | sed -E 's|/+$||; s|.*github\.com[:/]||; s|\.git$||; s|/+$||')
-   # Guard (POSIX): require exactly one slash and a non-empty value.
+   # Guard (POSIX): slug must be exactly OWNER/REPO (one slash, no whitespace) AND the original
+   # URL must actually be github.com — otherwise a non-GitHub remote whose path looks like
+   # owner/repo after the sed no-op (e.g. `git@gitlab.com:foo/bar`) would slip through.
    case "$ORIGIN_SLUG" in
-     ""|*/*/*) VALID=no ;;
-     */*)      VALID=yes ;;
-     *)        VALID=no ;;
+     ""|*/*/*|*[[:space:]]*) VALID=no ;;
+     */*)                    VALID=yes ;;
+     *)                      VALID=no ;;
+   esac
+   case "$ORIGIN_URL" in
+     *github.com:*|*github.com/*) ;;
+     *)                          VALID=no ;;
    esac
    if [ "$VALID" = "yes" ]; then
      gh repo view "$ORIGIN_SLUG" --json isFork,parent,owner,name,defaultBranchRef

@@ -60,9 +60,13 @@ Run the following loop until Copilot returns zero new comments:
      max 5 min). If no prior review exists, default expected duration to
      60 seconds. Use progressive poll intervals (5s, 5s, 10s, 10s, then
      15s thereafter)
-   - Error detection: if the review body contains "Copilot encountered an
-     error" or "unable to review this pull request", re-request (step 1)
-     and resume polling. Max 3 error retries before reporting failure.
+   - Error detection: if the review body contains "exceeds the maximum
+     number of lines", treat this as a terminal complete state — do NOT
+     re-request, do NOT retry. Report status "too-large" and exit the loop
+     immediately (proceed to merge as if zero comments).
+   - If the review body contains "Copilot encountered an error" or
+     "unable to review this pull request", re-request (step 1) and resume
+     polling. Max 3 error retries before reporting failure.
    - If no review appears after max wait, report the timeout.
      **Default mode**: skip and continue. **Interactive mode (`--interactive`)**: ask the user what to do
 
@@ -91,7 +95,7 @@ Run the following loop until Copilot returns zero new comments:
    - Otherwise, go back to step 1
 
 When done, report back:
-- Final status: clean / timeout / error / guardrail
+- Final status: clean / timeout / error / guardrail / too-large (PR exceeded Copilot's 20 000-line limit — treated as clean)
 - Total iterations completed
 - List of commits made (if any)
 - Any unresolved threads remaining

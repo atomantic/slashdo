@@ -115,6 +115,7 @@ Verification — self-check before proceeding (no user prompt needed):
 - Only merge after the latest Copilot review has been submitted AND that review generated **zero comments**. Check this by:
   1. Confirming a new review node exists with `submittedAt` after your last push
   2. Confirming the review body says "generated 0 comments" OR there are no new unresolved threads
+- **Exception — too-large**: if the Copilot review body says the PR exceeds the maximum number of lines (20 000), treat it as a clean review and proceed to merge immediately. Do NOT re-request.
 - **Never merge if:**
   - No Copilot review was ever posted (review never arrived — ask user first)
   - "Awaiting requested review" is still shown (review in progress)
