@@ -212,8 +212,8 @@ Completed items archived from PLAN.md. For release notes, see `.changelogs/`.
 
 ## 2026-03-10
 
-- **[staging-ci-pipeline] Added CI pipeline for staging deploys**
-- **[api-route-test-coverage] Test coverage for API routes**
+- **[staging-ci-pipeline] Added CI pipeline for staging deploys** — GitHub Actions workflow gating PRs into the `staging` branch
+- **[api-route-test-coverage] Test coverage for API routes** — added Vitest specs for every handler in `server/routes/`
 ```
 
 ### Rules

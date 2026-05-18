@@ -7,7 +7,7 @@ git branches and open PRs for the slug.
 
 The 50-char slug cap (see step 3 below) is sized for the branch-name
 budget: many CI/hosting integrations cap full ref names at ~244 chars, so
-keeping each segment tight leaves room for the `cos/<task>/.../`<agent>`
+keeping each segment tight leaves room for the `cos/<task>/<plan-id>/<agent>`
 wrapper and any `-2`/`-3` collision suffix without bumping that limit.
 
 ## Shape
@@ -38,9 +38,10 @@ The slug is derived deterministically from the item's title text:
    not `resolve-provider-and-model`. If you want readable word boundaries
    inside a camelCase identifier, manually space-separate it in the title.
 3. **Truncate to 50 chars** at the last `-` boundary at or before the cap
-   (so the slug ends on a word boundary, not a partial fragment). If there
-   is no `-` within the first 50 chars (single long word), hard-truncate
-   at 50.
+   (so the slug ends on a word boundary, not a partial fragment), then
+   trim any trailing `-` left behind by the truncation. If there is no
+   `-` within the first 50 chars (single long word), hard-truncate at 50
+   and skip the trailing-`-` trim (there is none).
 4. **Uniqueness** — the resulting slug must not collide with any existing
    `[slug]` already in PLAN.md OR DONE.md. On collision, append `-2`,
    `-3`, … (hard-truncating the base from the right if needed so that

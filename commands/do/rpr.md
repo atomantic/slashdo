@@ -126,13 +126,18 @@ Monitor:
       | jq -r '[.data.repository.pullRequest.reviews.nodes[]? | select(.author.login=="copilot-pull-request-reviewer") | .submittedAt] | max // "1970-01-01T00:00:00Z"')
     # Seed CI baseline once so the first tick doesn't fire a spurious burst of "ci:" events
     # for every check that was already in a terminal bucket when the monitor started. If the
-    # first `gh pr checks` call fails (network blip, missing jq) we'd be left with an empty
-    # ci_prev — retry until we get a valid snapshot rather than silently defaulting to empty.
+    # first `gh pr checks` call fails (network blip) OR jq itself fails (malformed JSON,
+    # missing jq) we'd be left with an empty ci_prev and the next tick would emit a burst
+    # for every existing check. Check the two exit statuses separately so we retry on a
+    # genuine failure but accept a legitimately-empty "no checks yet" snapshot.
     ci_prev=""
     while [ -z "$ci_prev_seeded" ]; do
       s0=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null)
-      if [ -n "$s0" ]; then
-        ci_prev=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s0" 2>/dev/null | sort)
+      if [ -z "$s0" ]; then
+        sleep 5
+        continue
+      fi
+      if ci_prev=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s0" | sort); then
         ci_prev_seeded=1
       else
         sleep 5
