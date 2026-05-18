@@ -41,9 +41,16 @@ suggested items (slugs will be assigned at insert time, since there's
 nothing to back-fill).
 
 1. Read PLAN.md and DONE.md (if either exists). Collect every `[slug]`
-   already present in either file into a `takenIds` set — including IDs on
-   `- [x]` archived-but-still-in-PLAN items and IDs inline on DONE.md
-   entries.
+   into a `takenIds` set **using the strict positional pattern** spelled
+   out in [lib/plan-id-format.md](../../lib/plan-id-format.md) (section
+   "Strict positional pattern for the Phase 0 collision scan"). In
+   short: PLAN.md slugs live at the bracketed token directly after
+   `- [ ] ` / `- [x] ` (or the indented variant); DONE.md slugs live at
+   the bracketed token directly after `- **`. Do NOT collect any
+   `[…]` token that appears elsewhere in a line (inline links,
+   reference shorthand) — those are not slugs and treating them as
+   taken would force unnecessary collision suffixes onto unrelated
+   future items.
 2. For each `- [ ]` / `- [x]` line in PLAN.md that does NOT already have an
    ID, derive a slug per the rules in
    [lib/plan-id-format.md](../../lib/plan-id-format.md):
@@ -89,7 +96,7 @@ If `GOALS.md` exists:
 - Note any items that should be absorbed into PLAN.md
 
 **Agent 5: Drift Detection**
-For every non-archived `- [ ]` checkbox in PLAN.md (Agent 5 runs in Phase 1 alongside Agents 1–4, before Phase 2's `still-pending` classification exists), determine whether executing the item as currently worded would *remove or regress a feature that has been added since the plan item was written*. Phase 2 reconciles drift results against the done-ness evidence — see the precedence rule below the triage table. Plans can drift: a "rip out X" or "replace Y with Z" item written six weeks ago may now collide with new functionality built on top of X or Y.
+For every checkbox in PLAN.md — **both `- [ ]` (open) and `- [x]` (completed-but-not-yet-archived) lines** — determine whether executing the item as currently worded would *remove or regress a feature that has been added since the plan item was written*. Agent 5 must evaluate `- [x]` items too because the Phase 2 precedence rule ("Drift takes precedence over done-ness") needs drift signal on `likely-done` candidates in order to fire — if Agent 5 skipped `- [x]` items, the `likely-done` ∩ `drifted` case described below could never actually arise. Agent 5 runs in Phase 1 alongside Agents 1–4, before Phase 2's `still-pending` classification exists; Phase 2 reconciles drift results against the done-ness evidence. Plans can drift: a "rip out X" or "replace Y with Z" item written six weeks ago may now collide with new functionality built on top of X or Y.
 
 For each item, look at:
 - Files/modules/functions the item would touch (infer from item text)

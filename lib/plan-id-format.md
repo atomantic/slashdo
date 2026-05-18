@@ -63,6 +63,21 @@ Examples:
 | `**Foo Bar.**` (first occurrence) | `foo-bar` |
 | `**Foo Bar.**` (second occurrence) | `foo-bar-2` |
 
+**Worked example for the first row** (subtle enough to deserve a trace):
+
+1. Strip wrappers: `Extract resolveProviderAndModel into promptRunner.js.`
+2. Lowercase + kebab: `.` is non-alphanumeric so the `.js.` segment
+   becomes `-js-`, then trailing-`-` trim gives the intermediate
+   pre-truncation slug `extract-resolveproviderandmodel-into-promptrunner-js`
+   (52 chars). Note `resolveProviderAndModel` is *flattened* to
+   `resolveproviderandmodel` because camelCase has no internal
+   non-alphanumeric boundary — see rule 2.
+3. Truncate at the last `-` ≤ position 50: the `-` immediately before
+   `js` sits at position 49, so truncation drops `-js`, yielding
+   `extract-resolveproviderandmodel-into-promptrunner-`. Trim the
+   trailing `-` for a final 49-char slug.
+4. Uniqueness: no collision in this example, so we stop here.
+
 ## Immutability
 
 Once a slug is assigned, it is **immutable** — even if the item's title is
@@ -104,3 +119,23 @@ PLAN.md `[slug]`; it is not re-derived from the (possibly-edited)
 archive description. The uniqueness check (step 4 above) scans DONE.md
 as well, so a retired slug is never recycled for a future item with a
 similar title.
+
+### Strict positional pattern for the Phase 0 collision scan
+
+The Phase 0 uniqueness check must only collect `[slug]` tokens from
+fixed positions to avoid false collisions with legitimate non-slug
+brackets (inline markdown links `[text](url)`, references like
+`see [docs/x.md]`, etc.) that may appear inside archive descriptions:
+
+- **PLAN.md**: only the bracketed token at position 3 on a checkbox
+  line (right after `- [ ] ` or `- [x] `, including nested-indent
+  variants like `  - [ ] [slug] …`). Regex sketch:
+  `^\s*-\s+\[[ x]\]\s+\[([a-z0-9-]+)\]\s`.
+- **DONE.md**: only the bracketed token at position 2 inside the
+  opening bold span on an archive line (right after `- **`). Regex
+  sketch: `^\s*-\s+\*\*\[([a-z0-9-]+)\]\s`.
+
+Brackets in any other position (mid-description links, inline `[…]`
+references, multi-bracket prose) MUST be ignored — they are not slugs
+and treating them as taken would force collision suffixes onto
+unrelated future items.

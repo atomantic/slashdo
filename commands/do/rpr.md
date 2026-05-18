@@ -147,6 +147,9 @@ Monitor:
       # New Copilot reviews since `latest`? Iterate in ascending order so that
       # if multiple reviews land between ticks each one emits its own event,
       # and `latest` advances to the most recent (max) — not the earliest.
+      # NOTE: the GraphQL `author.login` field returns `copilot-pull-request-reviewer`
+      # *without* a `[bot]` suffix — even though `__typename: Bot`. The `[bot]` form
+      # is only required when *requesting* a review via the REST API (see step 1 above).
       new_list=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 5) { nodes { author { login } submittedAt } } } } }\"}" \
         | gh api graphql --input - 2>/dev/null \
         | jq -r --arg t "$latest" '[.data.repository.pullRequest.reviews.nodes[]? | select(.author.login=="copilot-pull-request-reviewer") | select(.submittedAt > $t) | .submittedAt] | sort | .[]')
@@ -164,10 +167,20 @@ Monitor:
       # tick was filtered out. If the rpr loop needs to learn that a re-run finished
       # but landed on the same bucket, watch `gh run list` for new attempts on the
       # failed check rather than relying on a `ci:` event.
-      s=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null || echo '[]')
-      cur=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s" 2>/dev/null | sort)
-      comm -13 <(echo "$ci_prev") <(echo "$cur") | sed 's/^/ci: /'
-      ci_prev=$cur
+      # `gh pr checks` exits non-zero (code 8) when any check is failing — which is exactly
+      # the case we want to detect. We must NOT use `|| echo '[]'` here: when gh exits 8,
+      # command substitution would concatenate gh's real JSON output with the literal `[]`,
+      # producing malformed input that breaks jq. Capture the output unconditionally; only
+      # substitute `[]` when the captured output is empty (transport failure, not check
+      # failure). Then check jq's exit status separately before updating `ci_prev` — if jq
+      # fails we keep the previous baseline so the next tick doesn't emit a spurious burst
+      # for every check still in a terminal bucket.
+      s=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null)
+      [ -z "$s" ] && s='[]'
+      if cur=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s" | sort); then
+        comm -13 <(echo "$ci_prev") <(echo "$cur") | sed 's/^/ci: /'
+        ci_prev=$cur
+      fi
       sleep 25
     done
 ```
