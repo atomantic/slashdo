@@ -43,12 +43,14 @@ Address the latest code review feedback on the current branch's pull request usi
    - Each thread-fixing agent should:
      - Read the file and understand the context of the feedback
      - Make the requested code changes if they are accurate and warranted
+     - **Identify the root cause** of why the issue landed (missing lint rule, missing comment at the canonical site, misleading name, API that invites the mistake, etc.) per `~/.claude/lib/per-finding-root-cause.md` and apply the smallest matching action **in the same change**. Defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
      - Look for further opportunities to DRY up affected code
-     - Return what was changed and the thread ID that was addressed
+     - Return what was changed, the thread ID that was addressed, and the root-cause action taken (or "none — one-off")
    - The code quality reviewer should:
      - Read all changed files in the PR
      - Check for: style violations, missing error handling, dead code, DRY violations, security issues
-     - Apply fixes directly and return what was changed
+     - For each issue found, also apply the smallest root-cause action per `~/.claude/lib/per-finding-root-cause.md`
+     - Apply fixes directly and return what was changed plus the root-cause actions taken
    - After all agents return, review their changes for conflicts or overlapping edits
 
 5. **Run tests**: Run the project's test suite to verify all changes pass. Do not proceed if tests fail — fix issues first.
@@ -80,6 +82,8 @@ Address the latest code review feedback on the current branch's pull request usi
 9. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input).
 
 10. **Convention encoding**: After printing the summary, run the Convention Encoding phase against the issues addressed in this session. For each recurring pattern, apply the **smallest** code-level action that makes the convention self-evident (in-tree comment at the canonical site, a clarifying rename, or a surgical refactor that removes the footgun). CLAUDE.md / AGENTS.md additions are a **fallback** — used only when the convention can't be expressed locally. Encoded actions land in the same branch as the rpr fixes.
+
+!`cat ~/.claude/lib/per-finding-root-cause.md`
 
 !`cat ~/.claude/lib/post-review-doc-recommendations.md`
 

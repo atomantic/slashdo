@@ -83,6 +83,7 @@ Run the following loop until Copilot returns zero new comments:
    - Read the referenced file and understand the feedback
    - Evaluate if the finding is a real issue — if it is, fix it regardless of whether the current PR modified that code. Never dismiss findings as "out of scope" or "pre-existing."
    - Make the code fix
+   - IDENTIFY THE ROOT CAUSE of why the issue landed (missing lint rule, missing comment at the canonical site, misleading name, API that invites the mistake, etc.) per `~/.claude/lib/per-finding-root-cause.md` and apply the smallest matching action in the same change. Defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
    - Run the build command
    - If build passes, commit: address review: <summary>
    - Resolve the thread via GraphQL mutation using stdin JSON piping:
