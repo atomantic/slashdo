@@ -125,9 +125,10 @@ For each verified finding:
 1. Classify severity: **CRITICAL** (runtime crash, data leak, security) vs **IMPROVEMENT** (consistency, robustness, conventions)
 2. Fix all CRITICAL issues immediately
 3. For IMPROVEMENT issues, fix them too — the goal is to eliminate review round-trips
-4. After fixes, run the project's test suite and build command (per project conventions already in context)
-5. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
-6. Commit fixes: `refactor: address code review findings`
+4. **Identify the root cause** of why the issue existed (missing lint rule, missing comment at the canonical site, misleading name, API that invites the mistake, etc.) per `~/.claude/lib/per-finding-root-cause.md` and apply the smallest matching action **in the same change**. Defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
+5. After fixes, run the project's test suite and build command (per project conventions already in context)
+6. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
+7. Commit fixes: `refactor: address code review findings`
 
 ## Report
 
@@ -154,9 +155,11 @@ Print a summary table of what was reviewed and found:
 
 If no issues were found, confirm the code is clean and ready for PR.
 
-## Documentation Recommendations
+## Convention Encoding
 
-After the report is printed and fixes are committed, run the Documentation Recommendations phase. Examine the findings (both fixed and accepted-as-is) and surface project-level documentation updates that would prevent the same class of issue in future PRs. **This phase is read-only on project docs — surface suggestions only, never auto-edit CLAUDE.md, README.md, or other docs.**
+After the report is printed and fixes are committed, run the Convention Encoding phase. Examine the findings (both fixed and accepted-as-is) and, for each pattern likely to recur, apply the **smallest** code-level action that makes the convention self-evident (in-tree comment at the canonical site, a clarifying rename, or a surgical refactor that removes the footgun). CLAUDE.md / AGENTS.md additions are a **fallback**, used only when the convention truly can't be expressed locally. Any encoded actions land in the same branch as the review fixes.
+
+!`cat ~/.claude/lib/per-finding-root-cause.md`
 
 !`cat ~/.claude/lib/post-review-doc-recommendations.md`
 
