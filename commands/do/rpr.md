@@ -124,6 +124,7 @@ Monitor:
     # `latest` ends up as either the real max timestamp or — only if no Copilot reviews
     # exist yet on this PR — the documented far-past sentinel.
     latest=""
+    latest_seeded=""
     while [ -z "$latest_seeded" ]; do
       raw=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 50) { nodes { author { login } submittedAt } } } } }\"}" \
         | gh api graphql --input - 2>/dev/null)
@@ -144,6 +145,7 @@ Monitor:
     # for every existing check. Check the two exit statuses separately so we retry on a
     # genuine failure but accept a legitimately-empty "no checks yet" snapshot.
     ci_prev=""
+    ci_prev_seeded=""
     while [ -z "$ci_prev_seeded" ]; do
       s0=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null)
       if [ -z "$s0" ]; then
@@ -202,11 +204,19 @@ Monitor:
       # failure). Then check jq's exit status separately before updating `ci_prev` — if jq
       # fails we keep the previous baseline so the next tick doesn't emit a spurious burst
       # for every check still in a terminal bucket.
+      # Treat an empty `s` as a transient transport failure (gh exit / network blip) and
+      # SKIP the ci_prev update entirely — coercing empty to '[]' would parse cleanly,
+      # produce an empty cur, and overwrite the baseline. The next successful tick would
+      # then surface every existing check as "new" and emit a spurious burst, defeating
+      # the whole seed-loop purpose.
       s=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null)
-      [ -z "$s" ] && s='[]'
-      # Same pipefail-avoidance pattern as the seed loop above: capture jq's output and
-      # exit status BEFORE piping to sort, so a jq failure preserves the baseline rather
-      # than overwriting it with the empty string that sort would happily exit 0 on.
+      if [ -z "$s" ]; then
+        sleep 25
+        continue
+      fi
+      # Pipefail-avoidance pattern: capture jq's output and exit status BEFORE piping to
+      # sort, so a jq failure preserves the baseline rather than overwriting it with the
+      # empty string that sort would happily exit 0 on.
       if cur_raw=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s"); then
         cur=$(printf '%s\n' "$cur_raw" | sort)
         # Use `printf '%s'` (no trailing newline) so an empty ci_prev / cur feeds zero

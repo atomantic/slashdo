@@ -155,3 +155,12 @@ like `[-foo-]` will be picked up by the collision scan as taken (which
 is the safe choice — collide against the malformed slug, don't reissue
 it). Implementations that want to reject malformed slugs at collection
 time can use the stricter `[a-z0-9]+(-[a-z0-9]+)*` pattern.
+
+**Domain-specific shape conventions live in the per-command docs, not
+here.** The slug-derivation rules in this file are *general*: they map
+a title string to a kebab slug. Commands that want a more specific
+shape — e.g. `do:depfree` requiring `drop-<scope>-<pkg>` so scoped
+npm packages don't collapse to the same slug as their unscoped
+namesake (see `commands/do/depfree.md`) — encode that convention in
+the title text *before* applying the rules here. The collision scan
+still treats the resulting slug as opaque.

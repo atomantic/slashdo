@@ -42,7 +42,10 @@ replanned), skip Phase 0 entirely and let Phase 3 create PLAN.md from the
 suggested items (slugs will be assigned at insert time, since there's
 nothing to back-fill).
 
-1. Read PLAN.md and DONE.md (if either exists). Collect every `[slug]`
+1. Read PLAN.md and, if it exists, DONE.md. (PLAN.md presence is the
+   Phase 0 precondition stated above — a missing PLAN.md skips Phase 0
+   entirely. A missing DONE.md is fine: just treat it as an empty set
+   of taken slugs and proceed.) Collect every `[slug]`
    into a `takenIds` set **using the strict positional pattern** spelled
    out in [lib/plan-id-format.md](../../lib/plan-id-format.md) (section
    "Strict positional pattern for the Phase 0 collision scan"). In
