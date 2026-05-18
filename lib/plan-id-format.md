@@ -80,7 +80,8 @@ Examples:
    `resolveproviderandmodel` because camelCase has no internal
    non-alphanumeric boundary — see rule 2.
 3. Truncate at the last `-` ≤ position 50: the `-` immediately before
-   `js` sits at position 49, so truncation drops `-js`, yielding
+   `js` sits at position 50 (1-indexed), so the longest prefix ending
+   in `-` whose length is ≤ 50 is exactly the first 50 chars:
    `extract-resolveproviderandmodel-into-promptrunner-`. Trim the
    trailing `-` for a final 49-char slug.
 4. Uniqueness: no collision in this example, so we stop here.
