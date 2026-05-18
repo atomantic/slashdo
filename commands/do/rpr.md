@@ -119,11 +119,24 @@ Monitor:
     # replay every historical Copilot review on the PR as if it just landed. (If we left
     # this at the epoch sentinel, the very first tick would emit `copilot review:` for every
     # past review, which contradicts the "exactly one event per *new* review" invariant.)
-    # Override only if you want a different seed (e.g. start-of-session timestamp to replay
-    # reviews that landed while the agent was offline).
-    latest=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 5) { nodes { author { login } submittedAt } } } } }\"}" \
-      | gh api graphql --input - 2>/dev/null \
-      | jq -r '[.data.repository.pullRequest.reviews.nodes[]? | select(.author.login=="copilot-pull-request-reviewer") | .submittedAt] | max // "1970-01-01T00:00:00Z"')
+    # Retry until the GraphQL call AND jq both succeed — a one-shot seed that falls back to
+    # the epoch sentinel on transient failure would silently replay history on tick 1.
+    # `latest` ends up as either the real max timestamp or — only if no Copilot reviews
+    # exist yet on this PR — the documented far-past sentinel.
+    latest=""
+    while [ -z "$latest_seeded" ]; do
+      raw=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 20) { nodes { author { login } submittedAt } } } } }\"}" \
+        | gh api graphql --input - 2>/dev/null)
+      if [ -z "$raw" ]; then
+        sleep 5
+        continue
+      fi
+      if latest=$(jq -r '[.data.repository.pullRequest.reviews.nodes[]? | select(.author.login=="copilot-pull-request-reviewer") | .submittedAt] | max // "1970-01-01T00:00:00Z"' <<<"$raw"); then
+        latest_seeded=1
+      else
+        sleep 5
+      fi
+    done
     # Seed CI baseline once so the first tick doesn't fire a spurious burst of "ci:" events
     # for every check that was already in a terminal bucket when the monitor started. If the
     # first `gh pr checks` call fails (network blip) OR jq itself fails (malformed JSON,
@@ -150,7 +163,12 @@ Monitor:
       # NOTE: the GraphQL `author.login` field returns `copilot-pull-request-reviewer`
       # *without* a `[bot]` suffix — even though `__typename: Bot`. The `[bot]` form
       # is only required when *requesting* a review via the REST API (see step 1 above).
-      new_list=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 5) { nodes { author { login } submittedAt } } } } }\"}" \
+      # `last: 20` leaves headroom for fast multi-round sessions where Copilot reviews
+      # interleave with reviews from other reviewers (the select filter runs *after* the
+      # last-20 window, so a tick that lands 6 mixed reviews is fine; we just want the
+      # window large enough that the chance of dropping a Copilot review off the back is
+      # negligible at a 25 s tick).
+      new_list=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 20) { nodes { author { login } submittedAt } } } } }\"}" \
         | gh api graphql --input - 2>/dev/null \
         | jq -r --arg t "$latest" '[.data.repository.pullRequest.reviews.nodes[]? | select(.author.login=="copilot-pull-request-reviewer") | select(.submittedAt > $t) | .submittedAt] | sort | .[]')
       if [ -n "$new_list" ]; then
@@ -178,7 +196,12 @@ Monitor:
       s=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null)
       [ -z "$s" ] && s='[]'
       if cur=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s" | sort); then
-        comm -13 <(echo "$ci_prev") <(echo "$cur") | sed 's/^/ci: /'
+        # Use `printf '%s'` (no trailing newline) so an empty ci_prev / cur feeds zero
+        # lines to comm rather than one blank line. Without this, `echo "$x"` always
+        # emits at least a newline, so comm -13 would surface that blank line as "new"
+        # on tick 2, producing a spurious `ci: ` event (just the prefix) whenever a
+        # baseline transitions empty → empty or empty → populated.
+        comm -13 <(printf '%s' "$ci_prev" | grep -v '^$' || true) <(printf '%s' "$cur" | grep -v '^$' || true) | sed 's/^/ci: /'
         ci_prev=$cur
       fi
       sleep 25

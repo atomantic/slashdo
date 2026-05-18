@@ -13,6 +13,8 @@ Automatically audit PLAN.md against the codebase, prune completed/stale items, a
 
 **Philosophy:** PLAN.md should be short enough to paste into a prompt. Completed items belong in a done log, not cluttering the active plan.
 
+**Phase ordering:** This command runs phases 0 → 7. Phase 0 (plan-item ID assignment) was added so concurrent agents can claim distinct PLAN.md items via worktree branch names; existing phases keep their original numbering.
+
 ## Boundary Rule: PLAN.md vs GOALS.md
 
 **PLAN.md is tactical. GOALS.md is strategic.**
@@ -66,6 +68,17 @@ nothing to back-fill).
 
 If no IDs were assigned (every item already had one), this phase is a no-op
 and produces no commit on its own — proceed to Phase 1.
+
+**Concurrent-appender arbitration.** Audit commands like `do:better`,
+`do:better-swift`, and `do:depfree` independently append `- [ ]` items
+with their own slugs. Each command must re-read PLAN.md (and DONE.md)
+*immediately before* writing, so its uniqueness check sees the freshest
+state. If two such commands race and produce colliding slugs, Phase 0
+on the next replan is the safety net: it leaves existing slugs
+unchanged (immutability), so the collision is visible to the human via
+duplicate `[slug]` tokens and can be hand-resolved. No additional
+locking is provided — `/do:replan` is the single point that
+re-canonicalises the namespace.
 
 ## Phase 1: Automated Evidence Gathering
 

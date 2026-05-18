@@ -139,3 +139,11 @@ Brackets in any other position (mid-description links, inline `[…]`
 references, multi-bracket prose) MUST be ignored — they are not slugs
 and treating them as taken would force collision suffixes onto
 unrelated future items.
+
+**Permissive matching by design.** The `[a-z0-9-]+` character class
+accepts a single leading or trailing `-` even though the derivation
+rules trim them. Hand-edited PLAN.md entries with a malformed slug
+like `[-foo-]` will be picked up by the collision scan as taken (which
+is the safe choice — collide against the malformed slug, don't reissue
+it). Implementations that want to reject malformed slugs at collection
+time can use the stricter `[a-z0-9]+(-[a-z0-9]+)*` pattern.
