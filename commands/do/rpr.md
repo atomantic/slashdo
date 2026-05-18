@@ -111,18 +111,22 @@ Start the monitor *once* (right after the first review request, or at session en
 Monitor:
   description: "PR PR_NUM — Copilot reviews + CI"
   timeout_ms: 1800000   # 30 min; raise if your reviews are routinely slower
-  persistent: false
+  persistent: true
   command: |
     latest="SEED_TS"
     ci_prev=""
     while true; do
-      # New Copilot review since `latest`?
-      new=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 5) { nodes { author { login } submittedAt } } } } }\"}" \
+      # New Copilot reviews since `latest`? Iterate in ascending order so that
+      # if multiple reviews land between ticks each one emits its own event,
+      # and `latest` advances to the most recent (max) — not the earliest.
+      new_list=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 5) { nodes { author { login } submittedAt } } } } }\"}" \
         | gh api graphql --input - 2>/dev/null \
-        | jq -r --arg t "$latest" '[.data.repository.pullRequest.reviews.nodes[]? | select(.author.login=="copilot-pull-request-reviewer") | select(.submittedAt > $t) | .submittedAt] | min // empty')
-      if [ -n "$new" ]; then
-        echo "copilot review: $new"
-        latest="$new"
+        | jq -r --arg t "$latest" '[.data.repository.pullRequest.reviews.nodes[]? | select(.author.login=="copilot-pull-request-reviewer") | select(.submittedAt > $t) | .submittedAt] | sort | .[]')
+      if [ -n "$new_list" ]; then
+        while IFS= read -r ts; do
+          echo "copilot review: $ts"
+          latest="$ts"
+        done <<<"$new_list"
       fi
       # CI bucket transitions on the same tick.
       s=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null || echo '[]')

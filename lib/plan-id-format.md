@@ -29,16 +29,19 @@ The slug is derived deterministically from the item's title text:
 2. **Lowercase, kebab-case** — replace any run of non-`[a-z0-9]` with `-`,
    collapse repeated `-`, trim leading/trailing `-`.
 3. **Truncate to 50 chars** at the last `-` boundary at or before the cap
-   (so the slug ends on a word boundary, not a partial fragment).
+   (so the slug ends on a word boundary, not a partial fragment). If there
+   is no `-` within the first 50 chars (single long word), hard-truncate
+   at 50.
 4. **Uniqueness** — the resulting slug must not collide with any existing
    `[slug]` already in PLAN.md OR DONE.md. On collision, append `-2`,
-   `-3`, … (trimming the base if needed to stay within 50 chars).
+   `-3`, … (hard-truncating the base from the right if needed so that
+   `base + "-N"` stays within 50 chars).
 
 Examples:
 
 | Title | Slug |
 | --- | --- |
-| `**Extract resolveProviderAndModel into promptRunner.js.**` | `extract-resolveprovidera ndmodel-into-promptrunner` (truncated at 50) |
+| `**Extract resolveProviderAndModel into promptRunner.js.**` | `extract-resolveproviderandmodel-into-promptrunner` (truncated at 50) |
 | `**Content-addressed asset dedup.**` | `content-addressed-asset-dedup` |
 | `**Foo Bar.**` (first occurrence) | `foo-bar` |
 | `**Foo Bar.**` (second occurrence) | `foo-bar-2` |
@@ -62,7 +65,7 @@ prefix on the archived entry:
 ```markdown
 ## 2026-05-17
 
-- **[extract-resolveprovidera ndmodel-into-promptrunner] Extract resolveProviderAndModel** — landed `server/lib/promptRunner.js`; consolidated three call sites.
+- **[extract-resolveproviderandmodel-into-promptrunner] Extract resolveProviderAndModel** — landed `server/lib/promptRunner.js`; consolidated three call sites.
 ```
 
 This means the uniqueness check (step 4 above) scans DONE.md as well, so a

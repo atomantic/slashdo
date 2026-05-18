@@ -87,7 +87,13 @@ For each `still-pending` PLAN.md item, determine whether executing it as current
 
 For each item, look at:
 - Files/modules/functions the item would touch (infer from item text)
-- Git history of those paths since the plan item appeared (`git log --since=<plan-item-date> -- <path>`)
+- Git history of those paths since the plan item appeared. Derive
+  `<plan-item-date>` with this fallback chain:
+  1. `git blame -L <line>,<line> -- PLAN.md` on the checkbox line to find
+     the commit that introduced the item; use that commit's author date.
+  2. If blame is unhelpful (item moved by a recent reformat, file rewrite,
+     etc.), fall back to a fixed lookback window of **60 days**.
+  Then run `git log --since=<plan-item-date> -- <path>` on each touched path.
 - New exports, public APIs, tests, or call sites added to those paths
 - Whether the item's stated goal (remove / replace / simplify / consolidate) would delete code that other new code now depends on
 
@@ -137,7 +143,7 @@ Replan complete:
    Re-run with --interactive to resolve (replan / examine / delete).
 ```
 
-If `D > 0`, exit with a non-zero-style emphasis in the summary so the user sees it. Do not commit drifted-item resolutions silently.
+If `D > 0`, emphasize the drift count visually in the printed summary (e.g. bold + the `⚠️` prefix shown above) so the user notices it. Do **not** actually exit with a non-zero process exit code — `/do:replan` is often chained into other commands and a non-zero exit would break that automation. Do not commit drifted-item resolutions silently.
 
 ### Interactive Mode (`--interactive`)
 
