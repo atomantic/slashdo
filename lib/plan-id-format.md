@@ -41,7 +41,7 @@ Examples:
 
 | Title | Slug |
 | --- | --- |
-| `**Extract resolveProviderAndModel into promptRunner.js.**` | `extract-resolveproviderandmodel-into-promptrunner` (truncated at 50) |
+| `**Extract resolveProviderAndModel into promptRunner.js.**` | `extract-resolveproviderandmodel-into-promptrunner` (truncated at last `-` boundary ≤50; result is 49 chars) |
 | `**Content-addressed asset dedup.**` | `content-addressed-asset-dedup` |
 | `**Foo Bar.**` (first occurrence) | `foo-bar` |
 | `**Foo Bar.**` (second occurrence) | `foo-bar-2` |

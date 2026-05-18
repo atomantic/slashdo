@@ -106,15 +106,19 @@ Start the monitor *once* (right after the first review request, or at session en
 
 ```bash
 # Replace OWNER/REPO/PR_NUM with literals — no shell variables inside the GraphQL query string.
-# Replace SEED_TS with the latest Copilot review submittedAt you have already seen (or a far-past
-# ISO timestamp like "1970-01-01T00:00:00Z" if none).
+# SEED_TS defaults to the documented far-past sentinel so an unsubstituted placeholder
+# still works correctly (lexicographic comparison against a "2026-..." timestamp). Override
+# only if you want to skip past reviews you've already processed.
 Monitor:
   description: "PR PR_NUM — Copilot reviews + CI"
   timeout_ms: 1800000   # 30 min; raise if your reviews are routinely slower
   persistent: true
   command: |
-    latest="SEED_TS"
-    ci_prev=""
+    latest="1970-01-01T00:00:00Z"   # override with the last seen submittedAt to skip already-seen reviews
+    # Seed CI baseline once so the first tick doesn't fire a spurious burst of "ci:" events
+    # for every check that was already in a terminal bucket when the monitor started.
+    s0=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null || echo '[]')
+    ci_prev=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s0" 2>/dev/null | sort)
     while true; do
       # New Copilot reviews since `latest`? Iterate in ascending order so that
       # if multiple reviews land between ticks each one emits its own event,
@@ -129,6 +133,9 @@ Monitor:
         done <<<"$new_list"
       fi
       # CI bucket transitions on the same tick.
+      # Note: a check that goes fail → pending → fail (same terminal bucket as before)
+      # produces no event — the bucket value didn't actually change. If you need to
+      # detect re-failures, watch `gh run list` for new attempts on the failed check.
       s=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null || echo '[]')
       cur=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s" 2>/dev/null | sort)
       comm -13 <(echo "$ci_prev") <(echo "$cur") | sed 's/^/ci: /'
@@ -141,7 +148,7 @@ When you push a fix and want another review, just *request* it (the API call abo
 
 **Stop the monitor only when you're done with the rpr loop** (use `TaskStop` with the monitor's id), or let it time out naturally.
 
-**Dynamic poll timing within the monitor**: a 25s loop covers the typical 30–90s review latency without burning quota. If a review hasn't landed after **3× the historical average latency for this PR** (minimum 90 s, maximum 5 min), surface it via a one-shot status check and treat as stuck rather than slow.
+**Poll cadence + "stuck" threshold**: the monitor uses a fixed 25 s tick (covers the typical 30–90 s review latency without burning quota). The cadence itself is *not* dynamic. What *is* dynamic is the **stuck threshold**: if a review hasn't landed after **3× the historical average latency for this PR** (minimum 90 s, maximum 5 min), the rpr loop should surface it via a one-shot status check and treat it as stuck rather than slow — that decision lives in the rpr loop body, not in the monitor's sleep.
 
 The review is "complete" when a new `copilot review:` event fires. If no event arrives by the deadline you set: **Default mode**: auto-skip and continue. **Interactive mode (`--interactive`)**: ask the user whether to continue waiting, re-request, or skip.
 

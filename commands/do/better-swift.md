@@ -518,13 +518,13 @@ For each utility: name, purpose, files it replaces, signature sketch.
 For each file touched by multiple categories, document why it was assigned to one.
 
 ### Security & Secrets
-- [ ] [<slug>] **[CRITICAL]** `file:line` - Description — Fix: ... (Complexity: Simple/Medium/Complex)
+- [ ] [sec-keychain-token-leak] **[CRITICAL]** `file:line` - Description — Fix: ... (Complexity: Simple/Medium/Complex)
 
 ### Code Quality
-- [ ] [<slug>] **[HIGH]** `file:line` - Description — Fix: ...
+- [ ] [swift-mainactor-binding] **[HIGH]** `file:line` - Description — Fix: ...
 
 ### DRY & YAGNI
-- [ ] [<slug>] **[MEDIUM]** `file:line` - Description — Fix: ...
+- [ ] [dry-view-modifier-dup] **[MEDIUM]** `file:line` - Description — Fix: ...
 
 ### Architecture & SOLID
 ### Bugs, Performance & Error Handling

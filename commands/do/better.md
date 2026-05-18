@@ -259,13 +259,13 @@ For each utility: name, purpose, files it replaces, signature sketch.
 For each file touched by multiple categories, document why it was assigned to one.
 
 ### Security & Secrets
-- [ ] [<slug>] **[CRITICAL]** `file:line` - Description — Fix: ... (Complexity: Simple/Medium/Complex)
+- [ ] [sec-routes-pr-validation] **[CRITICAL]** `file:line` - Description — Fix: ... (Complexity: Simple/Medium/Complex)
 
 ### Code Quality
-- [ ] [<slug>] **[HIGH]** `file:line` - Description — Fix: ...
+- [ ] [quality-utils-error-paths] **[HIGH]** `file:line` - Description — Fix: ...
 
 ### DRY & YAGNI
-- [ ] [<slug>] **[MEDIUM]** `file:line` - Description — Fix: ...
+- [ ] [dry-cli-output-dedup] **[MEDIUM]** `file:line` - Description — Fix: ...
 
 ### Architecture & SOLID
 ### Bugs, Performance & Error Handling
