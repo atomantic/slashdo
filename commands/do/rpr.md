@@ -17,7 +17,7 @@ Address the latest code review feedback on the current branch's pull request usi
 
 2. **Check for existing code review** (only if `is_fork_pr=false`): Before requesting a new review, check if there's already a completed Copilot review or a pending Copilot review in progress. Query the PR's review requests and recent reviews:
    ```bash
-   gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviewRequests(first: 10) { nodes { requestedReviewer { ... on Bot { login } } } } reviews(last: 20) { nodes { state body author { login } submittedAt } } } } }'
+   gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviewRequests(first: 10) { nodes { requestedReviewer { ... on Bot { login } } } } reviews(last: 50) { nodes { state body author { login } submittedAt } } } } }'
    ```
    - **If at least one completed Copilot review exists** (a review in `reviews.nodes` authored by `copilot-pull-request-reviewer`): Skip requesting a new review — proceed directly to step 3 to fetch and address the existing feedback threads.
    - **If a Copilot review is currently pending** (Copilot appears in `reviewRequests.nodes[].requestedReviewer` as `copilot-pull-request-reviewer`): Treat the review as in progress. Poll for completion using the "Poll for review completion" section below, and consider it complete once a new Copilot review appears in `reviews.nodes` with a `submittedAt` timestamp later than the latest Copilot review timestamp you observed before starting to poll. Then proceed to step 3.
@@ -125,7 +125,7 @@ Monitor:
     # exist yet on this PR — the documented far-past sentinel.
     latest=""
     while [ -z "$latest_seeded" ]; do
-      raw=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 20) { nodes { author { login } submittedAt } } } } }\"}" \
+      raw=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 50) { nodes { author { login } submittedAt } } } } }\"}" \
         | gh api graphql --input - 2>/dev/null)
       if [ -z "$raw" ]; then
         sleep 5
@@ -150,7 +150,12 @@ Monitor:
         sleep 5
         continue
       fi
-      if ci_prev=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s0" | sort); then
+      # Capture jq's exit status BEFORE piping to sort. `if cur=$(jq ... | sort)` would
+      # only capture sort's exit (last command in the pipeline) without `set -o pipefail`,
+      # masking jq failures and letting an empty cur overwrite the baseline. Two-step
+      # capture is explicit and portable.
+      if ci_raw=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s0"); then
+        ci_prev=$(printf '%s\n' "$ci_raw" | sort)
         ci_prev_seeded=1
       else
         sleep 5
@@ -163,12 +168,16 @@ Monitor:
       # NOTE: the GraphQL `author.login` field returns `copilot-pull-request-reviewer`
       # *without* a `[bot]` suffix — even though `__typename: Bot`. The `[bot]` form
       # is only required when *requesting* a review via the REST API (see step 1 above).
-      # `last: 20` leaves headroom for fast multi-round sessions where Copilot reviews
-      # interleave with reviews from other reviewers (the select filter runs *after* the
-      # last-20 window, so a tick that lands 6 mixed reviews is fine; we just want the
-      # window large enough that the chance of dropping a Copilot review off the back is
-      # negligible at a 25 s tick).
-      new_list=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 20) { nodes { author { login } submittedAt } } } } }\"}" \
+      # `last: 50` leaves comfortable headroom for fast multi-round sessions where
+      # Copilot reviews interleave with reviews from other reviewers. The GraphQL
+      # `reviews` connection has no native author filter, so the select() runs *after*
+      # the last-N window — meaning the practical Copilot-event headroom is "however
+      # many of the last 50 reviews happen to be from Copilot". At 25 s per tick and 50
+      # nodes of trailing history, dropping a Copilot review off the back would require
+      # >50 reviews in 25 s, which is far outside normal multi-round behaviour. If a
+      # workflow ever pushes against that limit, raise the cap further; the response is
+      # tiny so 100 or 200 is also viable.
+      new_list=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 50) { nodes { author { login } submittedAt } } } } }\"}" \
         | gh api graphql --input - 2>/dev/null \
         | jq -r --arg t "$latest" '[.data.repository.pullRequest.reviews.nodes[]? | select(.author.login=="copilot-pull-request-reviewer") | select(.submittedAt > $t) | .submittedAt] | sort | .[]')
       if [ -n "$new_list" ]; then
@@ -195,7 +204,11 @@ Monitor:
       # for every check still in a terminal bucket.
       s=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null)
       [ -z "$s" ] && s='[]'
-      if cur=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s" | sort); then
+      # Same pipefail-avoidance pattern as the seed loop above: capture jq's output and
+      # exit status BEFORE piping to sort, so a jq failure preserves the baseline rather
+      # than overwriting it with the empty string that sort would happily exit 0 on.
+      if cur_raw=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s"); then
+        cur=$(printf '%s\n' "$cur_raw" | sort)
         # Use `printf '%s'` (no trailing newline) so an empty ci_prev / cur feeds zero
         # lines to comm rather than one blank line. Without this, `echo "$x"` always
         # emits at least a newline, so comm -13 would surface that blank line as "new"

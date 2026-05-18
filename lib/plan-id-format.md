@@ -37,11 +37,18 @@ The slug is derived deterministically from the item's title text:
    them — e.g. `resolveProviderAndModel` becomes `resolveproviderandmodel`,
    not `resolve-provider-and-model`. If you want readable word boundaries
    inside a camelCase identifier, manually space-separate it in the title.
-3. **Truncate to 50 chars** at the last `-` boundary at or before the cap
-   (so the slug ends on a word boundary, not a partial fragment), then
-   trim any trailing `-` left behind by the truncation. If there is no
-   `-` within the first 50 chars (single long word), hard-truncate at 50
-   and skip the trailing-`-` trim (there is none).
+3. **Truncate to 50 chars** at the last `-` boundary at or before the
+   cap (so the slug ends on a word boundary, not a partial fragment),
+   then trim any trailing `-` left behind by the truncation. Precise
+   semantics: take the longest prefix of the kebab string whose length
+   is ≤ 50 chars *and* which ends in `-`; drop the trailing `-`. If
+   there is no `-` within the first 50 chars (single long word),
+   hard-truncate at 50 and skip the trailing-`-` trim (there is none).
+   Worked example: a 52-char kebab `extract-…-promptrunner-js` has a
+   `-` at position 50 (1-indexed, immediately before `js`); the
+   ≤-50-char prefix ending in `-` is positions 1–50 (the string up to
+   and including that `-`); trimming the trailing `-` yields a 49-char
+   slug.
 4. **Uniqueness** — the resulting slug must not collide with any existing
    `[slug]` already in PLAN.md OR DONE.md. On collision, append `-2`,
    `-3`, … (hard-truncating the base from the right if needed so that
