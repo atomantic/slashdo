@@ -339,8 +339,12 @@ Estimated replacement code: ~{lines} lines across {files} new/modified files.
 
 ### Replacement Tasks
 For each dependency to remove:
-- [ ] **{package}** — {strategy}. Replace {N} call sites in {M} files. Write {utility name} ({est. lines} lines). Complexity: {level}.
+- [ ] [drop-{package-slug}] **{package}** — {strategy}. Replace {N} call sites in {M} files. Write {utility name} ({est. lines} lines). Complexity: {level}.
 ```
+
+**Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct removals via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case, ≤50 chars, unique against every `[slug]` already in PLAN.md and DONE.md. Recommended pattern: `drop-<package-name-kebabed>` (e.g. `[drop-uuid]`, `[drop-chalk]`); collide-suffix with `-2`/`-3` if the same package was removed in a prior audit and re-added.
+
+**Scoped npm packages** (e.g. `@types/node`, `@scope/pkg`) lose their leading `@` to the kebab-case rule and collapse `/` to `-`, so a naïve `drop-<package-name-kebabed>` would produce `drop-types-node` for both `@types/node` and any hypothetical `@othertypes/node`. Preserve the scope explicitly in the slug: `drop-<scope>-<pkg>` (so `@types/node` → `[drop-types-node]`, `@scope/pkg` → `[drop-scope-pkg]`). If a non-scoped package with the same shape already owns that slug, fall through to the standard `-2`/`-3` collision suffix.
 
 7. Print summary table:
 ```
@@ -685,7 +689,7 @@ gh pr merge {PR_NUMBER} --merge
    git stash pop
    ```
 4. Update PLAN.md:
-   - Mark completed removals with `[x]`
+   - Mark completed removals by flipping `- [ ]` → `- [x]` — **preserve the `[<slug>]` ID** on each line (only the box character changes, the slug stays). See [lib/plan-id-format.md](../../lib/plan-id-format.md).
    - Add PR link
    - Note any packages that were reverted
 5. Print the final summary:

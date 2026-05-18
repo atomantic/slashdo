@@ -203,7 +203,7 @@ If `--refresh` was passed and `GOALS.md` already exists:
 3. Identify goals whose status has changed (new progress, completed, abandoned)
 4. **Default mode**: Update the document in-place automatically, preserving user-written content where possible. Print a summary of what changed.
    **Interactive mode (`--interactive`)**: Present changes to the user for confirmation before updating.
-5. If any checkbox task lists are found in the existing GOALS.md, move them to PLAN.md automatically (default) or offer to move them (interactive)
+5. If any checkbox task lists are found in the existing GOALS.md, move them to PLAN.md automatically (default) or offer to move them (interactive). When inserting each item into PLAN.md, **assign it a unique `[<slug>]` ID** per [lib/plan-id-format.md](../../lib/plan-id-format.md): kebab-case slug derived from the item title, ≤50 chars, unique against every existing `[slug]` in PLAN.md and DONE.md.
 
 ## Phase 5: Finalize
 
