@@ -5,6 +5,11 @@ work by encoding the slug in their worktree branch name
 (`cos/<task>/<plan-id>/<agent>`). Other agents detect the claim by scanning
 git branches and open PRs for the slug.
 
+The 50-char slug cap (see step 3 below) is sized for the branch-name
+budget: many CI/hosting integrations cap full ref names at ~244 chars, so
+keeping each segment tight leaves room for the `cos/<task>/.../`<agent>`
+wrapper and any `-2`/`-3` collision suffix without bumping that limit.
+
 ## Shape
 
 Every `- [ ]` / `- [x]` checkbox carries an ID **immediately after the
@@ -27,7 +32,11 @@ The slug is derived deterministically from the item's title text:
    `[text](url)` → `text`, `~~struck~~` → `struck`. Remove HTML comments
    (e.g. `<!-- NEEDS_INPUT -->`).
 2. **Lowercase, kebab-case** — replace any run of non-`[a-z0-9]` with `-`,
-   collapse repeated `-`, trim leading/trailing `-`.
+   collapse repeated `-`, trim leading/trailing `-`. Note: camelCase tokens
+   are **flattened** because there is no non-alphanumeric boundary inside
+   them — e.g. `resolveProviderAndModel` becomes `resolveproviderandmodel`,
+   not `resolve-provider-and-model`. If you want readable word boundaries
+   inside a camelCase identifier, manually space-separate it in the title.
 3. **Truncate to 50 chars** at the last `-` boundary at or before the cap
    (so the slug ends on a word boundary, not a partial fragment). If there
    is no `-` within the first 50 chars (single long word), hard-truncate
@@ -35,7 +44,14 @@ The slug is derived deterministically from the item's title text:
 4. **Uniqueness** — the resulting slug must not collide with any existing
    `[slug]` already in PLAN.md OR DONE.md. On collision, append `-2`,
    `-3`, … (hard-truncating the base from the right if needed so that
-   `base + "-N"` stays within 50 chars).
+   `base + "-N"` stays within 50 chars). After each right-trim the
+   resulting `base + "-N"` may itself collide with an unrelated existing
+   slug that happens to be a prefix of the original — **re-run the
+   uniqueness check after every truncation+suffix step, bumping `N`
+   until the candidate is unique against both PLAN.md and DONE.md**. The
+   right-trimmed base is not required to end on a word boundary (rule 3's
+   word-boundary guarantee applies only to the initial 50-char
+   truncation).
 
 Examples:
 
@@ -60,7 +76,13 @@ never rewrites an existing slug.
 ## DONE.md archival
 
 When an item moves from PLAN.md to DONE.md, the slug is preserved as a
-prefix on the archived entry:
+prefix on the archived entry. **This file is the canonical specification
+for the archive shape — every command that touches DONE.md
+(`do:replan`, `do:goals`, `do:push`, `do:pr-better`, etc.) must produce
+this exact shape so the Phase 0 uniqueness check can parse it
+deterministically.**
+
+Canonical archive line:
 
 ```markdown
 ## 2026-05-17
@@ -68,5 +90,16 @@ prefix on the archived entry:
 - **[extract-resolveproviderandmodel-into-promptrunner] Extract resolveProviderAndModel** — landed `server/lib/promptRunner.js`; consolidated three call sites.
 ```
 
-This means the uniqueness check (step 4 above) scans DONE.md as well, so a
-retired slug is never recycled for a future item with a similar title.
+Required shape, in order:
+1. `- ` (bullet)
+2. `**` (open bold)
+3. `[<slug>]` immediately after the open bold, no leading space
+4. ` ` (single space) + the human-readable title
+5. `**` (close bold)
+6. ` — ` (em-dash with spaces) + the description
+
+The slug on the archived line is **lifted verbatim** from the source
+PLAN.md `[slug]`; it is not re-derived from the (possibly-edited)
+archive description. The uniqueness check (step 4 above) scans DONE.md
+as well, so a retired slug is never recycled for a future item with a
+similar title.

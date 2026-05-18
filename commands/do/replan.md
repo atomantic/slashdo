@@ -33,11 +33,17 @@ checkbox. The ID lets concurrent agents claim distinct items by encoding the
 slug in their worktree branch name (`cos/<task>/<plan-id>/<agent>`) and lets
 other agents detect what's in flight by scanning branches/PRs for the slug.
 
-Run this phase BEFORE the evidence-gathering agents below:
+Run this phase BEFORE the evidence-gathering agents below.
 
-1. Read PLAN.md and DONE.md (if it exists). Collect every `[slug]` already
-   present in either file into a `takenIds` set — including IDs on `- [x]`
-   archived-but-still-in-PLAN items and IDs inline on DONE.md entries.
+**Precondition:** PLAN.md exists. If PLAN.md is missing (fresh repo, never
+replanned), skip Phase 0 entirely and let Phase 3 create PLAN.md from the
+suggested items (slugs will be assigned at insert time, since there's
+nothing to back-fill).
+
+1. Read PLAN.md and DONE.md (if either exists). Collect every `[slug]`
+   already present in either file into a `takenIds` set — including IDs on
+   `- [x]` archived-but-still-in-PLAN items and IDs inline on DONE.md
+   entries.
 2. For each `- [ ]` / `- [x]` line in PLAN.md that does NOT already have an
    ID, derive a slug per the rules in
    [lib/plan-id-format.md](../../lib/plan-id-format.md):
@@ -83,7 +89,7 @@ If `GOALS.md` exists:
 - Note any items that should be absorbed into PLAN.md
 
 **Agent 5: Drift Detection**
-For each `still-pending` PLAN.md item, determine whether executing it as currently worded would *remove or regress a feature that has been added since the plan item was written*. Plans can drift: a "rip out X" or "replace Y with Z" item written six weeks ago may now collide with new functionality built on top of X or Y.
+For every non-archived `- [ ]` checkbox in PLAN.md (Agent 5 runs in Phase 1 alongside Agents 1–4, before Phase 2's `still-pending` classification exists), determine whether executing the item as currently worded would *remove or regress a feature that has been added since the plan item was written*. Phase 2 reconciles drift results against the done-ness evidence — see the precedence rule below the triage table. Plans can drift: a "rip out X" or "replace Y with Z" item written six weeks ago may now collide with new functionality built on top of X or Y.
 
 For each item, look at:
 - Files/modules/functions the item would touch (infer from item text)
@@ -214,7 +220,7 @@ Completed items archived from PLAN.md. For release notes, see `.changelogs/`.
 
 - Group by date (newest first)
 - One line per item — concise description of what was done, not the original checkbox text
-- **Preserve the `[plan-id]` slug** from the PLAN.md line as a bracketed prefix on the archived entry. The bold-wrapped title makes the slug easy to grep across DONE.md and keeps the uniqueness check correct on future replans (retired slugs are not reused).
+- **Lift the `[plan-id]` slug verbatim** from the source PLAN.md line — do NOT re-derive the slug from the (possibly-rewritten) archive description. Slugs are immutable once assigned (see [lib/plan-id-format.md](../../lib/plan-id-format.md)) and Phase 0's collision check parses DONE.md expecting the exact slug that was issued. The bold-wrapped title format makes the slug easy to grep across DONE.md and keeps the uniqueness check correct on future replans (retired slugs are not reused).
 - If the completed item had substantial documentation (>20 lines), extract it to `docs/` and add a link: `- **[plan-id] Feature X** — see [docs/features/x.md](./docs/features/x.md)`
 - Do NOT duplicate changelog entries — DONE.md captures plan-item completion, changelogs capture release-level changes
 

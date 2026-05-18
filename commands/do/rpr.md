@@ -106,19 +106,38 @@ Start the monitor *once* (right after the first review request, or at session en
 
 ```bash
 # Replace OWNER/REPO/PR_NUM with literals — no shell variables inside the GraphQL query string.
-# SEED_TS defaults to the documented far-past sentinel so an unsubstituted placeholder
-# still works correctly (lexicographic comparison against a "2026-..." timestamp). Override
-# only if you want to skip past reviews you've already processed.
+# The monitor uses `gh pr checks` with `--json name,bucket` throughout. The `bucket` field
+# groups checks into a small fixed vocabulary: `pass`, `fail`, `cancel`, `skipping`, `pending`
+# — see `gh pr checks --help`. The emitted `ci: <name>: <bucket>` events embed that vocabulary
+# verbatim, so the rpr loop body should switch on those exact values.
 Monitor:
   description: "PR PR_NUM — Copilot reviews + CI"
   timeout_ms: 1800000   # 30 min; raise if your reviews are routinely slower
   persistent: true
   command: |
-    latest="1970-01-01T00:00:00Z"   # override with the last seen submittedAt to skip already-seen reviews
+    # Seed the review baseline from the current max submittedAt so the first tick does NOT
+    # replay every historical Copilot review on the PR as if it just landed. (If we left
+    # this at the epoch sentinel, the very first tick would emit `copilot review:` for every
+    # past review, which contradicts the "exactly one event per *new* review" invariant.)
+    # Override only if you want a different seed (e.g. start-of-session timestamp to replay
+    # reviews that landed while the agent was offline).
+    latest=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 5) { nodes { author { login } submittedAt } } } } }\"}" \
+      | gh api graphql --input - 2>/dev/null \
+      | jq -r '[.data.repository.pullRequest.reviews.nodes[]? | select(.author.login=="copilot-pull-request-reviewer") | .submittedAt] | max // "1970-01-01T00:00:00Z"')
     # Seed CI baseline once so the first tick doesn't fire a spurious burst of "ci:" events
-    # for every check that was already in a terminal bucket when the monitor started.
-    s0=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null || echo '[]')
-    ci_prev=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s0" 2>/dev/null | sort)
+    # for every check that was already in a terminal bucket when the monitor started. If the
+    # first `gh pr checks` call fails (network blip, missing jq) we'd be left with an empty
+    # ci_prev — retry until we get a valid snapshot rather than silently defaulting to empty.
+    ci_prev=""
+    while [ -z "$ci_prev_seeded" ]; do
+      s0=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null)
+      if [ -n "$s0" ]; then
+        ci_prev=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s0" 2>/dev/null | sort)
+        ci_prev_seeded=1
+      else
+        sleep 5
+      fi
+    done
     while true; do
       # New Copilot reviews since `latest`? Iterate in ascending order so that
       # if multiple reviews land between ticks each one emits its own event,
@@ -133,9 +152,13 @@ Monitor:
         done <<<"$new_list"
       fi
       # CI bucket transitions on the same tick.
-      # Note: a check that goes fail → pending → fail (same terminal bucket as before)
-      # produces no event — the bucket value didn't actually change. If you need to
-      # detect re-failures, watch `gh run list` for new attempts on the failed check.
+      # Event semantics: an event fires when the bucket *string* for a check changes
+      # after filtering out `pending`. So `fail → cancel` (or any terminal → different
+      # terminal) DOES fire. But `fail → pending → fail` (same terminal bucket either
+      # side of a re-run) does NOT — the comm diff sees no change because the pending
+      # tick was filtered out. If the rpr loop needs to learn that a re-run finished
+      # but landed on the same bucket, watch `gh run list` for new attempts on the
+      # failed check rather than relying on a `ci:` event.
       s=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null || echo '[]')
       cur=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s" 2>/dev/null | sort)
       comm -13 <(echo "$ci_prev") <(echo "$cur") | sed 's/^/ci: /'
@@ -158,10 +181,12 @@ The review is "complete" when a new `copilot review:` event fires. If no event a
 
 The persistent monitor (see "Poll for review completion" above) emits one event per CI check bucket transition — `ci: lint: pass`, `ci: test (20.x): fail`, etc. — without you needing a separate poll. On a failure event:
 
-1. Fetch logs for the failing check:
+1. Fetch logs for the failing check. Use the same `bucket` field the monitor uses (the
+   `gh pr checks` bucket vocabulary is `pass` / `fail` / `cancel` / `skipping` / `pending`;
+   `fail` is the one that fires the `ci: <name>: fail` event):
    ```bash
-   RUN_ID="$(gh pr checks PR_NUM --json name,conclusion,detailsUrl \
-     --jq '.[] | select(.conclusion=="FAILURE") | .detailsUrl | capture("/runs/(?<id>[0-9]+)") | .id' \
+   RUN_ID="$(gh pr checks PR_NUM --json name,bucket,detailsUrl \
+     --jq '.[] | select(.bucket=="fail") | .detailsUrl | capture("/runs/(?<id>[0-9]+)") | .id' \
      | head -n1)"
    gh run view "$RUN_ID" --log-failed
    ```
