@@ -154,9 +154,9 @@ Print a summary table of what was reviewed and found:
 
 If no issues were found, confirm the code is clean and ready for PR.
 
-## Documentation Recommendations
+## Convention Encoding
 
-After the report is printed and fixes are committed, run the Documentation Recommendations phase. Examine the findings (both fixed and accepted-as-is) and surface project-level documentation updates that would prevent the same class of issue in future PRs. **This phase is read-only on project docs — surface suggestions only, never auto-edit CLAUDE.md, README.md, or other docs.**
+After the report is printed and fixes are committed, run the Convention Encoding phase. Examine the findings (both fixed and accepted-as-is) and, for each pattern likely to recur, apply the **smallest** code-level action that makes the convention self-evident (in-tree comment at the canonical site, a clarifying rename, or a surgical refactor that removes the footgun). CLAUDE.md / AGENTS.md additions are a **fallback**, used only when the convention truly can't be expressed locally. Any encoded actions land in the same branch as the review fixes.
 
 !`cat ~/.claude/lib/post-review-doc-recommendations.md`
 

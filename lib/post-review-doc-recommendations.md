@@ -1,68 +1,81 @@
-# Post-Review Documentation Recommendations
+# Post-Review Convention Encoding
 
-After a review-and-fix cycle (e.g., `/do:review`, `/do:rpr`, end of a Copilot review loop) completes, scan the findings for patterns worth surfacing in project documentation — so the next contributor (or AI agent) avoids the same class of issue without needing the reviewer to teach them again.
+After a review-and-fix cycle (e.g., `/do:review`, `/do:rpr`, end of a Copilot review loop) completes, scan the findings for patterns worth encoding — so the next contributor (or AI agent) avoids the same class of issue without needing the reviewer to teach them again.
 
-This phase is **read-only on project docs** — it surfaces concrete suggestions the user accepts or rejects. Do NOT auto-edit CLAUDE.md, README.md, or any project documentation file.
+**Default action is to encode the convention in the code itself**, not to surface a CLAUDE.md suggestion. A convention buried in a wall-of-text doc bullet rots; a comment at the canonical site, a renamed helper, or a small refactor that eliminates the bug class is durable.
 
-## What counts as a documentation candidate
+CLAUDE.md additions are a **fallback**, used only when the convention genuinely spans too many sites to encode locally.
 
-A finding earns a doc recommendation when ALL of the following apply:
+## What counts as an encoding candidate
+
+A finding earns an encoding action when ALL of the following apply:
 
 1. **Preventable by knowing a convention**: the issue would not have happened if the contributor knew a project-level convention, invariant, or constraint.
-2. **Non-obvious from the code**: a competent contributor skimming the relevant file wouldn't infer the convention from the code alone (e.g., it lives in one helper but is the established pattern everywhere).
-3. **Likely to recur**: the codebase has many similar entry points OR similar issues have appeared in past PRs/commits. One-time mistakes don't warrant a doc change.
+2. **Non-obvious from the code**: a competent contributor skimming the relevant file wouldn't infer the convention from the code alone.
+3. **Likely to recur**: the codebase has many similar entry points OR similar issues have appeared in past PRs/commits. One-time mistakes don't warrant encoding.
 
-A finding is **NOT** a doc candidate when:
+A finding is **NOT** an encoding candidate when:
 - It's a one-off bug (typo, missed null check, copy-paste error, isolated logic mistake).
 - The fix itself made the convention discoverable (e.g., introducing a `request()` helper that callers will find by grep).
-- It's a generic best practice already covered by the review checklists — those belong in `lib/code-review-checklist.md` and the agent files, not in project docs.
-- The recommendation would be documentation about what one function does — that's a code-level comment or a self-documenting rename, not project documentation.
+- It's a generic best practice already covered by the review checklists.
 
-## Where to recommend each update
+## Action selection — prefer code over docs
 
-Match each doc candidate to the right surface:
+For each candidate, pick the **smallest** action from this priority list that makes the convention self-evident. Stop at the first option that fits:
 
-- **`CLAUDE.md`** (or `.claude/CLAUDE.md`, `AGENTS.md` — whichever the project already uses) — codebase-level conventions an AI agent or human contributor should know before editing: auth model, error class hierarchy, "we don't mock the DB", custom helper conventions (`use request() not fetch()`), platform constraints, "never touch X without doing Y".
-- **`CONTRIBUTING.md`** — contributor process: how to run tests, branch naming, commit format, review expectations, what kinds of PRs are out of scope.
-- **`README.md`** — setup, build, run, ports, service dependencies, environment variables a new contributor must set.
-- **`docs/<area>.md`** or an in-tree `AGENTS.md` — architecture explanations that span multiple files (data flow, state machine, lifecycle, plugin contracts, the canonical place to add a new X).
-- **In-tree comment near the relevant code** — invariants too narrow for top-level docs but easy to miss when editing one file (e.g., "this list must remain sorted by `priority` because `findFirst` does binary search").
+1. **Refactor that eliminates the bug class** — when the same mistake keeps recurring because the API invites it. Examples: pre-sanitize inside the helper instead of relying on callers to remember; collapse two parallel write paths into one; rename a misleading parameter. Keep the refactor surgical — do NOT introduce new abstractions or layers just to encode a convention. Three similar lines is better than a premature helper.
+2. **In-tree comment at the canonical site** — one short line (one or two sentences max) placed where the convention is enforced or where it's most likely to be violated. Lead with the *why*, since well-named identifiers already convey the *what*. Don't reference the current PR or finding — those rot.
+3. **Rename for clarity** — when a misleading or generic name (`data`, `update`, `handler`) caused the confusion. A renamed identifier teaches every caller for free.
+4. **Brief addition to an existing in-tree `docs/<area>.md` or module-level `AGENTS.md`** — when the convention spans 2-5 files in a clear area and a comment in each would be redundant.
+5. **CLAUDE.md / AGENTS.md fallback** — only when the convention spans the whole codebase, has no canonical enforcement site, and can't be expressed locally without scattering identical comments everywhere. This should be rare.
 
-If the project doesn't have a CLAUDE.md / AGENTS.md and a candidate clearly belongs there, suggest creating it (not actively — recommend it).
+If even the CLAUDE.md fallback would just restate something a careful reader would catch, skip it. It's better to encode nothing than to bloat the docs.
+
+## Bounds on auto-edits
+
+- **One-line comments only** (or two short lines if a `Why:` plus a one-line constraint is needed). No multi-paragraph docstrings. No "this function does X" comments — those duplicate the code.
+- **No new abstractions for their own sake.** A refactor is acceptable only if it makes the existing code clearer or removes a footgun; it is NOT acceptable to introduce a wrapper/helper/guard solely to have a place to attach a comment.
+- **No speculative changes.** Encode only the convention demonstrated by the findings, not adjacent conventions you happen to notice.
+- **Test impact**: if the refactor touches behavior, run the test suite and surface any failures. If the refactor is comment-only or rename-only, no tests need to run.
+- **Stay in scope**: encoding actions should land alongside the review fixes in the same commit/PR — don't open a new branch for them.
 
 ## Output format
 
-Append this section to the end of the review/fix report:
+After applying any encoding actions and committing them, append this section to the end of the review/fix report:
 
 ```
-## Documentation Recommendations
+## Conventions Encoded
 
-Based on the {N} findings addressed in this review, the following project documentation updates would help prevent the same class of issue in future PRs:
+For each finding pattern below, the smallest action that makes the convention self-evident from the code has been applied. CLAUDE.md additions are listed at the bottom only when the convention can't be expressed locally.
 
-### {target file path} — {one-line purpose}
-
-**Add**:
-> {exact text to paste, 1-3 sentences, written in the project's existing voice if known}
-
-**Why**: {one sentence linking back to the finding(s) that motivated it}
+### {pattern name, e.g. "Server-owned operational fields"}
+**Action**: {one of: comment at <path:line>, rename <old> → <new> at <path>, refactor in <path> (1-line summary), in-tree doc at <path>}
+**Why**: {one sentence linking back to the finding(s)}
 
 ---
 
-(repeat per recommendation; group multiple recommendations under the same file when they fit together)
+(repeat per encoded pattern)
+
+### CLAUDE.md fallback (only if necessary)
+
+**Add to {file}** (under {section}):
+> {1-3 sentence convention text in the project's voice}
+
+**Why local encoding wasn't sufficient**: {one sentence — e.g., "convention applies to every new render type and has no single dispatch site"}
 ```
 
-If no findings meet the doc-candidate criteria, print exactly:
+If no findings meet the encoding criteria, print exactly:
 
 ```
-## Documentation Recommendations
+## Conventions Encoded
 
-No project documentation updates recommended — the findings in this review were isolated and don't suggest a recurring convention worth surfacing.
+No conventions encoded — the findings in this review were isolated and don't suggest a recurring pattern worth surfacing.
 ```
 
 ## Guidelines
 
-- **Quote-able text**: write the proposed addition as if pasting it directly. The user should be able to copy it without rewording.
-- **Project voice**: if the existing docs use a particular tone (terse / formal / bulleted / prose), match it. If you haven't read the existing docs, suggest the addition in plain prose and flag that the user may want to reformat.
-- **One recommendation per pattern, not per finding**: if three findings all point to "callers must use the `request()` helper, not bare `fetch()`", that's one recommendation, not three.
-- **Don't recommend documentation of the fix itself**: a PR fixing a bug doesn't need a doc note saying "we fixed bug X". Document the underlying invariant or convention instead.
-- **Be honest when nothing recurs**: it's better to print the "no recommendations" message than to invent doc changes for the sake of output.
+- **One action per pattern, not per finding**: if three findings all point to "callers must use the `request()` helper", that's one encoding action (the comment / rename / refactor), not three.
+- **Don't encode the fix itself**: a PR fixing a bug doesn't need a comment saying "we fixed bug X". Encode the underlying invariant or convention.
+- **Project voice for any text written**: match the existing tone (terse / formal / bulleted / prose). If you haven't read the existing docs, default to plain terse prose.
+- **Be honest when nothing recurs**: print the "no conventions encoded" message rather than inventing changes.
+- **Read-only escape hatch**: if a candidate action would be too risky to apply automatically (large refactor, ambiguous canonical site, touches multiple subsystems), describe the action under the `Conventions Encoded` section as **"Proposed — not auto-applied"** with the rationale, instead of attempting it.
