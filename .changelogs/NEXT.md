@@ -8,4 +8,6 @@
 
 ## Fixed
 
+- **`install.sh` and `uninstall.sh` LIBS arrays** include `local-agent-review-loop` so the curl-bash install path (and local-mode `./install.sh`) actually delivers the new file to `~/.claude/lib/` and `~/.gemini/lib/`. Without this entry, `do:pr --review-with codex|gemini|claude` failed at the `!cat ~/.claude/lib/local-agent-review-loop.md` inclusion step with `No such file or directory`. Note: the `npx slash-do` installer is unaffected — it auto-discovers files in `lib/` via `collectLibFiles()`. Only the bash installer carries a hardcoded list.
+
 ## Removed
