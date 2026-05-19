@@ -19,19 +19,19 @@ When to use this instead of Copilot:
 
 The orchestrating agent runs the chosen CLI directly via Bash (no sub-agent delegation — the main thread does the verification, per design). Output is captured to a log file so it can be summarized without flooding context.
 
-This loop assumes slashdo is installed in the target CLI's environment (see `src/environments.js`), so `do:review` is available as a first-class command and we just invoke it by name. Each CLI has its own invocation convention — slash-prefixed for Claude and Gemini, bare for Codex (which exposes slashdo commands as skills, not slash commands):
+For `claude` and `gemini`, this loop assumes slashdo is installed in the target CLI's environment (see `src/environments.js`), so the slashdo `do:review` command is available — `/do:review` for both (they use slash-command namespacing). For `codex`, we use codex's **built-in `codex review` subcommand** instead of the slashdo skill — codex ships a first-class review experience, and using it gives a more authentic codex-flavored review than re-prompting through `codex exec`.
 
 All three CLIs are invoked in **reckless / non-interactive mode** — they run unattended and must not stop to ask for permission. The flags below disable each CLI's interactive approval gates:
 
 | Agent | Command |
 |-------|---------|
-| `claude` | `claude -p "/do:review {BASE_BRANCH}" --dangerously-skip-permissions` |
-| `codex` | `codex exec --skip-git-repo-check -a never "do:review {BASE_BRANCH}"` |
-| `gemini` | `GEMINI_SANDBOX=false gemini --yolo -p "/do:review {BASE_BRANCH}"` |
+| `claude` | `claude -p "/do:review {BASE_BRANCH} — commit each fix batch as 'address review: <summary>' and DO NOT push" --dangerously-skip-permissions` |
+| `codex` | `codex review -a never --base {BASE_BRANCH}` |
+| `gemini` | `GEMINI_SANDBOX=false gemini --yolo -p "/do:review {BASE_BRANCH} — commit each fix batch as 'address review: <summary>' and DO NOT push"` |
 
-Invocation rationale (per slashdo's installed-command layout):
-- `claude` and `gemini` both expose slashdo commands as slash commands (`subdirectory` namespacing), so `/do:review` is the canonical form for each
-- `codex` exposes slashdo commands as named skills (`directory` namespacing → `~/.codex/skills/do-review/SKILL.md`), invoked by bare name `do:review` (no slash prefix)
+Notes on each invocation:
+- **claude / gemini** call slashdo's installed `do:review`, with a suffix appended to the command argument overriding two of `do:review`'s defaults: switch the commit message to `address review: <summary>` (instead of `refactor: address code review findings`) and skip the auto-push (the orchestrating agent will verify and push).
+- **codex** uses the built-in `codex review` subcommand against `{BASE_BRANCH}`. `codex review` may either (a) auto-apply fixes and commit them, or (b) produce a review report without applying fixes — behavior depends on the codex version installed. If codex exits with no new commits but its log contains findings, the orchestrating agent in step 3 below treats the log as the review and applies fixes itself before proceeding. Confirm the exact `codex review` flag spelling against `codex review --help` on first run — `-a never` is the global codex approval-mode flag and applies to subcommands, but `--base` may be named differently in your codex version (e.g., positional `{BASE_BRANCH}`).
 
 Flag rationale (reckless / unattended mode):
 - `claude --dangerously-skip-permissions` — auto-approves all tool calls in the headless session
@@ -39,14 +39,6 @@ Flag rationale (reckless / unattended mode):
 - `gemini --yolo` — auto-approves all tool calls. `GEMINI_SANDBOX=false` disables the sandboxed-shell layer so commands run directly in the working directory (needed because the agent edits files and runs the project build/test commands)
 
 Because these flags grant the headless CLI full unattended write access to the working tree, the verify step in this loop (build + tests + diff inspection by the main thread) is mandatory and non-skippable — it is the only line of defense between the headless agent's output and the remote branch.
-
-### Pre-invocation override
-
-`do:review` (as installed) commits its own fixes with `refactor: address code review findings` and may also push if `gh` is configured. Before invoking, append a one-line instruction to the command argument so the headless agent's commit message matches this loop's expectation and it does NOT push:
-
-- Append: `— commit each fix batch as 'address review: <summary>' and DO NOT push; the orchestrating agent will verify and push.`
-
-Concretely, the invocation argument becomes (example for claude): `"/do:review {BASE_BRANCH} — commit each fix batch as 'address review: <summary>' and DO NOT push; the orchestrating agent will verify and push."` Apply the same suffix to the codex/gemini variants.
 
 ### Loop
 
@@ -68,7 +60,9 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
    NEW_COMMITS=$(git rev-list "$LOOP_START_SHA..HEAD" --count)
    UNCOMMITTED=$(git status --porcelain | wc -l)
    ```
-   - If `NEW_COMMITS == 0` and `UNCOMMITTED == 0`: the CLI found nothing to fix. Set `STATUS=clean` and exit the loop.
+   - If `NEW_COMMITS == 0` and `UNCOMMITTED == 0`:
+     - For `claude` and `gemini`: the CLI's `do:review` ran and found nothing to fix. Set `STATUS=clean` and exit the loop.
+     - For `codex`: `codex review` may have produced a review without applying fixes. Inspect `$LOG_FILE` — if it contains review findings (look for severity markers like `CRITICAL` / `HIGH` / `MEDIUM` / `LOW`, or a numbered findings list), the orchestrating agent must apply the fixes itself: read the log, fix each finding in the working tree, run `{BUILD_CMD}` + `{TEST_CMD}`, and commit as `address review: <summary>`. Then proceed to step 4. If the log shows no actionable findings, set `STATUS=clean` and exit.
    - If `UNCOMMITTED > 0` (CLI left changes uncommitted despite the instruction):
      - Print the uncommitted diff
      - **Default mode**: stage all changed files explicitly (not `git add -A` — list them) and commit with `chore: local review changes (uncommitted by {REVIEW_AGENT})`. Then continue to verification.
