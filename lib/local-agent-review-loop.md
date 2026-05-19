@@ -23,15 +23,23 @@ For `claude` and `gemini`, this loop assumes slashdo is installed in the target 
 
 All three CLIs are invoked in **reckless / non-interactive mode** — they run unattended and must not stop to ask for permission. The flags below disable each CLI's interactive approval gates:
 
+Before building the codex invocation, compute these once:
+```bash
+HEAD_SHA=$(git rev-parse HEAD)
+REVIEW_TITLE=$(git log -1 --format=%s "$HEAD_SHA")   # subject of HEAD commit; falls back to branch name if empty
+[ -z "$REVIEW_TITLE" ] && REVIEW_TITLE="Review of $BRANCH_NAME against $BASE_BRANCH"
+REVIEW_PROMPT="Review the diff from $BASE_BRANCH to HEAD, commit each fix batch as 'address review: <summary>', and DO NOT push — the orchestrating agent will verify and push."
+```
+
 | Agent | Command |
 |-------|---------|
 | `claude` | `claude -p "/do:review {BASE_BRANCH} — commit each fix batch as 'address review: <summary>' and DO NOT push" --dangerously-skip-permissions` |
-| `codex` | `codex review -a never --base {BASE_BRANCH}` |
+| `codex` | `codex review -a never --commit "$HEAD_SHA" --base "$BASE_BRANCH" --title "$REVIEW_TITLE" "$REVIEW_PROMPT"` |
 | `gemini` | `GEMINI_SANDBOX=false gemini --yolo -p "/do:review {BASE_BRANCH} — commit each fix batch as 'address review: <summary>' and DO NOT push"` |
 
 Notes on each invocation:
 - **claude / gemini** call slashdo's installed `do:review`, with a suffix appended to the command argument overriding two of `do:review`'s defaults: switch the commit message to `address review: <summary>` (instead of `refactor: address code review findings`) and skip the auto-push (the orchestrating agent will verify and push).
-- **codex** uses the built-in `codex review` subcommand against `{BASE_BRANCH}`. `codex review` may either (a) auto-apply fixes and commit them, or (b) produce a review report without applying fixes — behavior depends on the codex version installed. If codex exits with no new commits but its log contains findings, the orchestrating agent in step 3 below treats the log as the review and applies fixes itself before proceeding. Confirm the exact `codex review` flag spelling against `codex review --help` on first run — `-a never` is the global codex approval-mode flag and applies to subcommands, but `--base` may be named differently in your codex version (e.g., positional `{BASE_BRANCH}`).
+- **codex** uses the built-in `codex review` subcommand. The full, documented invocation is `codex review --commit <SHA> --base <BRANCH> --title <TITLE> [PROMPT]` — pass ALL four arguments. Do NOT use a positional base or omit `--title`; codex will print its help and exit if any required flag is missing, and the loop will burn an iteration on a no-op. The trailing `[PROMPT]` is where this loop injects the commit-style and don't-push override. Behavior of `codex review` may either (a) auto-apply fixes and commit them, or (b) produce a review report without applying fixes — behavior depends on the codex version installed. If codex exits with no new commits but its log contains findings, the orchestrating agent in step 3 below treats the log as the review and applies fixes itself before proceeding.
 
 Flag rationale (reckless / unattended mode):
 - `claude --dangerously-skip-permissions` — auto-approves all tool calls in the headless session
