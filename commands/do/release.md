@@ -1,11 +1,18 @@
 ---
 description: Create a release PR using the project's documented release workflow
-argument-hint: "[--interactive]"
+argument-hint: "[--interactive] [--review-with copilot|codex|gemini|claude]"
 ---
 
 **Default mode: fully autonomous.** Auto-detects branches, determines version bump from commits, runs review, creates and merges the release PR without prompting.
 
 **`--interactive` mode:** Pauses for branch confirmation, version approval, and merge confirmation.
+
+## Parse Arguments
+
+Parse `$ARGUMENTS` for `--review-with <agent>`:
+- Accepted values: `copilot` (default), `codex`, `gemini`, `claude`
+- Record as `REVIEW_AGENT`. If omitted, set `REVIEW_AGENT=copilot`
+- If the value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
 
 ## Detect Release Workflow
 
@@ -107,9 +114,26 @@ Verification — self-check before proceeding (no user prompt needed):
 
 **Note**: Do NOT bump the version for review fixes — the version was already set during the release preparation.
 
+## Run the Review Loop
+
+Dispatch on `REVIEW_AGENT`:
+
+- **`copilot`** (default): run the Copilot cloud review loop below.
+- **`codex` | `gemini` | `claude`**: run the local-agent review loop instead. Do not run the Copilot loop in this mode.
+
+### Copilot path (`REVIEW_AGENT=copilot`)
+
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
+### Local-agent path (`REVIEW_AGENT` ∈ {codex, gemini, claude})
+
+!`cat ~/.claude/lib/local-agent-review-loop.md`
+
 ## Merge the PR (only after a CLEAN review with zero comments)
+
+The merge gate adapts to whichever loop ran:
+
+### When `REVIEW_AGENT=copilot`
 
 - **CRITICAL**: Do NOT merge until Copilot has submitted a review. A missing review is NOT the same as a clean review.
 - Only merge after the latest Copilot review has been submitted AND that review generated **zero comments**. Check this by:
@@ -120,6 +144,16 @@ Verification — self-check before proceeding (no user prompt needed):
   - No Copilot review was ever posted (review never arrived — ask user first)
   - "Awaiting requested review" is still shown (review in progress)
   - The latest review had comments that you fixed but you didn't get a CLEAN re-review
+
+### When `REVIEW_AGENT` ∈ {codex, gemini, claude}
+
+- Only merge if the local-agent loop reported `STATUS=clean`. Any other status (`guardrail`, `cli-error`, `broken-build`, `test-failed`, `rejected`) blocks the merge:
+  - **Default mode**: do NOT merge. Leave the PR open and report the status so the user can review manually.
+  - **Interactive mode (`--interactive`)**: ask the user whether to merge anyway, fall back to Copilot for a second pass, or leave open.
+- The local-agent loop already verified build and tests locally before pushing, so no separate review-comment count is required — `clean` means all iterations passed verification.
+
+### Merging (both paths)
+
 - Once confirmed clean, merge:
   ```bash
   gh pr merge <number> --merge
