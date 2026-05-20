@@ -92,8 +92,6 @@ jobs:
       - name: Publish to npm
         if: steps.npm-check.outputs.published == 'false'
         run: npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Generate changelog
         id: changelog
