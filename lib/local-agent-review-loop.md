@@ -34,7 +34,7 @@ REVIEW_PROMPT="Review the diff from $BASE_BRANCH to HEAD, commit each fix batch 
 | Agent | Command |
 |-------|---------|
 | `claude` | `claude -p "/do:review {BASE_BRANCH} — commit each fix batch as 'address review: <summary>' and DO NOT push" --dangerously-skip-permissions` |
-| `codex` | `codex review -a never --commit "$HEAD_SHA" --base "$BASE_BRANCH" --title "$REVIEW_TITLE" "$REVIEW_PROMPT"` |
+| `codex` | `codex review --commit "$HEAD_SHA" --base "$BASE_BRANCH" --title "$REVIEW_TITLE" "$REVIEW_PROMPT"` |
 | `gemini` | `GEMINI_SANDBOX=false gemini --yolo -p "/do:review {BASE_BRANCH} — commit each fix batch as 'address review: <summary>' and DO NOT push"` |
 
 Notes on each invocation:
@@ -43,7 +43,7 @@ Notes on each invocation:
 
 Flag rationale (reckless / unattended mode):
 - `claude --dangerously-skip-permissions` — auto-approves all tool calls in the headless session
-- `codex -a never` — sets approval mode to `never`, so codex never prompts for command/edit approval
+- `codex review` — already non-interactive by design (per `codex review --help`: "Run a code review non-interactively"). Do NOT pass `-a` / `--approval`; the `codex review` subcommand does not accept it and will reject the flag. The top-level `codex` and `codex exec` commands accept `-a never`, but this loop deliberately uses `codex review` instead, so no approval flag is needed.
 - `gemini --yolo` — auto-approves all tool calls. `GEMINI_SANDBOX=false` disables the sandboxed-shell layer so commands run directly in the working directory (needed because the agent edits files and runs the project build/test commands)
 
 Because these flags grant the headless CLI full unattended write access to the working tree, the verify step in this loop (build + tests + diff inspection by the main thread) is mandatory and non-skippable — it is the only line of defense between the headless agent's output and the remote branch.
