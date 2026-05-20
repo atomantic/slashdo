@@ -1,11 +1,11 @@
 ---
 description: Run a full do:better audit/remediation on the current branch, commit fixes directly to it, then open a single PR with do:pr
-argument-hint: "[--interactive] [path filter or focus areas]"
+argument-hint: "[--interactive] [--review-with copilot|codex|gemini|claude] [path filter or focus areas]"
 ---
 
 # PR-Better — Better Audit + Single PR
 
-Run the full `do:better` DevSecOps audit and remediation, but **commit all fixes directly to the current branch** instead of creating per-category PRs. Then hand off to `do:pr` so the entire result ships as one cohesive PR (with self-review and the Copilot review loop).
+Run the full `do:better` DevSecOps audit and remediation, but **commit all fixes directly to the current branch** instead of creating per-category PRs. Then hand off to `do:pr` so the entire result ships as one cohesive PR (with self-review and the Copilot review loop, or a local-agent review loop if `--review-with` is set).
 
 This is the right command when:
 - You want the full `do:better` quality bar on a feature branch you're about to ship
@@ -14,10 +14,13 @@ This is the right command when:
 
 ## Argument Forwarding
 
-Pass `$ARGUMENTS` through to `do:better` verbatim, with these constraints applied automatically:
+Split `$ARGUMENTS` into two groups before forwarding:
+- **`--review-with <agent>`** is a `do:pr` flag, NOT a `do:better` flag. Extract it from `$ARGUMENTS`, record the value as `REVIEW_AGENT_ARG` (the full `--review-with <agent>` token pair, or empty string if not supplied), and remove it from the string passed to `do:better`.
+- All remaining flags (`--interactive`, path filter, focus areas) pass through to `do:better` verbatim.
+
+Constraints applied automatically:
 - **`--scan-only` is incompatible** — if the user passes it, refuse and explain that pr-better must remediate
 - **`--no-merge` is incompatible** — pr-better always produces a PR, but as one combined PR via `do:pr`
-- All other flags (`--interactive`, path filter, focus areas) pass through unchanged
 
 ## Pre-flight
 
@@ -68,7 +71,7 @@ The only Phase 7-equivalent housekeeping that applies:
 
 ## Phase B: Run do:pr
 
-After Phase A leaves all fixes committed on `{CURRENT_BRANCH}`, hand off to the workflow defined in `~/.claude/commands/do/pr.md`:
+After Phase A leaves all fixes committed on `{CURRENT_BRANCH}`, hand off to the workflow defined in `~/.claude/commands/do/pr.md`, forwarding `REVIEW_AGENT_ARG` (the `--review-with <agent>` pair extracted in argument forwarding) so the chosen reviewer runs on the combined PR:
 
 1. **Detect branches** — already done in pre-flight, reuse those values
 2. **Commit and push** — commit any remaining staged changes (e.g., the PLAN.md update), then `git pull --rebase --autostash && git push -u origin {current_branch}`
@@ -76,7 +79,7 @@ After Phase A leaves all fixes committed on `{CURRENT_BRANCH}`, hand off to the 
 4. **Open the PR** — create a single PR with a description that summarizes both:
    - The original feature work on the branch (from prior commits)
    - The do:better audit findings now folded in (categories, counts, severity)
-5. **Copilot review loop** — runs once on the combined PR via the standard `do:pr` flow
+5. **Review loop** — runs once on the combined PR via the standard `do:pr` flow. If `REVIEW_AGENT_ARG` is set (e.g., `--review-with codex`), do:pr will run the local-agent review loop instead of the Copilot loop.
 
 ## Final Report
 

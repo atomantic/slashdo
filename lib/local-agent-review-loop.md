@@ -1,0 +1,135 @@
+## Local Agent Code Review Loop
+
+Run a local CLI agent in headless mode to review the PR branch and apply fixes, then verify in the main thread before pushing. This is an alternative to the Copilot cloud review loop — selected via `--review-with codex|gemini|claude`.
+
+When to use this instead of Copilot:
+- The repo isn't connected to GitHub Copilot review (or you don't want to pay for it)
+- You want a different reviewer's perspective (Codex, Gemini, or a separate Claude session)
+- You want the review to happen entirely locally, before pushing
+
+### Pre-flight
+
+1. Confirm `{REVIEW_AGENT}` is one of `claude`, `codex`, `gemini`. Otherwise abort with a usage error.
+2. Confirm the CLI binary is installed: `command -v {REVIEW_AGENT}`. If missing:
+   - **Default mode**: print a warning, **set `REVIEW_AGENT=copilot`**, and fall back to the Copilot loop. The reassignment is mandatory — `do:release`'s merge gate dispatches on `REVIEW_AGENT` and only accepts local-agent `STATUS=clean`, so leaving `REVIEW_AGENT` set to the original (missing) agent would block a clean Copilot review from merging. If Copilot is also unavailable (no `gh` auth or no Copilot reviewer configured), stop and report.
+   - **Interactive mode (`--interactive`)**: ask the user whether to install, fall back, or abort. If the user chooses fall back, reassign `REVIEW_AGENT=copilot` as above.
+3. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
+
+### Headless invocation per agent
+
+The orchestrating agent runs the chosen CLI directly via Bash (no sub-agent delegation — the main thread does the verification, per design). Output is captured to a log file so it can be summarized without flooding context.
+
+For `claude` and `gemini`, this loop assumes slashdo is installed in the target CLI's environment (see `src/environments.js`), so the slashdo `do:review` command is available — `/do:review` for both (they use slash-command namespacing). For `codex`, we use codex's **built-in `codex review` subcommand** instead of the slashdo skill — codex ships a first-class review experience, and using it gives a more authentic codex-flavored review than re-prompting through `codex exec`.
+
+All three CLIs are invoked in **reckless / non-interactive mode** — they run unattended and must not stop to ask for permission. The flags below disable each CLI's interactive approval gates:
+
+Before invoking any local agent, compute the shared inputs once. The slash-command argument MUST be only the base-branch ref — `do:review` treats `$ARGUMENTS` as the base branch and runs `git diff $ARGUMENTS...HEAD`, so any prose appended to the argument (e.g., `main — commit each ...`) becomes a non-existent ref and the diff fails. Convey commit-style overrides as separate prompt text *after* the slash command, on a new line:
+
+```bash
+REVIEW_TITLE=$(git log -1 --format=%s HEAD)   # subject of HEAD commit; falls back below if empty
+[ -z "$REVIEW_TITLE" ] && REVIEW_TITLE="Review of $BRANCH_NAME against $BASE_BRANCH"
+
+# Shared prompt for claude / gemini. The branch is the slash-command arg;
+# the commit-style override is a separate sentence on a new line, so
+# do:review parses only "$BASE_BRANCH" as the base branch.
+REVIEW_OVERRIDE="When committing fixes, use commit messages of the form 'address review: <summary>' instead of the default."
+LOCAL_PROMPT=$(printf '/do:review %s\n\n%s' "$BASE_BRANCH" "$REVIEW_OVERRIDE")
+```
+
+Pick a timeout wrapper at this point too. The step-2 invocation below runs `$TIMEOUT_CMD {INVOCATION}`; on stock macOS without `coreutils`, plain `timeout(1)` is absent and `timeout 1800 …` exits 127 before the reviewer ever runs:
+
+```bash
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="timeout 1800"
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="gtimeout 1800"
+else
+  TIMEOUT_CMD=""   # rely on the CLI's own internal limits
+fi
+```
+
+| Agent | Command |
+|-------|---------|
+| `claude` | `claude -p "$LOCAL_PROMPT" --dangerously-skip-permissions` |
+| `codex` | `codex review --base "$BASE_BRANCH" --title "$REVIEW_TITLE"` |
+| `gemini` | `env GEMINI_SANDBOX=false gemini --yolo -p "$LOCAL_PROMPT"` |
+
+Notes on each invocation:
+- **claude / gemini** call slashdo's installed `do:review`, with a suffix appended to the command argument overriding two of `do:review`'s defaults: switch the commit message to `address review: <summary>` (instead of `refactor: address code review findings`) and skip the auto-push (the orchestrating agent will verify and push).
+- **codex** uses the built-in `codex review` subcommand with the **base-branch review target**, which reviews the full diff from `$BASE_BRANCH` to `HEAD`. The three review targets — `--uncommitted`, `--commit <SHA>`, and `--base <BRANCH>` — are mutually exclusive (per `codex review --help` and confirmed by `error: the argument '--commit <SHA>' cannot be used with: --base <BRANCH>`). The positional `[PROMPT]` is *also* mutually exclusive with `--base` (`error: the argument '--base <BRANCH>' cannot be used with: [PROMPT]`), so the commit-style override that `claude`/`gemini` receive cannot be passed to codex this way — the orchestrating agent supplies the commit message itself in step 3 below. `codex review` on the current shipped version produces review findings without applying fixes, so the orchestrating agent reads the log and applies fixes regardless; behavior on older or future versions may auto-apply, in which case step 3's "if new commits exist" branch handles it.
+
+Flag rationale (reckless / unattended mode):
+- `claude --dangerously-skip-permissions` — auto-approves all tool calls in the headless session
+- `codex review` — already non-interactive by design (per `codex review --help`: "Run a code review non-interactively"). Do NOT pass `-a` / `--approval`; the `codex review` subcommand does not accept it and will reject the flag. The top-level `codex` and `codex exec` commands accept `-a never`, but this loop deliberately uses `codex review` instead, so no approval flag is needed. Also do NOT combine `--commit <SHA>` with `--base <BRANCH>` or with a positional `[PROMPT]` — codex enforces mutual exclusion across review targets and prompt mode, and the loop would exit with code 2 before any review work runs.
+- `gemini --yolo` — auto-approves all tool calls. `env GEMINI_SANDBOX=false` disables the sandboxed-shell layer so commands run directly in the working directory (needed because the agent edits files and runs the project build/test commands). The `env` prefix is required because the timeout wrapper at step 2 of the loop runs `timeout 1800 {INVOCATION}`, and shell `VAR=value cmd` assignments only work before the first command word — without `env`, the assignment would be treated as the program name and exec would fail
+
+Because these flags grant the headless CLI full unattended write access to the working tree, the verify step in this loop (build + tests + diff inspection by the main thread) is mandatory and non-skippable — it is the only line of defense between the headless agent's output and the remote branch.
+
+### Loop
+
+Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
+
+1. **Capture baseline**: `LOOP_START_SHA=$(git rev-parse HEAD)`
+
+2. **Invoke the chosen CLI** (foreground, but redirect output to a log so context stays clean):
+   ```bash
+   LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
+   $TIMEOUT_CMD {INVOCATION} > "$LOG_FILE" 2>&1
+   EXIT_CODE=$?
+   ```
+   - `$TIMEOUT_CMD` was selected during pre-flight (`timeout 1800`, `gtimeout 1800`, or empty when neither is installed). Empty expands to nothing, so the line becomes a direct invocation that relies on the CLI's own internal limits — preferred to exiting 127 before the reviewer runs.
+   - If `EXIT_CODE != 0` and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of the log, and exit the loop. Surface the log path so the user can inspect.
+
+3. **Detect changes**:
+   ```bash
+   NEW_COMMITS=$(git rev-list "$LOOP_START_SHA..HEAD" --count)
+   UNCOMMITTED=$(git status --porcelain | wc -l)
+   ```
+   - If `NEW_COMMITS == 0` and `UNCOMMITTED == 0`:
+     - For `claude` and `gemini`: the CLI's `do:review` ran and found nothing to fix. Set `STATUS=clean` and exit the loop.
+     - For `codex`: `codex review` may have produced a review without applying fixes. Inspect `$LOG_FILE` — if it contains review findings (look for severity markers like `CRITICAL` / `HIGH` / `MEDIUM` / `LOW`, or a numbered findings list), the orchestrating agent must apply the fixes itself: read the log, fix each finding in the working tree, run `{BUILD_CMD}` + `{TEST_CMD}`, and commit as `address review: <summary>`. Then proceed to step 4. If the log shows no actionable findings, set `STATUS=clean` and exit.
+   - If `UNCOMMITTED > 0` (CLI left changes uncommitted despite the instruction):
+     - Print the uncommitted diff
+     - **Default mode**: stage all changed files explicitly (not `git add -A` — list them) and commit with `chore: local review changes (uncommitted by {REVIEW_AGENT})`. Then continue to verification.
+     - **Interactive mode**: ask the user whether to commit, discard, or abort.
+
+4. **Verify in the main thread** (this is the explicit hand-back per design — do NOT delegate this step to a sub-agent):
+   - Read the diff: `git diff "$LOOP_START_SHA..HEAD"` and inspect each new commit's message + changes. Look for:
+     - Changes that go beyond the stated review scope (out-of-bounds refactors, unrelated files touched)
+     - Commits that revert legitimate behavior to make a flaky test pass
+     - Disabled tests, skipped assertions, or `// TODO` placeholders introduced by the agent
+     - Secrets, hardcoded credentials, or other content that must not land
+   - Run `{BUILD_CMD}`. If it fails:
+     - **Default mode**: revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=broken-build`, exit the loop, and report
+     - **Interactive mode**: ask the user whether to retry (re-invoke CLI), revert, or accept-and-fix-manually
+   - Run `{TEST_CMD}`. Same handling on failure (`STATUS=test-failed`).
+   - If any of the inspection red flags above triggered, treat as a verification failure: revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=rejected`, and exit the loop.
+
+5. **Push verified changes**:
+   ```bash
+   git push origin {BRANCH_NAME}
+   ```
+   If the push fails (e.g., non-fast-forward), run `git pull --rebase --autostash && git push origin {BRANCH_NAME}` once before reporting failure.
+
+6. **Re-loop or stop**:
+   - `ITERATION=$((ITERATION + 1))`
+   - If `ITERATION < MAX_ITERATIONS`: go back to step 1 to confirm the latest commits don't themselves need further review (catches recursive findings — common when a fix introduces a new shape).
+   - Otherwise: `STATUS=guardrail`, exit the loop.
+
+### Final report
+
+Print:
+
+```
+## Local Agent Review Summary
+
+Agent: {REVIEW_AGENT}
+Branch: {BRANCH_NAME}
+Status: {STATUS}    # clean / guardrail / cli-error / broken-build / test-failed / rejected
+Iterations: {ITERATION}
+Commits added: {N}
+Files modified: {file list}
+Log: {LOG_FILE path}
+```
+
+If `STATUS=clean` after the first iteration, the PR is ready for the merge gate (release flow) or hand-off back to the user (PR flow). For any other status, the calling command must decide whether to proceed, fall back to Copilot, or stop — never auto-merge on a non-clean local-agent status.

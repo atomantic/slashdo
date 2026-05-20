@@ -1,6 +1,14 @@
 ---
 description: Commit, push, and open a PR against the repo's default branch
+argument-hint: "[--review-with copilot|codex|gemini|claude]"
 ---
+
+## Parse Arguments
+
+Parse `$ARGUMENTS` for `--review-with <agent>`:
+- Accepted values: `copilot` (default), `codex`, `gemini`, `claude`
+- Record as `REVIEW_AGENT`. If omitted, set `REVIEW_AGENT=copilot`
+- If the value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
 
 ## Detect Branches
 
@@ -53,6 +61,19 @@ Verification — confirm before proceeding:
 - Create a PR from `{current_branch}` to `{default_branch}`
 - Create a rich PR description
 
+## Run the Review Loop
+
+Dispatch on `REVIEW_AGENT`:
+
+- **`copilot`** (default): run the Copilot cloud review loop below.
+- **`codex` | `gemini` | `claude`**: run the local-agent review loop instead. The local CLI runs `/do:review` (or an equivalent self-contained review prompt) in headless mode against the branch; this main thread then verifies its output, runs build + tests, and pushes the verified fixes. Do not run the Copilot loop in this mode.
+
+### Copilot path (`REVIEW_AGENT=copilot`)
+
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
-**Report the final status** to the user including PR URL and review outcome.
+### Local-agent path (`REVIEW_AGENT` ∈ {codex, gemini, claude})
+
+!`cat ~/.claude/lib/local-agent-review-loop.md`
+
+**Report the final status** to the user including PR URL and review outcome (status from whichever loop ran).
