@@ -23,17 +23,36 @@ For `claude` and `gemini`, this loop assumes slashdo is installed in the target 
 
 All three CLIs are invoked in **reckless / non-interactive mode** — they run unattended and must not stop to ask for permission. The flags below disable each CLI's interactive approval gates:
 
-Before building the codex invocation, compute a review title (cosmetic — codex displays it in the review summary):
+Before invoking any local agent, compute the shared inputs once. The slash-command argument MUST be only the base-branch ref — `do:review` treats `$ARGUMENTS` as the base branch and runs `git diff $ARGUMENTS...HEAD`, so any prose appended to the argument (e.g., `main — commit each ...`) becomes a non-existent ref and the diff fails. Convey commit-style overrides as separate prompt text *after* the slash command, on a new line:
+
 ```bash
-REVIEW_TITLE=$(git log -1 --format=%s HEAD)   # subject of HEAD commit; falls back to branch name if empty
+REVIEW_TITLE=$(git log -1 --format=%s HEAD)   # subject of HEAD commit; falls back below if empty
 [ -z "$REVIEW_TITLE" ] && REVIEW_TITLE="Review of $BRANCH_NAME against $BASE_BRANCH"
+
+# Shared prompt for claude / gemini. The branch is the slash-command arg;
+# the commit-style override is a separate sentence on a new line, so
+# do:review parses only "$BASE_BRANCH" as the base branch.
+REVIEW_OVERRIDE="When committing fixes, use commit messages of the form 'address review: <summary>' instead of the default."
+LOCAL_PROMPT=$(printf '/do:review %s\n\n%s' "$BASE_BRANCH" "$REVIEW_OVERRIDE")
+```
+
+Pick a timeout wrapper at this point too. The step-2 invocation below runs `$TIMEOUT_CMD {INVOCATION}`; on stock macOS without `coreutils`, plain `timeout(1)` is absent and `timeout 1800 …` exits 127 before the reviewer ever runs:
+
+```bash
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="timeout 1800"
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="gtimeout 1800"
+else
+  TIMEOUT_CMD=""   # rely on the CLI's own internal limits
+fi
 ```
 
 | Agent | Command |
 |-------|---------|
-| `claude` | `claude -p "/do:review {BASE_BRANCH} — commit each fix batch as 'address review: <summary>' and DO NOT push" --dangerously-skip-permissions` |
+| `claude` | `claude -p "$LOCAL_PROMPT" --dangerously-skip-permissions` |
 | `codex` | `codex review --base "$BASE_BRANCH" --title "$REVIEW_TITLE"` |
-| `gemini` | `env GEMINI_SANDBOX=false gemini --yolo -p "/do:review {BASE_BRANCH} — commit each fix batch as 'address review: <summary>' and DO NOT push"` |
+| `gemini` | `env GEMINI_SANDBOX=false gemini --yolo -p "$LOCAL_PROMPT"` |
 
 Notes on each invocation:
 - **claude / gemini** call slashdo's installed `do:review`, with a suffix appended to the command argument overriding two of `do:review`'s defaults: switch the commit message to `address review: <summary>` (instead of `refactor: address code review findings`) and skip the auto-push (the orchestrating agent will verify and push).
@@ -55,10 +74,10 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
 2. **Invoke the chosen CLI** (foreground, but redirect output to a log so context stays clean):
    ```bash
    LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
-   timeout 1800 {INVOCATION} > "$LOG_FILE" 2>&1
+   $TIMEOUT_CMD {INVOCATION} > "$LOG_FILE" 2>&1
    EXIT_CODE=$?
    ```
-   - 30-minute cap via `timeout(1)`. If `timeout` is unavailable on macOS, install via `coreutils` (`gtimeout`) or skip the wrapper and rely on the CLI's own limits.
+   - `$TIMEOUT_CMD` was selected during pre-flight (`timeout 1800`, `gtimeout 1800`, or empty when neither is installed). Empty expands to nothing, so the line becomes a direct invocation that relies on the CLI's own internal limits — preferred to exiting 127 before the reviewer runs.
    - If `EXIT_CODE != 0` and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of the log, and exit the loop. Surface the log path so the user can inspect.
 
 3. **Detect changes**:
