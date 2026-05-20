@@ -23,27 +23,25 @@ For `claude` and `gemini`, this loop assumes slashdo is installed in the target 
 
 All three CLIs are invoked in **reckless / non-interactive mode** — they run unattended and must not stop to ask for permission. The flags below disable each CLI's interactive approval gates:
 
-Before building the codex invocation, compute these once:
+Before building the codex invocation, compute a review title (cosmetic — codex displays it in the review summary):
 ```bash
-HEAD_SHA=$(git rev-parse HEAD)
-REVIEW_TITLE=$(git log -1 --format=%s "$HEAD_SHA")   # subject of HEAD commit; falls back to branch name if empty
+REVIEW_TITLE=$(git log -1 --format=%s HEAD)   # subject of HEAD commit; falls back to branch name if empty
 [ -z "$REVIEW_TITLE" ] && REVIEW_TITLE="Review of $BRANCH_NAME against $BASE_BRANCH"
-REVIEW_PROMPT="Review the diff from $BASE_BRANCH to HEAD, commit each fix batch as 'address review: <summary>', and DO NOT push — the orchestrating agent will verify and push."
 ```
 
 | Agent | Command |
 |-------|---------|
 | `claude` | `claude -p "/do:review {BASE_BRANCH} — commit each fix batch as 'address review: <summary>' and DO NOT push" --dangerously-skip-permissions` |
-| `codex` | `codex review --commit "$HEAD_SHA" --base "$BASE_BRANCH" --title "$REVIEW_TITLE" "$REVIEW_PROMPT"` |
+| `codex` | `codex review --base "$BASE_BRANCH" --title "$REVIEW_TITLE"` |
 | `gemini` | `GEMINI_SANDBOX=false gemini --yolo -p "/do:review {BASE_BRANCH} — commit each fix batch as 'address review: <summary>' and DO NOT push"` |
 
 Notes on each invocation:
 - **claude / gemini** call slashdo's installed `do:review`, with a suffix appended to the command argument overriding two of `do:review`'s defaults: switch the commit message to `address review: <summary>` (instead of `refactor: address code review findings`) and skip the auto-push (the orchestrating agent will verify and push).
-- **codex** uses the built-in `codex review` subcommand. The full, documented invocation is `codex review --commit <SHA> --base <BRANCH> --title <TITLE> [PROMPT]` — pass ALL four arguments. Do NOT use a positional base or omit `--title`; codex will print its help and exit if any required flag is missing, and the loop will burn an iteration on a no-op. The trailing `[PROMPT]` is where this loop injects the commit-style and don't-push override. Behavior of `codex review` may either (a) auto-apply fixes and commit them, or (b) produce a review report without applying fixes — behavior depends on the codex version installed. If codex exits with no new commits but its log contains findings, the orchestrating agent in step 3 below treats the log as the review and applies fixes itself before proceeding.
+- **codex** uses the built-in `codex review` subcommand with the **base-branch review target**, which reviews the full diff from `$BASE_BRANCH` to `HEAD`. The three review targets — `--uncommitted`, `--commit <SHA>`, and `--base <BRANCH>` — are mutually exclusive (per `codex review --help` and confirmed by `error: the argument '--commit <SHA>' cannot be used with: --base <BRANCH>`). The positional `[PROMPT]` is *also* mutually exclusive with `--base` (`error: the argument '--base <BRANCH>' cannot be used with: [PROMPT]`), so the commit-style override that `claude`/`gemini` receive cannot be passed to codex this way — the orchestrating agent supplies the commit message itself in step 3 below. `codex review` on the current shipped version produces review findings without applying fixes, so the orchestrating agent reads the log and applies fixes regardless; behavior on older or future versions may auto-apply, in which case step 3's "if new commits exist" branch handles it.
 
 Flag rationale (reckless / unattended mode):
 - `claude --dangerously-skip-permissions` — auto-approves all tool calls in the headless session
-- `codex review` — already non-interactive by design (per `codex review --help`: "Run a code review non-interactively"). Do NOT pass `-a` / `--approval`; the `codex review` subcommand does not accept it and will reject the flag. The top-level `codex` and `codex exec` commands accept `-a never`, but this loop deliberately uses `codex review` instead, so no approval flag is needed.
+- `codex review` — already non-interactive by design (per `codex review --help`: "Run a code review non-interactively"). Do NOT pass `-a` / `--approval`; the `codex review` subcommand does not accept it and will reject the flag. The top-level `codex` and `codex exec` commands accept `-a never`, but this loop deliberately uses `codex review` instead, so no approval flag is needed. Also do NOT combine `--commit <SHA>` with `--base <BRANCH>` or with a positional `[PROMPT]` — codex enforces mutual exclusion across review targets and prompt mode, and the loop would exit with code 2 before any review work runs.
 - `gemini --yolo` — auto-approves all tool calls. `GEMINI_SANDBOX=false` disables the sandboxed-shell layer so commands run directly in the working directory (needed because the agent edits files and runs the project build/test commands)
 
 Because these flags grant the headless CLI full unattended write access to the working tree, the verify step in this loop (build + tests + diff inspection by the main thread) is mandatory and non-skippable — it is the only line of defense between the headless agent's output and the remote branch.
