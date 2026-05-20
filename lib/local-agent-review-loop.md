@@ -11,8 +11,8 @@ When to use this instead of Copilot:
 
 1. Confirm `{REVIEW_AGENT}` is one of `claude`, `codex`, `gemini`. Otherwise abort with a usage error.
 2. Confirm the CLI binary is installed: `command -v {REVIEW_AGENT}`. If missing:
-   - **Default mode**: print a warning and fall back to the Copilot loop. If Copilot is also unavailable (no `gh` auth or no Copilot reviewer configured), stop and report.
-   - **Interactive mode (`--interactive`)**: ask the user whether to install, fall back, or abort.
+   - **Default mode**: print a warning, **set `REVIEW_AGENT=copilot`**, and fall back to the Copilot loop. The reassignment is mandatory — `do:release`'s merge gate dispatches on `REVIEW_AGENT` and only accepts local-agent `STATUS=clean`, so leaving `REVIEW_AGENT` set to the original (missing) agent would block a clean Copilot review from merging. If Copilot is also unavailable (no `gh` auth or no Copilot reviewer configured), stop and report.
+   - **Interactive mode (`--interactive`)**: ask the user whether to install, fall back, or abort. If the user chooses fall back, reassign `REVIEW_AGENT=copilot` as above.
 3. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
 
 ### Headless invocation per agent
@@ -33,7 +33,7 @@ REVIEW_TITLE=$(git log -1 --format=%s HEAD)   # subject of HEAD commit; falls ba
 |-------|---------|
 | `claude` | `claude -p "/do:review {BASE_BRANCH} — commit each fix batch as 'address review: <summary>' and DO NOT push" --dangerously-skip-permissions` |
 | `codex` | `codex review --base "$BASE_BRANCH" --title "$REVIEW_TITLE"` |
-| `gemini` | `GEMINI_SANDBOX=false gemini --yolo -p "/do:review {BASE_BRANCH} — commit each fix batch as 'address review: <summary>' and DO NOT push"` |
+| `gemini` | `env GEMINI_SANDBOX=false gemini --yolo -p "/do:review {BASE_BRANCH} — commit each fix batch as 'address review: <summary>' and DO NOT push"` |
 
 Notes on each invocation:
 - **claude / gemini** call slashdo's installed `do:review`, with a suffix appended to the command argument overriding two of `do:review`'s defaults: switch the commit message to `address review: <summary>` (instead of `refactor: address code review findings`) and skip the auto-push (the orchestrating agent will verify and push).
@@ -42,7 +42,7 @@ Notes on each invocation:
 Flag rationale (reckless / unattended mode):
 - `claude --dangerously-skip-permissions` — auto-approves all tool calls in the headless session
 - `codex review` — already non-interactive by design (per `codex review --help`: "Run a code review non-interactively"). Do NOT pass `-a` / `--approval`; the `codex review` subcommand does not accept it and will reject the flag. The top-level `codex` and `codex exec` commands accept `-a never`, but this loop deliberately uses `codex review` instead, so no approval flag is needed. Also do NOT combine `--commit <SHA>` with `--base <BRANCH>` or with a positional `[PROMPT]` — codex enforces mutual exclusion across review targets and prompt mode, and the loop would exit with code 2 before any review work runs.
-- `gemini --yolo` — auto-approves all tool calls. `GEMINI_SANDBOX=false` disables the sandboxed-shell layer so commands run directly in the working directory (needed because the agent edits files and runs the project build/test commands)
+- `gemini --yolo` — auto-approves all tool calls. `env GEMINI_SANDBOX=false` disables the sandboxed-shell layer so commands run directly in the working directory (needed because the agent edits files and runs the project build/test commands). The `env` prefix is required because the timeout wrapper at step 2 of the loop runs `timeout 1800 {INVOCATION}`, and shell `VAR=value cmd` assignments only work before the first command word — without `env`, the assignment would be treated as the program name and exec would fail
 
 Because these flags grant the headless CLI full unattended write access to the working tree, the verify step in this loop (build + tests + diff inspection by the main thread) is mandatory and non-skippable — it is the only line of defense between the headless agent's output and the remote branch.
 
