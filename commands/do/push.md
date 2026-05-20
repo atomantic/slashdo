@@ -35,7 +35,7 @@ Commit and push all work from this session, updating documentation as needed.
 
 3. **Update PLAN.md** (if exists):
    - Mark completed items as done by flipping `- [ ]` → `- [x]`
-   - **Preserve the `[plan-id]` slug** on any line you touch — only the box character changes, the slug stays. See [lib/plan-id-format.md](../../lib/plan-id-format.md) for the slug convention. If you reference a finished item in the commit message or changelog, include its slug (e.g. `feat([slug]): …`) so the work is grep-able across DONE.md, branches, and PR titles.
+   - **Preserve the `[plan-id]` slug** on any line you touch — only the box character changes, the slug stays. See [lib/plan-id-format.md](../../lib/plan-id-format.md) for the slug convention. If you reference a finished item in the commit message or changelog, include its slug (e.g. `feat([slug]): …`) so the work is grep-able across the changelog, branches, and PR titles.
    - Update progress notes if relevant
    - Skip if no PLAN.md exists or changes aren't plan-related
 
