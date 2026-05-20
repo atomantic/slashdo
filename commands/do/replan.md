@@ -13,7 +13,7 @@ Automatically audit PLAN.md against the codebase, prune completed/stale items, s
 
 **Philosophy:** PLAN.md should be short enough to paste into a prompt. Completed items don't belong in the active plan — the audit trail lives in git history and the changelog.
 
-**Phase ordering:** This command runs phases 0 → 7. Phase 0 (plan-item ID assignment) was added so concurrent agents can claim distinct PLAN.md items via worktree branch names; existing phases keep their original numbering.
+**Phase ordering:** This command runs phases 0 → 6.
 
 ## Boundary Rule: PLAN.md vs GOALS.md
 
@@ -64,7 +64,7 @@ nothing to back-fill).
    `takenIds` so subsequent items in the same pass don't collide.
 4. **Never rewrite an existing `[slug]`** — slugs are immutable once
    assigned. Only items missing an ID get one.
-5. Track the count `{I}` of IDs assigned for the Phase 3 / Phase 7 summary.
+5. Track the count `{I}` of IDs assigned for the Phase 3 / Phase 6 summary.
 
 If no IDs were assigned (every item already had one), this phase is a no-op
 and produces no commit on its own — proceed to Phase 1.
@@ -190,7 +190,7 @@ AskUserQuestion([{
 
 **Exclusive options** (present only if the user asks, as a separate follow-up):
 - "Show me the details" — print full evidence, then re-ask the above
-- "Just clean up formatting" — only reformat PLAN.md, skip all archive/remove/add actions
+- "Just clean up formatting" — only reformat PLAN.md, skip all remove/add actions
 
 If the user selects "Show me the details" as a response, print the full evidence and re-ask.
 
