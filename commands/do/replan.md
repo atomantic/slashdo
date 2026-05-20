@@ -1,17 +1,17 @@
 ---
-description: Automated audit/triage of PLAN.md — archive completed items to DONE.md, suggest new work, keep PLAN.md lean
+description: Automated audit/triage of PLAN.md — prune completed items, suggest new work, keep PLAN.md lean
 argument-hint: "[--interactive]"
 ---
 
 # Replan Command
 
-Automatically audit PLAN.md against the codebase, prune completed/stale items, archive what's done, suggest new work, and leave PLAN.md lean and actionable.
+Automatically audit PLAN.md against the codebase, prune completed/stale items, suggest new work, and leave PLAN.md lean and actionable.
 
-**Default mode: fully autonomous.** Scans the codebase, archives done items, removes stale items, adds suggested new items, and commits — no user interaction.
+**Default mode: fully autonomous.** Scans the codebase, removes done and stale items, adds suggested new items, and commits — no user interaction.
 
 **`--interactive` mode:** Pauses after evidence gathering to present findings and get user approval before making changes.
 
-**Philosophy:** PLAN.md should be short enough to paste into a prompt. Completed items belong in a done log, not cluttering the active plan.
+**Philosophy:** PLAN.md should be short enough to paste into a prompt. Completed items don't belong in the active plan — the audit trail lives in git history and the changelog.
 
 **Phase ordering:** This command runs phases 0 → 7. Phase 0 (plan-item ID assignment) was added so concurrent agents can claim distinct PLAN.md items via worktree branch names; existing phases keep their original numbering.
 
@@ -24,7 +24,7 @@ GOALS.md answers: *Why does this project exist? What does success look like? Wha
 
 **PLAN.md must NOT contain:**
 - Mission statements, core tenets, or non-goals (those belong in GOALS.md)
-- Completed items (those belong in `DONE.md`)
+- Completed items (the changelog and git history are the audit trail)
 - Detailed documentation (those belong in `docs/`)
 
 ## Phase 0: Assign Plan-Item IDs
@@ -42,16 +42,13 @@ replanned), skip Phase 0 entirely and let Phase 3 create PLAN.md from the
 suggested items (slugs will be assigned at insert time, since there's
 nothing to back-fill).
 
-1. Read PLAN.md and, if it exists, DONE.md. (PLAN.md presence is the
-   Phase 0 precondition stated above — a missing PLAN.md skips Phase 0
-   entirely. A missing DONE.md is fine: just treat it as an empty set
-   of taken slugs and proceed.) Collect every `[slug]`
-   into a `takenIds` set **using the strict positional pattern** spelled
-   out in [lib/plan-id-format.md](../../lib/plan-id-format.md) (section
-   "Strict positional pattern for the Phase 0 collision scan"). In
-   short: PLAN.md slugs live at the bracketed token directly after
-   `- [ ] ` / `- [x] ` (or the indented variant); DONE.md slugs live at
-   the bracketed token directly after `- **`. Do NOT collect any
+1. Read PLAN.md. (PLAN.md presence is the Phase 0 precondition stated
+   above — a missing PLAN.md skips Phase 0 entirely.) Collect every
+   `[slug]` into a `takenIds` set **using the strict positional pattern**
+   spelled out in [lib/plan-id-format.md](../../lib/plan-id-format.md)
+   (section "Strict positional pattern for the Phase 0 collision scan").
+   In short: PLAN.md slugs live at the bracketed token directly after
+   `- [ ] ` / `- [x] ` (or the indented variant). Do NOT collect any
    `[…]` token that appears elsewhere in a line (inline links,
    reference shorthand) — those are not slugs and treating them as
    taken would force unnecessary collision suffixes onto unrelated
@@ -74,9 +71,8 @@ and produces no commit on its own — proceed to Phase 1.
 
 **Concurrent-appender arbitration.** Audit commands like `do:better`,
 `do:better-swift`, and `do:depfree` independently append `- [ ]` items
-with their own slugs. Each command must re-read PLAN.md (and DONE.md)
-*immediately before* writing, so its uniqueness check sees the freshest
-state. If two such commands race and produce colliding slugs, Phase 0
+with their own slugs. Each command must re-read PLAN.md *immediately
+before* writing, so its uniqueness check sees the freshest state. If two such commands race and produce colliding slugs, Phase 0
 on the next replan is the safety net: it leaves existing slugs
 unchanged (immutability), so the collision is visible to the human via
 duplicate `[slug]` tokens and can be hand-resolved. No additional
@@ -139,8 +135,8 @@ Using agent results, classify every PLAN.md item:
 
 | Status | Criteria | Action |
 |--------|----------|--------|
-| `confirmed-done` | Git commit + code exists + tests pass | Archive to DONE.md |
-| `likely-done` | Strong evidence but not 100% certain | Archive to DONE.md |
+| `confirmed-done` | Git commit + code exists + tests pass | Remove from PLAN.md |
+| `likely-done` | Strong evidence but not 100% certain | Remove from PLAN.md |
 | `stale` | No commits, no code, no recent discussion; item is >30 days old with zero progress | Remove from PLAN.md |
 | `drifted` | Agent 5 flagged `drift-conflict` or `drift-unclear` | **Never auto-modify** — surface to human (replan / examine / delete) |
 | `still-pending` | No evidence of completion and no drift | Keep in PLAN.md |
@@ -153,7 +149,7 @@ Using agent results, classify every PLAN.md item:
 
 Apply all changes immediately without prompting — **except for `drifted` items, which are never auto-modified**:
 
-1. Archive `confirmed-done` and `likely-done` items to DONE.md
+1. Remove `confirmed-done` and `likely-done` items from PLAN.md. The commit message should list the removed slugs (e.g. `docs: replan — completed [slug-a], [slug-b]`) so git log + the changelog remain the audit trail.
 2. Remove `stale` items from PLAN.md
 3. Add suggested new items to the appropriate PLAN.md section
 4. Absorb any tactical items found in GOALS.md
@@ -163,7 +159,7 @@ Apply all changes immediately without prompting — **except for `drifted` items
 ```
 Replan complete:
 - Assigned {I} new plan-item IDs (Phase 0)
-- Archived {N} completed items to DONE.md
+- Removed {N} completed items from PLAN.md
 - Removed {S} stale items
 - Added {P} new suggested items
 - {any GOALS.md boundary fixes}
@@ -180,11 +176,11 @@ Present ONE consolidated summary to the user:
 
 ```
 AskUserQuestion([{
-  question: "Replan audit complete. Here's what I found:\n\n**Auto-archiving to DONE.md** ({N} items):\n{list of confirmed-done items}\n\n**Likely done — archive?** ({M} items):\n{list with evidence}\n\n**Flagged as stale** ({S} items):\n{list with last-activity dates}\n\n**⚠️ Drifted — would remove new features** ({D} items):\n{list with collision details}\n\n**New suggestions** ({P} items):\n{numbered list of proposed new items with rationale}\n\nHow should I proceed?",
+  question: "Replan audit complete. Here's what I found:\n\n**Confirmed done — remove from PLAN.md** ({N} items):\n{list of confirmed-done items}\n\n**Likely done — remove?** ({M} items):\n{list with evidence}\n\n**Flagged as stale** ({S} items):\n{list with last-activity dates}\n\n**⚠️ Drifted — would remove new features** ({D} items):\n{list with collision details}\n\n**New suggestions** ({P} items):\n{numbered list of proposed new items with rationale}\n\nHow should I proceed?",
   multiSelect: true,
   options: [
-    { label: "Archive confirmed-done", description: "Move {N} confirmed items to DONE.md" },
-    { label: "Archive likely-done too", description: "Also move {M} likely-done items to DONE.md" },
+    { label: "Remove confirmed-done", description: "Strike {N} confirmed items from PLAN.md (git log + changelog are the audit trail)" },
+    { label: "Remove likely-done too", description: "Also strike {M} likely-done items from PLAN.md" },
     { label: "Remove stale items", description: "Delete {S} stale items from PLAN.md" },
     { label: "Add suggested items", description: "Add {P} new items to PLAN.md" },
     { label: "Resolve drifted items", description: "Walk through {D} drifted items one-by-one" }
@@ -216,38 +212,7 @@ AskUserQuestion([{
 
 If "Replan — rewrite item": draft a revised item that explicitly accounts for the new feature, then ask the user to accept / edit / reject the rewrite before writing to PLAN.md. Never auto-apply a rewrite.
 
-## Phase 4: Archive to DONE.md
-
-`DONE.md` lives at project root. It's the append-only log of completed work.
-
-### Format
-
-```markdown
-# Done Log
-
-Completed items archived from PLAN.md. For release notes, see `.changelogs/`.
-
-## 2026-03-16
-
-- **[auth-middleware-jwt] Implemented feature X** — added auth middleware and JWT validation
-- **[user-profile-null-check] Fixed bug Y** — null check on user profile load
-- **[extract-monolithic-handler] Refactored Z** — extracted shared utilities from monolithic handler
-
-## 2026-03-10
-
-- **[staging-ci-pipeline] Added CI pipeline for staging deploys** — GitHub Actions workflow gating PRs into the `staging` branch
-- **[api-route-test-coverage] Test coverage for API routes** — added Vitest specs for every handler in `server/routes/`
-```
-
-### Rules
-
-- Group by date (newest first)
-- One line per item — concise description of what was done, not the original checkbox text
-- **Lift the `[plan-id]` slug verbatim** from the source PLAN.md line — do NOT re-derive the slug from the (possibly-rewritten) archive description. Slugs are immutable once assigned (see [lib/plan-id-format.md](../../lib/plan-id-format.md)) and Phase 0's collision check parses DONE.md expecting the exact slug that was issued. The bold-wrapped title format makes the slug easy to grep across DONE.md and keeps the uniqueness check correct on future replans (retired slugs are not reused).
-- If the completed item had substantial documentation (>20 lines), extract it to `docs/` and add a link: `- **[plan-id] Feature X** — see [docs/features/x.md](./docs/features/x.md)`
-- Do NOT duplicate changelog entries — DONE.md captures plan-item completion, changelogs capture release-level changes
-
-## Phase 5: Rebuild PLAN.md
+## Phase 4: Rebuild PLAN.md
 
 Rewrite PLAN.md to be lean and actionable:
 
@@ -257,7 +222,6 @@ Rewrite PLAN.md to be lean and actionable:
 # Development Plan
 
 For project mission and milestones, see [GOALS.md](./GOALS.md).
-For completed work, see [DONE.md](./DONE.md).
 
 ## Next Up
 
@@ -281,28 +245,29 @@ For completed work, see [DONE.md](./DONE.md).
 - **"Next Up" is ordered** — numbered list, max 5 items, these are the immediate priorities
 - **"Backlog" is unordered** — checkbox items that are planned but not prioritized; each carries its `[plan-id]` slug from Phase 0
 - **"Future / Ideas" has no checkboxes** — these are possibilities, not commitments, so they don't need slug IDs
-- **No completed items** — they're in DONE.md
+- **No completed items** — the changelog and git log are the audit trail
 - **No detailed docs** — link to `docs/` files instead
 - **No section if it's empty** — don't include "Backlog" with zero items
 - **Preserve existing `[plan-id]` slugs verbatim** when items are moved between sections or rewritten — slugs are immutable once assigned (see [lib/plan-id-format.md](../../lib/plan-id-format.md)). Only Phase 0 generates new slugs.
 
-## Phase 6: Absorb GOALS.md Violations
+## Phase 5: Absorb GOALS.md Violations
 
 If tactical items (checkboxes, implementation details) were found in GOALS.md:
 - Move them into the appropriate PLAN.md section
 - Update GOALS.md to remove tactical content
 
-## Phase 7: Commit
+## Phase 6: Commit
 
 Stage and commit all files modified during this replan:
 ```bash
 git add PLAN.md
 # Stage optional files only if they exist and were modified
-git add DONE.md 2>/dev/null || true
 git add GOALS.md 2>/dev/null || true
 git add docs/ 2>/dev/null || true
-git commit -m "docs: replan — archive {N} completed items, update priorities"
+git commit -m "docs: replan — completed [slug-a], [slug-b]; pruned {S} stale, added {P} new"
 ```
+
+The commit subject is the audit trail — list the completed slugs explicitly so `git log --grep=<slug>` finds them later.
 
 Do NOT push unless explicitly asked.
 
@@ -310,7 +275,6 @@ Do NOT push unless explicitly asked.
 
 - If no PLAN.md exists, inform the user and offer to create one from codebase analysis
 - The opportunity scanner suggestion is the key differentiator — every replan should surface at least one new idea
-- DONE.md is append-only — never delete entries from it
 - Keep PLAN.md under ~50 lines whenever possible — it should be scannable in seconds
 - Adapt to existing project structure and conventions
 - **Never silently resolve a `drifted` item.** Autonomous mode annotates and surfaces; only the human decides between replan / examine / delete.

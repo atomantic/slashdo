@@ -50,16 +50,23 @@ The slug is derived deterministically from the item's title text:
    and including that `-`); trimming the trailing `-` yields a 49-char
    slug.
 4. **Uniqueness** — the resulting slug must not collide with any existing
-   `[slug]` already in PLAN.md OR DONE.md. On collision, append `-2`,
+   `[slug]` already in PLAN.md. On collision, append `-2`,
    `-3`, … (hard-truncating the base from the right if needed so that
    `base + "-N"` stays within 50 chars). After each right-trim the
    resulting `base + "-N"` may itself collide with an unrelated existing
    slug that happens to be a prefix of the original — **re-run the
    uniqueness check after every truncation+suffix step, bumping `N`
-   until the candidate is unique against both PLAN.md and DONE.md**. The
+   until the candidate is unique against PLAN.md**. The
    right-trimmed base is not required to end on a word boundary (rule 3's
    word-boundary guarantee applies only to the initial 50-char
    truncation).
+
+   Note: slugs are only checked for collision against PLAN.md. Completed
+   items are removed from PLAN.md (not archived to a separate file) — the
+   audit trail of which slugs once existed lives in `git log` and the
+   changelog. A retired slug *can* theoretically be reused for a brand-new
+   item, but in practice the title-derivation rules make accidental reuse
+   unlikely; reach into git history if you need to confirm.
 
 Examples:
 
@@ -90,58 +97,24 @@ Examples:
 
 Once a slug is assigned, it is **immutable** — even if the item's title is
 later edited, the slug stays the same. This is intentional: the slug
-identifies the work item across PR titles, branches, and DONE.md archive
-entries.
+identifies the work item across PR titles, branches, commit messages, and
+changelog entries.
 
 The ID-assignment pass (run by `/do:replan` and the PortOS `do-replan`
 scheduled task) only assigns slugs to items that are missing one — it
 never rewrites an existing slug.
-
-## DONE.md archival
-
-When an item moves from PLAN.md to DONE.md, the slug is preserved as a
-prefix on the archived entry. **This file is the canonical specification
-for the archive shape — every command that touches DONE.md
-(`do:replan`, `do:goals`, `do:push`, `do:pr-better`, etc.) must produce
-this exact shape so the Phase 0 uniqueness check can parse it
-deterministically.**
-
-Canonical archive line:
-
-```markdown
-## 2026-05-17
-
-- **[extract-resolveproviderandmodel-into-promptrunner] Extract resolveProviderAndModel** — landed `server/lib/promptRunner.js`; consolidated three call sites.
-```
-
-Required shape, in order:
-1. `- ` (bullet)
-2. `**` (open bold)
-3. `[<slug>]` immediately after the open bold, no leading space
-4. ` ` (single space) + the human-readable title
-5. `**` (close bold)
-6. ` — ` (em-dash with spaces) + the description
-
-The slug on the archived line is **lifted verbatim** from the source
-PLAN.md `[slug]`; it is not re-derived from the (possibly-edited)
-archive description. The uniqueness check (step 4 above) scans DONE.md
-as well, so a retired slug is never recycled for a future item with a
-similar title.
 
 ### Strict positional pattern for the Phase 0 collision scan
 
 The Phase 0 uniqueness check must only collect `[slug]` tokens from
 fixed positions to avoid false collisions with legitimate non-slug
 brackets (inline markdown links `[text](url)`, references like
-`see [docs/x.md]`, etc.) that may appear inside archive descriptions:
+`see [docs/x.md]`, etc.) that may appear inside item descriptions:
 
 - **PLAN.md**: only the bracketed token at position 3 on a checkbox
   line (right after `- [ ] ` or `- [x] `, including nested-indent
   variants like `  - [ ] [slug] …`). Regex sketch:
   `^\s*-\s+\[[ x]\]\s+\[([a-z0-9-]+)\]\s`.
-- **DONE.md**: only the bracketed token at position 2 inside the
-  opening bold span on an archive line (right after `- **`). Regex
-  sketch: `^\s*-\s+\*\*\[([a-z0-9-]+)\]\s`.
 
 Brackets in any other position (mid-description links, inline `[…]`
 references, multi-bracket prose) MUST be ignored — they are not slugs
