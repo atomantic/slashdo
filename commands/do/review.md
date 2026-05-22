@@ -1,17 +1,18 @@
 ---
 description: Deep code review of changed files against software engineering best practices
-argument-hint: "[--strict|--nuclear] [PR-URL | base-branch]"
+argument-hint: "[--strict|--nuclear] [--draft] [PR-URL | base-branch]"
 ---
 
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for:
 - **`--strict`** (alias: **`--nuclear`**): enable the Structural Ambition agent (6th agent) and promote structural findings to blocker tier. Use for branches you want to land cleanly — flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications.
-- **GitHub PR reference** — any non-flag token that contains `github` AND looks like a PR reference. Match all of the following:
+- **`--draft`** (PR mode only): write the review payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the `gh api` command to publish it manually, instead of posting the review immediately. Ignored when `PR_MODE=false`.
+- **GitHub PR reference** — any non-flag token that looks like a PR reference. A token matches if **any** of the following holds (the rules are OR-ed; the `github` substring is sufficient but not required):
   - Full URL: `https://github.com/{owner}/{repo}/pull/{number}` (and any subpath like `/files`, `/commits`)
   - SSH-style URL with `github.com` host
-  - Shorthand: `{owner}/{repo}#{number}` when prefixed/followed by anything containing `github` in the same argument list, or when the argument matches `^[^/]+/[^/]+#[0-9]+$` and `gh repo view` confirms it resolves
-  - If the argument contains the substring `github` AND a `/pull/{number}` segment, treat as a PR URL even if not on github.com (handles GHES hosts like `github.example.com`)
+  - Any URL containing the substring `github` AND a `/pull/{number}` segment — covers GHES hosts like `github.example.com`
+  - Shorthand: the argument matches `^[^/]+/[^/]+#[0-9]+$` AND `gh repo view {owner}/{repo}` confirms it resolves (the shorthand form does NOT require the `github` substring — `gh` is the source of truth for whether it's a real repo)
   - Extract `OWNER`, `REPO`, and `PR_NUM`. Set `PR_MODE=true` and `PR_URL` to the canonical URL.
 - Any other non-flag token: treat as the base branch override (only when `PR_MODE=false`).
 
@@ -48,7 +49,7 @@ When a PR URL was parsed, do NOT use the local working tree as the source of tru
    ```bash
    gh pr diff {PR_NUM} --repo {OWNER}/{REPO} > /tmp/do-review-pr-{PR_NUM}.diff
    ```
-4. **Parse the diff to build a "commentable lines" map** — `{file_path: set of line numbers on the RIGHT (new) side of the diff}`. GitHub's review API only accepts inline comments on lines that appear in the patch; comments on lines outside the diff will be rejected. Use `git apply --numstat` or a small awk pass over the unified diff to collect each `@@ -a,b +c,d @@` hunk's right-side line range, then exclude removed/context-only lines. Save to `/tmp/do-review-pr-{PR_NUM}-lines.json`.
+4. **Parse the diff to build a "commentable lines" map** — `{file_path: set of line numbers on the RIGHT (new) side of the diff}`. GitHub's review API only accepts inline comments on lines that appear in the patch; comments on lines outside the diff will be rejected. Walk the unified diff line by line: track the current file from `+++ b/{path}` headers, parse each `@@ -a,b +c,d @@` hunk header to seed the right-side line counter at `c`, then iterate hunk body lines — increment the counter on `+` (added) and ` ` (context) lines and include both in the map; skip `-` (removed) lines without incrementing. (Do NOT use `git apply --numstat` — it reports per-file add/delete totals, not hunk line ranges.) Save to `/tmp/do-review-pr-{PR_NUM}-lines.json`.
 5. **Fetch each changed file at HEAD_SHA** so agents can read full file content (not just the hunk):
    ```bash
    gh api repos/{OWNER}/{REPO}/contents/{path}?ref={HEAD_SHA} --jq '.content' | base64 -d > /tmp/do-review-pr-{PR_NUM}/{path}

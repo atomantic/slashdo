@@ -30,6 +30,7 @@ COMMANDS=(
 
 OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
+# NOTE: keep in sync with install.sh LIBS — see comment there.
 LIBS=(
   code-review-checklist copilot-review-loop graphql-escaping
   local-agent-review-loop
@@ -38,6 +39,7 @@ LIBS=(
   swift-review-checklist swift-gotchas
   review-surface-scan review-surface-quality review-security-audit
   review-cross-file-tracing review-cross-file-contract
+  review-structural-ambition
 )
 
 HOOKS=(slashdo-check-update slashdo-statusline)
