@@ -33,7 +33,7 @@ Constraints applied automatically:
 Execute the full `do:better` workflow defined in `~/.claude/commands/do/better.md` with these mandatory deviations:
 
 ### Phase 0 → 4a: unchanged
-Run discovery, audit (all 8 agents), plan generation, worktree setup, foundation utilities, parallel remediation, build/test verification, and internal code review exactly as specified in `do:better`.
+Run discovery, audit (all 8 agents, plus the Structural Ambition agent when `--strict`/`--nuclear` is passed), plan generation, worktree setup, foundation utilities, parallel remediation, build/test verification, and internal code review exactly as specified in `do:better`.
 
 ### Phase 4b: Force the "Commit directly" path
 

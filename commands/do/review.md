@@ -1,15 +1,23 @@
 ---
 description: Deep code review of changed files against software engineering best practices
-argument-hint: "[base-branch]"
+argument-hint: "[--strict|--nuclear] [base-branch]"
 ---
+
+## Parse Arguments
+
+Parse `$ARGUMENTS` for:
+- **`--strict`** (alias: **`--nuclear`**): enable the Structural Ambition agent (6th agent) and promote structural findings to blocker tier. Use for branches you want to land cleanly — flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications.
+- Any non-flag token: treat as the base branch override.
+
+Set `STRICT_MODE=true` if either flag is present.
 
 ## Determine Scope
 
-1. **Detect the base branch** — use the argument if provided, otherwise run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`
+1. **Detect the base branch** — use the positional argument if provided, otherwise run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`
 2. **Detect the current branch** — `git branch --show-current`
 3. **Get the diff stat** — `git diff {base}...HEAD --stat` to see all changed files and line counts
 4. **Get the full diff** — `git diff {base}...HEAD` to see actual changes
-5. Print: `Reviewing: {current} vs {base} — {N} files changed`
+5. Print: `Reviewing: {current} vs {base} — {N} files changed{strict_suffix}` where `{strict_suffix}` is ` (strict mode)` when `STRICT_MODE=true`, empty otherwise
 
 If there are no changes, inform the user and stop.
 
@@ -32,9 +40,11 @@ Before dispatching agents, understand what this change set claims to do:
 
 ## Dispatch Review Agents
 
-Read the five agent instruction files, then spawn **all five in parallel** using the Agent tool with `model: "opus"`. Each agent reviews ALL changed files independently.
+Read the agent instruction files, then spawn agents **in parallel** using the Agent tool with `model: "opus"`. Each agent reviews ALL changed files independently.
 
 **The agents are deliberately short and principle-led.** Each agent's checklist is a prompt for attention — opus's job is to think about the problem space, not pattern-match against bullets. The most expensive misses in past reviews were *consequence-reasoning* bugs (a fallback path producing a different shape than the happy path; an encoder corrupting a downstream parser; a test asserting a symptom instead of the contract) — none findable by adding more bullets. Trust the agent to reason; the checklist seeds the lens, not the conclusions.
+
+Always dispatch agents 1–5. Dispatch agent 6 only when `STRICT_MODE=true`.
 
 <surface_scan_agent>
 
@@ -86,6 +96,16 @@ Catches CONTRACT issues across files: schema/shape agreements, validation parity
 
 </cross_file_contract_agent>
 
+<structural_ambition_agent>
+
+### 6. Structural Ambition Agent (strict mode only)
+
+Dispatch only when `STRICT_MODE=true`. Catches STRUCTURAL issues the other agents miss: missed code-judo simplifications, file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, bespoke duplicates of canonical helpers, cast-heavy/optional-soup contracts. Push the bar to "this works AND the implementation feels inevitable in hindsight."
+
+!`cat ~/.claude/lib/review-structural-ambition.md`
+
+</structural_ambition_agent>
+
 ### How to dispatch
 
 For each agent, construct its prompt by combining:
@@ -94,7 +114,7 @@ For each agent, construct its prompt by combining:
 3. The list of changed files from the diff stat
 4. Instruction: "Read each changed file in full (not just diff hunks). Apply your reading lens — the checklist seeds attention but is NOT a script. Reason from principles about each new shape, flow, or contract: what's the smallest input that breaks this? What does the producer believe vs the consumer? What does the fallback path actually deliver? What does the documentation claim vs what the code does? Report findings that demonstrate consequence reasoning, not just pattern matches."
 
-Spawn all five agents simultaneously. Each returns its findings independently.
+Spawn agents 1–5 simultaneously. If `STRICT_MODE=true`, also spawn agent 6 in the same parallel batch. Each returns its findings independently.
 
 ### Large PR handling
 
@@ -102,12 +122,13 @@ If the diff touches more than 20 files, tell each agent to batch files by direct
 
 ## Collect & Deduplicate
 
-After all five agents return:
+After all dispatched agents return:
 
 1. **Merge** all findings into a single list, tagged by source agent
-2. **Deduplicate**: if two agents flagged the same `file:line` with overlapping descriptions, keep the most detailed version and note all agents that found it (overlap between Surface Scan and Surface Quality, or between Cross-File Tracing and Cross-File Contract, is expected for borderline issues — that's signal a finding is real, not noise)
+2. **Deduplicate**: if two agents flagged the same `file:line` with overlapping descriptions, keep the most detailed version and note all agents that found it (overlap between Surface Scan and Surface Quality, or between Cross-File Tracing and Cross-File Contract, is expected for borderline issues — that's signal a finding is real, not noise). The Structural Ambition agent (strict mode) frequently overlaps with Surface Quality on wrapper/duplication findings — keep the Structural Ambition phrasing when it names a concrete reframing
 3. **PR coherence**: verify commits deliver what they claim — flag discrepancies as IMPROVEMENT findings
 4. **CLAUDE.md filter**: remove findings that conflict with explicit project conventions
+5. **Strict-mode severity promotion** (only when `STRICT_MODE=true`): promote findings marked `[BLOCKER]` by the Structural Ambition agent to CRITICAL severity in the fix phase. Promote findings from other agents that match a strict-mode blocker pattern (file pushed past 1000 lines, ad-hoc conditional in unrelated flow, thin wrapper/identity abstraction, bespoke duplicate of a canonical helper) to CRITICAL as well
 
 ## Verify Findings
 
@@ -144,10 +165,13 @@ Print a summary table of what was reviewed and found:
 | Security Audit | N | N | N |
 | Cross-File Tracing (State) | N | N | N |
 | Cross-File Contract | N | N | N |
+| Structural Ambition (strict) | N | N | N |
 | **Total** | **N** | **N** | **N** |
 
+Omit the Structural Ambition row when `STRICT_MODE=false`.
+
 ### Issues Fixed
-- file:line — description of fix (agent: Surface-Scan / Surface-Quality / Security / Cross-File-Tracing / Cross-File-Contract)
+- file:line — description of fix (agent: Surface-Scan / Surface-Quality / Security / Cross-File-Tracing / Cross-File-Contract / Structural-Ambition)
 
 ### Accepted As-Is (with rationale)
 - file:line — description and why it's acceptable
