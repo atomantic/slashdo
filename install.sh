@@ -61,7 +61,7 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 LIBS=(
   code-review-checklist copilot-review-loop graphql-escaping
   local-agent-review-loop
-  per-finding-root-cause
+  per-finding-root-cause plan-id-format
   post-review-doc-recommendations remediation-agent-template
   swift-review-checklist swift-gotchas
   review-surface-scan review-surface-quality review-security-audit
