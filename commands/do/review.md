@@ -1,17 +1,27 @@
 ---
 description: Deep code review of changed files against software engineering best practices
-argument-hint: "[--strict|--nuclear] [base-branch]"
+argument-hint: "[--strict|--nuclear] [PR-URL | base-branch]"
 ---
 
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for:
 - **`--strict`** (alias: **`--nuclear`**): enable the Structural Ambition agent (6th agent) and promote structural findings to blocker tier. Use for branches you want to land cleanly — flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications.
-- Any non-flag token: treat as the base branch override.
+- **GitHub PR reference** — any non-flag token that contains `github` AND looks like a PR reference. Match all of the following:
+  - Full URL: `https://github.com/{owner}/{repo}/pull/{number}` (and any subpath like `/files`, `/commits`)
+  - SSH-style URL with `github.com` host
+  - Shorthand: `{owner}/{repo}#{number}` when prefixed/followed by anything containing `github` in the same argument list, or when the argument matches `^[^/]+/[^/]+#[0-9]+$` and `gh repo view` confirms it resolves
+  - If the argument contains the substring `github` AND a `/pull/{number}` segment, treat as a PR URL even if not on github.com (handles GHES hosts like `github.example.com`)
+  - Extract `OWNER`, `REPO`, and `PR_NUM`. Set `PR_MODE=true` and `PR_URL` to the canonical URL.
+- Any other non-flag token: treat as the base branch override (only when `PR_MODE=false`).
 
-Set `STRICT_MODE=true` if either flag is present.
+Set `STRICT_MODE=true` if either strict flag is present.
+
+If both a PR URL and a base-branch token are provided, the PR URL wins — ignore the base-branch token and warn the user.
 
 ## Determine Scope
+
+### Local branch mode (`PR_MODE=false`)
 
 1. **Detect the base branch** — use the positional argument if provided, otherwise run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`
 2. **Detect the current branch** — `git branch --show-current`
@@ -21,9 +31,43 @@ Set `STRICT_MODE=true` if either flag is present.
 
 If there are no changes, inform the user and stop.
 
+### GitHub PR mode (`PR_MODE=true`)
+
+When a PR URL was parsed, do NOT use the local working tree as the source of truth. Review the PR as published on GitHub instead.
+
+1. **Fetch PR metadata**:
+   ```bash
+   gh pr view {PR_NUM} --repo {OWNER}/{REPO} --json number,title,author,baseRefName,headRefName,headRefOid,baseRefOid,url,isCrossRepository,headRepositoryOwner,headRepository
+   ```
+   Capture `HEAD_SHA` (`headRefOid`), `BASE_SHA` (`baseRefOid`), `HEAD_REF`, `BASE_REF`, `AUTHOR_LOGIN`, and `IS_FORK` (`isCrossRepository`).
+2. **Fetch the changed-files list**:
+   ```bash
+   gh pr diff {PR_NUM} --repo {OWNER}/{REPO} --name-only
+   ```
+3. **Fetch the full unified diff** (used by agents to scope to changed hunks AND used later to filter inline comments to lines that exist in the diff):
+   ```bash
+   gh pr diff {PR_NUM} --repo {OWNER}/{REPO} > /tmp/do-review-pr-{PR_NUM}.diff
+   ```
+4. **Parse the diff to build a "commentable lines" map** — `{file_path: set of line numbers on the RIGHT (new) side of the diff}`. GitHub's review API only accepts inline comments on lines that appear in the patch; comments on lines outside the diff will be rejected. Use `git apply --numstat` or a small awk pass over the unified diff to collect each `@@ -a,b +c,d @@` hunk's right-side line range, then exclude removed/context-only lines. Save to `/tmp/do-review-pr-{PR_NUM}-lines.json`.
+5. **Fetch each changed file at HEAD_SHA** so agents can read full file content (not just the hunk):
+   ```bash
+   gh api repos/{OWNER}/{REPO}/contents/{path}?ref={HEAD_SHA} --jq '.content' | base64 -d > /tmp/do-review-pr-{PR_NUM}/{path}
+   ```
+   (Create parent dirs as needed; URL-encode the path.)
+6. Print: `Reviewing PR #{PR_NUM}: {title} — {N} files changed{strict_suffix}` plus a one-line note: `Author: {AUTHOR_LOGIN}{fork_suffix}` where `{fork_suffix}` is ` (cross-repo fork)` when `IS_FORK=true`.
+
+If the PR has no changed files, inform the user and stop.
+
 ## Apply Project Conventions
 
 CLAUDE.md is already loaded into your context. Use its rules (code style, error handling, logging, security model, scope exclusions) as overrides to generic best practices throughout this review. Pass relevant convention overrides to each agent so they don't flag things the project intentionally allows (e.g., "no auth needed — internal tool").
+
+In `PR_MODE`, the local CLAUDE.md may not apply to the PR being reviewed (it could be from a fork or a different repo). Also attempt to fetch the target repo's CLAUDE.md and AGENTS.md if they exist:
+```bash
+gh api repos/{OWNER}/{REPO}/contents/CLAUDE.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}-CLAUDE.md || true
+gh api repos/{OWNER}/{REPO}/contents/AGENTS.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}-AGENTS.md || true
+```
+Pass whichever exists to the agents instead of (or in addition to) the local one.
 
 ## PR-Level Coherence Check
 
@@ -110,9 +154,11 @@ Dispatch only when `STRICT_MODE=true`. Catches STRUCTURAL issues the other agent
 
 For each agent, construct its prompt by combining:
 1. The agent's instruction content (from the sections above)
-2. Project convention overrides from CLAUDE.md that affect the review
-3. The list of changed files from the diff stat
-4. Instruction: "Read each changed file in full (not just diff hunks). Apply your reading lens — the checklist seeds attention but is NOT a script. Reason from principles about each new shape, flow, or contract: what's the smallest input that breaks this? What does the producer believe vs the consumer? What does the fallback path actually deliver? What does the documentation claim vs what the code does? Report findings that demonstrate consequence reasoning, not just pattern matches."
+2. Project convention overrides from CLAUDE.md that affect the review (use the PR's CLAUDE.md/AGENTS.md when `PR_MODE=true`)
+3. The list of changed files from the diff stat (or `gh pr diff --name-only` in PR mode) AND, in PR mode, the path to each file's full content under `/tmp/do-review-pr-{PR_NUM}/`
+4. In PR mode only: the path to `/tmp/do-review-pr-{PR_NUM}-lines.json` (the commentable-lines map) and an instruction that **every finding MUST cite a `file:line` where `line` appears in the commentable-lines map** — otherwise the finding cannot be posted as an inline comment and should be downgraded to a summary-only finding
+5. Instruction: "Read each changed file in full (not just diff hunks). Apply your reading lens — the checklist seeds attention but is NOT a script. Reason from principles about each new shape, flow, or contract: what's the smallest input that breaks this? What does the producer believe vs the consumer? What does the fallback path actually deliver? What does the documentation claim vs what the code does? Report findings that demonstrate consequence reasoning, not just pattern matches."
+6. In PR mode only: "For every CRITICAL or IMPROVEMENT finding where a concrete fix is obvious, include a `suggestion:` block — the exact replacement text for the cited line(s). Use `start_line` and `line` to span multiple lines when the fix needs more than one line. The reviewer will package these as GitHub inline review suggestions."
 
 Spawn agents 1–5 simultaneously. If `STRICT_MODE=true`, also spawn agent 6 in the same parallel batch. Each returns its findings independently.
 
@@ -140,9 +186,13 @@ For each finding, ground it in evidence before classifying:
 
 After verifying all findings, run the project's build and test commands to confirm no false positives.
 
-## Fix Issues
+In `PR_MODE`, skip the local build/test step — the PR's CI is the source of truth for that repo. Verify by reading code only.
 
-For each verified finding:
+## Fix Issues (local branch mode only)
+
+**Skip this section entirely when `PR_MODE=true`** — in PR mode, jump to "Post Review to GitHub PR" below. The whole point of PR mode is to publish review comments on the remote PR, not to mutate the local working tree (the PR may be on a fork or a branch we can't push to).
+
+For each verified finding (local branch mode):
 1. Classify severity: **CRITICAL** (runtime crash, data leak, security) vs **IMPROVEMENT** (consistency, robustness, conventions)
 2. Fix all CRITICAL issues immediately
 3. For IMPROVEMENT issues, fix them too — the goal is to eliminate review round-trips
@@ -150,6 +200,85 @@ For each verified finding:
 5. After fixes, run the project's test suite and build command (per project conventions already in context)
 6. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
 7. Commit fixes: `refactor: address code review findings`
+
+## Post Review to GitHub PR (`PR_MODE=true` only)
+
+Skip this section when `PR_MODE=false`. When `PR_MODE=true`, this is the **primary output** of the command — package the verified findings as a single GitHub PR review with inline comments containing code suggestions, just like Copilot.
+
+### Classify findings for posting
+
+For each verified finding:
+1. **Severity**: CRITICAL (runtime crash, data leak, security, contract break) vs IMPROVEMENT (consistency, robustness, conventions).
+2. **Postability**: Check the cited `file:line` against the commentable-lines map (`/tmp/do-review-pr-{PR_NUM}-lines.json`):
+   - **In-diff** → eligible for an inline comment
+   - **Out-of-diff** → cannot be inline; include in the review summary body instead
+3. **Has suggestion**: True if the finding contains a concrete replacement for the cited line(s).
+
+### Build the inline comments array
+
+For each in-diff finding, build a comment object:
+
+```json
+{
+  "path": "<repo-relative path>",
+  "line": <end line on the RIGHT side of the diff>,
+  "side": "RIGHT",
+  "body": "<severity tag> <one-line gist>\n\n<2-4 sentence explanation tied to specific code>\n\n```suggestion\n<exact replacement text for the line range>\n```"
+}
+```
+
+Rules:
+- For multi-line suggestions, add `"start_line": <first line>` and `"start_side": "RIGHT"`. `line` is the LAST line of the range, `start_line` is the FIRST. Both must be in the commentable-lines map.
+- The `suggestion` block's content replaces the cited lines verbatim. **Do not** include the original code prefixed with `-` or new code prefixed with `+` — `suggestion` blocks are not diff format; they're literal replacement text.
+- Severity tag: prefix the body with `**[CRITICAL]**`, `**[IMPROVEMENT]**`, or `**[NIT]**` so the PR author can triage at a glance.
+- Findings without a concrete suggestion still get inline comments — just omit the ```` ```suggestion ```` block and describe the problem.
+- Skip `UNCERTAIN` findings — don't post speculation.
+
+### Build the review summary body
+
+Assemble a top-level review body (markdown) with:
+- One-line verdict (e.g., `Reviewed by /do:review — N critical, M improvements, K nits.`)
+- A short "Highlights" section listing the most important 1-3 CRITICAL findings by `file:line`
+- An "Out-of-diff observations" section for findings on lines that aren't part of the patch (so the author still sees them)
+- A "Coherence check" section if the PR description/commits claim something the code doesn't deliver (from the "PR-Level Coherence Check" step)
+- A footer: `_Generated by /do:review_`
+
+### Pick the review event
+
+- **`REQUEST_CHANGES`** if any finding is CRITICAL **and** the current user is not the PR author. If the current user IS the PR author (check via `gh api user -q '.login'` vs `AUTHOR_LOGIN`), downgrade to `COMMENT` — GitHub forbids requesting changes on your own PR.
+- **`COMMENT`** otherwise (improvements/nits only, or self-PR).
+- **Never `APPROVE` automatically** — approval is a human judgment call.
+
+### Submit the review
+
+Write the payload to `/tmp/do-review-pr-{PR_NUM}-payload.json`:
+
+```json
+{
+  "commit_id": "<HEAD_SHA>",
+  "event": "COMMENT | REQUEST_CHANGES",
+  "body": "<review summary markdown>",
+  "comments": [ ...inline comment objects... ]
+}
+```
+
+Post it:
+```bash
+gh api repos/{OWNER}/{REPO}/pulls/{PR_NUM}/reviews \
+  --method POST \
+  --input /tmp/do-review-pr-{PR_NUM}-payload.json
+```
+
+On `422 Unprocessable Entity`, the most common causes are:
+1. A comment's `line` is not in the diff — re-validate against the lines map and drop offending comments.
+2. `commit_id` is stale (the PR head moved while you were reviewing) — re-fetch `headRefOid` and retry.
+3. `start_line >= line` for a multi-line comment — fix the ordering.
+
+Print the review URL returned by the API (`html_url`) so the user can open it.
+
+### Drafts mode (optional)
+
+If the user wants to inspect comments before publishing, support a `--draft` flag: instead of `POST .../reviews`, write the payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the path plus the `gh api` command needed to publish it manually. (Default behavior remains: publish immediately.)
 
 ## Report
 
@@ -179,9 +308,13 @@ Omit the Structural Ambition row when `STRICT_MODE=false`.
 
 If no issues were found, confirm the code is clean and ready for PR.
 
+In `PR_MODE`, replace "Issues Fixed" with **Inline Suggestions Posted** (count and list with `file:line` + one-line gist) and **Out-of-diff Findings** (list — these went into the summary body), and add a final line with the posted review URL.
+
 ## Convention Encoding
 
-After the report is printed and fixes are committed, run the Convention Encoding phase. Examine the findings (both fixed and accepted-as-is) and, for each pattern likely to recur, apply the **smallest** code-level action that makes the convention self-evident (in-tree comment at the canonical site, a clarifying rename, or a surgical refactor that removes the footgun). CLAUDE.md / AGENTS.md additions are a **fallback**, used only when the convention truly can't be expressed locally. Any encoded actions land in the same branch as the review fixes.
+**Skip when `PR_MODE=true`** — convention encoding mutates the local working tree, which is the wrong target when we're reviewing someone else's remote PR. Any convention recommendations belong in the summary body of the posted review instead, phrased as suggestions to the PR author.
+
+After the report is printed and fixes are committed (local branch mode), run the Convention Encoding phase. Examine the findings (both fixed and accepted-as-is) and, for each pattern likely to recur, apply the **smallest** code-level action that makes the convention self-evident (in-tree comment at the canonical site, a clarifying rename, or a surgical refactor that removes the footgun). CLAUDE.md / AGENTS.md additions are a **fallback**, used only when the convention truly can't be expressed locally. Any encoded actions land in the same branch as the review fixes.
 
 !`cat ~/.claude/lib/per-finding-root-cause.md`
 
@@ -189,7 +322,9 @@ After the report is printed and fixes are committed, run the Convention Encoding
 
 ## PR Comment Policy
 
-After the review and any fixes, determine whether to post review comments on the PR/MR:
+**This section applies only when `PR_MODE=false`.** When `PR_MODE=true`, posting the review IS the deliverable — the user invoked the command with a PR URL specifically to publish review feedback, so the self-vs-other-author check is skipped and the review is always posted (per "Post Review to GitHub PR" above).
+
+For local branch mode, after the review and any fixes, determine whether to post review comments on the PR/MR:
 
 1. **Check for an open PR** on the current branch: `gh pr view --json number,author --jq '{number, author: .author.login}' 2>/dev/null`. If the command fails (no PR exists), skip posting.
 2. **Get the current user**: `gh api user -q '.login'`
