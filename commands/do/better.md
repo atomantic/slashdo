@@ -1,11 +1,11 @@
 ---
 description: Unified DevSecOps audit, remediation, test enhancement, per-category PRs, CI verification, and Copilot review loop with worktree isolation
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [path filter or focus areas]"
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [--strict|--nuclear] [path filter or focus areas]"
 ---
 
 # Better — Unified DevSecOps Pipeline
 
-Run the full DevSecOps lifecycle: audit the codebase with 8 deduplicated agents, consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run Copilot review loops, and merge.
+Run the full DevSecOps lifecycle: audit the codebase with 8 deduplicated agents (9 in strict mode), consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run Copilot review loops, and merge.
 
 **Default mode: fully autonomous.** Uses Balanced model profile, proceeds through all phases without prompting, auto-merges PRs with clean reviews.
 
@@ -15,6 +15,7 @@ Parse `$ARGUMENTS` for:
 - **`--interactive`**: pause at each decision point for user approval
 - **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation
 - **`--no-merge`**: run through PR creation (Phase 5), skip Copilot review and merge
+- **`--strict`** (alias: **`--nuclear`**): enable the Structural Ambition agent (9th audit agent) and promote its blocker-tier findings to CRITICAL severity for remediation. Flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications. Set `STRICT_MODE=true` when present
 - **Path filter**: limit scanning scope to specific directories or files
 - **Focus areas**: e.g., "security only", "DRY and bugs"
 
@@ -69,6 +70,7 @@ When compacting during this workflow, always preserve:
 - All PR numbers and URLs created so far
 - `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR`, `REPO_DIR` values
 - `VCS_HOST`, `CLI_TOOL`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
+- `STRICT_MODE` (true/false — determines whether the Structural Ambition agent runs and whether structural findings are promoted to CRITICAL)
 - `PHASE_4C_START_SHA` (needed for FILE_OWNER_MAP update in Phase 4c.3)
 - `VACUOUS_TESTS_FIXED`, `WEAK_TESTS_STRENGTHENED`, `NEW_TEST_CASES`, `NEW_TEST_FILES`
 - `CREATED_CATEGORY_SLUGS` (list of branch slugs created in Phase 5)
@@ -227,6 +229,11 @@ Skip step 4 if steps 1-3 reveal the code is correct.
 
    Report each finding with a severity prefix `**[CRITICAL]**`, `**[HIGH]**`, `**[MEDIUM]**`, or `**[LOW]**` followed immediately by a quality prefix `[VACUOUS]`, `[WEAK]`, or `[MISSING]` (for example, `**[HIGH][VACUOUS]**`) to distinguish quality issues from coverage gaps while keeping the format consistent with other agents. Include the specific test name and file:line for existing test issues.
 
+9. **Structural Ambition** _(strict mode only — dispatch only when `STRICT_MODE=true`, otherwise skip)_
+   Sources: `~/.claude/lib/review-structural-ambition.md` — read this file and use its full content as the agent's instructions.
+   Focus: missed code-judo simplifications (reframings that delete whole branches/modes/helpers), file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers / identity abstractions, boundary leaks (feature logic in shared modules), bespoke duplicates of canonical helpers, cast-heavy / `any`-heavy / optional-soup contracts, sequential orchestration where the parallel/atomic shape is obviously cleaner.
+   Report findings using the standard severity format. The skill file's presumptive blockers (file pushed past 1000 lines, spaghetti growth in existing code, thin wrappers, boundary leaks, canonical-helper duplication) must be marked `[CRITICAL]` so Phase 2 picks them up for remediation. Every finding must name a concrete suggested reframing — drop findings that only say "could be cleaner" without a path. Tag this agent's category as `structural` for Phase 2 ownership mapping.
+
 Wait for ALL agents to complete before proceeding.
 
 </audit_instructions>
@@ -272,6 +279,7 @@ For each file touched by multiple categories, document why it was assigned to on
 ### Stack-Specific
 ### Dependency Freedom
 ### Test Quality & Coverage
+### Structural Ambition  _(only when STRICT_MODE=true)_
 ```
 
 **Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct findings via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case derived from the title text, ≤50 chars, unique against every `[slug]` already in PLAN.md. Recommended pattern for audit findings: `<category-prefix>-<file-basename>-<short-hint>` (e.g. `[sec-routes-pr-validation]`, `[dry-cli-output-dedup]`).
@@ -285,6 +293,7 @@ For each file touched by multiple categories, document why it was assigned to on
    - Stack-Specific → Stack-Specific → `stack-specific`
    - Dep Freedom → Dependency Freedom → `deps`
    - Tests → Test Quality & Coverage → `tests`
+   - Structural → Structural Ambition → `structural` _(strict mode only)_
 
 ```
 | Category          | CRITICAL | HIGH | MEDIUM | LOW | Total |
@@ -297,8 +306,11 @@ For each file touched by multiple categories, document why it was assigned to on
 | Stack-Specific    | ...      | ...  | ...    | ... | ...   |
 | Dep Freedom       | ...      | ...  | ...    | ... | ...   |
 | Tests             | ...      | ...  | ...    | ... | ...   |
+| Structural        | ...      | ...  | ...    | ... | ...   |
 | TOTAL             | ...      | ...  | ...    | ... | ...   |
 ```
+
+Omit the **Structural** row when `STRICT_MODE=false`.
 
 **GATE: If `--scan-only` was passed, STOP HERE.** Print the summary and exit.
 
@@ -351,6 +363,7 @@ If no shared utilities were identified, skip this step.
    - Bugs, Performance & Error Handling
    - Stack-Specific
    - Dependency Freedom
+   - Structural Ambition _(strict mode only)_ — remediation agent must apply the specific reframing named in each finding (extract module, collapse condition chain, delete wrapper, move logic to canonical layer). Do NOT settle for "cleaner version of the same idea" — if the finding says "delete this branch by reframing X as Y," the fix must actually delete the branch. If a reframing turns out to be infeasible after investigation, leave the finding as-is and document why in the commit message rather than substituting a cosmetic change
 3. Only create tasks for categories that have actionable findings
 4. Spawn up to 5 general-purpose agents as teammates. **Pass `REMEDIATION_MODEL` as the `model` parameter on each agent.** If `REMEDIATION_MODEL` is `opus`, omit the parameter to inherit from session.
 
@@ -558,7 +571,7 @@ Initialize `CREATED_CATEGORY_SLUGS=""` (empty space-delimited string). After eac
 For each category that has findings:
 1. Switch to `{DEFAULT_BRANCH}`: `git checkout {DEFAULT_BRANCH}`
 2. Create a category branch: `git checkout -b better/{CATEGORY_SLUG}`
-   - Use slugs: `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`
+   - Use slugs: `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`, and `structural` (strict mode only)
 3. For each file assigned to this category in `FILE_OWNER_MAP`:
    - **Modified files**: `git checkout better/{DATE} -- {file_path}`
    - **New files (Added)**: `git checkout better/{DATE} -- {file_path}`
@@ -782,7 +795,10 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 | Stack-Specific     | ...      | ...   | ...     | #number  | pass   | approved |
 | Dep Freedom        | ...      | ...   | ...     | #number  | pass   | approved |
 | Tests              | ...      | ...   | ...     | #number  | pass   | approved |
+| Structural         | ...      | ...   | ...     | #number  | pass   | approved |
 | TOTAL              | ...      | ...   | ...     | N PRs    |        |          |
+
+Omit the **Structural** row when `STRICT_MODE=false`.
 
 Test Enhancement Stats:
 - Vacuous tests fixed: {VACUOUS_TESTS_FIXED}
@@ -820,3 +836,4 @@ Test Enhancement Stats:
 - Test Quality & Coverage findings are remediated in Phase 4c with a dedicated test enhancement agent that verifies tests fail when code is broken
 - GitLab projects skip the Copilot review loop entirely (Phase 6) and stop after MR creation
 - CI must pass on each PR before requesting Copilot review or merging
+- `--strict` (alias `--nuclear`) adds the Structural Ambition agent and promotes its blocker-tier findings (file >1000 lines, spaghetti additions, thin wrappers, boundary leaks, canonical-helper duplication) to CRITICAL. Use when auditing a branch you want to land cleanly. The Structural Ambition category produces high-judgment findings — expect more remediation churn than the runtime/security agents and budget extra Copilot-review iterations for its PR. If a finding's reframing turns out to be infeasible after investigation, leave it and document why rather than substituting a cosmetic change

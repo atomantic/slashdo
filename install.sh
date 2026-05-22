@@ -53,14 +53,20 @@ COMMANDS=(
 
 OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
+# NOTE: keep this allowlist in sync with files under lib/ in the repo. Any new
+# lib/*.md that a command spec references (e.g. via `!cat ~/.claude/lib/<name>.md`)
+# MUST be added here AND to uninstall.sh, or the curl installer will silently skip
+# it and the command will fail at runtime. The npm installer (src/installer.js)
+# enumerates lib/ dynamically, so it doesn't need updating.
 LIBS=(
   code-review-checklist copilot-review-loop graphql-escaping
   local-agent-review-loop
-  per-finding-root-cause
+  per-finding-root-cause plan-id-format
   post-review-doc-recommendations remediation-agent-template
   swift-review-checklist swift-gotchas
   review-surface-scan review-surface-quality review-security-audit
   review-cross-file-tracing review-cross-file-contract
+  review-structural-ambition
 )
 
 HOOKS=(slashdo-check-update slashdo-statusline)

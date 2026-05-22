@@ -311,3 +311,14 @@ The most expensive misses are not pattern misses — they are *consequence-reaso
 - New content not matching existing indentation, bullet style, heading levels
 - Duplicate section headers in a single structured file (changelog, README) are merge artifacts — consolidate
 - Shell instructions with destructive operations not verifying preconditions first
+
+**Structural ambition** _(apply when reviewing diffs from `--strict` runs, optional otherwise)_
+- File pushed from under 1000 lines to over 1000 lines — extract helpers/subcomponents/modules first
+- New ad-hoc conditional bolted onto an existing flow the surrounding code wasn't designed for — move into a dedicated abstraction, state machine, or the layer that already owns the concept
+- Thin wrappers / identity abstractions / single-call-site helpers that add indirection without buying clarity — delete the wrapper
+- Feature-specific logic added to a shared/canonical module, or implementation details leaking through APIs callers must know about — move to the layer that owns the concept
+- Bespoke helper duplicating a canonical utility — use the existing one; extend it if missing a capability
+- Cast-heavy / `any`-heavy / optional-soup contracts paper over an unclear invariant — make the boundary explicit
+- Refactors that move code between files without reducing the number of concepts the reader holds — flag as "movement without simplification"
+- Missed code-judo: a small reframing that would delete a whole branch/mode/helper. Don't accept a cleaner version of the same messy idea when a simpler model is plausible
+- Tone: direct and demanding about structure, never rude. Phrasings: "this pushes the file past 1k lines — decompose first", "this works, but the surrounding code is more spaghetti", "this abstraction isn't earning its keep", "code-judo move here deletes the whole {branch}". Avoid rename-only suggestions when the real issue is structural
