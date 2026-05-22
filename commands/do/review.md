@@ -49,12 +49,17 @@ When a PR URL was parsed, do NOT use the local working tree as the source of tru
    ```bash
    gh pr diff {PR_NUM} --repo {OWNER}/{REPO} > /tmp/do-review-pr-{PR_NUM}.diff
    ```
-4. **Parse the diff to build a "commentable lines" map** — `{file_path: set of line numbers on the RIGHT (new) side of the diff}`. GitHub's review API only accepts inline comments on lines that appear in the patch; comments on lines outside the diff will be rejected. Walk the unified diff line by line: track the current file from `+++ b/{path}` headers, parse each `@@ -a,b +c,d @@` hunk header to seed the right-side line counter at `c`, then iterate hunk body lines — increment the counter on `+` (added) and ` ` (context) lines and include both in the map; skip `-` (removed) lines without incrementing. (Do NOT use `git apply --numstat` — it reports per-file add/delete totals, not hunk line ranges.) Save to `/tmp/do-review-pr-{PR_NUM}-lines.json`.
-5. **Fetch each changed file at HEAD_SHA** so agents can read full file content (not just the hunk):
+4. **Parse the diff to build a "commentable lines" map** — `{file_path: set of line numbers on the RIGHT (new) side of the diff}`. GitHub's review API only accepts inline comments on lines that appear in the patch; comments on lines outside the diff will be rejected. Walk the unified diff line by line:
+   - Track the current file from `diff --git a/<path> b/<path>` headers (authoritative for both adds and renames). Prefer this over `+++ b/<path>` because deletions emit `+++ /dev/null` and renames may not round-trip the new path through `+++` alone.
+   - If the file is deleted (the `+++` header is `/dev/null`), skip it entirely — there are no right-side lines to comment on.
+   - Parse each `@@ -a,b +c,d @@` hunk header to seed the right-side line counter at `c`, then iterate hunk body lines: increment the counter on `+` (added) and ` ` (context) lines and include both in the map; skip `-` (removed) lines without incrementing.
+   - **Ignore the `\ No newline at end of file` marker line** — it's metadata, not a content line, and must NOT advance the right-side counter.
+   - (Do NOT use `git apply --numstat` — it reports per-file add/delete totals, not hunk line ranges.) Save to `/tmp/do-review-pr-{PR_NUM}-lines.json`.
+5. **Fetch each changed file at HEAD_SHA** so agents can read full file content (not just the hunk). Skip deleted files — `repos/{OWNER}/{REPO}/contents/{path}?ref={HEAD_SHA}` returns 404 for any path removed in the PR, and a strict failure would derail PR-mode for delete-only or mixed-deletion PRs:
    ```bash
-   gh api repos/{OWNER}/{REPO}/contents/{path}?ref={HEAD_SHA} --jq '.content' | base64 -d > /tmp/do-review-pr-{PR_NUM}/{path}
+   gh api repos/{OWNER}/{REPO}/contents/{path}?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}/{path} || echo "skipped (deleted or unreadable): {path}"
    ```
-   (Create parent dirs as needed; URL-encode the path.)
+   (Create parent dirs as needed; URL-encode the path. Use the `diff --git` header from step 4 to identify deletions up front and skip the fetch entirely for those.)
 6. Print: `Reviewing PR #{PR_NUM}: {title} — {N} files changed{strict_suffix}` plus a one-line note: `Author: {AUTHOR_LOGIN}{fork_suffix}` where `{fork_suffix}` is ` (cross-repo fork)` when `IS_FORK=true`.
 
 If the PR has no changed files, inform the user and stop.
