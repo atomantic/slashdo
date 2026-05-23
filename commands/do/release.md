@@ -37,9 +37,9 @@ Before doing anything, determine the project's source and target branches for re
    - **Project conventions** (already in context) — look for git workflow sections, branch descriptions, or release instructions
    - **Versioning docs** — check `docs/VERSIONING.md`, `CONTRIBUTING.md`, or `RELEASING.md`
    - **Branch convention** — if a `release` branch exists, the target is `release`; otherwise create it from the last release tag (see step 3 below). In `--interactive` mode, ask the user to confirm
-3. **Ensure the target branch exists** — if not, create it from the last release tag:
+3. **Ensure the target branch exists** — if not, create it from the last release tag (or root commit if no tags exist yet — net-new project):
    ```bash
-   git branch release $(git describe --tags --abbrev=0)
+   git branch release $(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
    git push -u origin release
    ```
    This ensures the PR diff shows ALL changes since the last release, not just the version bump.
@@ -61,9 +61,9 @@ Print the detected workflow: `Detected release flow: {source} → {target}`
 ## Determine Version and Finalize Changelog
 
 1. **Determine version bump** from commits since the last git tag:
-   - Scan commit messages for conventional commit prefixes:
-     - `breaking:` → **major** bump
-     - `feat:` → **minor** bump
+   - Scan commit messages for conventional commit prefixes (also check each commit's body/footer for `BREAKING CHANGE:` — a recognized way to signal a breaking change without the prefix):
+     - `breaking:`, any prefix with a `!` (e.g. `feat!:`, `fix!:`, `refactor!:`), or a `BREAKING CHANGE:` footer → **major** bump
+     - `feat:` or `build:` → **minor** bump
      - `fix:`, `chore:`, `docs:`, `refactor:`, `perf:`, `style:`, `test:`, `ci:` → **patch** bump
    - Use the **highest applicable level** across all commits
    - **Default mode**: Use the determined version automatically. **Interactive mode (`--interactive`)**: Present the proposed version to the user for confirmation
@@ -191,9 +191,13 @@ For `dirty` or `inconclusive`:
 
 ## Post-Merge
 
-1. **Tag the release** on the target branch to trigger the publish workflow:
+1. **Tag the release** on the target branch to trigger the publish workflow. Refuse to overwrite an existing tag — a colliding `v{version}` usually means the version bump heuristic picked an already-released value or a prior partial release left state behind, both of which need human attention before force-tagging would be safe:
    ```bash
-   git fetch origin {target}
+   git fetch origin {target} 'refs/tags/*:refs/tags/*'
+   if git rev-parse -q --verify "refs/tags/v{version}" >/dev/null; then
+     echo "Tag v{version} already exists. Aborting tag step. Investigate (rerun version bump? force-tag manually?) before retrying."
+     exit 1
+   fi
    git tag v{version} origin/{target}
    git push origin v{version}
    ```
