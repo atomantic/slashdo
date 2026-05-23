@@ -158,10 +158,11 @@ The merge gate consumes the **wrapper's `{OVERALL_STATUS}`** plus, for any copil
 
 - `clean` — every executed pass returned `clean` (copilot `too-large` counts as clean here, per the copilot loop's own rule). **Eligible to merge.**
 - `partial` — the wrapper stopped early because of an explicit stop-mode flag (`--review-stop-on-findings` or `--review-stop-on-clean`) and the executed passes all completed normally. **Eligible to merge** — the user opted into the short-circuit.
+- `inconclusive` — the executed list contained inconclusive statuses (`timeout`, `error`, `guardrail`) and zero `clean` results. **Do NOT merge** — no reviewer ever produced a verdict.
 - `dirty` — a pass returned a hard-error status (`cli-error`, `broken-build`, `test-failed`, `rejected`) and the wrapper short-circuited. **Do NOT merge.**
 
-For `dirty`:
-- **Default mode**: leave the PR open and report the failing pass's status so the user can review manually.
+For `dirty` or `inconclusive`:
+- **Default mode**: leave the PR open and report the proximate status so the user can review manually.
 - **Interactive mode (`--interactive`)**: ask the user whether to merge anyway, re-run a specific reviewer, or leave open.
 
 ### Copilot-specific checks (when copilot was in the executed list)
