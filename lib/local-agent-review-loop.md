@@ -116,6 +116,8 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
    - If `EXIT_CODE != 0` and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of the log, and exit the loop. Surface the log path so the user can inspect.
 
 3. **Detect changes and apply fixes** (logic depends on `{REVIEWER_APPLIES}`):
+
+   First, snapshot the pre-CLI git state. These values describe what the *CLI* did to the working tree (everything in `REVIEWER_APPLIES=true` is judged from them; in `REVIEWER_APPLIES=false` they should be zero because the CLI was told not to edit):
    ```bash
    NEW_COMMITS=$(git rev-list "$LOOP_START_SHA..HEAD" --count)
    UNCOMMITTED=$(git status --porcelain | wc -l)
@@ -128,8 +130,13 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
      - For each finding, read the cited file at the cited line, apply the proposed fix (using the structured `fix:` field as a starting point; if the proposal is wrong or imprecise, the orchestrator's judgment overrides — this is *your* commit, not the CLI's).
      - After each cohesive set of fixes, run `{BUILD_CMD}` (skip when empty) and `{TEST_CMD}`. If either fails, fix forward (don't push a broken state) — if the failure stems from a bad finding, drop that finding and continue.
      - Commit each fix (or coherent group of fixes) as `address review: <summary>`. Do not include co-author or "Generated with" lines.
-   - If `NEW_COMMITS == 0` after the apply pass (e.g., the orchestrator rejected every finding as wrong/out-of-scope), set `STATUS=clean` and exit.
-   - If `UNCOMMITTED > 0` after the apply pass, you have a bug — the orchestrator should always commit what it stages. Print the uncommitted diff, stage and commit explicitly listed files as `address review: orchestrator-applied — remaining changes`, and proceed.
+   - After the apply pass, **recompute** the change counts — the orchestrator's commits since `$LOOP_START_SHA` are what step 4 must verify and step 5 must push. Reusing the pre-apply values here would falsely report `clean` while leaving the orchestrator's fixes unverified and unpushed:
+     ```bash
+     NEW_COMMITS=$(git rev-list "$LOOP_START_SHA..HEAD" --count)
+     UNCOMMITTED=$(git status --porcelain | wc -l)
+     ```
+   - If recomputed `NEW_COMMITS == 0` (e.g., the orchestrator rejected every finding as wrong/out-of-scope), set `STATUS=clean` and exit.
+   - If recomputed `UNCOMMITTED > 0`, you have a bug — the orchestrator should always commit what it stages. Print the uncommitted diff, stage and commit explicitly listed files as `address review: orchestrator-applied — remaining changes`, and proceed.
 
    **When `REVIEWER_APPLIES=true` (reviewer applies)**:
    - The CLI was expected to apply fixes directly in the working tree and commit them as `address review: <summary>`.
