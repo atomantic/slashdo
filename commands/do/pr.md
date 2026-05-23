@@ -1,6 +1,6 @@
 ---
 description: Commit, push, and open a PR against the repo's default branch
-argument-hint: "[--review-with copilot|codex|gemini|claude]"
+argument-hint: "[--review-with copilot|codex|gemini|claude] [--reviewer-applies]"
 ---
 
 ## Parse Arguments
@@ -9,6 +9,11 @@ Parse `$ARGUMENTS` for `--review-with <agent>`:
 - Accepted values: `copilot` (default), `codex`, `gemini`, `claude`
 - Record as `REVIEW_AGENT`. If omitted, set `REVIEW_AGENT=copilot`
 - If the value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
+
+Parse `$ARGUMENTS` for `--reviewer-applies` (boolean, no value):
+- Record as `REVIEWER_APPLIES=true` if present, otherwise `REVIEWER_APPLIES=false` (default).
+- This flag picks who applies fixes the reviewer surfaces: by default the orchestrating thread (this session) reads the reviewer's findings and applies fixes itself; with `--reviewer-applies` the reviewing CLI applies fixes in the working tree directly. See `lib/local-agent-review-loop.md` "Editing mode" for the rationale and trade-offs.
+- The flag is **not supported on the copilot path** because Copilot reviews are read-only by design (cloud-side comments, no working-tree access). If `REVIEW_AGENT=copilot` and `REVIEWER_APPLIES=true`, print a warning (`--reviewer-applies has no effect with --review-with copilot; fixes are always applied by the orchestrator's sub-agent`) and continue with the standard Copilot loop.
 
 ## Detect Branches
 

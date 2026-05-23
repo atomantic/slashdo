@@ -55,7 +55,7 @@ All commands live under the `do:` namespace:
 | Command | What it does |
 |:---|:---|
 | `/do:push` | Commit and push all work with changelog |
-| `/do:pr` | Open a PR with self-review and Copilot review loop |
+| `/do:pr` | Open a PR with self-review and a review loop (Copilot by default; see [Review loop flags](#review-loop-flags-dopr-dorelease-dopr-better)) |
 | `/do:pr-better` | Run a full do:better audit on the current branch, commit fixes directly, then open a single PR |
 | `/do:fpr` | Fork PR -- push to fork, PR against upstream |
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
@@ -70,6 +70,17 @@ All commands live under the `do:` namespace:
 | `/do:omd` | Audit and optimize markdown files |
 | `/do:update` | Update slashdo to latest version |
 | `/do:help` | List all available commands |
+
+### Review loop flags (`/do:pr`, `/do:release`, `/do:pr-better`)
+
+These three commands accept two flags that control the post-PR review:
+
+| Flag | Default | What it does |
+|:---|:---|:---|
+| `--review-with <agent>` | `copilot` | Pick the reviewer: `copilot` (GitHub cloud review), `codex`, `gemini`, or `claude` (a separate local CLI in headless mode). |
+| `--reviewer-applies` | off | Edit the working tree directly from the reviewing CLI instead of routing findings back through the orchestrating thread. No effect with `--review-with copilot` (Copilot reviews are read-only). |
+
+By default the orchestrator that opened the PR also applies the fixes — it reads the reviewer's findings and edits the working tree itself. Pass `--reviewer-applies` only when you want the reviewing agent's *judgment* in the final patch (e.g. asking gemini to both find and patch its own concerns).
 
 ## Supported Environments
 
