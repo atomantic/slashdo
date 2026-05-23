@@ -45,7 +45,7 @@ REVIEW_TITLE=$(git log -1 --format=%s HEAD)   # subject of HEAD commit; falls ba
 # In both cases the branch is the slash-command arg; the override is a
 # separate sentence on a new line, so do:review parses only "$BASE_BRANCH".
 if [ "$REVIEWER_APPLIES" = "true" ]; then
-  REVIEW_OVERRIDE="When committing fixes, use commit messages of the form 'address review: <summary>' instead of the default."
+  REVIEW_OVERRIDE="When committing fixes, use commit messages of the form 'address review ($REVIEW_AGENT): <summary>' instead of the default — the parenthesized agent name records which reviewer surfaced the finding."
 else
   REVIEW_OVERRIDE="REVIEW-ONLY MODE — do NOT modify files, do NOT commit, do NOT post a PR comment. Skip the 'Fix Issues', 'Convention Encoding', and 'PR Comment Policy' phases of do:review entirely. After verifying findings, print them to stdout as a numbered list using this exact format (one block per finding):
 
@@ -62,7 +62,7 @@ LOCAL_PROMPT=$(printf '/do:review %s\n\n%s' "$BASE_BRANCH" "$REVIEW_OVERRIDE")
 
 # Codex-only prompt for REVIEWER_APPLIES=true (codex exec invocation —
 # codex doesn't have slashdo installed, so describe the task directly).
-CODEX_APPLY_PROMPT="Review the diff from $BASE_BRANCH to HEAD in this repo against software-engineering best practices (correctness, security, test coverage, contract drift). For each finding, apply the fix in the working tree, then run \`$BUILD_CMD\` (skip if empty) and \`$TEST_CMD\` to verify, and commit each fix with message 'address review: <summary>'. Do not introduce changes beyond the scope of fixing the findings. Do not skip tests or weaken assertions."
+CODEX_APPLY_PROMPT="Review the diff from $BASE_BRANCH to HEAD in this repo against software-engineering best practices (correctness, security, test coverage, contract drift). For each finding, apply the fix in the working tree, then run \`$BUILD_CMD\` (skip if empty) and \`$TEST_CMD\` to verify, and commit each fix with message 'address review (codex): <summary>'. Do not introduce changes beyond the scope of fixing the findings. Do not skip tests or weaken assertions."
 ```
 
 Pick a timeout wrapper at this point too. The step-2 invocation below runs `$TIMEOUT_CMD {INVOCATION}`; on stock macOS without `coreutils`, plain `timeout(1)` is absent and `timeout 1800 …` exits 127 before the reviewer ever runs:
@@ -88,7 +88,7 @@ Pick the invocation based on `{REVIEW_AGENT}` and `{REVIEWER_APPLIES}`:
 For `claude` and `gemini`, the same command string is used in both modes — `$LOCAL_PROMPT` already encodes the mode via the suffix override that branches on `$REVIEWER_APPLIES` above. The CLI's behavior changes because do:review's body sees a different override. For `codex`, the invocation itself swaps because `codex review` (review-only) and `codex exec` (apply-fixes) are different subcommands with incompatible flag sets.
 
 Notes on each invocation:
-- **claude / gemini** call slashdo's installed `do:review`. In `REVIEWER_APPLIES=true` mode, the suffix overrides two of do:review's defaults: switch the commit message to `address review: <summary>` (instead of `refactor: address code review findings`) and skip the auto-push (the orchestrating agent will verify and push). In `REVIEWER_APPLIES=false` mode, the suffix instead instructs do:review to skip its Fix/Convention/PR-Comment phases and emit findings to stdout in a structured format the orchestrator can parse.
+- **claude / gemini** call slashdo's installed `do:review`. In `REVIEWER_APPLIES=true` mode, the suffix overrides two of do:review's defaults: switch the commit message to `address review (<agent>): <summary>` where `<agent>` is the reviewing CLI's slug — `claude` or `gemini` here (instead of `do:review`'s current default `address review (self): <summary>`) and skip the auto-push (the orchestrating agent will verify and push). The parenthesized agent name records which reviewer surfaced the finding, which is useful when scanning the log of a release that ran multiple reviewers. In `REVIEWER_APPLIES=false` mode, the suffix instead instructs do:review to skip its Fix/Convention/PR-Comment phases and emit findings to stdout in a structured format the orchestrator can parse — the orchestrator then commits the fixes using the same `address review (<agent>): <summary>` form to preserve attribution.
 - **codex (review-only)** uses the built-in `codex review` subcommand with the **base-branch review target**, which reviews the full diff from `$BASE_BRANCH` to `HEAD`. The three review targets — `--uncommitted`, `--commit <SHA>`, and `--base <BRANCH>` — are mutually exclusive (per `codex review --help` and confirmed by `error: the argument '--commit <SHA>' cannot be used with: --base <BRANCH>`). The positional `[PROMPT]` is *also* mutually exclusive with `--base` (`error: the argument '--base <BRANCH>' cannot be used with: [PROMPT]`), so per-invocation overrides cannot be passed this way — the orchestrating agent applies the fixes itself per step 3.
 - **codex (reviewer-applies)** uses `codex -a never exec "$CODEX_APPLY_PROMPT"` because `codex review` is read-only on the current shipped version (produces findings without modifying the working tree). `codex exec` accepts a free-form prompt that asks codex to review *and* apply fixes, with the top-level `-a never` flag selecting the never-ask approval mode so it runs unattended. The flag MUST precede the `exec` subcommand — `codex exec -a never ...` exits 2 with `error: unexpected argument '-a' found`, because `-a` is a top-level Codex option that the `exec` subcommand parser does not recognize.
 
@@ -129,17 +129,17 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
    - Otherwise, the orchestrator applies each fix in this session:
      - For each finding, read the cited file at the cited line, apply the proposed fix (using the structured `fix:` field as a starting point; if the proposal is wrong or imprecise, the orchestrator's judgment overrides — this is *your* commit, not the CLI's).
      - After each cohesive set of fixes, run `{BUILD_CMD}` (skip when empty) and `{TEST_CMD}`. If either fails, fix forward (don't push a broken state) — if the failure stems from a bad finding, drop that finding and continue.
-     - Commit each fix (or coherent group of fixes) as `address review: <summary>`. Do not include co-author or "Generated with" lines.
+     - Commit each fix (or coherent group of fixes) as `address review (<agent>): <summary>` where `<agent>` is `$REVIEW_AGENT` (the reviewing CLI's slug — `codex` / `gemini` / `claude`). The parenthesized agent name records which reviewer surfaced the finding. Do not include co-author or "Generated with" lines.
    - After the apply pass, **recompute** the change counts — the orchestrator's commits since `$LOOP_START_SHA` are what step 4 must verify and step 5 must push. Reusing the pre-apply values here would falsely report `clean` while leaving the orchestrator's fixes unverified and unpushed:
      ```bash
      NEW_COMMITS=$(git rev-list "$LOOP_START_SHA..HEAD" --count)
      UNCOMMITTED=$(git status --porcelain | wc -l)
      ```
    - If recomputed `NEW_COMMITS == 0` (e.g., the orchestrator rejected every finding as wrong/out-of-scope), set `STATUS=clean` and exit.
-   - If recomputed `UNCOMMITTED > 0`, you have a bug — the orchestrator should always commit what it stages. Print the uncommitted diff, stage and commit explicitly listed files as `address review: orchestrator-applied — remaining changes`, and proceed.
+   - If recomputed `UNCOMMITTED > 0`, you have a bug — the orchestrator should always commit what it stages. Print the uncommitted diff, stage and commit explicitly listed files as `address review ($REVIEW_AGENT): orchestrator-applied — remaining changes`, and proceed.
 
    **When `REVIEWER_APPLIES=true` (reviewer applies)**:
-   - The CLI was expected to apply fixes directly in the working tree and commit them as `address review: <summary>`.
+   - The CLI was expected to apply fixes directly in the working tree and commit them as `address review ($REVIEW_AGENT): <summary>`.
    - If `NEW_COMMITS == 0` and `UNCOMMITTED == 0`: the CLI ran and found nothing to fix. Set `STATUS=clean` and exit the loop.
    - If `UNCOMMITTED > 0` (CLI left changes uncommitted despite the instruction):
      - Print the uncommitted diff
@@ -153,10 +153,10 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
      - Commits that revert legitimate behavior to make a flaky test pass
      - Disabled tests, skipped assertions, or `// TODO` placeholders introduced by the agent
      - Secrets, hardcoded credentials, or other content that must not land
-   - Run `{BUILD_CMD}`. If it fails:
+   - Run `{BUILD_CMD}` (skip when empty — projects without a build step skip this check). If it fails:
      - **Default mode**: revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=broken-build`, exit the loop, and report
      - **Interactive mode**: ask the user whether to retry (re-invoke CLI), revert, or accept-and-fix-manually
-   - Run `{TEST_CMD}`. Same handling on failure (`STATUS=test-failed`).
+   - Run `{TEST_CMD}` (skip when empty). Same handling on failure (`STATUS=test-failed`).
    - If any of the inspection red flags above triggered, treat as a verification failure: revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=rejected`, and exit the loop.
 
 5. **Push verified changes**:
