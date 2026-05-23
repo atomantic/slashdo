@@ -208,7 +208,7 @@ For each verified finding (local branch mode):
 4. **Identify the root cause** of why the issue existed (missing lint rule, missing comment at the canonical site, misleading name, API that invites the mistake, etc.) per `~/.claude/lib/per-finding-root-cause.md` and apply the smallest matching action **in the same change**. Defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
 5. After fixes, run the project's test suite and build command (per project conventions already in context)
 6. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
-7. Commit fixes: `refactor: address code review findings`
+7. Commit fixes: `address review (self): <summary>` — the parenthesized agent name (here `self` for the host CLI's own self-review) records which reviewer surfaced the finding, matching the convention used by delegated `--review-with` passes.
 
 ## Post Review to GitHub PR (`PR_MODE=true` only)
 

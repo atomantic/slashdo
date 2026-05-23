@@ -87,7 +87,8 @@ Run the following loop until Copilot returns zero new comments:
    - Make the code fix
    - IDENTIFY THE ROOT CAUSE of why the issue landed (missing lint rule, missing comment at the canonical site, misleading name, API that invites the mistake, etc.) per `~/.claude/lib/per-finding-root-cause.md` and apply the smallest matching action in the same change. Defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
    - Run the build command
-   - If build passes, commit: address review: <summary>
+   - If build passes, commit: address review (copilot): <summary>
+     The parenthesized agent name records which reviewer surfaced the finding — useful when scanning the log of a release that ran multiple reviewers.
    - Resolve the thread via GraphQL mutation using stdin JSON piping:
      echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
    - After all threads resolved, push all commits to remote
