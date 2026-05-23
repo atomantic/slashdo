@@ -37,10 +37,12 @@ Before doing anything, determine the project's source and target branches for re
    - **Project conventions** (already in context) — look for git workflow sections, branch descriptions, or release instructions
    - **Versioning docs** — check `docs/VERSIONING.md`, `CONTRIBUTING.md`, or `RELEASING.md`
    - **Branch convention** — if a `release` branch exists, the target is `release`; otherwise create it from the last release tag (see step 3 below). In `--interactive` mode, ask the user to confirm
-3. **Ensure the target branch exists** — if not, create it from the last release tag (or root commit if no tags exist yet — net-new project):
+3. **Ensure the target branch exists** — if not, create it from the last release tag (or root commit if no tags exist yet — net-new project). Snippet self-guards against an already-existing branch:
    ```bash
-   git branch release $(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
-   git push -u origin release
+   if ! git show-ref --verify --quiet refs/heads/{target} && ! git show-ref --verify --quiet refs/remotes/origin/{target}; then
+     git branch {target} $(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
+     git push -u origin {target}
+   fi
    ```
    This ensures the PR diff shows ALL changes since the last release, not just the version bump.
 
@@ -63,12 +65,12 @@ Print the detected workflow: `Detected release flow: {source} → {target}`
 1. **Determine version bump** from commits since the last git tag:
    - Scan commit messages for conventional commit prefixes (also check each commit's body/footer for `BREAKING CHANGE:` — a recognized way to signal a breaking change without the prefix):
      - `breaking:`, any prefix with a `!` (e.g. `feat!:`, `fix!:`, `refactor!:`), or a `BREAKING CHANGE:` footer → **major** bump
-     - `feat:` or `build:` → **minor** bump
-     - `fix:`, `chore:`, `docs:`, `refactor:`, `perf:`, `style:`, `test:`, `ci:` → **patch** bump
+     - `feat:` → **minor** bump
+     - `fix:`, `build:`, `chore:`, `docs:`, `refactor:`, `perf:`, `style:`, `test:`, `ci:` → **patch** bump
    - Use the **highest applicable level** across all commits
    - **Default mode**: Use the determined version automatically. **Interactive mode (`--interactive`)**: Present the proposed version to the user for confirmation
 
-2. **Bump version**: Run `npm version <major|minor|patch> --no-git-tag-version` to update `package.json` and `package-lock.json`
+2. **Bump version**: Use the project's native version-bump command. For Node projects: `npm version <major|minor|patch> --no-git-tag-version` (updates `package.json` and `package-lock.json`). For other ecosystems, detect from the project files in the working directory and use the equivalent (`cargo set-version` for Rust, `poetry version` for Python, `mix.exs` edit for Elixir, manual `VERSION` file edit for Go). The commit step below stages whichever files the bump command modified — not a hardcoded list.
 
 3. **Finalize changelog**:
    - Check for a changelog directory: `.changelogs/` or `.changelog/` (use whichever exists)
@@ -81,7 +83,7 @@ Print the detected workflow: `Detected release flow: {source} → {target}`
      - Generate a changelog from commit history since the last tag
      - Write it to `{changelog_dir}/v{new_version}.md`
 
-4. **Commit the release**: Stage `package.json`, `package-lock.json`, and the changelog file. Commit with message `chore: release v{new_version}`
+4. **Commit the release**: Stage whatever files step 2's version-bump command modified (Node: `package.json` and possibly `package-lock.json`; Rust: `Cargo.toml` and `Cargo.lock`; Python: `pyproject.toml`; etc.) plus the changelog file. Commit with message `chore: release v{new_version}`. Listing files explicitly (not `git add -A`) keeps unrelated dirty state out of the release commit.
 
 ## Local Code Review (REQUIRED GATE)
 

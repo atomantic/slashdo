@@ -153,10 +153,10 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
      - Commits that revert legitimate behavior to make a flaky test pass
      - Disabled tests, skipped assertions, or `// TODO` placeholders introduced by the agent
      - Secrets, hardcoded credentials, or other content that must not land
-   - Run `{BUILD_CMD}`. If it fails:
+   - Run `{BUILD_CMD}` (skip when empty — projects without a build step skip this check). If it fails:
      - **Default mode**: revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=broken-build`, exit the loop, and report
      - **Interactive mode**: ask the user whether to retry (re-invoke CLI), revert, or accept-and-fix-manually
-   - Run `{TEST_CMD}`. Same handling on failure (`STATUS=test-failed`).
+   - Run `{TEST_CMD}` (skip when empty). Same handling on failure (`STATUS=test-failed`).
    - If any of the inspection red flags above triggered, treat as a verification failure: revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=rejected`, and exit the loop.
 
 5. **Push verified changes**:
