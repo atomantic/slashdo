@@ -55,7 +55,7 @@ All commands live under the `do:` namespace:
 | Command | What it does |
 |:---|:---|
 | `/do:push` | Commit and push all work with changelog |
-| `/do:pr` | Open a PR with self-review and a review loop (Copilot by default; see [Review loop flags](#review-loop-flags-dopr-dorelease-dopr-better)) |
+| `/do:pr` | Open a PR with self-review and a review loop (Copilot by default; see [Review loop flags](#review-loop-flags-dopr-dorelease-dopr-better-doreview)) |
 | `/do:pr-better` | Run a full do:better audit on the current branch, commit fixes directly, then open a single PR |
 | `/do:fpr` | Fork PR -- push to fork, PR against upstream |
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
@@ -82,7 +82,7 @@ These commands accept a shared set of flags that control which reviewer(s) run a
 | `--review-stop-on-clean` | off | Stop after the first reviewer that reports zero findings (clean). Mutually exclusive with `--review-stop-on-findings`. |
 | `--reviewer-applies` | off | Edit the working tree directly from the reviewing CLI instead of routing findings back through the orchestrating thread. No effect on copilot passes (Copilot reviews are read-only); takes effect on each codex / gemini / claude pass in the list. |
 
-By default every listed reviewer runs in order, and the orchestrator that opened the PR also applies the fixes — it reads each reviewer's findings and edits the working tree itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking gemini to both find and patch its own concerns). For `/do:release`, the merge gate requires the multi-reviewer aggregate status to be `clean` (or `partial`, if you explicitly opted into a stop-mode short-circuit) — a `dirty` aggregate (build/test broken on some pass) blocks the merge.
+By default every listed reviewer runs in order, and the orchestrator that opened the PR also applies the fixes — it reads each reviewer's findings and edits the working tree itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking gemini to both find and patch its own concerns). For `/do:release`, the merge gate requires the multi-reviewer aggregate status to be `clean` (or `partial`, if you explicitly opted into a stop-mode short-circuit) — a `dirty` aggregate (build/test broken on some pass) or an `inconclusive` aggregate (any executed pass timed out, errored, hit its guardrail, or was skipped — even if other passes returned clean) blocks the merge.
 
 For `/do:review`, the listed agents run **after** the host CLI's own self-review (the multi-agent review built into `do:review`). The list names *additional* reviewers; whichever CLI is hosting `/do:review` does its own pass first regardless.
 
