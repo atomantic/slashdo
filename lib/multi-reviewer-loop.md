@@ -31,9 +31,9 @@ Iterate `REVIEW_AGENTS` in order. For each `{REVIEW_AGENT}`:
 
 1. **Print a banner**: `--- Review pass {n}/{N}: {REVIEW_AGENT} ---`
 2. **Capture baseline**: `PASS_START_SHA=$(git rev-parse HEAD)` so the wrapper can tell whether this reviewer changed anything (independent of the inner loop's own tracking).
-3. **Dispatch** to the matching single-reviewer loop:
-   - `copilot` → `~/.claude/lib/copilot-review-loop.md`
-   - `codex` | `gemini` | `claude` → `~/.claude/lib/local-agent-review-loop.md`
+3. **Dispatch** to the matching single-reviewer loop. The loop file lives under the host CLI's lib directory (`~/.claude/lib/` for Claude, `~/.config/opencode/lib/` for OpenCode, `~/.gemini/lib/` for Gemini — slashdo's installer rewrites command-spec `!cat` references for each env, so use the same lib basename in whichever env this wrapper executes; the path itself is env-specific and not hardcoded here):
+   - `copilot` → `{LIB_DIR}/copilot-review-loop.md`
+   - `codex` | `gemini` | `claude` → `{LIB_DIR}/local-agent-review-loop.md`
 
    The inner loop already handles its own iterations, fix-and-push cycles, and verification. It returns a `{STATUS}` value:
    - Copilot loop: `clean | timeout | error | guardrail | too-large`

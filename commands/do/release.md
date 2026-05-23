@@ -37,9 +37,12 @@ Before doing anything, determine the project's source and target branches for re
    - **Project conventions** (already in context) — look for git workflow sections, branch descriptions, or release instructions
    - **Versioning docs** — check `docs/VERSIONING.md`, `CONTRIBUTING.md`, or `RELEASING.md`
    - **Branch convention** — if a `release` branch exists, the target is `release`; otherwise create it from the last release tag (see step 3 below). In `--interactive` mode, ask the user to confirm
-3. **Ensure the target branch exists** — if not, create it from the last release tag (or root commit if no tags exist yet — net-new project). Snippet self-guards against an already-existing branch:
+3. **Ensure the target branch exists** — if not, create it from the last release tag (or root commit if no tags exist yet — net-new project). The snippet must consult the remote (not just local refs) before deciding to create, because on a fresh clone the remote-tracking ref for `{target}` may not have been fetched yet — creating a new `{target}` branch from the last tag in that case would lose history and the subsequent `git push` would either fail (non-fast-forward) or, worse, succeed and clobber the real release branch. Fetch the target ref first, then probe both the local heads and the freshly-updated remote-tracking refs via `git ls-remote --heads origin {target}`:
    ```bash
-   if ! git show-ref --verify --quiet refs/heads/{target} && ! git show-ref --verify --quiet refs/remotes/origin/{target}; then
+   git fetch origin "{target}:refs/remotes/origin/{target}" 2>/dev/null || true
+   if ! git show-ref --verify --quiet refs/heads/{target} \
+       && ! git show-ref --verify --quiet refs/remotes/origin/{target} \
+       && [ -z "$(git ls-remote --heads origin {target})" ]; then
      git branch {target} $(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
      git push -u origin {target}
    fi
