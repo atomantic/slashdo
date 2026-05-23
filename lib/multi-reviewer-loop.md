@@ -47,12 +47,12 @@ After each pass completes (before moving to the next reviewer), evaluate `{REVIE
 | Mode | Continue to next reviewer when... | Stop when... |
 |------|------------------------------------|---------------|
 | `all` | always (until list exhausted) | list exhausted |
-| `on-findings` | this pass made zero changes (`PASS_START_SHA == HEAD`) AND the inner status is `clean` | this pass made any change OR returned any non-clean status |
+| `on-findings` | this pass made zero changes (`PASS_START_SHA == HEAD`), regardless of status | this pass made any change (commits added since `PASS_START_SHA`) |
 | `on-clean` | this pass returned a non-clean status OR made changes | this pass returned `clean` AND made zero changes |
 
 **Hard-error short-circuit (applies in all modes)**: if the inner loop returns `cli-error`, `broken-build`, `test-failed`, or `rejected`, stop the multi-reviewer loop immediately. These statuses mean the branch is in a state subsequent reviewers shouldn't run against (broken build / reverted state / explicit reject). Surface the failing reviewer's status as the wrapper's overall status — do not silently continue.
 
-For `copilot` `timeout`/`error`/`guardrail`, do continue to the next reviewer in `all` and `on-clean` modes (the copilot loop already exhausted its own retry budget; the next reviewer may still produce a clean pass). In `on-findings` mode, treat these as "not clean" and continue.
+Inconclusive non-fix statuses (`copilot` `timeout`/`error`/`guardrail` and local-agent `guardrail`) do NOT count as findings — they mean the reviewer couldn't produce a verdict, not that it found something to fix. In `all` and `on-clean` modes, continue to the next reviewer (the next one may still produce a clean pass). In `on-findings` mode, also continue — no findings were surfaced, so the stop condition isn't met. Record the inconclusive status in the per-pass table for reporting.
 
 ### Aggregate report
 
