@@ -47,12 +47,12 @@ After each pass completes (before moving to the next reviewer), evaluate `{REVIE
 | Mode | Continue to next reviewer when... | Stop when... |
 |------|------------------------------------|---------------|
 | `all` | always (until list exhausted) | list exhausted |
-| `on-findings` | this pass made zero changes (`PASS_START_SHA == HEAD`), regardless of status | this pass made any change (commits added since `PASS_START_SHA`) |
-| `on-clean` | this pass returned a non-clean status OR made changes | this pass returned `clean` AND made zero changes |
+| `on-findings` | this pass is inconclusive (status ∈ `timeout`/`error`/`guardrail`/`skipped`), regardless of whether commits were added; OR this pass returned a verdict status (`clean` for any loop, or `too-large` for copilot) AND made zero changes (`PASS_START_SHA == HEAD`) | this pass returned a verdict status AND made any change (commits added since `PASS_START_SHA`) |
+| `on-clean` | this pass returned a non-clean status (including inconclusive) OR made changes | this pass returned `clean` (or copilot `too-large`) AND made zero changes |
 
 **Hard-error short-circuit (applies in all modes)**: if the inner loop returns `cli-error`, `broken-build`, `test-failed`, or `rejected`, stop the multi-reviewer loop immediately. These statuses mean the branch is in a state subsequent reviewers shouldn't run against (broken build / reverted state / explicit reject). Surface the failing reviewer's status as the wrapper's overall status — do not silently continue.
 
-Inconclusive non-fix statuses (`copilot` `timeout`/`error`/`guardrail` and local-agent `guardrail`) do NOT count as findings — they mean the reviewer couldn't produce a verdict, not that it found something to fix. In `all` and `on-clean` modes, continue to the next reviewer (the next one may still produce a clean pass). In `on-findings` mode, also continue — no findings were surfaced, so the stop condition isn't met. Record the inconclusive status in the per-pass table for reporting.
+Inconclusive non-fix statuses (`copilot` `timeout`/`error`/`guardrail` and local-agent `guardrail`, plus the `skipped` precondition statuses) do NOT count as findings — they mean the reviewer couldn't produce a verdict, not that it found something to fix. Treat them as continue-signals in every stop mode, even if the inner loop somehow added commits before bailing out: a stop-mode short-circuit must require a *verdict* status (`clean`, `too-large`) before honoring the commits-added / no-commits-added condition. This matches the table above and prevents a flaky reviewer that crashed mid-fix from claiming the stop-mode's "found something" signal.
 
 ### Aggregate report
 
