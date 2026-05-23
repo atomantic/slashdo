@@ -9,7 +9,7 @@ The calling command must populate these before reaching this loop:
 - `{REVIEW_AGENTS}` — ordered list of reviewer slugs, e.g. `[codex, gemini, copilot]`. May contain a single entry. Deduped left-to-right by the parser; the first occurrence wins.
 - `{REVIEW_STOP_MODE}` — one of:
   - `all` (default) — run every listed reviewer in order, regardless of what each reports
-  - `on-findings` — stop after the first reviewer that fixed at least one finding (i.e. reported a non-empty change set / non-zero comments); the assumption is that subsequent reviewers would mostly duplicate the same surface and the user wants speed
+  - `on-findings` — stop after the first reviewer that produced a verdict status (`clean`, or copilot `too-large`) AND added at least one commit since `PASS_START_SHA` (i.e. the orchestrator actually landed a fix). Reviewer-reported "comments" without resulting commits do NOT trigger the stop — the signal is the commit-graph delta, not the count of suggestions. The assumption is that once a verdict pass has landed fixes, subsequent reviewers would mostly duplicate the same surface and the user wants speed
   - `on-clean` — stop after the first reviewer that reports zero findings (clean); the user is treating "any reviewer says clean" as sufficient signal
 - `{REVIEWER_APPLIES}` — boolean, forwarded to each reviewer's loop. No effect on the copilot path (already a no-op there).
 
