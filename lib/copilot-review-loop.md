@@ -2,6 +2,8 @@
 
 After the PR is created, run the Copilot review-and-fix loop.
 
+**Note on `--reviewer-applies`**: the `--reviewer-applies` flag (which routes edits through the reviewing CLI rather than the orchestrator) is a no-op on this path. Copilot reviews are read-only by design — they generate comments cloud-side without working-tree access — so there is no reviewer-side edit path to enable. If the calling command saw `--reviewer-applies` alongside `--review-with copilot`, it should have already printed a warning and continued; this loop's behavior is unchanged either way. Fixes are always applied by the sub-agent the parent spawns (see "Sub-agent prompt template" below), reading from Copilot's comments.
+
 **IMPORTANT — Sub-agent delegation**: To prevent context exhaustion on long review cycles, delegate the entire review loop to a **general-purpose sub-agent** via the Agent tool. The sub-agent runs the full loop (request → wait → check → fix → re-request) autonomously and returns only the final status. This keeps the parent agent's context clean.
 
 ### Sub-agent prompt template:
