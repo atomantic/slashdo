@@ -33,7 +33,7 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 # NOTE: keep in sync with install.sh LIBS — see comment there.
 LIBS=(
   code-review-checklist copilot-review-loop graphql-escaping
-  local-agent-review-loop
+  local-agent-review-loop multi-reviewer-loop
   per-finding-root-cause plan-id-format
   post-review-doc-recommendations remediation-agent-template
   swift-review-checklist swift-gotchas

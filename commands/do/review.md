@@ -1,6 +1,6 @@
 ---
 description: Deep code review of changed files against software engineering best practices
-argument-hint: "[--strict|--nuclear] [--draft] [PR-URL | base-branch]"
+argument-hint: "[--strict|--nuclear] [--draft] [--review-with <agent>[,<agent>...]] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [PR-URL | base-branch]"
 ---
 
 ## Parse Arguments
@@ -8,6 +8,9 @@ argument-hint: "[--strict|--nuclear] [--draft] [PR-URL | base-branch]"
 Parse `$ARGUMENTS` for:
 - **`--strict`** (alias: **`--nuclear`**): enable the Structural Ambition agent (6th agent) and promote structural findings to blocker tier. Use for branches you want to land cleanly — flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications.
 - **`--draft`** (PR mode only): write the review payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the `gh api` command to publish it manually, instead of posting the review immediately. Ignored when `PR_MODE=false`.
+- **`--review-with <agent[,agent,...]>`** (optional): after the host CLI's self-review completes (the multi-agent flow defined below), delegate **additional** review passes to the named external CLIs in order. Accepted slugs per slot: `copilot`, `codex`, `gemini`, `claude`. Split on `,`, trim whitespace, dedupe preserving first-occurrence order. Abort with `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.` on any unknown slug. If omitted, `REVIEW_AGENTS=[]` and no delegated passes run — behavior matches the historical `/do:review` (self-review only). **The host CLI is not implied in this list** — whichever CLI is hosting `/do:review` (claude, codex, or gemini) runs the self-review first regardless. The list names *additional* reviewers; an explicit `claude` entry while running under claude means "start a fresh claude headless session for a second-pass perspective," which is allowed.
+- **`--review-stop-on-findings` / `--review-stop-on-clean`** (mutually exclusive, optional): stop-mode for the delegated passes. Default `REVIEW_STOP_MODE=all` (run every listed agent). `on-findings` stops after the first delegated reviewer that surfaces a non-empty change set; `on-clean` stops after the first delegated reviewer that reports zero findings. Abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined` if both appear.
+- **`--reviewer-applies`** (optional, boolean): forwarded to each delegated local-agent pass to route fixes through the reviewing CLI instead of the orchestrator. See `lib/local-agent-review-loop.md` "Editing mode" for the trade-offs. No effect on the copilot path or on the host's self-review.
 - **GitHub PR reference** — any non-flag token that looks like a PR reference. A token matches if **any** of the following holds (the rules are OR-ed; the `github` substring is sufficient but not required):
   - Full URL: `https://github.com/{owner}/{repo}/pull/{number}` (and any subpath like `/files`, `/commits`)
   - SSH-style URL with `github.com` host
@@ -338,3 +341,36 @@ For local branch mode, after the review and any fixes, determine whether to post
 4. **If the PR was opened by someone else**, post a review comment on the PR summarizing the findings using `gh pr review {number} --comment --body "..."`. Include the issues found, fixes applied, and any remaining items that need the author's attention.
 
 This avoids noisy self-comments on your own PRs while still providing feedback to other contributors.
+
+## Delegated Review Passes (`--review-with`)
+
+**Skip this section when `REVIEW_AGENTS` is empty.**
+
+After the host CLI's self-review has fully completed — fixes applied (local mode) or review posted (PR mode), Convention Encoding done, PR Comment Policy executed — hand off to the **multi-reviewer loop** to run additional perspective passes through the listed external CLIs.
+
+Inputs to the wrapper:
+
+- `{REVIEW_AGENTS}` — the parsed list (e.g. `[claude, gemini, copilot]`)
+- `{REVIEW_STOP_MODE}` — `all` (default) | `on-findings` | `on-clean`
+- `{REVIEWER_APPLIES}` — boolean, forwarded to each local-agent pass
+
+Per-agent dispatch inside the wrapper:
+
+- `copilot` — only meaningful when a PR exists for the current branch (local mode) or when `PR_MODE=true`. Requests a Copilot review on the PR via the Copilot review loop. If no PR is associated with the current branch in local mode, print `Skipping copilot pass: no open PR on {branch}.` and continue to the next agent.
+- `codex` | `gemini` | `claude` — invoke the local-agent review loop. The CLI runs `/do:review` headless against the same scope this invocation reviewed:
+  - In **local branch mode**, the headless CLI reviews `{base}...HEAD` on the current working tree (it will see the host's just-committed fixes as part of HEAD).
+  - In **PR mode**, the headless CLI runs `/do:review <PR-URL>` so it reviews the same PR; if `--draft` was passed to the outer invocation, also forward it so each delegated CLI drafts rather than publishes (otherwise multiple reviews will be posted in succession, which is usually the intent).
+
+### Multi-reviewer wrapper
+
+!`cat ~/.claude/lib/multi-reviewer-loop.md`
+
+### Inner loop bodies (referenced by the wrapper)
+
+!`cat ~/.claude/lib/copilot-review-loop.md`
+
+!`cat ~/.claude/lib/local-agent-review-loop.md`
+
+### Final report (when delegated passes ran)
+
+After the wrapper exits, append the wrapper's aggregate report to the self-review summary. Make clear in the heading that the self-review was pass 0 (host CLI) and the wrapper's table covers the delegated passes 1..N. The final overall status the user cares about is whichever is worse between (a) the self-review's "issues remaining" count and (b) the wrapper's `{OVERALL_STATUS}`.

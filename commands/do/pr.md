@@ -1,19 +1,27 @@
 ---
 description: Commit, push, and open a PR against the repo's default branch
-argument-hint: "[--review-with copilot|codex|gemini|claude] [--reviewer-applies]"
+argument-hint: "[--review-with <agent>[,<agent>...]] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies]"
 ---
 
 ## Parse Arguments
 
-Parse `$ARGUMENTS` for `--review-with <agent>`:
-- Accepted values: `copilot` (default), `codex`, `gemini`, `claude`
-- Record as `REVIEW_AGENT`. If omitted, set `REVIEW_AGENT=copilot`
-- If the value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
+Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
+- Accepted values per slot: `copilot` (default), `codex`, `gemini`, `claude`
+- The value may be a single agent or a **comma-separated, ordered list** (e.g. `--review-with codex,gemini,copilot`). Split on `,`, trim whitespace around each slug.
+- Record the resulting list as `REVIEW_AGENTS`. If `--review-with` is omitted, set `REVIEW_AGENTS=[copilot]`.
+- Dedupe preserving first-occurrence order; if duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
+- If any value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
+
+Parse `$ARGUMENTS` for the stop-mode flags (mutually exclusive):
+- `--review-stop-on-findings` — stop the multi-reviewer loop after the first reviewer that fixed at least one finding (subsequent reviewers in the list are skipped).
+- `--review-stop-on-clean` — stop after the first reviewer that reports a clean pass with zero findings.
+- If neither is present, set `REVIEW_STOP_MODE=all` (default — always run every listed reviewer in order).
+- If both are present, abort with: `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
 
 Parse `$ARGUMENTS` for `--reviewer-applies` (boolean, no value):
 - Record as `REVIEWER_APPLIES=true` if present, otherwise `REVIEWER_APPLIES=false` (default).
 - This flag picks who applies fixes the reviewer surfaces: by default the orchestrating thread (this session) reads the reviewer's findings and applies fixes itself; with `--reviewer-applies` the reviewing CLI applies fixes in the working tree directly. See `lib/local-agent-review-loop.md` "Editing mode" for the rationale and trade-offs.
-- The flag is **not supported on the copilot path** because Copilot reviews are read-only by design (cloud-side comments, no working-tree access). If `REVIEW_AGENT=copilot` and `REVIEWER_APPLIES=true`, print a warning (`--reviewer-applies has no effect with --review-with copilot; fixes are always applied by the orchestrator's sub-agent`) and continue with the standard Copilot loop.
+- The flag is **not supported on the copilot path** because Copilot reviews are read-only by design (cloud-side comments, no working-tree access). If `REVIEW_AGENTS` contains `copilot` and `REVIEWER_APPLIES=true`, print a warning (`--reviewer-applies has no effect on the copilot pass; fixes there are always applied by the orchestrator's sub-agent`) and continue — the flag still takes effect on the non-copilot passes in the list.
 
 ## Detect Branches
 
@@ -68,17 +76,25 @@ Verification — confirm before proceeding:
 
 ## Run the Review Loop
 
-Dispatch on `REVIEW_AGENT`:
+Hand off to the **multi-reviewer loop** with the parsed inputs:
 
-- **`copilot`** (default): run the Copilot cloud review loop below.
-- **`codex` | `gemini` | `claude`**: run the local-agent review loop instead. The local CLI runs `/do:review` (or an equivalent self-contained review prompt) in headless mode against the branch; this main thread then verifies its output, runs build + tests, and pushes the verified fixes. Do not run the Copilot loop in this mode.
+- `{REVIEW_AGENTS}` — ordered list (default `[copilot]`)
+- `{REVIEW_STOP_MODE}` — `all` (default) | `on-findings` | `on-clean`
+- `{REVIEWER_APPLIES}` — boolean
 
-### Copilot path (`REVIEW_AGENT=copilot`)
+The wrapper runs each reviewer in order, deciding when to stop per the stop-mode. Each individual pass uses the matching single-reviewer loop:
+
+- `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`)
+- `codex` | `gemini` | `claude` → local-agent headless review loop (`lib/local-agent-review-loop.md`) — the local CLI runs `/do:review` (or an equivalent self-contained review prompt) against the branch; this main thread then verifies its output, runs build + tests, and pushes the verified fixes
+
+### Multi-reviewer wrapper
+
+!`cat ~/.claude/lib/multi-reviewer-loop.md`
+
+### Inner loop bodies (referenced by the wrapper)
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
-### Local-agent path (`REVIEW_AGENT` ∈ {codex, gemini, claude})
-
 !`cat ~/.claude/lib/local-agent-review-loop.md`
 
-**Report the final status** to the user including PR URL and review outcome (status from whichever loop ran).
+**Report the final status** to the user including the PR URL and the multi-reviewer aggregate report (per-pass status table plus overall status).

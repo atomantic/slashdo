@@ -1,11 +1,11 @@
 ---
 description: Run a full do:better audit/remediation on the current branch, commit fixes directly to it, then open a single PR with do:pr
-argument-hint: "[--interactive] [--review-with copilot|codex|gemini|claude] [--reviewer-applies] [path filter or focus areas]"
+argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [path filter or focus areas]"
 ---
 
 # PR-Better — Better Audit + Single PR
 
-Run the full `do:better` DevSecOps audit and remediation, but **commit all fixes directly to the current branch** instead of creating per-category PRs. Then hand off to `do:pr` so the entire result ships as one cohesive PR (with self-review and the Copilot review loop, or a local-agent review loop if `--review-with` is set).
+Run the full `do:better` DevSecOps audit and remediation, but **commit all fixes directly to the current branch** instead of creating per-category PRs. Then hand off to `do:pr` so the entire result ships as one cohesive PR (with self-review and the Copilot review loop, or a multi-reviewer loop if `--review-with` lists one or more agents).
 
 This is the right command when:
 - You want the full `do:better` quality bar on a feature branch you're about to ship
@@ -14,8 +14,9 @@ This is the right command when:
 
 ## Argument Forwarding
 
-Split `$ARGUMENTS` into two groups before forwarding:
-- **`--review-with <agent>`** is a `do:pr` flag, NOT a `do:better` flag. Extract it from `$ARGUMENTS`, record the value as `REVIEW_AGENT_ARG` (the full `--review-with <agent>` token pair, or empty string if not supplied), and remove it from the string passed to `do:better`.
+Split `$ARGUMENTS` into groups before forwarding — every `do:pr` review flag must be extracted and held aside so `do:better` doesn't reject it:
+- **`--review-with <agent[,agent,...]>`** is a `do:pr` flag, NOT a `do:better` flag. Extract it from `$ARGUMENTS`, record the value as `REVIEW_AGENT_ARG` (the full `--review-with <value>` token pair preserved verbatim including any comma-separated list, or empty string if not supplied), and remove it from the string passed to `do:better`.
+- **`--review-stop-on-findings`** and **`--review-stop-on-clean`** are `do:pr` flags. Extract whichever (at most one) is present, record as `REVIEW_STOP_ARG` (the literal flag token, or empty string if absent), and remove it from the string passed to `do:better`.
 - **`--reviewer-applies`** is also a `do:pr` flag, NOT a `do:better` flag. Extract it from `$ARGUMENTS`, record as `REVIEWER_APPLIES_ARG` (the literal token `--reviewer-applies`, or empty string if not supplied), and remove it from the string passed to `do:better`.
 - All remaining flags (`--interactive`, path filter, focus areas) pass through to `do:better` verbatim.
 
@@ -72,7 +73,7 @@ The only Phase 7-equivalent housekeeping that applies:
 
 ## Phase B: Run do:pr
 
-After Phase A leaves all fixes committed on `{CURRENT_BRANCH}`, hand off to the workflow defined in `~/.claude/commands/do/pr.md`, forwarding both `REVIEW_AGENT_ARG` (the `--review-with <agent>` pair extracted in argument forwarding) AND `REVIEWER_APPLIES_ARG` (the `--reviewer-applies` token if it was passed) so the chosen reviewer — and the chosen editing mode — runs on the combined PR:
+After Phase A leaves all fixes committed on `{CURRENT_BRANCH}`, hand off to the workflow defined in `~/.claude/commands/do/pr.md`, forwarding all three review flags extracted in argument forwarding — `REVIEW_AGENT_ARG` (the `--review-with <value>` pair, possibly comma-separated), `REVIEW_STOP_ARG` (the stop-mode flag, if any), and `REVIEWER_APPLIES_ARG` (the `--reviewer-applies` token, if passed) — so the chosen reviewer(s), stop-mode, and editing mode all run on the combined PR:
 
 1. **Detect branches** — already done in pre-flight, reuse those values
 2. **Commit and push** — commit any remaining staged changes (e.g., the PLAN.md update), then `git pull --rebase --autostash && git push -u origin {current_branch}`
@@ -80,7 +81,7 @@ After Phase A leaves all fixes committed on `{CURRENT_BRANCH}`, hand off to the 
 4. **Open the PR** — create a single PR with a description that summarizes both:
    - The original feature work on the branch (from prior commits)
    - The do:better audit findings now folded in (categories, counts, severity)
-5. **Review loop** — runs once on the combined PR via the standard `do:pr` flow. If `REVIEW_AGENT_ARG` is set (e.g., `--review-with codex`), do:pr will run the local-agent review loop instead of the Copilot loop. If `REVIEWER_APPLIES_ARG` is also set, do:pr passes the flag through so the chosen CLI (not the orchestrator) applies fixes — on the copilot path the flag is a no-op (a warning is printed).
+5. **Review loop** — runs once on the combined PR via the standard `do:pr` flow. If `REVIEW_AGENT_ARG` lists a single non-copilot agent (e.g., `--review-with codex`), do:pr runs that local-agent review loop instead of the Copilot loop. If it lists multiple agents (e.g., `--review-with codex,gemini,copilot`), do:pr runs the multi-reviewer wrapper, dispatching each in order. `REVIEW_STOP_ARG` controls when to stop early (default: run all). If `REVIEWER_APPLIES_ARG` is also set, do:pr passes the flag through so the chosen CLI (not the orchestrator) applies fixes — on the copilot path the flag is a no-op (a warning is printed).
 
 ## Final Report
 

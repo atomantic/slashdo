@@ -71,16 +71,20 @@ All commands live under the `do:` namespace:
 | `/do:update` | Update slashdo to latest version |
 | `/do:help` | List all available commands |
 
-### Review loop flags (`/do:pr`, `/do:release`, `/do:pr-better`)
+### Review loop flags (`/do:pr`, `/do:release`, `/do:pr-better`, `/do:review`)
 
-These three commands accept two flags that control the post-PR review:
+These commands accept a shared set of flags that control which reviewer(s) run and how the multi-reviewer loop is gated:
 
 | Flag | Default | What it does |
 |:---|:---|:---|
-| `--review-with <agent>` | `copilot` | Pick the reviewer: `copilot` (GitHub cloud review), `codex`, `gemini`, or `claude` (a separate local CLI in headless mode). |
-| `--reviewer-applies` | off | Edit the working tree directly from the reviewing CLI instead of routing findings back through the orchestrating thread. No effect with `--review-with copilot` (Copilot reviews are read-only). |
+| `--review-with <agent>[,<agent>...]` | `copilot` (on `do:pr` / `do:release` / `do:pr-better`); empty (on `do:review`, which still runs its own self-review unconditionally) | Pick one or more reviewers, run in the order given. Accepted slugs: `copilot` (GitHub cloud review), `codex`, `gemini`, `claude` (each non-copilot slug spawns that local CLI in headless mode). Example: `--review-with codex,gemini,copilot` runs codex first, then gemini, then copilot, each reviewing the branch as the previous pass left it. |
+| `--review-stop-on-findings` | off | Stop the multi-reviewer loop after the first reviewer that fixes at least one finding (subsequent reviewers in the list are skipped). Mutually exclusive with `--review-stop-on-clean`. |
+| `--review-stop-on-clean` | off | Stop after the first reviewer that reports zero findings (clean). Mutually exclusive with `--review-stop-on-findings`. |
+| `--reviewer-applies` | off | Edit the working tree directly from the reviewing CLI instead of routing findings back through the orchestrating thread. No effect on copilot passes (Copilot reviews are read-only); takes effect on each codex / gemini / claude pass in the list. |
 
-By default the orchestrator that opened the PR also applies the fixes — it reads the reviewer's findings and edits the working tree itself. Pass `--reviewer-applies` only when you want the reviewing agent's *judgment* in the final patch (e.g. asking gemini to both find and patch its own concerns).
+By default every listed reviewer runs in order, and the orchestrator that opened the PR also applies the fixes — it reads each reviewer's findings and edits the working tree itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking gemini to both find and patch its own concerns). For `/do:release`, the merge gate requires the multi-reviewer aggregate status to be `clean` (or `partial`, if you explicitly opted into a stop-mode short-circuit) — a `dirty` aggregate (build/test broken on some pass) blocks the merge.
+
+For `/do:review`, the listed agents run **after** the host CLI's own self-review (the multi-agent review built into `do:review`). The list names *additional* reviewers; whichever CLI is hosting `/do:review` does its own pass first regardless.
 
 ## Supported Environments
 

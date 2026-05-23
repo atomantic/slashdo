@@ -1,6 +1,6 @@
 ---
 description: Create a release PR using the project's documented release workflow
-argument-hint: "[--interactive] [--review-with copilot|codex|gemini|claude] [--reviewer-applies]"
+argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies]"
 ---
 
 **Default mode: fully autonomous.** Auto-detects branches, determines version bump from commits, runs review, creates and merges the release PR without prompting.
@@ -9,15 +9,23 @@ argument-hint: "[--interactive] [--review-with copilot|codex|gemini|claude] [--r
 
 ## Parse Arguments
 
-Parse `$ARGUMENTS` for `--review-with <agent>`:
-- Accepted values: `copilot` (default), `codex`, `gemini`, `claude`
-- Record as `REVIEW_AGENT`. If omitted, set `REVIEW_AGENT=copilot`
-- If the value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
+Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
+- Accepted values per slot: `copilot` (default), `codex`, `gemini`, `claude`
+- The value may be a single agent or a **comma-separated, ordered list** (e.g. `--review-with codex,gemini,copilot`). Split on `,`, trim whitespace around each slug.
+- Record the resulting list as `REVIEW_AGENTS`. If `--review-with` is omitted, set `REVIEW_AGENTS=[copilot]`.
+- Dedupe preserving first-occurrence order; if duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
+- If any value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
+
+Parse `$ARGUMENTS` for the stop-mode flags (mutually exclusive):
+- `--review-stop-on-findings` — stop the multi-reviewer loop after the first reviewer that fixed at least one finding.
+- `--review-stop-on-clean` — stop after the first reviewer that reports a clean pass with zero findings.
+- If neither is present, set `REVIEW_STOP_MODE=all` (default — always run every listed reviewer in order). For release PRs the default is appropriate: each reviewer's perspective adds to the merge-gate confidence.
+- If both are present, abort with: `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
 
 Parse `$ARGUMENTS` for `--reviewer-applies` (boolean, no value):
 - Record as `REVIEWER_APPLIES=true` if present, otherwise `REVIEWER_APPLIES=false` (default).
 - This flag picks who applies fixes the reviewer surfaces: by default the orchestrating thread (this session) reads the reviewer's findings and applies fixes itself; with `--reviewer-applies` the reviewing CLI applies fixes in the working tree directly. See `lib/local-agent-review-loop.md` "Editing mode" for the rationale and trade-offs.
-- The flag is **not supported on the copilot path** because Copilot reviews are read-only by design (cloud-side comments, no working-tree access). If `REVIEW_AGENT=copilot` and `REVIEWER_APPLIES=true`, print a warning (`--reviewer-applies has no effect with --review-with copilot; fixes are always applied by the orchestrator's sub-agent`) and continue with the standard Copilot loop.
+- The flag is **not supported on the copilot path** because Copilot reviews are read-only by design (cloud-side comments, no working-tree access). If `REVIEW_AGENTS` contains `copilot` and `REVIEWER_APPLIES=true`, print a warning (`--reviewer-applies has no effect on the copilot pass; fixes there are always applied by the orchestrator's sub-agent`) and continue — the flag still takes effect on the non-copilot passes in the list.
 
 ## Detect Release Workflow
 
@@ -121,24 +129,42 @@ Verification — self-check before proceeding (no user prompt needed):
 
 ## Run the Review Loop
 
-Dispatch on `REVIEW_AGENT`:
+Hand off to the **multi-reviewer loop** with the parsed inputs:
 
-- **`copilot`** (default): run the Copilot cloud review loop below.
-- **`codex` | `gemini` | `claude`**: run the local-agent review loop instead. Do not run the Copilot loop in this mode.
+- `{REVIEW_AGENTS}` — ordered list (default `[copilot]`)
+- `{REVIEW_STOP_MODE}` — `all` (default) | `on-findings` | `on-clean`
+- `{REVIEWER_APPLIES}` — boolean
 
-### Copilot path (`REVIEW_AGENT=copilot`)
+Each pass uses the matching single-reviewer loop:
+
+- `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`)
+- `codex` | `gemini` | `claude` → local-agent headless review loop (`lib/local-agent-review-loop.md`)
+
+### Multi-reviewer wrapper
+
+!`cat ~/.claude/lib/multi-reviewer-loop.md`
+
+### Inner loop bodies (referenced by the wrapper)
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
-### Local-agent path (`REVIEW_AGENT` ∈ {codex, gemini, claude})
-
 !`cat ~/.claude/lib/local-agent-review-loop.md`
 
-## Merge the PR (only after a CLEAN review with zero comments)
+## Merge the PR (only after a CLEAN multi-reviewer result)
 
-The merge gate adapts to whichever loop ran:
+The merge gate consumes the **wrapper's `{OVERALL_STATUS}`** plus, for any copilot pass that ran, the standard copilot post-pass checks.
 
-### When `REVIEW_AGENT=copilot`
+### Wrapper status
+
+- `clean` — every executed pass returned `clean` (copilot `too-large` counts as clean here, per the copilot loop's own rule). **Eligible to merge.**
+- `partial` — the wrapper stopped early because of an explicit stop-mode flag (`--review-stop-on-findings` or `--review-stop-on-clean`) and the executed passes all completed normally. **Eligible to merge** — the user opted into the short-circuit.
+- `dirty` — a pass returned a hard-error status (`cli-error`, `broken-build`, `test-failed`, `rejected`) and the wrapper short-circuited. **Do NOT merge.**
+
+For `dirty`:
+- **Default mode**: leave the PR open and report the failing pass's status so the user can review manually.
+- **Interactive mode (`--interactive`)**: ask the user whether to merge anyway, re-run a specific reviewer, or leave open.
+
+### Copilot-specific checks (when copilot was in the executed list)
 
 - **CRITICAL**: Do NOT merge until Copilot has submitted a review. A missing review is NOT the same as a clean review.
 - Only merge after the latest Copilot review has been submitted AND that review generated **zero comments**. Check this by:
@@ -150,14 +176,11 @@ The merge gate adapts to whichever loop ran:
   - "Awaiting requested review" is still shown (review in progress)
   - The latest review had comments that you fixed but you didn't get a CLEAN re-review
 
-### When `REVIEW_AGENT` ∈ {codex, gemini, claude}
+### Local-agent-specific checks (when codex/gemini/claude was in the executed list)
 
-- Only merge if the local-agent loop reported `STATUS=clean`. Any other status (`guardrail`, `cli-error`, `broken-build`, `test-failed`, `rejected`) blocks the merge:
-  - **Default mode**: do NOT merge. Leave the PR open and report the status so the user can review manually.
-  - **Interactive mode (`--interactive`)**: ask the user whether to merge anyway, fall back to Copilot for a second pass, or leave open.
-- The local-agent loop already verified build and tests locally before pushing, so no separate review-comment count is required — `clean` means all iterations passed verification.
+- The local-agent loop already verified build and tests locally before pushing, so no separate review-comment count is required — its `clean` status in the wrapper table means all iterations of that pass passed verification.
 
-### Merging (both paths)
+### Merging (after all checks above pass)
 
 - Once confirmed clean, merge:
   ```bash
