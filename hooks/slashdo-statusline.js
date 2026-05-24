@@ -95,27 +95,22 @@ process.stdin.on('end', () => {
       }
     }
 
-    // Update notifications (GSD + slashdo)
+    // Update notifications — scan all *-update-check.json files in cache dir
     let updates = '';
     const cacheDir = path.join(claudeDir, 'cache');
-    const gsdCacheFile = path.join(cacheDir, 'gsd-update-check.json');
-    if (fs.existsSync(gsdCacheFile)) {
-      try {
-        const cache = JSON.parse(fs.readFileSync(gsdCacheFile, 'utf8'));
-        if (cache.update_available) {
-          updates += '\x1b[33m⬆ /gsd:update\x1b[0m │ ';
+    try {
+      if (fs.existsSync(cacheDir)) {
+        for (const f of fs.readdirSync(cacheDir)) {
+          if (!f.endsWith('-update-check.json')) continue;
+          try {
+            const cache = JSON.parse(fs.readFileSync(path.join(cacheDir, f), 'utf8'));
+            if (cache.update_available && cache.command) {
+              updates += `\x1b[33m⬆ ${cache.command}\x1b[0m │ `;
+            }
+          } catch (e) {}
         }
-      } catch (e) {}
-    }
-    const slashdoCacheFile = path.join(cacheDir, 'slashdo-update-check.json');
-    if (fs.existsSync(slashdoCacheFile)) {
-      try {
-        const cache = JSON.parse(fs.readFileSync(slashdoCacheFile, 'utf8'));
-        if (cache.update_available) {
-          updates += '\x1b[33m⬆ /do:update\x1b[0m │ ';
-        }
-      } catch (e) {}
-    }
+      }
+    } catch (e) {}
 
     // Output
     const dirname = path.basename(dir);

@@ -55,6 +55,7 @@ try {
 
     const result = {
       update_available: updateAvailable,
+      command: '/do:update',
       installed,
       latest: latest || 'unknown',
       checked: Math.floor(Date.now() / 1000)
