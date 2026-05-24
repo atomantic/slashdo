@@ -257,6 +257,7 @@ The most expensive misses are not pattern misses — they are *consequence-reaso
 - Comment / JSDoc references a function or symbol that doesn't exist
 - Sample-config / README examples use keys the loader doesn't read
 - Inline code examples or command templates not syntactically valid
+- Canonical command/flag invocation string changed in one place but not its copies — when a required flag is added (e.g. `--sandbox danger-full-access`), grep the whole file AND sibling docs for every literal occurrence of the old command form (table cells, inline examples, AND prose rationale bullets) and update them in one pass; a primary reference and its explanatory examples must never diverge (a reader can copy any of them)
 - Sequential numbering with gaps after edits
 - Template/prompt variables referenced but never assigned
 - LLM prompt promises downstream behavior the code doesn't deliver
