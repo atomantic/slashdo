@@ -98,6 +98,7 @@ The most expensive misses are not pattern misses — they are *consequence-reaso
 
 **Async & state consistency** _[async/await, Promises, UI state]_
 - Optimistic UI state never reverted on failure
+- Generation/sequence counter guarding optimistic async resolution: must gate the REVERT (failure) path, not only success — else an earlier op's late failure yanks a display a newer op (even one targeting the SAME id, where `current === id` still matches) now owns; must NOT gate the server-confirmation/success write on generation — record EVERY accepted result (the confirmed value tracks server-RESPONSE order, which serialized writes already order, not client-INTENT order; gating it drops a superseded-but-accepted result and a later failure reverts to a stale value); must bump the counter at the actual mutation point, not before an intervening `await` (e.g. a save that precedes the switch — a still-in-flight/failing pre-step prematurely supersedes unrelated in-flight ops)
 - Multiple coupled state variables updated independently; selection sets not pruned on data refresh/filter/sort
 - Component state initialized from props via `useState(prop)` doesn't sync on prop change — use effect keyed on all identity discriminators
 - Periodic operations with skip conditions not advancing timing state — re-trigger loop
