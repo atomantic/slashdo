@@ -153,7 +153,8 @@ npx slash-do@latest        # from your terminal
 1. Commands live in `commands/do/` as Claude Code format `.md` files (source of truth)
 2. Lib files (shared partials) live in `lib/`
 3. The transformer handles format conversion for each environment
-4. Test with `node bin/cli.js --list` and `node bin/cli.js --dry-run`
+4. Capability-gated content: wrap environment-specific instructions in `<!-- if:teams -->…<!-- else -->…<!-- /if:teams -->` blocks. The transformer keeps the matching branch per the target environment's capability flag (`supportsTeams` in `src/environments.js`) and strips the markers — e.g. `do:better` uses `TeamCreate` on Claude Code and falls back to parallel sub-agents elsewhere.
+5. Test with `node bin/cli.js --list` and `node bin/cli.js --dry-run`
 
 ## License
 

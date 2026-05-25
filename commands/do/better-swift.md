@@ -604,16 +604,22 @@ If no shared utilities were identified, skip this step.
 
 ### 3c: Parallel Remediation
 
-1. Use `TeamCreate` with name `better-swift-{DATE}`
-2. Use `TaskCreate` for each category that has CRITICAL, HIGH, or MEDIUM findings. Possible categories:
-   - Security & Secrets
-   - Code Quality & Style
-   - DRY & YAGNI
-   - Architecture & SOLID
-   - Bugs, Performance & Error Handling
-   - Platform Coverage & SwiftUI Patterns
-3. Only create tasks for categories that have actionable findings
-4. Spawn up to 5 general-purpose agents as teammates. **Pass `REMEDIATION_MODEL` as the `model` parameter on each agent.** If `REMEDIATION_MODEL` is `opus`, omit the parameter to inherit from session.
+Remediation runs in parallel, one worker per category that has CRITICAL, HIGH, or MEDIUM findings. Possible categories (only act on those with actionable findings):
+- Security & Secrets
+- Code Quality & Style
+- DRY & YAGNI
+- Architecture & SOLID
+- Bugs, Performance & Error Handling
+- Platform Coverage & SwiftUI Patterns
+
+<!-- if:teams -->
+1. Use `TeamCreate` with name `better-swift-{DATE}`.
+2. Use `TaskCreate` for each category above that has actionable findings.
+3. Spawn up to 5 general-purpose agents as teammates. **Pass `REMEDIATION_MODEL` as the `model` parameter on each agent.** If `REMEDIATION_MODEL` is `opus`, omit the parameter to inherit from session. Each teammate marks its task complete via `TaskUpdate` when done.
+<!-- else -->
+1. Spawn up to 5 general-purpose `Agent` sub-agents — one per category above that has actionable findings. **Pass `REMEDIATION_MODEL` as the `model` parameter on each `Agent` call.** If `REMEDIATION_MODEL` is `opus`, omit the parameter to inherit from session.
+2. Launch all `Agent` calls **in parallel** (multiple tool calls in a single response) and wait for all to return. Each sub-agent returns its results directly — no task board or shutdown step is needed.
+<!-- /if:teams -->
 
 ### Agent instructions template:
 
@@ -679,8 +685,12 @@ After all agents complete:
    - Identify which commits caused the failure via `git bisect` or manual review
    - Attempt to fix in a new commit: `fix: resolve {platform} build/test failure from {category} changes`
    - If unfixable, revert the problematic commit(s): `git -C {WORKTREE_DIR} revert <sha>` and note which findings were skipped
+<!-- if:teams -->
 4. Shut down all agents via `SendMessage` with `type: "shutdown_request"`
 5. Clean up team via `TeamDelete`
+<!-- else -->
+4. No teardown needed — the parallel sub-agents from Phase 3c have already returned.
+<!-- /if:teams -->
 
 ## Phase 4b: Internal Code Review
 
