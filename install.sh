@@ -59,7 +59,8 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 # it and the command will fail at runtime. The npm installer (src/installer.js)
 # enumerates lib/ dynamically, so it doesn't need updating.
 LIBS=(
-  code-review-checklist copilot-review-loop graphql-escaping
+  code-review-checklist copilot-review-loop finding-disposition
+  graphql-escaping
   local-agent-review-loop multi-reviewer-loop
   per-finding-root-cause plan-id-format
   post-review-doc-recommendations remediation-agent-template

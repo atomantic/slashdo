@@ -3,7 +3,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const CLAUDE_LIB_PREFIX = '~/.claude/lib/';
+// Maps an `if:<capability>` token to the boolean flag on an environment.
+// Only registered capabilities are resolved; unknown tokens are left intact.
+const CONDITIONAL_CAPABILITIES = { teams: 'supportsTeams' };
 
 function parseFrontmatter(content) {
   const lines = content.split('\n');
@@ -43,6 +45,20 @@ function inlineLibContent(body, libDir) {
       return fs.readFileSync(libFile, 'utf8').trim();
     }
     return match;
+  });
+}
+
+// Resolves `<!-- if:<cap> -->…<!-- else -->…<!-- /if:<cap> -->` blocks against
+// the target environment's capability flags, keeping the matching branch and
+// stripping the markers. The `else` branch is optional. Blocks do not nest.
+// Unknown capabilities are left untouched so stray comments never silently
+// delete content.
+function applyConditionalBlocks(content, env) {
+  const blockRe = /<!--\s*if:([a-zA-Z]+)\s*-->\n?([\s\S]*?)(?:<!--\s*else\s*-->\n?([\s\S]*?))?<!--\s*\/if:\1\s*-->\n?/g;
+  return content.replace(blockRe, (match, cap, ifContent, elseContent = '') => {
+    const flag = CONDITIONAL_CAPABILITIES[cap];
+    if (!flag) return match;
+    return env[flag] ? ifContent : elseContent;
   });
 }
 
@@ -100,6 +116,9 @@ function transformCommand(content, env, sourceLibDir) {
     transformedBody = inlineLibContent(transformedBody, sourceLibDir);
   }
 
+  // Run after inlining so conditionals inside inlined lib content are resolved too.
+  transformedBody = applyConditionalBlocks(transformedBody, env);
+
   let header;
   switch (env.format) {
     case 'yaml-frontmatter':
@@ -116,16 +135,18 @@ function transformCommand(content, env, sourceLibDir) {
 }
 
 function transformLib(content, env) {
+  let transformed = content;
   if (env.supportsCatInclusion && env.libPathPrefix) {
-    return rewriteLibPaths(content, env.libPathPrefix);
+    transformed = rewriteLibPaths(transformed, env.libPathPrefix);
   }
-  return content;
+  return applyConditionalBlocks(transformed, env);
 }
 
 module.exports = {
   parseFrontmatter,
   rewriteLibPaths,
   inlineLibContent,
+  applyConditionalBlocks,
   getTargetFilename,
   transformCommand,
   transformLib,

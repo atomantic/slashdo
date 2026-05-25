@@ -10,6 +10,7 @@ const {
   parseFrontmatter,
   rewriteLibPaths,
   inlineLibContent,
+  applyConditionalBlocks,
   getTargetFilename,
   transformCommand,
   transformLib,
@@ -121,6 +122,48 @@ describe('inlineLibContent', () => {
 
 // ── getTargetFilename ───────────────────────────────────────────────
 
+describe('applyConditionalBlocks', () => {
+  const teamsOn = { supportsTeams: true };
+  const teamsOff = { supportsTeams: false };
+
+  it('keeps the if-branch and strips the else-branch when the flag is true', () => {
+    const content = 'before\n<!-- if:teams -->\nTEAM\n<!-- else -->\nSOLO\n<!-- /if:teams -->\nafter';
+    assert.equal(applyConditionalBlocks(content, teamsOn), 'before\nTEAM\nafter');
+  });
+
+  it('keeps the else-branch when the flag is false', () => {
+    const content = 'before\n<!-- if:teams -->\nTEAM\n<!-- else -->\nSOLO\n<!-- /if:teams -->\nafter';
+    assert.equal(applyConditionalBlocks(content, teamsOff), 'before\nSOLO\nafter');
+  });
+
+  it('removes an else-less block entirely when the flag is false', () => {
+    const content = 'a\n<!-- if:teams -->\nTEAM-ONLY\n<!-- /if:teams -->\nb';
+    assert.equal(applyConditionalBlocks(content, teamsOff), 'a\nb');
+    assert.equal(applyConditionalBlocks(content, teamsOn), 'a\nTEAM-ONLY\nb');
+  });
+
+  it('resolves multiple independent blocks in one document', () => {
+    const content = 'X<!-- if:teams -->A<!-- else -->a<!-- /if:teams -->Y<!-- if:teams -->B<!-- else -->b<!-- /if:teams -->Z';
+    assert.equal(applyConditionalBlocks(content, teamsOn), 'XAYBZ');
+    assert.equal(applyConditionalBlocks(content, teamsOff), 'XaYbZ');
+  });
+
+  it('collapses an own-line block without leaving a blank line', () => {
+    const content = 'before\n<!-- if:teams -->\nTEAM-ONLY\n<!-- /if:teams -->\nafter';
+    assert.equal(applyConditionalBlocks(content, teamsOff), 'before\nafter');
+  });
+
+  it('leaves unknown capabilities untouched', () => {
+    const content = '<!-- if:flux -->X<!-- else -->Y<!-- /if:flux -->';
+    assert.equal(applyConditionalBlocks(content, teamsOn), content);
+  });
+
+  it('leaves plain content without conditional markers unchanged', () => {
+    const content = 'just some text\nwith lines';
+    assert.equal(applyConditionalBlocks(content, teamsOff), content);
+  });
+});
+
 describe('getTargetFilename', () => {
   it('subdirectory: preserves path structure', () => {
     const env = { namespacing: 'subdirectory', ext: '.md' };
@@ -160,16 +203,19 @@ describe('transformCommand', () => {
     format: 'yaml-frontmatter',
     supportsCatInclusion: true,
     libPathPrefix: '~/.claude/lib/',
+    supportsTeams: true,
   };
   const geminiEnv = {
     format: 'toml',
     supportsCatInclusion: true,
     libPathPrefix: '~/.gemini/lib/',
+    supportsTeams: false,
   };
   const codexEnv = {
     format: 'yaml-frontmatter',
     supportsCatInclusion: false,
     libPathPrefix: null,
+    supportsTeams: false,
   };
 
   it('produces yaml-frontmatter format for claude', () => {
@@ -221,6 +267,22 @@ describe('transformCommand', () => {
     assert.ok(!result.includes('!`cat'));
     fs.rmSync(tmpDir, { recursive: true });
   });
+
+  it('keeps the team branch for environments that support teams', () => {
+    const content = '---\ndescription: Test\n---\n<!-- if:teams -->\nTeamCreate\n<!-- else -->\nsub-agents\n<!-- /if:teams -->';
+    const result = transformCommand(content, claudeEnv);
+    assert.ok(result.includes('TeamCreate'));
+    assert.ok(!result.includes('sub-agents'));
+    assert.ok(!result.includes('if:teams'));
+  });
+
+  it('swaps in the sub-agent branch for environments without teams', () => {
+    const content = '---\ndescription: Test\n---\n<!-- if:teams -->\nTeamCreate\n<!-- else -->\nsub-agents\n<!-- /if:teams -->';
+    const result = transformCommand(content, codexEnv);
+    assert.ok(result.includes('sub-agents'));
+    assert.ok(!result.includes('TeamCreate'));
+    assert.ok(!result.includes('if:teams'));
+  });
 });
 
 // ── transformLib ────────────────────────────────────────────────────
@@ -236,5 +298,17 @@ describe('transformLib', () => {
     const env = { supportsCatInclusion: false, libPathPrefix: null };
     const content = 'See ~/.claude/lib/foo.md';
     assert.equal(transformLib(content, env), content);
+  });
+
+  it('resolves team conditionals in lib content per environment', () => {
+    const content = '<!-- if:teams -->team note<!-- else -->solo note<!-- /if:teams -->';
+    assert.equal(
+      transformLib(content, { supportsCatInclusion: false, libPathPrefix: null, supportsTeams: true }),
+      'team note'
+    );
+    assert.equal(
+      transformLib(content, { supportsCatInclusion: false, libPathPrefix: null, supportsTeams: false }),
+      'solo note'
+    );
   });
 });

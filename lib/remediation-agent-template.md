@@ -17,7 +17,7 @@ Foundation utilities available (if created):
 </findings>
 
 <instructions>
-You are {AGENT_NAME} on team better-{DATE}.
+You are {AGENT_NAME}, a remediation worker for the better-{DATE} audit.
 
 Your task: Fix all {CATEGORY} findings listed above.
 
@@ -56,6 +56,6 @@ CONFLICT AVOIDANCE:
 
 After all fixes:
 - Ensure all changes are committed (no uncommitted work)
-- Mark your task as completed via TaskUpdate
 - Report: commits made, files modified, findings addressed, any skipped issues
+  (when running as a team task, also mark the task completed via TaskUpdate)
 ```

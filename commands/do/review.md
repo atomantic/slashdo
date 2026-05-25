@@ -201,10 +201,12 @@ In `PR_MODE`, skip the local build/test step — the PR's CI is the source of tr
 
 **Skip this section entirely when `PR_MODE=true`** — in PR mode, jump to "Post Review to GitHub PR" below. The whole point of PR mode is to publish review comments on the remote PR, not to mutate the local working tree (the PR may be on a fork or a branch we can't push to).
 
+!`cat ~/.claude/lib/finding-disposition.md`
+
 For each verified finding (local branch mode):
 1. Classify severity: **CRITICAL** (runtime crash, data leak, security) vs **IMPROVEMENT** (consistency, robustness, conventions)
 2. Fix all CRITICAL issues immediately
-3. For IMPROVEMENT issues, fix them too — the goal is to eliminate review round-trips
+3. For IMPROVEMENT issues, fix them too — the goal is to eliminate review round-trips. Per the Finding Disposition guidance above, defer a finding to PLAN.md only when the fix is genuinely large/architectural or too risky to land in this branch — never as a way to avoid a contained fix you could make now
 4. **Identify the root cause** of why the issue existed (missing lint rule, missing comment at the canonical site, misleading name, API that invites the mistake, etc.) per `~/.claude/lib/per-finding-root-cause.md` and apply the smallest matching action **in the same change**. Defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
 5. After fixes, run the project's test suite and build command (per project conventions already in context)
 6. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
