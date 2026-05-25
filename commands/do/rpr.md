@@ -83,6 +83,8 @@ Address the latest code review feedback on the current branch's pull request usi
 
 10. **Convention encoding**: After printing the summary, run the Convention Encoding phase against the issues addressed in this session. For each recurring pattern, apply the **smallest** code-level action that makes the convention self-evident (in-tree comment at the canonical site, a clarifying rename, or a surgical refactor that removes the footgun). CLAUDE.md / AGENTS.md additions are a **fallback** — used only when the convention can't be expressed locally. Encoded actions land in the same branch as the rpr fixes.
 
+!`cat ~/.claude/lib/finding-disposition.md`
+
 !`cat ~/.claude/lib/per-finding-root-cause.md`
 
 !`cat ~/.claude/lib/post-review-doc-recommendations.md`
@@ -268,3 +270,4 @@ Fixing CI failures early avoids burning a Copilot review cycle on code that won'
 - If feedback is unclear or incorrect, leave a reply comment instead of resolving
 - Always run tests before committing — never push code with known failures
 - **Never dismiss findings as "out of scope" or "not modified in this PR."** If a review identifies a real issue, fix it — regardless of whether the current PR touched that code. Evaluate every finding on its merits. Don't leave trash on the floor.
+- **Default to fixing findings in this PR; defer to PLAN.md only when a fix is genuinely large/architectural or too risky to land here.** Don't park a fixable finding in PLAN.md just because it's more than a one-liner — if you could fix it now, you must. See the "Finding Disposition" guidance loaded above for the fix-now / reply / defer decision.
