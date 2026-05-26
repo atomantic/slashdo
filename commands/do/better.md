@@ -1,21 +1,24 @@
 ---
-description: Unified DevSecOps audit, remediation, test enhancement, per-category PRs, CI verification, and Copilot review loop with worktree isolation
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-iterations <n>] [--strict|--nuclear] [path filter or focus areas]"
+description: Unified DevSecOps audit, remediation, test enhancement, per-category PRs, CI verification, and an optional multi-reviewer review loop with worktree isolation
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--strict|--nuclear] [path filter or focus areas]"
 ---
 
 # Better — Unified DevSecOps Pipeline
 
-Run the full DevSecOps lifecycle: audit the codebase with 8 deduplicated agents (9 in strict mode), consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run Copilot review loops, and merge.
+Run the full DevSecOps lifecycle: audit the codebase with 8 deduplicated agents (9 in strict mode), consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run the requested review loop(s), and merge.
 
-**Default mode: fully autonomous.** Uses Balanced model profile, proceeds through all phases without prompting, auto-merges PRs with clean reviews.
+**Default mode: fully autonomous.** Uses Balanced model profile, proceeds through all phases without prompting. **There is no default reviewer**: if `--review-with` is omitted, no external review runs and PRs are left open for manual review (no auto-merge). Pass `--review-with <agent>` to run a review loop and auto-merge PRs with clean reviews.
 
 **`--interactive` mode:** Pauses for model profile selection, review findings approval, guardrail decisions, and merge confirmation.
 
 Parse `$ARGUMENTS` for:
 - **`--interactive`**: pause at each decision point for user approval
 - **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation
-- **`--no-merge`**: run through PR creation (Phase 5), skip Copilot review and merge
-- **`--review-iterations <n>`**: cap how many Copilot review-and-fix cycles each PR's review loop runs (Phase 6). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass per PR, exiting early on 0 comments). `0` = loop until Copilot returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).`
+- **`--no-merge`**: run through PR creation (Phase 5), skip the review loop and merge
+- **`--review-with <agent[,agent,...]>`**: which reviewer(s) run the Phase 6 review loop on each PR. Accepted slugs: `copilot`, `codex`, `gemini`, `claude` (comma-separated, ordered list; split on `,`, trim whitespace, dedupe preserving first-occurrence order). Record as `REVIEW_AGENTS`. **There is no default** — if omitted, set `REVIEW_AGENTS=[]`: Phase 6 is skipped and PRs are left open without merging (see Phase 6). `copilot` is never added implicitly. Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
+- **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to the multi-reviewer loop for each PR; control when a per-PR reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
+- **`--reviewer-applies`**: forwarded to each PR's review loop — the reviewing CLI applies fixes directly instead of the orchestrator (no effect on copilot passes). Record `REVIEWER_APPLIES=true`/`false`.
+- **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** pass runs per PR (Phase 6); no effect on `codex`/`gemini`/`claude` passes (fixed 3-iteration cap). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass per PR, exiting early on 0 comments). `0` = loop until Copilot returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).`
 - **`--strict`** (alias: **`--nuclear`**): enable the Structural Ambition agent (9th audit agent) and promote its blocker-tier findings to CRITICAL severity for remediation. Flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications. Set `STRICT_MODE=true` when present
 - **Path filter**: limit scanning scope to specific directories or files
 - **Focus areas**: e.g., "security only", "DRY and bugs"
@@ -658,7 +661,7 @@ Record all `PR_NUMBERS` and `PR_URLS` in a map: `{category: {number, url}}`.
 
 **GATE: If `--no-merge` was passed, STOP HERE.** Print all PR URLs and summary.
 
-**GATE: If `VCS_HOST` is `gitlab`, STOP HERE.** Print all MR URLs and summary. GitLab does not support the Copilot review loop.
+**GATE: If `VCS_HOST` is `gitlab`, STOP HERE.** Print all MR URLs and summary. The automated Phase 6 review loop + auto-merge run on GitHub PRs only; GitLab MRs are left open for manual review and merge.
 
 ## Phase 5d: CI Verification
 
@@ -695,34 +698,39 @@ After creating all PRs, verify CI passes on each one:
    e. Re-poll CI until it passes or max retries (3) are exhausted
    f. If CI still fails after 3 fix attempts, inform the user and continue with other PRs
 
-## Phase 6: Copilot Review Loop (GitHub only)
+## Phase 6: Review Loop (GitHub only)
 
-Run each PR's Copilot review loop for at most `{REVIEW_ITERATIONS}` review-and-fix cycles (default 1), exiting early the moment a review returns 0 comments. With the default of 1, each PR gets a single review pass plus its fixes and the sub-agent returns `capped` (treated as clean / ready-to-merge — every fix the review surfaced was applied). When `{REVIEW_ITERATIONS}` is 0 (unlimited), sub-agents loop until 0 comments and enforce a 10-iteration guardrail: at iteration 10 the sub-agent stops and returns a "guardrail" status. **Default mode**: auto-stop at the guardrail. **Interactive mode (`--interactive`)**: prompt the parent agent to ask the user whether to continue or stop.
+**GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this entire phase AND the Phase 6.4 merge.** There is no default reviewer. Leave every PR open for manual review, print the PR URLs and summary (mark the Review column `none — left open`), then proceed to Phase 7 cleanup. PRs are merged only after a clean review loop, which requires an explicit `--review-with`.
 
-**Sub-agent delegation** (prevents context exhaustion): delegate each PR's review loop to a **separate general-purpose sub-agent** via the Agent tool. Launch sub-agents in parallel (one per PR). Each sub-agent runs the full loop (request → wait → check → fix → re-request) autonomously and returns only the final status.
+Otherwise, run each PR through the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot passes only; local-agent passes use their own fixed 3-iteration cap). A copilot pass with the default `--review-iterations 1` runs a single review-and-fix cycle and returns `capped` (clean-equivalent / ready-to-merge). `0` lets a copilot pass loop until 0 comments, bounded by the copilot loop's 10-iteration guardrail. **Default mode**: auto-stop at the guardrail. **Interactive mode (`--interactive`)**: prompt the parent agent to ask the user whether to continue or stop.
+
+**Sub-agent delegation** (prevents context exhaustion): delegate each PR's review loop to a **separate general-purpose sub-agent** via the Agent tool. Launch sub-agents in parallel (one per PR). Each sub-agent runs the multi-reviewer loop (which dispatches each listed agent to the copilot loop or the local-agent loop) autonomously against its PR's branch and returns only the final aggregate status.
 
 ### 6.1: Launch parallel sub-agents (one per PR)
 
-For each PR, spawn a general-purpose sub-agent using the shared review loop template:
+For each PR, spawn a general-purpose sub-agent that runs the **multi-reviewer wrapper** below over `REVIEW_AGENTS` for that PR. The wrapper `!cat`s the inner loop bodies it dispatches to:
+
+!`cat ~/.claude/lib/multi-reviewer-loop.md`
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
-Pass each sub-agent the PR-specific variables: `{PR_NUMBER}`, `{OWNER}/{REPO}`, `better/{CATEGORY_SLUG}`, `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the iteration cap; default 1).
+!`cat ~/.claude/lib/local-agent-review-loop.md`
+
+Pass each sub-agent the PR-specific variables: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `better/{CATEGORY_SLUG}` (the branch the local-agent loop checks out and reviews), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the copilot iteration cap; default 1).
 
 Launch all PR sub-agents in parallel. Wait for all to complete.
 
 ### 6.2: Handle sub-agent results
 
-For each sub-agent result:
-- **clean**: a review returned 0 comments — mark PR as ready to merge
-- **capped**: the configured `{REVIEW_ITERATIONS}` cap (default 1) was reached after applying every fix the review surfaced — treated as clean; mark PR as ready to merge
-- **timeout**: **Default mode**: skip the timed-out PR and continue. **Interactive mode**: inform the user and ask whether to continue waiting, re-request, or skip
-- **error**: **Default mode**: retry up to 3 times, then skip. **Interactive mode**: inform the user and ask whether to retry or skip
-- **guardrail**: the sub-agent hit the 10-iteration limit (only reachable when `{REVIEW_ITERATIONS}` is 0). **Default mode**: auto-stop and mark as best-effort. **Interactive mode**: ask the user whether to continue with more iterations or stop
+Each sub-agent returns the multi-reviewer wrapper's `{OVERALL_STATUS}` for its PR:
+- **clean**: every executed pass returned clean (copilot `capped`/`too-large` count as clean) — mark PR as ready to merge
+- **partial**: a stop-mode flag short-circuited the list and every executed pass was clean — mark PR as ready to merge (the user opted into the short-circuit)
+- **inconclusive**: at least one requested pass timed out, errored, hit its guardrail, or was skipped (e.g. a missing CLI binary, or copilot when no PR review could be produced). **Default mode**: leave the PR open for manual review. **Interactive mode**: inform the user and ask whether to merge anyway, re-run, or skip
+- **dirty**: a pass left the branch with a broken build / failed tests / explicit reject. **Default mode**: leave the PR open. **Interactive mode**: ask whether to fix-and-retry or skip
 
 ### 6.3: Merge Gate (MANDATORY)
 
-**Do NOT merge any PR until its own Copilot review has completed (approved or commented with zero unresolved issues).**
+**Do NOT merge any PR whose aggregate review status is not `clean` (or `partial` under an explicit stop-mode).** A missing or inconclusive review is NOT a clean review.
 
 ### Default Mode (autonomous)
 
@@ -733,7 +741,7 @@ Print the review status summary, then auto-merge all PRs whose reviews completed
 Present the review status summary to the user via `AskUserQuestion`:
 ```
 AskUserQuestion([{
-  question: "Copilot review status:\n{for each PR: #number - status (approved/comments/pending/timeout)}\n\nHow would you like to proceed?",
+  question: "Review status ({REVIEW_AGENTS}):\n{for each PR: #number - aggregate status (clean/partial/inconclusive/dirty)}\n\nHow would you like to proceed?",
   options: [
     { label: "Merge approved PRs", description: "Merge only PRs with passing review" },
     { label: "Merge all", description: "Merge all PRs regardless of review status" },
@@ -826,9 +834,9 @@ Test Enhancement Stats:
 - **Push failure**: `git pull --rebase --autostash` then retry push
 - **CI failure on PR**: investigate logs, fix in a new commit, push, re-check (max 3 attempts per PR)
 - **Cross-PR dependency breakage**: add backward-compatible re-exports or move shared files to the PR that creates them
-- **Copilot timeout** (review not received within decreasing timeout window): inform user, offer to merge without review approval or wait longer
-- **Copilot review loop exceeds 10 iterations per PR**: sub-agent hits guardrail and reports back; ask user whether to continue or stop
-- **Copilot "too-large"** (PR exceeds Copilot's 20 000-line limit): treat as clean — do NOT re-request, proceed directly to merge
+- **Reviewer timeout / error / guardrail** (copilot review not received in the timeout window, a local CLI errored, or a copilot pass hit its 10-iteration limit): the per-PR sub-agent surfaces it as an `inconclusive` aggregate. **Default mode**: leave that PR open. **Interactive mode**: ask the user whether to merge without a clean review, re-run, or skip
+- **Copilot "too-large"** (PR exceeds Copilot's 20 000-line limit): the copilot pass treats it as clean — do NOT re-request; it counts toward a clean aggregate
+- **Missing reviewer CLI** (`--review-with codex`/`gemini`/`claude` but the binary isn't installed): the multi-reviewer loop records that pass as `skipped` (→ inconclusive aggregate). It does NOT silently fall back to copilot
 - **Existing worktree found at startup**: ask user — resume (reuse worktree) or cleanup (remove and start fresh)
 - **No findings above LOW**: skip Phases 3-7, print "No actionable findings" with the LOW summary
 - **Merge conflict after prior PR merged**: rebase the branch onto the updated default branch, push with `--force-with-lease`, re-run CI
@@ -846,6 +854,7 @@ Test Enhancement Stats:
 - Only CRITICAL, HIGH, and MEDIUM findings are auto-remediated for code categories; LOW findings remain tracked in PLAN.md
 - Dependency Freedom findings replace unnecessary third-party packages with owned code — see `/do:depfree` for standalone usage
 - Test Quality & Coverage findings are remediated in Phase 4c with a dedicated test enhancement agent that verifies tests fail when code is broken
-- GitLab projects skip the Copilot review loop entirely (Phase 6) and stop after MR creation
-- CI must pass on each PR before requesting Copilot review or merging
-- `--strict` (alias `--nuclear`) adds the Structural Ambition agent and promotes its blocker-tier findings (file >1000 lines, spaghetti additions, thin wrappers, boundary leaks, canonical-helper duplication) to CRITICAL. Use when auditing a branch you want to land cleanly. The Structural Ambition category produces high-judgment findings — expect more remediation churn than the runtime/security agents and budget extra Copilot-review iterations for its PR. If a finding's reframing turns out to be infeasible after investigation, leave it and document why rather than substituting a cosmetic change
+- **No default reviewer**: without `--review-with`, Phase 6 and the auto-merge are skipped and all PRs are left open for manual review. Pass `--review-with <agent[,agent,...]>` to run a review loop and enable auto-merge on a clean result. `copilot` is never added implicitly
+- GitLab projects skip the Phase 6 review loop + auto-merge entirely and stop after MR creation (the loop drives GitHub PRs; local-agent reviewers aside, there is no GitLab merge path here)
+- CI must pass on each PR before its review loop runs or it is merged
+- `--strict` (alias `--nuclear`) adds the Structural Ambition agent and promotes its blocker-tier findings (file >1000 lines, spaghetti additions, thin wrappers, boundary leaks, canonical-helper duplication) to CRITICAL. Use when auditing a branch you want to land cleanly. The Structural Ambition category produces high-judgment findings — expect more remediation churn than the runtime/security agents and budget extra review iterations for its PR. If a finding's reframing turns out to be infeasible after investigation, leave it and document why rather than substituting a cosmetic change

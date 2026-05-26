@@ -1,6 +1,6 @@
 ---
 description: Audit third-party dependencies and remove unnecessary ones by writing replacement code
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [--heavy] [--review-iterations <n>] [specific packages to evaluate]"
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [--heavy] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [specific packages to evaluate]"
 ---
 
 # Depfree — Dependency Freedom Audit
@@ -16,9 +16,12 @@ Every small library is an attack surface. Supply chain compromises are real and 
 Parse `$ARGUMENTS` for:
 - **`--interactive`**: pause at each decision point for user approval
 - **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation
-- **`--no-merge`**: run through PR creation, skip merge
+- **`--no-merge`**: run through PR creation, skip the review loop and merge
 - **`--heavy`**: aggressive mode — only keep foundational frameworks and language runtimes; replace everything else that is feasibly replaceable (see Heavy Mode below)
-- **`--review-iterations <n>`**: cap how many Copilot review-and-fix cycles the review loop runs (Phase 5c). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass, exiting early on 0 comments). `0` = loop until Copilot returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).`
+- **`--review-with <agent[,agent,...]>`**: which reviewer(s) run the Phase 5c review loop on the PR. Accepted slugs: `copilot`, `codex`, `gemini`, `claude` (comma-separated, ordered list; split on `,`, trim whitespace, dedupe preserving first-occurrence order). Record as `REVIEW_AGENTS`. **There is no default** — if omitted, set `REVIEW_AGENTS=[]`: Phase 5c is skipped and the PR is left open without merging (see Phase 5c/5d). `copilot` is never added implicitly. Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
+- **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to the multi-reviewer loop; control when the reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
+- **`--reviewer-applies`**: forwarded to the review loop — the reviewing CLI applies fixes directly instead of the orchestrator (no effect on copilot passes). Record `REVIEWER_APPLIES=true`/`false`.
+- **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** pass runs (Phase 5c); no effect on `codex`/`gemini`/`claude` passes (fixed 3-iteration cap). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass, exiting early on 0 comments). `0` = loop until Copilot returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).`
 - **Specific packages**: limit audit scope to named packages (e.g., "chalk dotenv")
 
 Set `HEAVY_MODE` to `true` if `--heavy` was passed, `false` otherwise.
@@ -651,18 +654,26 @@ Record `PR_NUMBER` and `PR_URL`.
    - Fetch failure logs, diagnose, fix, commit, push
    - Max 3 fix attempts before informing the user
 
-### 5c: Copilot Review Loop (GitHub only)
+### 5c: Review Loop (GitHub only)
 
-If `VCS_HOST` is `github`, run the Copilot review loop using the shared template:
+**GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this phase AND the Phase 5d merge.** There is no default reviewer. Leave the PR open for manual review, print its URL and summary, then proceed to Phase 6 cleanup.
+
+Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot passes only; local-agent passes use their own fixed 3-iteration cap). The wrapper `!cat`s the inner loop bodies it dispatches to:
+
+!`cat ~/.claude/lib/multi-reviewer-loop.md`
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
-Pass: `{PR_NUMBER}`, `{OWNER}/{REPO}`, `depfree/{DATE}`, `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the iteration cap; default 1 — one review pass, returning `capped`, which counts as clean for the merge gate below). When `{REVIEW_ITERATIONS}` is 0, the loop runs until 0 comments (bounded by the 10-iteration guardrail).
+!`cat ~/.claude/lib/local-agent-review-loop.md`
+
+Pass: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `depfree/{DATE}` (the branch the local-agent loop checks out and reviews), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the copilot iteration cap; default 1 — one review pass, returning `capped`, which counts as clean for the merge gate below). When `{REVIEW_ITERATIONS}` is 0, a copilot pass runs until 0 comments (bounded by the 10-iteration guardrail).
 
 ### 5d: Merge
 
-**Default mode**: Auto-merge if review is clean (`clean`, `capped`, or `too-large`).
-**Interactive mode**: Ask user for merge approval.
+Reached only when a review loop ran (`REVIEW_AGENTS` non-empty); the empty case stopped at 5c with the PR left open. Consume the multi-reviewer wrapper's `{OVERALL_STATUS}`:
+
+**Default mode**: Auto-merge when `{OVERALL_STATUS}` is `clean` (or `partial` under an explicit stop-mode). On `inconclusive` (a requested reviewer timed out, errored, hit its guardrail, or was skipped — including a missing CLI binary) or `dirty` (broken build / failed tests / reject), leave the PR open and report the status.
+**Interactive mode**: Ask the user for merge approval, showing `{OVERALL_STATUS}`.
 
 ```bash
 gh pr merge {PR_NUMBER} --merge

@@ -10,9 +10,9 @@ argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-i
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
-- Accepted values per slot: `copilot` (default), `codex`, `gemini`, `claude`
+- Accepted values per slot: `copilot`, `codex`, `gemini`, `claude`
 - The value may be a single agent or a **comma-separated, ordered list** (e.g. `--review-with codex,gemini,copilot`). Split on `,`, trim whitespace around each slug.
-- Record the resulting list as `REVIEW_AGENTS`. If `--review-with` is omitted, set `REVIEW_AGENTS=[copilot]`.
+- Record the resulting list as `REVIEW_AGENTS`. **There is no default reviewer.** If `--review-with` is omitted, set `REVIEW_AGENTS=[]` — no external review pass runs (the Local Code Review gate below still runs unconditionally). Whatever you list is exactly what runs, in order: `--review-with codex` runs codex only; copilot is never added implicitly.
 - Dedupe preserving first-occurrence order; if duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
 - If any value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
 
@@ -59,7 +59,7 @@ Print the detected workflow: `Detected release flow: {source} → {target}`
 
 **Default mode**: If ambiguous, use the most likely branch (prefer `release` if it exists). If the target branch does not exist, create it from the last release tag (see step 3 above). If detection still yields `target == source`, abort with an error — a release PR cannot merge a branch into itself. **Interactive mode (`--interactive`)**: Ask the user to confirm before proceeding.
 
-**Important**: The PR direction is `{source}` → `{target}` (e.g., `main` → `release`). This gives Copilot the full diff of all changes since the last release for review. Do NOT create a branch from source and PR back into it — that only shows the version bump commit.
+**Important**: The PR direction is `{source}` → `{target}` (e.g., `main` → `release`). This gives any reviewer (and the human approver) the full diff of all changes since the last release. Do NOT create a branch from source and PR back into it — that only shows the version bump commit.
 
 ## Pre-Release Checks
 
@@ -140,9 +140,11 @@ Verification — self-check before proceeding (no user prompt needed):
 
 ## Run the Review Loop
 
-Hand off to the **multi-reviewer loop** with the parsed inputs:
+**If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), skip this entire section — no external review loop runs. The Local Code Review gate above plus the passing build/tests are the merge gate; set `OVERALL_STATUS=clean` (no-review path) and proceed to the merge section. The Copilot-specific and local-agent-specific merge checks below do not apply when no reviewer ran.
 
-- `{REVIEW_AGENTS}` — ordered list (default `[copilot]`)
+Otherwise, hand off to the **multi-reviewer loop** with the parsed inputs:
+
+- `{REVIEW_AGENTS}` — ordered list of the agents passed via `--review-with` (non-empty; the empty case was handled above)
 - `{REVIEW_STOP_MODE}` — `all` (default) | `on-findings` | `on-clean`
 - `{REVIEWER_APPLIES}` — boolean
 - `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot iteration cap (`0` = loop until clean)
@@ -168,7 +170,7 @@ The merge gate consumes the **wrapper's `{OVERALL_STATUS}`** plus, for any copil
 
 ### Wrapper status
 
-- `clean` — every executed pass returned `clean` (copilot `too-large` and `capped` both count as clean here, per the copilot loop's own rule; `capped` is the default `--review-iterations 1` outcome — one review ran and all its fixes were applied). **Eligible to merge.**
+- `clean` — every executed pass returned `clean` (copilot `too-large` and `capped` both count as clean here, per the copilot loop's own rule; `capped` is the default `--review-iterations 1` outcome — one review ran and all its fixes were applied), **or** no external reviewer was requested (`--review-with` omitted → `REVIEW_AGENTS=[]`) and the Local Code Review gate plus build/tests passed (the no-review path set `OVERALL_STATUS=clean`). **Eligible to merge.**
 - `partial` — the wrapper stopped early because of an explicit stop-mode flag (`--review-stop-on-findings` or `--review-stop-on-clean`) and the executed passes all completed normally. **Eligible to merge** — the user opted into the short-circuit.
 - `inconclusive` — the executed list contained **at least one** pass whose status was inconclusive (`timeout`, `error`, `guardrail`, `skipped`), regardless of whether other passes returned `clean`. **Do NOT merge** — the user asked for multiple perspectives and at least one never produced a verdict.
 - `dirty` — a pass returned a hard-error status (`cli-error`, `broken-build`, `test-failed`, `rejected`) and the wrapper short-circuited. **Do NOT merge.**

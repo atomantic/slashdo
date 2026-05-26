@@ -55,7 +55,7 @@ All commands live under the `do:` namespace:
 | Command | What it does |
 |:---|:---|
 | `/do:push` | Commit and push all work with changelog |
-| `/do:pr` | Open a PR with self-review and a review loop (Copilot by default; see [Review loop flags](#review-loop-flags-dopr-dorelease-dopr-better-doreview)) |
+| `/do:pr` | Open a PR with self-review; runs an external review loop only when you pass `--review-with` (no default reviewer; see [Review loop flags](#review-loop-flags-dopr-dorelease-dopr-better-doreview-dobetter-dobetter-swift-dodepfree-dorpr)) |
 | `/do:pr-better` | Run a full do:better audit on the current branch, commit fixes directly, then open a single PR |
 | `/do:fpr` | Fork PR -- push to fork, PR against upstream |
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
@@ -71,14 +71,14 @@ All commands live under the `do:` namespace:
 | `/do:update` | Update slashdo to latest version |
 | `/do:help` | List all available commands |
 
-### Review loop flags (`/do:pr`, `/do:release`, `/do:pr-better`, `/do:review`)
+### Review loop flags (`/do:pr`, `/do:release`, `/do:pr-better`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:depfree`, `/do:rpr`)
 
-These commands accept a shared set of flags that control which reviewer(s) run and how the multi-reviewer loop is gated:
+These commands accept a shared set of flags that control which reviewer(s) run and how the multi-reviewer loop is gated. **No reviewer is ever hardcoded — `copilot` runs only when you list it** (the one exception is `/do:rpr`, whose conditional default is documented below):
 
 | Flag | Default | What it does |
 |:---|:---|:---|
-| `--review-with <agent>[,<agent>...]` | `copilot` (on `do:pr` / `do:release` / `do:pr-better`); empty (on `do:review`, which still runs its own self-review unconditionally) | Pick one or more reviewers, run in the order given. Accepted slugs: `copilot` (GitHub cloud review), `codex`, `gemini`, `claude` (each non-copilot slug spawns that local CLI in headless mode). Example: `--review-with codex,gemini,copilot` runs codex first, then gemini, then copilot, each reviewing the branch as the previous pass left it. |
-| `--review-iterations <n>` | `1` | Cap how many review-and-fix cycles the **Copilot** loop runs. Default `1`: request one review, apply every fix it surfaces, then stop (exiting early if the review returns 0 comments). `0` restores the legacy "loop until 0 comments" behavior, bounded by a 10-iteration safety guardrail. No effect on `codex`/`gemini`/`claude` passes (fixed 3-iteration cap). The same flag is also accepted by `/do:better`, `/do:better-swift`, and `/do:depfree`, which run the Copilot loop directly. |
+| `--review-with <agent>[,<agent>...]` | empty — **no default reviewer** (except `/do:rpr`, see below) | Pick one or more reviewers, run in the order given. Omit the flag and no external review runs (each command still runs its own unconditional self-review gate). Accepted slugs: `copilot` (GitHub cloud review), `codex`, `gemini`, `claude` (each non-copilot slug spawns that local CLI in headless mode). Whatever you list is exactly what runs — `--review-with codex` runs codex only; copilot is never added implicitly. Example: `--review-with codex,gemini,copilot` runs codex first, then gemini, then copilot, each reviewing the branch as the previous pass left it. On `/do:better`, `/do:better-swift`, and `/do:depfree`, omitting the flag means the review loop **and the auto-merge** are skipped — PRs are left open for manual review. |
+| `--review-iterations <n>` | `1` | Cap how many review-and-fix cycles a **Copilot** pass runs. Default `1`: request one review, apply every fix it surfaces, then stop (exiting early if the review returns 0 comments). `0` restores the legacy "loop until 0 comments" behavior, bounded by a 10-iteration safety guardrail. No effect on `codex`/`gemini`/`claude` passes (fixed 3-iteration cap), and no effect when copilot isn't in the list. Accepted by `/do:better`, `/do:better-swift`, and `/do:depfree` too. |
 | `--review-stop-on-findings` | off | Stop the multi-reviewer loop after the first reviewer that fixes at least one finding (subsequent reviewers in the list are skipped). Mutually exclusive with `--review-stop-on-clean`. |
 | `--review-stop-on-clean` | off | Stop after the first reviewer that reports zero findings (clean). Mutually exclusive with `--review-stop-on-findings`. |
 | `--reviewer-applies` | off | Edit the working tree directly from the reviewing CLI instead of routing findings back through the orchestrating thread. No effect on copilot passes (Copilot reviews are read-only); takes effect on each codex / gemini / claude pass in the list. |
@@ -86,6 +86,8 @@ These commands accept a shared set of flags that control which reviewer(s) run a
 By default every listed reviewer runs in order, and the orchestrator that opened the PR also applies the fixes — it reads each reviewer's findings and edits the working tree itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking gemini to both find and patch its own concerns). For `/do:release`, the merge gate requires the multi-reviewer aggregate status to be `clean` (or `partial`, if you explicitly opted into a stop-mode short-circuit) — a `dirty` aggregate (build/test broken on some pass) or an `inconclusive` aggregate (any executed pass timed out, errored, hit its guardrail, or was skipped — even if other passes returned clean) blocks the merge.
 
 For `/do:review`, the listed agents run **after** the host CLI's own self-review (the multi-agent review built into `do:review`). The list names *additional* reviewers; whichever CLI is hosting `/do:review` does its own pass first regardless.
+
+`/do:better`, `/do:better-swift`, and `/do:depfree` run the chosen reviewer(s) as their post-PR review loop (per PR, in parallel for the multi-PR `better` commands). With no `--review-with`, they skip the review loop and auto-merge and leave PRs open. `/do:rpr` is special: it **resolves review threads from any author** (Copilot, human, or other bot), and its `--review-with` default is a *conditional* `copilot` — it requests a Copilot review only when the PR has no review yet, or when Copilot is already the reviewer in play; pass `--review-with codex|gemini|claude` to run a local review loop instead.
 
 ## Supported Environments
 

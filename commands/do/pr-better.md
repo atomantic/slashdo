@@ -5,7 +5,7 @@ argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-s
 
 # PR-Better — Better Audit + Single PR
 
-Run the full `do:better` DevSecOps audit and remediation, but **commit all fixes directly to the current branch** instead of creating per-category PRs. Then hand off to `do:pr` so the entire result ships as one cohesive PR (with self-review and the Copilot review loop, or a multi-reviewer loop if `--review-with` lists one or more agents).
+Run the full `do:better` DevSecOps audit and remediation, but **commit all fixes directly to the current branch** instead of creating per-category PRs. Then hand off to `do:pr` so the entire result ships as one cohesive PR (with the self-review gate always, plus a multi-reviewer loop **only if** `--review-with` lists one or more agents — there is no default reviewer; omit the flag and only the self-review runs).
 
 This is the right command when:
 - You want the full `do:better` quality bar on a feature branch you're about to ship
@@ -82,7 +82,7 @@ After Phase A leaves all fixes committed on `{CURRENT_BRANCH}`, hand off to the 
 4. **Open the PR** — create a single PR with a description that summarizes both:
    - The original feature work on the branch (from prior commits)
    - The do:better audit findings now folded in (categories, counts, severity)
-5. **Review loop** — runs once on the combined PR via the standard `do:pr` flow. `do:pr` always routes review execution through the multi-reviewer wrapper, even for a single agent (which becomes a one-item list dispatching to the matching inner loop: the copilot loop for `copilot`, the local-agent loop for `codex`/`gemini`/`claude`). Multi-agent lists (e.g., `--review-with codex,gemini,copilot`) run each entry in order through the same wrapper. `REVIEW_STOP_ARG` controls when to stop early (default: run all). If `REVIEWER_APPLIES_ARG` is also set, do:pr passes the flag through so the chosen CLI (not the orchestrator) applies fixes — on the copilot path the flag is a no-op (a warning is printed). `REVIEW_ITERATIONS_ARG` caps the copilot review-and-fix cycles (default `1`); if omitted, do:pr applies its own default of a single Copilot pass.
+5. **Review loop** — runs once on the combined PR via the standard `do:pr` flow. If `REVIEW_AGENT_ARG` is empty (no `--review-with` was passed), `do:pr` runs **no** external review loop — there is no default reviewer; the self-review gate at step 3 is the only review. When one or more agents are listed, `do:pr` routes review execution through the multi-reviewer wrapper, even for a single agent (which becomes a one-item list dispatching to the matching inner loop: the copilot loop for `copilot`, the local-agent loop for `codex`/`gemini`/`claude`). Multi-agent lists (e.g., `--review-with codex,gemini,copilot`) run each entry in order through the same wrapper. `REVIEW_STOP_ARG` controls when to stop early (default: run all). If `REVIEWER_APPLIES_ARG` is also set, do:pr passes the flag through so the chosen CLI (not the orchestrator) applies fixes — on the copilot path the flag is a no-op (a warning is printed). `REVIEW_ITERATIONS_ARG` caps the copilot review-and-fix cycles (default `1`) when copilot is in the list.
 
 ## Final Report
 

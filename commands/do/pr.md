@@ -6,9 +6,9 @@ argument-hint: "[--review-with <agent>[,<agent>...]] [--review-iterations <n>] [
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
-- Accepted values per slot: `copilot` (default), `codex`, `gemini`, `claude`
+- Accepted values per slot: `copilot`, `codex`, `gemini`, `claude`
 - The value may be a single agent or a **comma-separated, ordered list** (e.g. `--review-with codex,gemini,copilot`). Split on `,`, trim whitespace around each slug.
-- Record the resulting list as `REVIEW_AGENTS`. If `--review-with` is omitted, set `REVIEW_AGENTS=[copilot]`.
+- Record the resulting list as `REVIEW_AGENTS`. **There is no default reviewer.** If `--review-with` is omitted, set `REVIEW_AGENTS=[]` — no external review pass runs (the Local Code Review gate below still runs unconditionally). Whatever you list is exactly what runs, in order: `--review-with codex` runs codex only; copilot is never added implicitly.
 - Dedupe preserving first-occurrence order; if duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
 - If any value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
 
@@ -82,9 +82,11 @@ Verification — confirm before proceeding:
 
 ## Run the Review Loop
 
-Hand off to the **multi-reviewer loop** with the parsed inputs:
+**If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), skip this entire section — the Local Code Review gate above was the only review. Report the PR URL and stop; there is no multi-reviewer aggregate to report.
 
-- `{REVIEW_AGENTS}` — ordered list (default `[copilot]`)
+Otherwise, hand off to the **multi-reviewer loop** with the parsed inputs:
+
+- `{REVIEW_AGENTS}` — ordered list of the agents passed via `--review-with` (non-empty; the empty case was handled above)
 - `{REVIEW_STOP_MODE}` — `all` (default) | `on-findings` | `on-clean`
 - `{REVIEWER_APPLIES}` — boolean
 - `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot iteration cap (`0` = loop until clean)
