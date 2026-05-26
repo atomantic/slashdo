@@ -181,15 +181,15 @@ For `dirty` or `inconclusive`:
 
 ### Copilot-specific checks (when copilot was in the executed list)
 
-- **CRITICAL**: Do NOT merge until Copilot has submitted a review. A missing review is NOT the same as a clean review.
-- Only merge after the latest Copilot review has been submitted AND that review generated **zero comments**. Check this by:
-  1. Confirming a new review node exists with `submittedAt` after your last push
-  2. Confirming the review body says "generated 0 comments" OR there are no new unresolved threads
+- **CRITICAL**: Do NOT merge until the copilot pass returned a verdict status. A missing review is NOT the same as a clean review.
+- Merge only on a copilot verdict status. Which verdict is required depends on `{REVIEW_ITERATIONS}`:
+  - **Default bounded mode (`--review-iterations` ≥ 1)**: the verdict is `capped` — the configured cap was reached after applying every fix the review surfaced. Merge **without** requiring a confirming zero-comment re-review (that is the whole point of the bounded default; `capped` is clean-equivalent per the wrapper-status block above).
+  - **Unlimited mode (`--review-iterations 0`)**: the verdict must be `clean` — the latest Copilot review was submitted AND generated **zero comments**. Check by: (1) confirming a new review node exists with `submittedAt` after your last push; (2) confirming the review body says "generated 0 comments" OR there are no new unresolved threads.
 - **Exception — too-large**: if the Copilot review body says the PR exceeds the maximum number of lines (20 000), treat it as a clean review and proceed to merge immediately. Do NOT re-request.
 - **Never merge if:**
   - No Copilot review was ever posted (review never arrived — ask user first)
   - "Awaiting requested review" is still shown (review in progress)
-  - The latest review had comments that you fixed but you didn't get a CLEAN re-review
+  - **In unlimited mode only (`--review-iterations 0`)**: the latest review had comments that you fixed but you didn't get a CLEAN re-review. (In the bounded default this is the expected `capped` outcome and IS eligible to merge.)
 
 ### Local-agent-specific checks (when codex/gemini/claude was in the executed list)
 

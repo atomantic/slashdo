@@ -1,6 +1,6 @@
 ---
 description: Run a full do:better audit/remediation on the current branch, commit fixes directly to it, then open a single PR with do:pr
-argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [path filter or focus areas]"
+argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [path filter or focus areas]"
 ---
 
 # PR-Better — Better Audit + Single PR

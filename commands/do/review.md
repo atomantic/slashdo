@@ -1,6 +1,6 @@
 ---
 description: Deep code review of changed files against software engineering best practices
-argument-hint: "[--strict|--nuclear] [--draft] [--review-with <agent>[,<agent>...]] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [PR-URL | base-branch]"
+argument-hint: "[--strict|--nuclear] [--draft] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [PR-URL | base-branch]"
 ---
 
 ## Parse Arguments
