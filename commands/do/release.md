@@ -1,6 +1,6 @@
 ---
 description: Create a release PR using the project's documented release workflow
-argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies]"
+argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies]"
 ---
 
 **Default mode: fully autonomous.** Auto-detects branches, determines version bump from commits, runs review, creates and merges the release PR without prompting.
@@ -10,9 +10,9 @@ argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-s
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
-- Accepted values per slot: `copilot` (default), `codex`, `gemini`, `claude`
+- Accepted values per slot: `copilot`, `codex`, `gemini`, `claude`
 - The value may be a single agent or a **comma-separated, ordered list** (e.g. `--review-with codex,gemini,copilot`). Split on `,`, trim whitespace around each slug.
-- Record the resulting list as `REVIEW_AGENTS`. If `--review-with` is omitted, set `REVIEW_AGENTS=[copilot]`.
+- Record the resulting list as `REVIEW_AGENTS`. **There is no default reviewer.** If `--review-with` is omitted, set `REVIEW_AGENTS=[]` — no external review pass runs (the Local Code Review gate below still runs unconditionally). Whatever you list is exactly what runs, in order: `--review-with codex` runs codex only; copilot is never added implicitly.
 - Dedupe preserving first-occurrence order; if duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
 - If any value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
 
@@ -26,6 +26,12 @@ Parse `$ARGUMENTS` for `--reviewer-applies` (boolean, no value):
 - Record as `REVIEWER_APPLIES=true` if present, otherwise `REVIEWER_APPLIES=false` (default).
 - This flag picks who applies fixes the reviewer surfaces: by default the orchestrating thread (this session) reads the reviewer's findings and applies fixes itself; with `--reviewer-applies` the reviewing CLI applies fixes in the working tree directly. See `lib/local-agent-review-loop.md` "Editing mode" for the rationale and trade-offs.
 - The flag is **not supported on the copilot path** because Copilot reviews are read-only by design (cloud-side comments, no working-tree access). If `REVIEW_AGENTS` contains `copilot` and `REVIEWER_APPLIES=true`, print a warning (`--reviewer-applies has no effect on the copilot pass; fixes there are always applied by the orchestrator's sub-agent`) and continue — the flag still takes effect on the non-copilot passes in the list.
+
+Parse `$ARGUMENTS` for `--review-iterations <n>` (affects the copilot pass only):
+- Record as `REVIEW_ITERATIONS`. If `--review-iterations` is omitted, default to `1` — a single Copilot review-and-fix pass (request one review, fix everything it surfaces, stop).
+- Must be a non-negative integer. Any positive `n` runs at most `n` review-and-fix cycles, still exiting early if a review returns 0 comments. `0` means "loop until Copilot returns 0 comments" (the legacy behavior, bounded by the copilot loop's 10-iteration safety guardrail).
+- If the value is missing or not a non-negative integer, abort with: `--review-iterations must be a non-negative integer (got: {value}).`
+- This flag has no effect on local-agent reviewers (`codex`/`gemini`/`claude`); they keep their own fixed 3-iteration cap. The default `capped` verdict (cap reached after applying fixes) counts as clean-equivalent for the merge gate — see the merge section below.
 
 ## Detect Release Workflow
 
@@ -53,7 +59,7 @@ Print the detected workflow: `Detected release flow: {source} → {target}`
 
 **Default mode**: If ambiguous, use the most likely branch (prefer `release` if it exists). If the target branch does not exist, create it from the last release tag (see step 3 above). If detection still yields `target == source`, abort with an error — a release PR cannot merge a branch into itself. **Interactive mode (`--interactive`)**: Ask the user to confirm before proceeding.
 
-**Important**: The PR direction is `{source}` → `{target}` (e.g., `main` → `release`). This gives Copilot the full diff of all changes since the last release for review. Do NOT create a branch from source and PR back into it — that only shows the version bump commit.
+**Important**: The PR direction is `{source}` → `{target}` (e.g., `main` → `release`). This gives any reviewer (and the human approver) the full diff of all changes since the last release. Do NOT create a branch from source and PR back into it — that only shows the version bump commit.
 
 ## Pre-Release Checks
 
@@ -134,11 +140,14 @@ Verification — self-check before proceeding (no user prompt needed):
 
 ## Run the Review Loop
 
-Hand off to the **multi-reviewer loop** with the parsed inputs:
+**If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), skip this entire section — no external review loop runs. The Local Code Review gate above plus the passing build/tests are the merge gate; set `OVERALL_STATUS=clean` (no-review path) and proceed to the merge section. The Copilot-specific and local-agent-specific merge checks below do not apply when no reviewer ran.
 
-- `{REVIEW_AGENTS}` — ordered list (default `[copilot]`)
+Otherwise, hand off to the **multi-reviewer loop** with the parsed inputs:
+
+- `{REVIEW_AGENTS}` — ordered list of the agents passed via `--review-with` (non-empty; the empty case was handled above)
 - `{REVIEW_STOP_MODE}` — `all` (default) | `on-findings` | `on-clean`
 - `{REVIEWER_APPLIES}` — boolean
+- `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot iteration cap (`0` = loop until clean)
 
 Each pass uses the matching single-reviewer loop:
 
@@ -161,7 +170,7 @@ The merge gate consumes the **wrapper's `{OVERALL_STATUS}`** plus, for any copil
 
 ### Wrapper status
 
-- `clean` — every executed pass returned `clean` (copilot `too-large` counts as clean here, per the copilot loop's own rule). **Eligible to merge.**
+- `clean` — every executed pass returned `clean` (copilot `too-large` and `capped` both count as clean here, per the copilot loop's own rule; `capped` is the default `--review-iterations 1` outcome — one review ran and all its fixes were applied), **or** no external reviewer was requested (`--review-with` omitted → `REVIEW_AGENTS=[]`) and the Local Code Review gate plus build/tests passed (the no-review path set `OVERALL_STATUS=clean`). **Eligible to merge.**
 - `partial` — the wrapper stopped early because of an explicit stop-mode flag (`--review-stop-on-findings` or `--review-stop-on-clean`) and the executed passes all completed normally. **Eligible to merge** — the user opted into the short-circuit.
 - `inconclusive` — the executed list contained **at least one** pass whose status was inconclusive (`timeout`, `error`, `guardrail`, `skipped`), regardless of whether other passes returned `clean`. **Do NOT merge** — the user asked for multiple perspectives and at least one never produced a verdict.
 - `dirty` — a pass returned a hard-error status (`cli-error`, `broken-build`, `test-failed`, `rejected`) and the wrapper short-circuited. **Do NOT merge.**
@@ -172,15 +181,15 @@ For `dirty` or `inconclusive`:
 
 ### Copilot-specific checks (when copilot was in the executed list)
 
-- **CRITICAL**: Do NOT merge until Copilot has submitted a review. A missing review is NOT the same as a clean review.
-- Only merge after the latest Copilot review has been submitted AND that review generated **zero comments**. Check this by:
-  1. Confirming a new review node exists with `submittedAt` after your last push
-  2. Confirming the review body says "generated 0 comments" OR there are no new unresolved threads
+- **CRITICAL**: Do NOT merge until the copilot pass returned a verdict status. A missing review is NOT the same as a clean review.
+- Merge only on a copilot verdict status. Which verdict is required depends on `{REVIEW_ITERATIONS}`:
+  - **Default bounded mode (`--review-iterations` ≥ 1)**: the verdict is `capped` — the configured cap was reached after applying every fix the review surfaced. Merge **without** requiring a confirming zero-comment re-review (that is the whole point of the bounded default; `capped` is clean-equivalent per the wrapper-status block above).
+  - **Unlimited mode (`--review-iterations 0`)**: the verdict must be `clean` — the latest Copilot review was submitted AND generated **zero comments**. Check by: (1) confirming a new review node exists with `submittedAt` after your last push; (2) confirming the review body says "generated 0 comments" OR there are no new unresolved threads.
 - **Exception — too-large**: if the Copilot review body says the PR exceeds the maximum number of lines (20 000), treat it as a clean review and proceed to merge immediately. Do NOT re-request.
 - **Never merge if:**
   - No Copilot review was ever posted (review never arrived — ask user first)
   - "Awaiting requested review" is still shown (review in progress)
-  - The latest review had comments that you fixed but you didn't get a CLEAN re-review
+  - **In unlimited mode only (`--review-iterations 0`)**: the latest review had comments that you fixed but you didn't get a CLEAN re-review. (In the bounded default this is the expected `capped` outcome and IS eligible to merge.)
 
 ### Local-agent-specific checks (when codex/gemini/claude was in the executed list)
 

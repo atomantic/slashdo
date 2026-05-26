@@ -1,6 +1,6 @@
 ---
 description: Deep code review of changed files against software engineering best practices
-argument-hint: "[--strict|--nuclear] [--draft] [--review-with <agent>[,<agent>...]] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [PR-URL | base-branch]"
+argument-hint: "[--strict|--nuclear] [--draft] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [PR-URL | base-branch]"
 ---
 
 ## Parse Arguments
@@ -11,6 +11,7 @@ Parse `$ARGUMENTS` for:
 - **`--review-with <agent[,agent,...]>`** (optional): after the host CLI's self-review completes (the multi-agent flow defined below), delegate **additional** review passes to the named external CLIs in order. Accepted slugs per slot: `copilot`, `codex`, `gemini`, `claude`. Split on `,`, trim whitespace, dedupe preserving first-occurrence order. Abort with `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.` on any unknown slug. If omitted, `REVIEW_AGENTS=[]` and no delegated passes run — behavior matches the historical `/do:review` (self-review only). **The host CLI is not implied in this list** — whichever CLI is hosting `/do:review` (claude, codex, or gemini) runs the self-review first regardless. The list names *additional* reviewers; an explicit `claude` entry while running under claude means "start a fresh claude headless session for a second-pass perspective," which is allowed.
 - **`--review-stop-on-findings` / `--review-stop-on-clean`** (mutually exclusive, optional): stop-mode for the delegated passes. Default `REVIEW_STOP_MODE=all` (run every listed agent). `on-findings` stops after the first delegated reviewer that surfaces a non-empty change set; `on-clean` stops after the first delegated reviewer that reports zero findings. Abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined` if both appear.
 - **`--reviewer-applies`** (optional, boolean): forwarded to each delegated local-agent pass to route fixes through the reviewing CLI instead of the orchestrator. See `lib/local-agent-review-loop.md` "Editing mode" for the trade-offs. No effect on the copilot path or on the host's self-review.
+- **`--review-iterations <n>`** (optional): caps how many review-and-fix cycles a delegated **copilot** pass runs. Record as `REVIEW_ITERATIONS`; default `1` (one Copilot review-and-fix pass, exiting early on 0 comments). Must be a non-negative integer — abort with `--review-iterations must be a non-negative integer (got: {value}).` otherwise. `0` means "loop until Copilot returns 0 comments" (legacy behavior, bounded by the copilot loop's 10-iteration safety guardrail). No effect on local-agent passes (fixed 3-iteration cap) or on the host's self-review.
 - **GitHub PR reference** — any non-flag token that looks like a PR reference. A token matches if **any** of the following holds (the rules are OR-ed; the `github` substring is sufficient but not required):
   - Full URL: `https://github.com/{owner}/{repo}/pull/{number}` (and any subpath like `/files`, `/commits`)
   - SSH-style URL with `github.com` host
@@ -355,6 +356,7 @@ Inputs to the wrapper:
 - `{REVIEW_AGENTS}` — the parsed list (e.g. `[claude, gemini, copilot]`)
 - `{REVIEW_STOP_MODE}` — `all` (default) | `on-findings` | `on-clean`
 - `{REVIEWER_APPLIES}` — boolean, forwarded to each local-agent pass
+- `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot iteration cap (`0` = loop until clean)
 
 Per-agent dispatch inside the wrapper:
 

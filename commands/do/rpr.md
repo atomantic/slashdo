@@ -1,28 +1,42 @@
 ---
 description: Resolve PR review feedback with parallel agents
-argument-hint: "[--interactive]"
+argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--reviewer-applies]"
 ---
 
-**Default mode: fully autonomous.** Fetches review feedback, fixes issues, pushes, resolves threads, and loops Copilot reviews without prompting. Auto-skips on timeout/errors after retries.
+**Default mode: fully autonomous.** Fetches review feedback, fixes issues, pushes, resolves threads, and loops reviews without prompting. Auto-skips on timeout/errors after retries.
 
-**`--interactive` mode:** Pauses on Copilot review timeout and repeated errors to ask the user how to proceed.
+**`--interactive` mode:** Pauses on review timeout and repeated errors to ask the user how to proceed.
 
 # Resolve PR Review Feedback
 
-Address the latest code review feedback on the current branch's pull request using parallel sub-agents.
+Address the latest code review feedback on the current branch's pull request using parallel sub-agents. **Thread resolution is reviewer-agnostic** — rpr resolves every unresolved review thread it has addressed, no matter who authored it (Copilot, a human reviewer, or another bot). What `--review-with` controls is which reviewer rpr *requests* (and re-requests in the loop), not which threads it will resolve.
+
+## Parse Arguments
+
+Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
+- Accepted slugs: `copilot`, `codex`, `gemini`, `claude` (comma-separated, ordered list; split on `,`, trim whitespace, dedupe preserving first-occurrence order). Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
+- Record as `REVIEW_AGENTS`. **rpr's default is `copilot`** (its established identity is driving a Copilot review to clean) — but the default is *conditional*: see step 2 and step 8. If `--review-with` is omitted, set `REVIEW_AGENTS=[copilot]`.
+- If `REVIEW_AGENTS` names a **local CLI** (`codex`/`gemini`/`claude`, in any combination, with or without `copilot`), rpr requests each non-copilot reviewer via the **local-agent review loop** (`lib/local-agent-review-loop.md`) against the PR branch instead of requesting a Copilot cloud review for that slug. `copilot` entries still go through the Copilot request/poll path below.
+
+Parse `$ARGUMENTS` for `--reviewer-applies` (boolean): record `REVIEWER_APPLIES=true`/`false` (default `false`). Forwarded to any local-agent review loop; no effect on the Copilot path (a warning is printed if combined with a copilot-only list).
 
 ## Steps
 
 1. **Get the current PR and determine repo ownership**: Use `gh pr view --json number,url,reviewDecision,reviews,headRefName,baseRefName` to find the PR for this branch. Parse owner/name from `gh repo view --json owner,name`. Also check the PR's base repository owner — if the PR targets an upstream repo you don't own (i.e., a fork-to-upstream PR), note this as `is_fork_pr=true`. You can detect this by comparing the PR URL's owner against your authenticated user (`gh api user --jq .login`).
 
-2. **Check for existing code review** (only if `is_fork_pr=false`): Before requesting a new review, check if there's already a completed Copilot review or a pending Copilot review in progress. Query the PR's review requests and recent reviews:
+2. **Check for existing code review and decide which reviewer (if any) to request** (only if `is_fork_pr=false`): Query the PR's review requests and recent reviews:
    ```bash
    gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviewRequests(first: 10) { nodes { requestedReviewer { ... on Bot { login } } } } reviews(last: 50) { nodes { state body author { login } submittedAt } } } } }'
    ```
-   - **If at least one completed Copilot review exists** (a review in `reviews.nodes` authored by `copilot-pull-request-reviewer`): Skip requesting a new review — proceed directly to step 3 to fetch and address the existing feedback threads.
-   - **If a Copilot review is currently pending** (Copilot appears in `reviewRequests.nodes[].requestedReviewer` as `copilot-pull-request-reviewer`): Treat the review as in progress. Poll for completion using the "Poll for review completion" section below, and consider it complete once a new Copilot review appears in `reviews.nodes` with a `submittedAt` timestamp later than the latest Copilot review timestamp you observed before starting to poll. Then proceed to step 3.
-   - **If no Copilot review exists and no Copilot review is currently requested**: Request a new Copilot review per the "Requesting GitHub Copilot Code Review" section below, poll until complete, then proceed.
-   - **Skip this step entirely for fork-to-upstream PRs** — you don't have permission to request reviewers on repos you don't own.
+   Note whether **any** completed review exists (from a copilot bot, a human, or another bot) — call this `HAS_EXISTING_REVIEW` — and specifically whether a **completed** `copilot-pull-request-reviewer` review exists (a node in `reviews.nodes`, NOT merely a pending review request) — call this `HAS_COPILOT_REVIEW`. Track a Copilot review that is only **pending** (Copilot present in `reviewRequests.nodes[].requestedReviewer` with no completed Copilot review yet) separately as `COPILOT_REVIEW_PENDING` — a pending-only review must NOT set `HAS_COPILOT_REVIEW`, or the "completed review exists" branch below would fire and resolve threads before Copilot has posted anything. Then dispatch on `REVIEW_AGENTS`:
+
+   - **If `REVIEW_AGENTS` contains a local CLI (`codex`/`gemini`/`claude`):** run the **local-agent review loop** (`lib/local-agent-review-loop.md`, referenced below) for each such agent against the PR branch, forwarding `REVIEWER_APPLIES`. This produces findings (and, in reviewer-applies mode, fixes) locally — it does **not** request a Copilot cloud review for those slugs. Then proceed to step 3 to fetch and resolve any pre-existing unresolved threads as well. (If `REVIEW_AGENTS` also contains `copilot`, additionally run the Copilot path below.)
+   - **If `REVIEW_AGENTS` contains `copilot` (including the default):**
+     - **A completed Copilot review exists** (`HAS_COPILOT_REVIEW`): skip requesting a new one — proceed to step 3 to address its threads.
+     - **A Copilot review is currently pending** (`COPILOT_REVIEW_PENDING` — Copilot in `reviewRequests.nodes[].requestedReviewer`, with no completed Copilot review yet): treat it as in progress. Poll per "Poll for review completion" and consider it complete once a new Copilot review appears in `reviews.nodes` with a `submittedAt` later than the latest Copilot review timestamp observed before polling. Then proceed to step 3.
+     - **No Copilot review exists, but a non-Copilot review does** (`HAS_EXISTING_REVIEW && !HAS_COPILOT_REVIEW` — e.g. a human reviewed the PR): **do NOT request a Copilot review.** Proceed directly to step 3 and resolve the existing (non-Copilot) threads. rpr only summons Copilot when Copilot is already the reviewer in play, or when the PR has no review at all (next bullet).
+     - **No review of any kind exists** (`!HAS_EXISTING_REVIEW`): request a new Copilot review per "Requesting GitHub Copilot Code Review" below (rpr's default-Copilot identity for an un-reviewed PR), poll until complete, then proceed.
+   - **Skip this step entirely for fork-to-upstream PRs** — you don't have permission to request reviewers on repos you don't own. Still proceed to step 3 to resolve any threads already on the PR.
 
    **While waiting for review**: The persistent monitor (see "Poll for review completion" below) emits CI bucket transitions as events, so you'll be notified of failures without a separate poll. Fix any CI failures before the review completes (see "CI failure handling").
 
@@ -64,16 +78,20 @@ Address the latest code review feedback on the current branch's pull request usi
    echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"THREAD_ID_HERE\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
    ```
 
-8. **Decide whether to loop** (only if `is_fork_pr=false`): After pushing fixes, evaluate whether another Copilot review is worth running before requesting one. **Skip for fork-to-upstream PRs.**
+8. **Decide whether to loop** (only if `is_fork_pr=false`): After pushing fixes, evaluate whether another review round is worth running. **Skip for fork-to-upstream PRs.**
 
-   **Worthiness evaluation**: Classify all threads addressed in the last round and decide:
+   **Re-request gate (which reviewer, if any):**
+   - **Only re-request a Copilot review if Copilot is the reviewer actually in play** — i.e. `REVIEW_AGENTS` contains `copilot` **and** the threads you just resolved came from a Copilot review (`HAS_COPILOT_REVIEW`). If the round resolved only non-Copilot threads (e.g. a human review), do NOT request a Copilot review — resolve and proceed to step 9. (rpr summons Copilot only when Copilot is already reviewing.)
+   - If `REVIEW_AGENTS` names a **local CLI** (`codex`/`gemini`/`claude`), "another round" means re-running that agent's local-agent review loop — not a Copilot request. The local-agent loop manages its own fixed iteration cap, so typically one pass suffices; loop again only if you made substantive fixes that warrant a fresh local pass.
+
+   **Worthiness evaluation** (applies to whichever reviewer is in play): Classify all threads/findings addressed in the last round and decide:
    - **Stop and merge** if ALL of the following are true:
      - Every finding was a trivial nitpick — style preferences, naming suggestions, "consider..." language, minor formatting, or repeats of already-dismissed feedback
      - No finding touched correctness, security, logic, data integrity, or API contracts
      - You made fewer than 3 actual code changes in the last round
    - **Request another review** if any finding was substantive — logic bugs, security issues, missing guards, contract violations, or meaningful refactors
 
-   If stopping: print "All remaining findings are nitpicks — skipping further review loop" and proceed to step 9. If looping: request a fresh Copilot review per the "Requesting GitHub Copilot Code Review" section, then wait on the *existing* persistent monitor (do not start a second one) for the `copilot review:` event, then repeat from step 3.
+   If stopping: print "All remaining findings are nitpicks — skipping further review loop" and proceed to step 9. If looping with Copilot: request a fresh Copilot review per the "Requesting GitHub Copilot Code Review" section, then wait on the *existing* persistent monitor (do not start a second one) for the `copilot review:` event, then repeat from step 3. If looping with a local CLI: re-run its local-agent review loop, then repeat from step 3.
 
    **While waiting for review**: The monitor's CI events surface failures as they happen — see "CI failure handling".
 
@@ -90,6 +108,12 @@ Address the latest code review feedback on the current branch's pull request usi
 !`cat ~/.claude/lib/post-review-doc-recommendations.md`
 
 !`cat ~/.claude/lib/graphql-escaping.md`
+
+## Local-Agent Review Loop (for `--review-with codex|gemini|claude`)
+
+When `REVIEW_AGENTS` names a local CLI, step 2 (and the step-8 re-request) runs that agent's review against the PR branch via the shared local-agent loop instead of requesting a Copilot cloud review. Pass `{REVIEW_AGENT}`, `{REVIEWER_APPLIES}`, the PR branch (`headRefName`), the base branch (`baseRefName`), and the project `{BUILD_CMD}`. The loop verifies build + tests in the main thread before pushing; afterward, continue to step 3 to resolve any pre-existing threads.
+
+!`cat ~/.claude/lib/local-agent-review-loop.md`
 
 ## Requesting GitHub Copilot Code Review
 

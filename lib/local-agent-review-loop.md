@@ -1,18 +1,20 @@
 ## Local Agent Code Review Loop
 
-Run a local CLI agent in headless mode to review the PR branch, then either let that CLI apply fixes itself (`--reviewer-applies`) or read its findings back into the orchestrating thread which applies the fixes (default). Either way, verify in the main thread before pushing. This is an alternative to the Copilot cloud review loop — selected via `--review-with codex|gemini|claude`.
+Run a local agent to review the PR branch, then either let that agent apply fixes itself (`--reviewer-applies`) or read its findings back into the orchestrating thread which applies the fixes (default). Either way, verify in the main thread before pushing. This is an alternative to the Copilot cloud review loop — selected via `--review-with codex|gemini|claude`.
+
+The reviewer is a headless CLI subprocess (`codex` / `gemini`, and `claude` on non-Claude-Code hosts).<!-- if:teams --> The one exception is the `claude` reviewer under Claude Code: it runs as an **in-process sub-agent** (via the `Agent` tool), not a `claude -p` subprocess. A headless `claude -p` invocation bills against the Anthropic API even when the host session is already on a plan; an in-process sub-agent runs under the host session's plan instead, so it incurs no extra API billing. See the invocation table and Step 2.<!-- /if:teams -->
 
 When to use this instead of Copilot:
 - The repo isn't connected to GitHub Copilot review (or you don't want to pay for it)
-- You want a different reviewer's perspective (Codex, Gemini, or a separate Claude session)
+- You want a different reviewer's perspective (Codex, Gemini, or a separate Claude reviewer — an in-process sub-agent under Claude Code, or a headless `claude -p` session on other hosts)
 - You want the review to happen entirely locally, before pushing
 
 ### Pre-flight
 
 1. Confirm `{REVIEW_AGENT}` is one of `claude`, `codex`, `gemini`. Otherwise abort with a usage error.
 2. Confirm the CLI binary is installed: `command -v {REVIEW_AGENT}`. If missing:
-   - **Default mode**: print a warning, **set `REVIEW_AGENT=copilot`**, and fall back to the Copilot loop. The reassignment is mandatory — `do:release`'s merge gate dispatches on `REVIEW_AGENT` and only accepts local-agent `STATUS=clean`, so leaving `REVIEW_AGENT` set to the original (missing) agent would block a clean Copilot review from merging. If Copilot is also unavailable (no `gh` auth or no Copilot reviewer configured), stop and report.
-   - **Interactive mode (`--interactive`)**: ask the user whether to install, fall back, or abort. If the user chooses fall back, reassign `REVIEW_AGENT=copilot` as above.
+   - **Default mode**: print a warning (`{REVIEW_AGENT} CLI not installed — recording as skipped`), set `STATUS=skipped` (preconditions not met — binary missing), and return to the caller **without falling back to Copilot**. A missing reviewer must never be silently replaced by `copilot` — the executed reviewer set must only ever contain reviewers the user explicitly requested. The caller's aggregate treats a `skipped` pass as `inconclusive` (not eligible to merge). In the multi-reviewer-loop wrapper path this case is normally pre-empted: the wrapper probes binaries in its own pre-flight and records the skip before dispatching here (see `multi-reviewer-loop.md` Pre-flight, "Probe binary availability"). This branch is the safety net for callers that dispatch this loop directly, e.g. `/do:rpr`.
+   - **Interactive mode (`--interactive`)**: ask the user whether to install or skip. If install succeeds, proceed normally; if skip, record `STATUS=skipped` per the default-mode rule. Do not offer a Copilot fallback — substituting a reviewer the user didn't request is exactly what the no-default-reviewer policy forbids.
 3. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
 4. Record `{REVIEWER_APPLIES}` — boolean, defaults to `false`. Set to `true` when the orchestrating command was invoked with `--reviewer-applies`. This flag selects which side of the loop holds the editor: when `false` (default), the orchestrator applies fixes from the CLI's findings log; when `true`, the headless CLI applies fixes directly in the working tree and the orchestrator only verifies.
 
@@ -29,11 +31,11 @@ Review-only is the default because it keeps the edit author and the verifier in 
 
 ### Headless invocation per agent
 
-The orchestrating agent runs the chosen CLI directly via Bash (no sub-agent delegation — the main thread does the verification, per design). Output is captured to a log file so it can be summarized without flooding context.
+The orchestrating agent runs the chosen CLI directly via Bash and captures output to a log file so it can be summarized without flooding context.<!-- if:teams --> The sole exception is the `claude` reviewer under Claude Code: shelling out to `claude -p` would bill against the API even though the host session already runs on a plan, so the orchestrator instead dispatches an in-process **sub-agent** (via the `Agent` tool) to perform the review — see the invocation table and Step 2.<!-- /if:teams --> Either way, the **verification** step (Step 4) is always performed by the main thread and is never delegated to a sub-agent.
 
 For `claude` and `gemini`, this loop assumes slashdo is installed in the target CLI's environment (see `src/environments.js`), so the slashdo `do:review` command is available — `/do:review` for both (they use slash-command namespacing). For `codex`, we use codex's **built-in `codex review` subcommand** in review-only mode (codex ships a first-class review experience, more authentic than re-prompting through `codex exec`) and switch to `codex exec` only when `REVIEWER_APPLIES=true` (since `codex review` doesn't apply fixes — see notes below).
 
-All three CLIs are invoked in **reckless / non-interactive mode** — they run unattended and must not stop to ask for permission. The flags below disable each CLI's interactive approval gates.
+The CLI invocations run in **reckless / non-interactive mode** — they run unattended and must not stop to ask for permission. The flags below disable each CLI's interactive approval gates.<!-- if:teams --> (The Claude-Code sub-agent path needs no such flag: a spawned `Agent` inherits the host session's tool-approval settings and runs unattended within it.)<!-- /if:teams -->
 
 Before invoking any local agent, compute the shared inputs once. For the slash-command-based invocations (`claude` / `gemini`), the slash-command argument MUST be only the base-branch ref — `do:review` treats `$ARGUMENTS` as the base branch and runs `git diff $ARGUMENTS...HEAD`, so any prose appended to the argument (e.g., `main — commit each ...`) becomes a non-existent ref and the diff fails. Convey overrides as separate prompt text *after* the slash command, on a new line:
 
@@ -81,25 +83,29 @@ Pick the invocation based on `{REVIEW_AGENT}` and `{REVIEWER_APPLIES}`:
 
 | Agent | Review-only (`REVIEWER_APPLIES=false`, default) | Reviewer-applies (`REVIEWER_APPLIES=true`) |
 |-------|-------------------------------------------------|---------------------------------------------|
+<!-- if:teams -->
+| `claude` | Dispatch an in-process sub-agent via the `Agent` tool with `$LOCAL_PROMPT` (see Step 2) — **not** `claude -p`, so it stays on plan billing | Same sub-agent dispatch; the sub-agent applies and commits fixes directly in the shared working tree |
+<!-- else -->
 | `claude` | `claude -p "$LOCAL_PROMPT" --dangerously-skip-permissions` | `claude -p "$LOCAL_PROMPT" --dangerously-skip-permissions` |
+<!-- /if:teams -->
 | `codex` | `codex --sandbox danger-full-access review --base "$BASE_BRANCH" --title "$REVIEW_TITLE"` | `codex --sandbox danger-full-access -a never exec "$CODEX_APPLY_PROMPT"` |
 | `gemini` | `env GEMINI_SANDBOX=false gemini --yolo -p "$LOCAL_PROMPT"` | `env GEMINI_SANDBOX=false gemini --yolo -p "$LOCAL_PROMPT"` |
 
-For `claude` and `gemini`, the same command string is used in both modes — `$LOCAL_PROMPT` already encodes the mode via the suffix override that branches on `$REVIEWER_APPLIES` above. The CLI's behavior changes because do:review's body sees a different override. For `codex`, the invocation itself swaps because `codex review` (review-only) and `codex exec` (apply-fixes) are different subcommands with incompatible flag sets.
+For `claude` and `gemini`, the same `$LOCAL_PROMPT` drives both modes — it already encodes the mode via the suffix override that branches on `$REVIEWER_APPLIES` above. The reviewer's behavior changes because do:review's body sees a different override. For `codex`, the invocation itself swaps because `codex review` (review-only) and `codex exec` (apply-fixes) are different subcommands with incompatible flag sets.
 
 Notes on each invocation:
-- **claude / gemini** call slashdo's installed `do:review`. In `REVIEWER_APPLIES=true` mode, the suffix overrides two of do:review's defaults: switch the commit message to `address review (<agent>): <summary>` where `<agent>` is the reviewing CLI's slug — `claude` or `gemini` here (instead of `do:review`'s current default `address review (self): <summary>`) and skip the auto-push (the orchestrating agent will verify and push). The parenthesized agent name records which reviewer surfaced the finding, which is useful when scanning the log of a release that ran multiple reviewers. In `REVIEWER_APPLIES=false` mode, the suffix instead instructs do:review to skip its Fix/Convention/PR-Comment phases and emit findings to stdout in a structured format the orchestrator can parse — the orchestrator then commits the fixes using the same `address review (<agent>): <summary>` form to preserve attribution.
+- **claude / gemini** call slashdo's installed `do:review`.<!-- if:teams --> Under Claude Code the `claude` reviewer is a sub-agent that invokes the `do:review` skill in-process (the prompt content is identical to `$LOCAL_PROMPT`), rather than a `claude -p` subprocess.<!-- /if:teams --> In `REVIEWER_APPLIES=true` mode, the suffix overrides two of do:review's defaults: switch the commit message to `address review (<agent>): <summary>` where `<agent>` is the reviewing CLI's slug — `claude` or `gemini` here (instead of `do:review`'s current default `address review (self): <summary>`) and skip the auto-push (the orchestrating agent will verify and push). The parenthesized agent name records which reviewer surfaced the finding, which is useful when scanning the log of a release that ran multiple reviewers. In `REVIEWER_APPLIES=false` mode, the suffix instead instructs do:review to skip its Fix/Convention/PR-Comment phases and emit findings to stdout in a structured format the orchestrator can parse — the orchestrator then commits the fixes using the same `address review (<agent>): <summary>` form to preserve attribution.
 - **codex (review-only)** uses the built-in `codex review` subcommand with the **base-branch review target**, which reviews the full diff from `$BASE_BRANCH` to `HEAD`. The three review targets — `--uncommitted`, `--commit <SHA>`, and `--base <BRANCH>` — are mutually exclusive (per `codex review --help` and confirmed by `error: the argument '--commit <SHA>' cannot be used with: --base <BRANCH>`). The positional `[PROMPT]` is *also* mutually exclusive with `--base` (`error: the argument '--base <BRANCH>' cannot be used with: [PROMPT]`), so per-invocation overrides cannot be passed this way — the orchestrating agent applies the fixes itself per step 3. The top-level `--sandbox danger-full-access` flag (before the `review` subcommand) is required so codex can read the working tree and run git: under codex's default sandbox those operations are blocked and `codex review` produces no usable findings. Like `-a`, `--sandbox` is a top-level option and MUST precede `review`.
 - **codex (reviewer-applies)** uses `codex --sandbox danger-full-access -a never exec "$CODEX_APPLY_PROMPT"` because `codex review` is read-only on the current shipped version (produces findings without modifying the working tree). `codex exec` accepts a free-form prompt that asks codex to review *and* apply fixes, with the top-level `-a never` flag selecting the never-ask approval mode so it runs unattended. Both top-level flags MUST precede the `exec` subcommand — `codex exec -a never ...` exits 2 with `error: unexpected argument '-a' found`, because `-a` (like `--sandbox`) is a top-level Codex option that the `exec` subcommand parser does not recognize. The top-level `--sandbox danger-full-access` flag is needed here so codex can write the fixes, run the build/tests, and reach the network unattended.
 
 Flag rationale (reckless / unattended mode):
-- `claude --dangerously-skip-permissions` — auto-approves all tool calls in the headless session
+- `claude --dangerously-skip-permissions` — auto-approves all tool calls in the headless session.<!-- if:teams --> Used **only** when this loop runs outside Claude Code; under Claude Code the `claude` reviewer is an in-process sub-agent (no `claude -p`, no API billing) and this flag does not apply — see Step 2.<!-- /if:teams -->
 - `codex review` — already non-interactive by design (per `codex review --help`: "Run a code review non-interactively"). Do NOT pass `-a` / `--approval`; the `codex review` subcommand does not accept it and will reject the flag. Also do NOT combine `--commit <SHA>` with `--base <BRANCH>` or with a positional `[PROMPT]` — codex enforces mutual exclusion across review targets and prompt mode, and the loop would exit with code 2 before any review work runs.
 - `codex --sandbox danger-full-access -a never exec` — `-a never` is a top-level Codex flag (never ask for approval; auto-approves all proposed actions). It MUST precede the `exec` subcommand; the `exec` subcommand's own parser does not accept `-a` and `codex exec -a never ...` exits 2 (`error: unexpected argument '-a' found`). Used in the reviewer-applies path alongside the top-level `--sandbox danger-full-access` flag (see below); `codex review` rejects `-a` entirely.
 - `codex --sandbox danger-full-access` — top-level sandbox-policy flag, used on BOTH codex invocations (it precedes the `review` / `exec` subcommand). Codex's default sandbox (`workspace-write`) blocks network and restricts command execution, so without this flag `codex review` can't reliably read the tree / run git and the apply path can't run build, tests, or network ops. PortOS-style hosts run on a trusted single-user machine, so full access is the intended posture (mirrors `claude --dangerously-skip-permissions` / `gemini --yolo`). `--sandbox` and `-a` are independent top-level flags and may be combined (`codex --sandbox danger-full-access -a never exec …`).
 - `gemini --yolo` — auto-approves all tool calls. `env GEMINI_SANDBOX=false` disables the sandboxed-shell layer so commands run directly in the working directory (needed because the agent edits files and runs the project build/test commands). The `env` prefix is required because the timeout wrapper at step 2 of the loop runs `timeout 1800 {INVOCATION}`, and shell `VAR=value cmd` assignments only work before the first command word — without `env`, the assignment would be treated as the program name and exec would fail.
 
-Because these flags grant the headless CLI full unattended write access to the working tree, the verify step in this loop (build + tests + diff inspection by the main thread) is mandatory and non-skippable — it is the only line of defense between the headless agent's output and the remote branch. This applies in *both* editing modes: in review-only mode the orchestrator's own fixes are still verified before push, because the orchestrator may misread the CLI's findings or introduce its own regressions.
+Because these flags grant the headless CLI full unattended write access to the working tree — and the Claude-Code sub-agent likewise shares this working tree — the verify step in this loop (build + tests + diff inspection by the main thread) is mandatory and non-skippable — it is the only line of defense between the reviewing agent's output and the remote branch. This applies in *both* editing modes: in review-only mode the orchestrator's own fixes are still verified before push, because the orchestrator may misread the CLI's findings or introduce its own regressions.
 
 ### Loop
 
@@ -107,7 +113,17 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
 
 1. **Capture baseline**: `LOOP_START_SHA=$(git rev-parse HEAD)`
 
-2. **Invoke the chosen CLI** (foreground, but redirect output to a log so context stays clean):
+2. **Invoke the chosen reviewer** (capture output to a log so context stays clean):
+
+<!-- if:teams -->
+   **When `REVIEW_AGENT=claude`: dispatch an in-process sub-agent — do NOT run the Bash invocation below.** A headless `claude -p` session bills against the Anthropic API; an in-process sub-agent runs under this session's plan, so it incurs no extra API billing. Dispatch a general-purpose sub-agent via the `Agent` tool, then resume the loop:
+   - **Sub-agent prompt**: pass `$LOCAL_PROMPT` (computed above) as the prompt. It already invokes `/do:review $BASE_BRANCH` with the mode-specific suffix override, so the sub-agent behaves identically to the `claude -p` path — in `REVIEWER_APPLIES=true` mode it applies and commits fixes directly in the shared working tree (as `address review (claude): <summary>`); in review-only mode it returns the structured `FINDING <N>:` blocks (or `NO FINDINGS`) as its final message.
+   - **Capture the result into the log** so Step 3's parsing and the final report's `Log:` line work unchanged: `LOG_FILE="$(mktemp -t local-review-claude.XXXXXX.log)"`, write the sub-agent's returned message to `$LOG_FILE`, and set `EXIT_CODE=0` (use a non-zero `EXIT_CODE` only if the sub-agent reports it could not complete the review).
+   - Skip the Bash invocation below and proceed to Step 3.
+
+   **For `codex` and `gemini`** (and for `claude` only if this loop somehow runs outside Claude Code), use the Bash invocation:
+<!-- /if:teams -->
+
    ```bash
    LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
    $TIMEOUT_CMD {INVOCATION} > "$LOG_FILE" 2>&1
@@ -180,11 +196,11 @@ Print:
 
 Agent: {REVIEW_AGENT}
 Branch: {BRANCH_NAME}
-Status: {STATUS}    # clean / guardrail / cli-error / broken-build / test-failed / rejected
+Status: {STATUS}    # clean / guardrail / cli-error / broken-build / test-failed / rejected / skipped
 Iterations: {ITERATION}
 Commits added: {N}
 Files modified: {file list}
 Log: {LOG_FILE path}
 ```
 
-If `STATUS=clean` after the first iteration, the PR is ready for the merge gate (release flow) or hand-off back to the user (PR flow). For any other status, the calling command must decide whether to proceed, fall back to Copilot, or stop — never auto-merge on a non-clean local-agent status.
+If `STATUS=clean` after the first iteration, the PR is ready for the merge gate (release flow) or hand-off back to the user (PR flow). For any other status (including `skipped`), the calling command must decide whether to proceed, re-run the reviewer, or stop — never auto-merge on a non-clean local-agent status, and never silently substitute `copilot` for a reviewer the user requested.

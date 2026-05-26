@@ -14,9 +14,18 @@ You are a Copilot review loop agent.
 PR: {PR_NUMBER} in {OWNER}/{REPO}
 Branch: {BRANCH_NAME}
 Build command: {BUILD_CMD}
-Max iterations: unlimited (loop until Copilot returns 0 comments)
-Safety guardrail: after 10 iterations, report back and ask the user
-whether to continue or stop — never loop indefinitely without confirmation.
+Max iterations: {REVIEW_ITERATIONS} (default 1). Run at most this many
+  review-and-fix cycles. The loop still exits early the moment a review
+  returns 0 comments. The default of 1 means: request one review, fix
+  everything it surfaced, and stop — without spending another cycle to
+  re-confirm. A value of 0 means "loop until Copilot returns 0 comments"
+  (the legacy behavior), bounded by the safety guardrail below.
+Safety guardrail: this applies only in unlimited mode ({REVIEW_ITERATIONS}
+  is 0). After 10 iterations, report back and — in interactive mode — ask
+  the user whether to continue or stop; never loop indefinitely without
+  confirmation. When {REVIEW_ITERATIONS} is a positive number, that count
+  IS the cap: the loop stops there with status "capped" (see the status
+  list below — treated as clean-equivalent for merge purposes).
 
 TIMEOUT SCHEDULE:
 When running parallel PR reviews (do:better), use shorter waits to avoid
@@ -37,7 +46,10 @@ an early first check avoids burning a full minute on a review that's
 already sitting in the API. For parallel PR reviews (do:better), use
 the decreasing timeout schedule above with a 15-second poll interval.
 
-Run the following loop until Copilot returns zero new comments:
+Run the following loop for at most {REVIEW_ITERATIONS} review-and-fix
+cycles (default 1), exiting early the moment a review returns zero new
+comments. When {REVIEW_ITERATIONS} is 0, loop until zero new comments
+(bounded by the 10-iteration safety guardrail):
 
 1. CAPTURE the latest Copilot review submittedAt timestamp (so you can
    detect when a NEW review arrives):
@@ -93,13 +105,26 @@ Run the following loop until Copilot returns zero new comments:
      echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
    - After all threads resolved, push all commits to remote
    - Increment iteration counter
-   - If iteration counter reaches 10, stop the loop and report back with
-     status "guardrail". **Default mode**: auto-stop and mark as best-effort.
+   - If {REVIEW_ITERATIONS} > 0 and the iteration counter reaches
+     {REVIEW_ITERATIONS}: stop the loop and report back with status
+     "capped" — the configured review-iteration cap was reached after
+     applying every fix the review surfaced. This is the default path (1
+     iteration). Treated as clean-equivalent for merge purposes: you
+     applied all the fixes, you just didn't spend another cycle
+     re-confirming zero comments.
+   - If {REVIEW_ITERATIONS} is 0 (unlimited) and the iteration counter
+     reaches 10: stop the loop and report back with status "guardrail".
+     **Default mode**: auto-stop and mark as best-effort.
      **Interactive mode (`--interactive`)**: ask the user whether to continue or stop
    - Otherwise, go back to step 1
 
 When done, report back:
-- Final status: clean / timeout / error / guardrail / too-large (PR exceeded Copilot's 20 000-line limit — treated as clean)
+- Final status: clean / capped / timeout / error / guardrail / too-large
+  - `clean` — a review returned 0 comments (PR is confirmed clean)
+  - `capped` — reached the configured {REVIEW_ITERATIONS} cap after applying every fix (the default 1-iteration path); treated as clean-equivalent for merge purposes
+  - `guardrail` — only in unlimited mode ({REVIEW_ITERATIONS}=0): hit the 10-iteration safety cap with comments still outstanding
+  - `too-large` — PR exceeded Copilot's 20 000-line limit; treated as clean
+  - `timeout` / `error` — the review did not complete
 - Total iterations completed
 - List of commits made (if any)
 - Any unresolved threads remaining
