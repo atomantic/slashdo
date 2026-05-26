@@ -1,6 +1,6 @@
 ---
 description: Audit third-party dependencies and remove unnecessary ones by writing replacement code
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [--heavy] [specific packages to evaluate]"
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [--heavy] [--review-iterations <n>] [specific packages to evaluate]"
 ---
 
 # Depfree — Dependency Freedom Audit
@@ -18,6 +18,7 @@ Parse `$ARGUMENTS` for:
 - **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation
 - **`--no-merge`**: run through PR creation, skip merge
 - **`--heavy`**: aggressive mode — only keep foundational frameworks and language runtimes; replace everything else that is feasibly replaceable (see Heavy Mode below)
+- **`--review-iterations <n>`**: cap how many Copilot review-and-fix cycles the review loop runs (Phase 5c). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass, exiting early on 0 comments). `0` = loop until Copilot returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).`
 - **Specific packages**: limit audit scope to named packages (e.g., "chalk dotenv")
 
 Set `HEAVY_MODE` to `true` if `--heavy` was passed, `false` otherwise.
@@ -656,11 +657,11 @@ If `VCS_HOST` is `github`, run the Copilot review loop using the shared template
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
-Pass: `{PR_NUMBER}`, `{OWNER}/{REPO}`, `depfree/{DATE}`, and `{BUILD_CMD}`.
+Pass: `{PR_NUMBER}`, `{OWNER}/{REPO}`, `depfree/{DATE}`, `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the iteration cap; default 1 — one review pass, returning `capped`, which counts as clean for the merge gate below). When `{REVIEW_ITERATIONS}` is 0, the loop runs until 0 comments (bounded by the 10-iteration guardrail).
 
 ### 5d: Merge
 
-**Default mode**: Auto-merge if review is clean.
+**Default mode**: Auto-merge if review is clean (`clean`, `capped`, or `too-large`).
 **Interactive mode**: Ask user for merge approval.
 
 ```bash

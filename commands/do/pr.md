@@ -1,6 +1,6 @@
 ---
 description: Commit, push, and open a PR against the repo's default branch
-argument-hint: "[--review-with <agent>[,<agent>...]] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies]"
+argument-hint: "[--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies]"
 ---
 
 ## Parse Arguments
@@ -22,6 +22,12 @@ Parse `$ARGUMENTS` for `--reviewer-applies` (boolean, no value):
 - Record as `REVIEWER_APPLIES=true` if present, otherwise `REVIEWER_APPLIES=false` (default).
 - This flag picks who applies fixes the reviewer surfaces: by default the orchestrating thread (this session) reads the reviewer's findings and applies fixes itself; with `--reviewer-applies` the reviewing CLI applies fixes in the working tree directly. See `lib/local-agent-review-loop.md` "Editing mode" for the rationale and trade-offs.
 - The flag is **not supported on the copilot path** because Copilot reviews are read-only by design (cloud-side comments, no working-tree access). If `REVIEW_AGENTS` contains `copilot` and `REVIEWER_APPLIES=true`, print a warning (`--reviewer-applies has no effect on the copilot pass; fixes there are always applied by the orchestrator's sub-agent`) and continue — the flag still takes effect on the non-copilot passes in the list.
+
+Parse `$ARGUMENTS` for `--review-iterations <n>` (affects the copilot pass only):
+- Record as `REVIEW_ITERATIONS`. If `--review-iterations` is omitted, default to `1` — a single Copilot review-and-fix pass (request one review, fix everything it surfaces, stop).
+- Must be a non-negative integer. Any positive `n` runs at most `n` review-and-fix cycles, still exiting early if a review returns 0 comments. `0` means "loop until Copilot returns 0 comments" (the legacy behavior, bounded by the copilot loop's 10-iteration safety guardrail).
+- If the value is missing or not a non-negative integer, abort with: `--review-iterations must be a non-negative integer (got: {value}).`
+- This flag has no effect on local-agent reviewers (`codex`/`gemini`/`claude`); they keep their own fixed 3-iteration cap.
 
 ## Detect Branches
 
@@ -81,6 +87,7 @@ Hand off to the **multi-reviewer loop** with the parsed inputs:
 - `{REVIEW_AGENTS}` — ordered list (default `[copilot]`)
 - `{REVIEW_STOP_MODE}` — `all` (default) | `on-findings` | `on-clean`
 - `{REVIEWER_APPLIES}` — boolean
+- `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot iteration cap (`0` = loop until clean)
 
 The wrapper runs each reviewer in order, deciding when to stop per the stop-mode. Each individual pass uses the matching single-reviewer loop:
 

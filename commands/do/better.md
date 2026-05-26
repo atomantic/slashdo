@@ -1,6 +1,6 @@
 ---
 description: Unified DevSecOps audit, remediation, test enhancement, per-category PRs, CI verification, and Copilot review loop with worktree isolation
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [--strict|--nuclear] [path filter or focus areas]"
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-iterations <n>] [--strict|--nuclear] [path filter or focus areas]"
 ---
 
 # Better — Unified DevSecOps Pipeline
@@ -15,6 +15,7 @@ Parse `$ARGUMENTS` for:
 - **`--interactive`**: pause at each decision point for user approval
 - **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation
 - **`--no-merge`**: run through PR creation (Phase 5), skip Copilot review and merge
+- **`--review-iterations <n>`**: cap how many Copilot review-and-fix cycles each PR's review loop runs (Phase 6). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass per PR, exiting early on 0 comments). `0` = loop until Copilot returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).`
 - **`--strict`** (alias: **`--nuclear`**): enable the Structural Ambition agent (9th audit agent) and promote its blocker-tier findings to CRITICAL severity for remediation. Flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications. Set `STRICT_MODE=true` when present
 - **Path filter**: limit scanning scope to specific directories or files
 - **Focus areas**: e.g., "security only", "DRY and bugs"
@@ -696,7 +697,7 @@ After creating all PRs, verify CI passes on each one:
 
 ## Phase 6: Copilot Review Loop (GitHub only)
 
-Loop until Copilot returns zero new comments (no fixed iteration limit). Sub-agents enforce a 10-iteration guardrail: at iteration 10 the sub-agent stops and returns a "guardrail" status. **Default mode**: auto-stop at the guardrail. **Interactive mode (`--interactive`)**: prompt the parent agent to ask the user whether to continue or stop.
+Run each PR's Copilot review loop for at most `{REVIEW_ITERATIONS}` review-and-fix cycles (default 1), exiting early the moment a review returns 0 comments. With the default of 1, each PR gets a single review pass plus its fixes and the sub-agent returns `capped` (treated as clean / ready-to-merge — every fix the review surfaced was applied). When `{REVIEW_ITERATIONS}` is 0 (unlimited), sub-agents loop until 0 comments and enforce a 10-iteration guardrail: at iteration 10 the sub-agent stops and returns a "guardrail" status. **Default mode**: auto-stop at the guardrail. **Interactive mode (`--interactive`)**: prompt the parent agent to ask the user whether to continue or stop.
 
 **Sub-agent delegation** (prevents context exhaustion): delegate each PR's review loop to a **separate general-purpose sub-agent** via the Agent tool. Launch sub-agents in parallel (one per PR). Each sub-agent runs the full loop (request → wait → check → fix → re-request) autonomously and returns only the final status.
 
@@ -706,17 +707,18 @@ For each PR, spawn a general-purpose sub-agent using the shared review loop temp
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
-Pass each sub-agent the PR-specific variables: `{PR_NUMBER}`, `{OWNER}/{REPO}`, `better/{CATEGORY_SLUG}`, and `{BUILD_CMD}`.
+Pass each sub-agent the PR-specific variables: `{PR_NUMBER}`, `{OWNER}/{REPO}`, `better/{CATEGORY_SLUG}`, `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the iteration cap; default 1).
 
 Launch all PR sub-agents in parallel. Wait for all to complete.
 
 ### 6.2: Handle sub-agent results
 
 For each sub-agent result:
-- **clean**: mark PR as ready to merge
+- **clean**: a review returned 0 comments — mark PR as ready to merge
+- **capped**: the configured `{REVIEW_ITERATIONS}` cap (default 1) was reached after applying every fix the review surfaced — treated as clean; mark PR as ready to merge
 - **timeout**: **Default mode**: skip the timed-out PR and continue. **Interactive mode**: inform the user and ask whether to continue waiting, re-request, or skip
 - **error**: **Default mode**: retry up to 3 times, then skip. **Interactive mode**: inform the user and ask whether to retry or skip
-- **guardrail**: the sub-agent hit the 10-iteration limit. **Default mode**: auto-stop and mark as best-effort. **Interactive mode**: ask the user whether to continue with more iterations or stop
+- **guardrail**: the sub-agent hit the 10-iteration limit (only reachable when `{REVIEW_ITERATIONS}` is 0). **Default mode**: auto-stop and mark as best-effort. **Interactive mode**: ask the user whether to continue with more iterations or stop
 
 ### 6.3: Merge Gate (MANDATORY)
 
