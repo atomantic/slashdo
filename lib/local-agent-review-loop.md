@@ -13,8 +13,8 @@ When to use this instead of Copilot:
 
 1. Confirm `{REVIEW_AGENT}` is one of `claude`, `codex`, `gemini`. Otherwise abort with a usage error.
 2. Confirm the CLI binary is installed: `command -v {REVIEW_AGENT}`. If missing:
-   - **Default mode**: print a warning, **set `REVIEW_AGENT=copilot`**, and fall back to the Copilot loop. The reassignment is mandatory — `do:release`'s merge gate dispatches on `REVIEW_AGENT` and only accepts local-agent `STATUS=clean`, so leaving `REVIEW_AGENT` set to the original (missing) agent would block a clean Copilot review from merging. If Copilot is also unavailable (no `gh` auth or no Copilot reviewer configured), stop and report.
-   - **Interactive mode (`--interactive`)**: ask the user whether to install, fall back, or abort. If the user chooses fall back, reassign `REVIEW_AGENT=copilot` as above.
+   - **Default mode**: print a warning (`{REVIEW_AGENT} CLI not installed — recording as skipped`), set `STATUS=skipped` (preconditions not met — binary missing), and return to the caller **without falling back to Copilot**. A missing reviewer must never be silently replaced by `copilot` — the executed reviewer set must only ever contain reviewers the user explicitly requested. The caller's aggregate treats a `skipped` pass as `inconclusive` (not eligible to merge). In the multi-reviewer-loop wrapper path this case is normally pre-empted: the wrapper probes binaries in its own pre-flight and records the skip before dispatching here (see `multi-reviewer-loop.md` Pre-flight, "Probe binary availability"). This branch is the safety net for callers that dispatch this loop directly, e.g. `/do:rpr`.
+   - **Interactive mode (`--interactive`)**: ask the user whether to install or skip. If install succeeds, proceed normally; if skip, record `STATUS=skipped` per the default-mode rule. Do not offer a Copilot fallback — substituting a reviewer the user didn't request is exactly what the no-default-reviewer policy forbids.
 3. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
 4. Record `{REVIEWER_APPLIES}` — boolean, defaults to `false`. Set to `true` when the orchestrating command was invoked with `--reviewer-applies`. This flag selects which side of the loop holds the editor: when `false` (default), the orchestrator applies fixes from the CLI's findings log; when `true`, the headless CLI applies fixes directly in the working tree and the orchestrator only verifies.
 
@@ -196,11 +196,11 @@ Print:
 
 Agent: {REVIEW_AGENT}
 Branch: {BRANCH_NAME}
-Status: {STATUS}    # clean / guardrail / cli-error / broken-build / test-failed / rejected
+Status: {STATUS}    # clean / guardrail / cli-error / broken-build / test-failed / rejected / skipped
 Iterations: {ITERATION}
 Commits added: {N}
 Files modified: {file list}
 Log: {LOG_FILE path}
 ```
 
-If `STATUS=clean` after the first iteration, the PR is ready for the merge gate (release flow) or hand-off back to the user (PR flow). For any other status, the calling command must decide whether to proceed, fall back to Copilot, or stop — never auto-merge on a non-clean local-agent status.
+If `STATUS=clean` after the first iteration, the PR is ready for the merge gate (release flow) or hand-off back to the user (PR flow). For any other status (including `skipped`), the calling command must decide whether to proceed, re-run the reviewer, or stop — never auto-merge on a non-clean local-agent status, and never silently substitute `copilot` for a reviewer the user requested.
