@@ -74,14 +74,14 @@ describe('rewriteLibPaths', () => {
 
   it('is a no-op when no lib paths present', () => {
     const body = 'No lib references here';
-    const result = rewriteLibPaths(body, '~/.gemini/lib/');
+    const result = rewriteLibPaths(body, '~/.config/opencode/lib/');
     assert.equal(result, body);
   });
 
   it('replaces multiple occurrences', () => {
     const body = '~/.claude/lib/a.md and ~/.claude/lib/b.md';
-    const result = rewriteLibPaths(body, '~/.gemini/lib/');
-    assert.equal(result, '~/.gemini/lib/a.md and ~/.gemini/lib/b.md');
+    const result = rewriteLibPaths(body, '~/.config/opencode/lib/');
+    assert.equal(result, '~/.config/opencode/lib/a.md and ~/.config/opencode/lib/b.md');
   });
 });
 
@@ -205,10 +205,11 @@ describe('transformCommand', () => {
     libPathPrefix: '~/.claude/lib/',
     supportsTeams: true,
   };
-  const geminiEnv = {
-    format: 'toml',
+  // OpenCode-style: YAML frontmatter with runtime !cat lib inclusion.
+  const catInclusionEnv = {
+    format: 'yaml-frontmatter',
     supportsCatInclusion: true,
-    libPathPrefix: '~/.gemini/lib/',
+    libPathPrefix: '~/.config/opencode/lib/',
     supportsTeams: false,
   };
   const codexEnv = {
@@ -224,15 +225,6 @@ describe('transformCommand', () => {
     assert.ok(result.startsWith('---\n'));
     assert.ok(result.includes('description: "Test cmd"'));
     assert.ok(result.includes('Body text'));
-  });
-
-  it('produces toml format for gemini (skips allowed-tools)', () => {
-    const content = '---\ndescription: Test cmd\nallowed-tools: bash\n---\nBody';
-    const result = transformCommand(content, geminiEnv);
-    assert.ok(result.startsWith('+++\n'));
-    assert.ok(result.includes('description = "Test cmd"'));
-    assert.ok(!result.includes('allowed-tools'));
-    assert.ok(result.includes('+++'));
   });
 
   it('produces yaml-frontmatter format for codex', () => {
@@ -252,8 +244,8 @@ describe('transformCommand', () => {
 
   it('rewrites lib paths for environments with supportsCatInclusion', () => {
     const content = '---\ndescription: Test\n---\n!`cat ~/.claude/lib/foo.md`';
-    const result = transformCommand(content, geminiEnv);
-    assert.ok(result.includes('~/.gemini/lib/foo.md'));
+    const result = transformCommand(content, catInclusionEnv);
+    assert.ok(result.includes('~/.config/opencode/lib/foo.md'));
     assert.ok(!result.includes('~/.claude/lib/'));
   });
 
@@ -289,9 +281,9 @@ describe('transformCommand', () => {
 
 describe('transformLib', () => {
   it('rewrites paths when env supports cat inclusion', () => {
-    const env = { supportsCatInclusion: true, libPathPrefix: '~/.gemini/lib/' };
+    const env = { supportsCatInclusion: true, libPathPrefix: '~/.config/opencode/lib/' };
     const result = transformLib('See ~/.claude/lib/foo.md', env);
-    assert.equal(result, 'See ~/.gemini/lib/foo.md');
+    assert.equal(result, 'See ~/.config/opencode/lib/foo.md');
   });
 
   it('returns content unchanged when env does not support cat inclusion', () => {

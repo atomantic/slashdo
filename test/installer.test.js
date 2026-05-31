@@ -219,7 +219,7 @@ describe('install with env formats', () => {
     cleanup(tmpDir);
   });
 
-  it('installs with directory namespacing (codex style)', () => {
+  it('installs with directory namespacing + inlined libs (Antigravity / Codex Agent Skills)', () => {
     const { tmpDir, env } = makeTmpEnv({
       namespacing: 'directory',
       format: 'yaml-frontmatter',
@@ -238,23 +238,6 @@ describe('install with env formats', () => {
     assert.ok(dirs.some(d => d.startsWith('do-')), 'Should create namespace dirs');
     const firstDir = dirs.find(d => d.startsWith('do-'));
     assert.ok(fs.existsSync(path.join(env.commandsDir, firstDir, 'SKILL.md')));
-
-    cleanup(tmpDir);
-  });
-
-  it('installs with toml format (gemini style)', () => {
-    const { tmpDir, env } = makeTmpEnv({
-      format: 'toml',
-      libPathPrefix: '~/.gemini/lib/',
-      supportsHooks: false,
-      hooksDir: null,
-    });
-
-    install({ env, packageDir: PACKAGE_DIR, dryRun: false });
-
-    const pushPath = path.join(env.commandsDir, 'do', 'push.md');
-    const content = fs.readFileSync(pushPath, 'utf8');
-    assert.ok(content.startsWith('+++'), 'Should use TOML format');
 
     cleanup(tmpDir);
   });

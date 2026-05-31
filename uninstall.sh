@@ -203,33 +203,33 @@ uninstall_opencode() {
   fi
 }
 
-uninstall_gemini() {
-  local target_cmd="$HOME/.gemini/commands/do"
-  local target_lib="$HOME/.gemini/lib"
+uninstall_antigravity() {
+  # Antigravity installs each command as an Agent Skill directory
+  # (~/.gemini/antigravity-cli/skills/do-<cmd>/SKILL.md), so removal is a
+  # directory delete — no content inlining needed, unlike install.
+  local target_skills="$HOME/.gemini/antigravity-cli/skills"
   local count=0
 
-  printf "  Uninstalling from ${GREEN}Gemini CLI${RESET}...\n"
+  printf "  Uninstalling from ${GREEN}Antigravity CLI${RESET}...\n"
 
   for cmd in "${COMMANDS[@]}" "${OLD_COMMANDS[@]}"; do
-    if [ -f "$target_cmd/$cmd.md" ]; then
-      rm -f "$target_cmd/$cmd.md"
-      printf "    removed: /do:%-18s${GREEN}ok${RESET}\n" "$cmd"
+    if [ -d "$target_skills/do-$cmd" ]; then
+      rm -rf "$target_skills/do-$cmd"
+      printf "    removed: /do-%-18s${GREEN}ok${RESET}\n" "$cmd"
       count=$((count + 1))
     fi
   done
 
-  for lib in "${LIBS[@]}"; do
-    if [ -f "$target_lib/$lib.md" ]; then
-      rm -f "$target_lib/$lib.md"
-      printf "    removed: lib/%-18s${GREEN}ok${RESET}\n" "$lib.md"
-      count=$((count + 1))
-    fi
-  done
+  if [ -f "$HOME/.gemini/antigravity-cli/.slashdo-version" ]; then
+    rm -f "$HOME/.gemini/antigravity-cli/.slashdo-version"
+    printf "    removed: .slashdo-version        ${GREEN}ok${RESET}\n"
+    count=$((count + 1))
+  fi
 
   if [ $count -eq 0 ]; then
     printf "    ${DIM}nothing to remove${RESET}\n"
   else
-    printf "    ${GREEN}$count files removed${RESET}\n"
+    printf "    ${GREEN}$count items removed${RESET}\n"
   fi
 }
 
@@ -237,7 +237,7 @@ detect_envs() {
   local envs=()
   [ -d "$HOME/.claude" ] && envs+=(claude)
   [ -d "$HOME/.config/opencode" ] && envs+=(opencode)
-  [ -d "$HOME/.gemini" ] && envs+=(gemini)
+  [ -d "$HOME/.gemini/antigravity-cli" ] && envs+=(antigravity)
   [ ${#envs[@]} -gt 0 ] && printf '%s\n' "${envs[@]}"
 }
 
@@ -254,9 +254,9 @@ printf "  Detected: ${GREEN}%s${RESET}\n\n" "${envs[*]}"
 
 for env in "${envs[@]}"; do
   case "$env" in
-    claude)   uninstall_claude ;;
-    opencode) uninstall_opencode ;;
-    gemini)   uninstall_gemini ;;
+    claude)      uninstall_claude ;;
+    opencode)    uninstall_opencode ;;
+    antigravity) uninstall_antigravity ;;
   esac
   printf "\n"
 done

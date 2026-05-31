@@ -78,7 +78,7 @@ detect_envs() {
   local envs=()
   [ -d "$HOME/.claude" ] && envs+=(claude)
   [ -d "$HOME/.config/opencode" ] && envs+=(opencode)
-  [ -d "$HOME/.gemini" ] && envs+=(gemini)
+  [ -d "$HOME/.gemini/antigravity-cli" ] && envs+=(antigravity)
   [ -d "$HOME/.codex" ] && envs+=(codex)
   [ ${#envs[@]} -gt 0 ] && printf '%s\n' "${envs[@]}"
 }
@@ -255,58 +255,13 @@ install_opencode() {
   done
 }
 
-install_gemini() {
-  local target_cmd="$HOME/.gemini/commands/do"
-  local target_lib="$HOME/.gemini/lib"
-  mkdir -p "$target_cmd" "$target_lib"
-
-  printf "  Installing to ${GREEN}Gemini CLI${RESET}...\n"
-
-  for cmd in "${COMMANDS[@]}"; do
-    printf "    /do:%-20s" "$cmd"
-    if fetch_file "commands/do/$cmd.md" "/tmp/slashdo-$cmd.md"; then
-      # Convert YAML frontmatter to TOML and rewrite lib paths
-      awk '
-        BEGIN { in_fm=0 }
-        NR==1 && /^---$/ { in_fm=1; print "+++"; next }
-        in_fm && /^---$/ { in_fm=0; print "+++"; next }
-        in_fm && /^description:/ { sub(/^description: */, ""); gsub(/"/, ""); printf "description = \"%s\"\n", $0; next }
-        in_fm && /^argument-hint:/ { sub(/^argument-hint: */, ""); gsub(/"/, ""); printf "argument-hint = \"%s\"\n", $0; next }
-        in_fm && /^allowed-tools:/ { next }
-        in_fm { print; next }
-        { gsub(/~\/.claude\/lib\//, "~/.gemini/lib/"); print }
-      ' "/tmp/slashdo-$cmd.md" > "$target_cmd/$cmd.md"
-      rm -f "/tmp/slashdo-$cmd.md"
-      printf "${GREEN}ok${RESET}\n"
-    else
-      printf "failed\n"
-    fi
-  done
-
-  for lib in "${LIBS[@]}"; do
-    printf "    lib/%-20s" "$lib.md"
-    if fetch_file "lib/$lib.md" "$target_lib/$lib.md"; then
-      printf "${GREEN}ok${RESET}\n"
-    else
-      printf "failed\n"
-    fi
-  done
-
-  for old in "${OLD_COMMANDS[@]}"; do
-    if [ -f "$target_cmd/$old.md" ]; then
-      rm -f "$target_cmd/$old.md"
-      printf "    migrated: /do:%-14s${GREEN}ok${RESET}\n" "$old"
-    fi
-  done
-}
-
 banner
 
 envs=($(detect_envs)) || true
 
 if [ ${#envs[@]} -eq 0 ]; then
   printf "  No supported AI coding environments detected.\n"
-  printf "  Supported: Claude Code, OpenCode, Gemini CLI, Codex\n\n"
+  printf "  Supported: Claude Code, OpenCode, Antigravity CLI, Codex\n\n"
   printf "  Create ~/.claude/ to enable Claude Code support, then re-run.\n"
   exit 1
 fi
@@ -320,10 +275,10 @@ printf "  Detected: ${GREEN}%s${RESET}\n\n" "${envs[*]}"
 
 for env in "${envs[@]}"; do
   case "$env" in
-    claude)   install_claude ;;
-    opencode) install_opencode ;;
-    gemini)   install_gemini ;;
-    codex)    printf "  ${DIM}Codex: use 'npx slash-do@latest --env codex' (requires Node.js for content inlining)${RESET}\n" ;;
+    claude)      install_claude ;;
+    opencode)    install_opencode ;;
+    antigravity) printf "  ${DIM}Antigravity CLI: use 'npx slash-do@latest --env antigravity' (Agent Skills require Node.js for content inlining)${RESET}\n" ;;
+    codex)       printf "  ${DIM}Codex: use 'npx slash-do@latest --env codex' (requires Node.js for content inlining)${RESET}\n" ;;
   esac
   printf "\n"
 done

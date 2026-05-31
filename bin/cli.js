@@ -3,7 +3,7 @@
 
 const path = require('path');
 const readline = require('readline');
-const { detectInstalled, getEnv, allEnvNames, ENVIRONMENTS } = require('../src/environments');
+const { detectInstalled, getEnv, allEnvNames, allEnvAliases, ENVIRONMENTS } = require('../src/environments');
 const { install, list } = require('../src/installer');
 
 const PACKAGE_DIR = path.resolve(__dirname, '..');
@@ -23,7 +23,7 @@ function usage() {
   console.log(`Usage:
   npx slash-do@latest                          Install/update all, auto-detect envs
   npx slash-do@latest --env claude             Install for Claude Code only
-  npx slash-do@latest --env opencode,gemini    Specific environments
+  npx slash-do@latest --env opencode,antigravity  Specific environments
   npx slash-do@latest --list                   Show commands and install status
   npx slash-do@latest --dry-run                Preview changes
   npx slash-do@latest --uninstall              Remove installed commands
@@ -31,16 +31,17 @@ function usage() {
 
 Options:
   --env <envs>    Comma-separated environments: ${allEnvNames().join(', ')}
+                  (aliases: ${allEnvAliases().join(', ')} → antigravity)
   --list          Show all commands and their install status
   --dry-run       Preview changes without applying them
   --uninstall     Remove all slashdo-installed commands
   --help          Show this help message
 
 Environments:
-  claude     Claude Code    (~/.claude/commands/)
-  opencode   OpenCode       (~/.config/opencode/commands/)
-  gemini     Gemini CLI     (~/.gemini/commands/)
-  codex      Codex          (~/.codex/skills/)
+  claude       Claude Code      (~/.claude/commands/)
+  opencode     OpenCode         (~/.config/opencode/commands/)
+  antigravity  Antigravity CLI  (~/.gemini/antigravity-cli/skills/)  [aliases: gemini, agy]
+  codex        Codex            (~/.codex/skills/)
 `);
 }
 

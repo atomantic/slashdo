@@ -71,16 +71,6 @@ function toYamlFrontmatter(fm) {
   return lines.join('\n');
 }
 
-function toTomlHeader(fm) {
-  const lines = ['+++'];
-  for (const [key, val] of Object.entries(fm)) {
-    if (key === 'allowed-tools') continue;
-    lines.push(`${key} = "${val}"`);
-  }
-  lines.push('+++');
-  return lines.join('\n');
-}
-
 function getTargetFilename(relPath, env) {
   const basename = path.basename(relPath, '.md');
   const dir = path.dirname(relPath);
@@ -119,17 +109,11 @@ function transformCommand(content, env, sourceLibDir) {
   // Run after inlining so conditionals inside inlined lib content are resolved too.
   transformedBody = applyConditionalBlocks(transformedBody, env);
 
-  let header;
-  switch (env.format) {
-    case 'yaml-frontmatter':
-      header = toYamlFrontmatter(frontmatter);
-      break;
-    case 'toml':
-      header = toTomlHeader(frontmatter);
-      break;
-    default:
-      header = toYamlFrontmatter(frontmatter);
-  }
+  // All current environments use YAML frontmatter (Claude / OpenCode commands,
+  // and the Agent Skills SKILL.md format used by Antigravity and Codex). The
+  // legacy Gemini CLI's TOML headers were dropped when Gemini became the
+  // Antigravity CLI (agy), which uses Agent Skills instead.
+  const header = toYamlFrontmatter(frontmatter);
 
   return header + '\n' + transformedBody;
 }
