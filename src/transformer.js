@@ -71,6 +71,16 @@ function toYamlFrontmatter(fm) {
   return lines.join('\n');
 }
 
+// The flat/directory skill name for a command: `do/better` -> `do-better`.
+// Matches the directory `getTargetFilename` creates for directory namespacing,
+// so it can double as the Agent Skills `name` field.
+function getSkillName(relPath) {
+  const basename = path.basename(relPath, '.md');
+  const dir = path.dirname(relPath);
+  const namespace = dir === '.' ? '' : dir;
+  return namespace ? `${namespace}-${basename}` : basename;
+}
+
 function getTargetFilename(relPath, env) {
   const basename = path.basename(relPath, '.md');
   const dir = path.dirname(relPath);
@@ -80,22 +90,18 @@ function getTargetFilename(relPath, env) {
     case 'subdirectory':
       return path.join(namespace, basename + (env.ext || '.md'));
 
-    case 'flat': {
-      const flat = namespace ? `${namespace}-${basename}` : basename;
-      return flat + (env.ext || '.md');
-    }
+    case 'flat':
+      return getSkillName(relPath) + (env.ext || '.md');
 
-    case 'directory': {
-      const dirName = namespace ? `${namespace}-${basename}` : basename;
-      return path.join(dirName, 'SKILL.md');
-    }
+    case 'directory':
+      return path.join(getSkillName(relPath), 'SKILL.md');
 
     default:
       return relPath;
   }
 }
 
-function transformCommand(content, env, sourceLibDir) {
+function transformCommand(content, env, sourceLibDir, relPath) {
   const { frontmatter, body } = parseFrontmatter(content);
 
   let transformedBody = body;
@@ -109,11 +115,21 @@ function transformCommand(content, env, sourceLibDir) {
   // Run after inlining so conditionals inside inlined lib content are resolved too.
   transformedBody = applyConditionalBlocks(transformedBody, env);
 
+  // The Agent Skills standard (directory namespacing — Antigravity/agy and
+  // Codex) requires a `name` field in SKILL.md frontmatter that matches the
+  // skill directory. Without it agy can't disambiguate skills and collapses
+  // them all into a single entry. Inject it first (Agent Skills convention puts
+  // `name` ahead of `description`) when the source command omits it.
+  let outFrontmatter = frontmatter;
+  if (env.namespacing === 'directory' && relPath && !frontmatter.name) {
+    outFrontmatter = { name: getSkillName(relPath), ...frontmatter };
+  }
+
   // All current environments use YAML frontmatter (Claude / OpenCode commands,
   // and the Agent Skills SKILL.md format used by Antigravity and Codex). The
   // legacy Gemini CLI's TOML headers were dropped when Gemini became the
   // Antigravity CLI (agy), which uses Agent Skills instead.
-  const header = toYamlFrontmatter(frontmatter);
+  const header = toYamlFrontmatter(outFrontmatter);
 
   return header + '\n' + transformedBody;
 }
@@ -131,6 +147,7 @@ module.exports = {
   rewriteLibPaths,
   inlineLibContent,
   applyConditionalBlocks,
+  getSkillName,
   getTargetFilename,
   transformCommand,
   transformLib,

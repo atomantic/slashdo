@@ -11,6 +11,7 @@ const {
   rewriteLibPaths,
   inlineLibContent,
   applyConditionalBlocks,
+  getSkillName,
   getTargetFilename,
   transformCommand,
   transformLib,
@@ -218,6 +219,15 @@ describe('transformCommand', () => {
     libPathPrefix: null,
     supportsTeams: false,
   };
+  // Agent Skills (Antigravity/agy, Codex) — directory namespacing requires a
+  // `name` field in SKILL.md frontmatter.
+  const skillEnv = {
+    format: 'yaml-frontmatter',
+    namespacing: 'directory',
+    supportsCatInclusion: false,
+    libPathPrefix: null,
+    supportsTeams: false,
+  };
 
   it('produces yaml-frontmatter format for claude', () => {
     const content = '---\ndescription: Test cmd\n---\nBody text';
@@ -274,6 +284,47 @@ describe('transformCommand', () => {
     assert.ok(result.includes('sub-agents'));
     assert.ok(!result.includes('TeamCreate'));
     assert.ok(!result.includes('if:teams'));
+  });
+
+  it('injects a name field matching the skill directory for directory namespacing', () => {
+    const content = '---\ndescription: Help cmd\n---\nBody';
+    const result = transformCommand(content, skillEnv, null, 'do/help');
+    // name must come first (Agent Skills convention) and match the skill dir.
+    assert.ok(result.startsWith('---\nname: "do-help"\n'));
+    assert.ok(result.includes('description: "Help cmd"'));
+  });
+
+  it('does not inject a name field without directory namespacing', () => {
+    const content = '---\ndescription: Help cmd\n---\nBody';
+    const result = transformCommand(content, codexEnv, null, 'do/help');
+    assert.ok(!result.includes('name:'));
+  });
+
+  it('does not inject a name field when relPath is absent', () => {
+    const content = '---\ndescription: Help cmd\n---\nBody';
+    const result = transformCommand(content, skillEnv);
+    assert.ok(!result.includes('name:'));
+  });
+
+  it('preserves an existing name field rather than overwriting it', () => {
+    const content = '---\nname: custom-name\ndescription: Help cmd\n---\nBody';
+    const result = transformCommand(content, skillEnv, null, 'do/help');
+    assert.ok(result.includes('name: "custom-name"'));
+    assert.ok(!result.includes('do-help'));
+  });
+});
+
+describe('getSkillName', () => {
+  it('joins namespace and basename with a hyphen', () => {
+    assert.equal(getSkillName('do/better'), 'do-better');
+  });
+
+  it('strips the .md extension', () => {
+    assert.equal(getSkillName('better-swift.md'), 'better-swift');
+  });
+
+  it('returns the basename for a top-level file', () => {
+    assert.equal(getSkillName('help'), 'help');
   });
 });
 
