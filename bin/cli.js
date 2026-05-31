@@ -149,7 +149,7 @@ async function main() {
   let selectedEnvs = args.envs;
 
   if (!selectedEnvs.length) {
-    const detected = detectInstalled();
+    const detected = detectInstalled({ includeLegacy: args.uninstall });
     if (!detected.length) {
       console.log('\nNo supported AI coding environments detected.');
       console.log('Supported environments:');
