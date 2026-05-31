@@ -104,7 +104,7 @@ function canonicalEnvName(name) {
   return ALIASES[name] || name;
 }
 
-function detectInstalled() {
+function detectInstalled({ includeLegacy = false } = {}) {
   const detected = [];
   for (const [key, env] of Object.entries(ENVIRONMENTS)) {
     const parentDir = path.dirname(env.commandsDir);
@@ -112,10 +112,13 @@ function detectInstalled() {
       detected.push(key);
     }
   }
-  // Also detect legacy environments so the npm uninstaller can clean them up.
-  for (const [key, env] of Object.entries(LEGACY_ENVIRONMENTS)) {
-    if (fs.existsSync(env.commandsDir)) {
-      detected.push(key);
+  // Legacy environments are only included when uninstalling so they don't
+  // surface as install targets (bin/cli.js looks them up via ENVIRONMENTS[k]).
+  if (includeLegacy) {
+    for (const [key, env] of Object.entries(LEGACY_ENVIRONMENTS)) {
+      if (fs.existsSync(env.commandsDir)) {
+        detected.push(key);
+      }
     }
   }
   return detected;
