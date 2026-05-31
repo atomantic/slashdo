@@ -283,4 +283,5 @@ for env in "${envs[@]}"; do
   printf "\n"
 done
 
-printf "  ${GREEN}Done!${RESET} Commands are available as /do:<name> in your AI coding assistant.\n\n"
+printf "  ${GREEN}Done!${RESET} Commands are available as /do:<name> in your AI coding assistant.\n"
+printf "  ${DIM}(Antigravity / Codex users: run the npx command above to complete installation.)${RESET}\n\n"

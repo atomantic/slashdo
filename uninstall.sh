@@ -233,11 +233,50 @@ uninstall_antigravity() {
   fi
 }
 
+uninstall_gemini_legacy() {
+  # Cleans up files installed by slashdo < 3.3 under the legacy Gemini CLI path.
+  local target_cmd="$HOME/.gemini/commands/do"
+  local target_lib="$HOME/.gemini/lib"
+  local count=0
+
+  printf "  Uninstalling legacy ${GREEN}Gemini CLI${RESET} files...\n"
+
+  for cmd in "${COMMANDS[@]}" "${OLD_COMMANDS[@]}"; do
+    if [ -f "$target_cmd/$cmd.md" ]; then
+      rm -f "$target_cmd/$cmd.md"
+      printf "    removed: /do:%-18s${GREEN}ok${RESET}\n" "$cmd"
+      count=$((count + 1))
+    fi
+  done
+
+  for lib in "${LIBS[@]}"; do
+    if [ -f "$target_lib/$lib.md" ]; then
+      rm -f "$target_lib/$lib.md"
+      printf "    removed: lib/%-18s${GREEN}ok${RESET}\n" "$lib.md"
+      count=$((count + 1))
+    fi
+  done
+
+  if [ -f "$HOME/.gemini/.slashdo-version" ]; then
+    rm -f "$HOME/.gemini/.slashdo-version"
+    printf "    removed: .slashdo-version        ${GREEN}ok${RESET}\n"
+    count=$((count + 1))
+  fi
+
+  if [ $count -eq 0 ]; then
+    printf "    ${DIM}nothing to remove${RESET}\n"
+  else
+    printf "    ${GREEN}$count files removed${RESET}\n"
+  fi
+}
+
 detect_envs() {
   local envs=()
   [ -d "$HOME/.claude" ] && envs+=(claude)
   [ -d "$HOME/.config/opencode" ] && envs+=(opencode)
   [ -d "$HOME/.gemini/antigravity-cli" ] && envs+=(antigravity)
+  # Detect legacy Gemini CLI install (slashdo < 3.3) for migration cleanup.
+  [ -d "$HOME/.gemini/commands/do" ] && envs+=(gemini-legacy)
   [ ${#envs[@]} -gt 0 ] && printf '%s\n' "${envs[@]}"
 }
 
@@ -254,9 +293,10 @@ printf "  Detected: ${GREEN}%s${RESET}\n\n" "${envs[*]}"
 
 for env in "${envs[@]}"; do
   case "$env" in
-    claude)      uninstall_claude ;;
-    opencode)    uninstall_opencode ;;
-    antigravity) uninstall_antigravity ;;
+    claude)        uninstall_claude ;;
+    opencode)      uninstall_opencode ;;
+    antigravity)   uninstall_antigravity ;;
+    gemini-legacy) uninstall_gemini_legacy ;;
   esac
   printf "\n"
 done
