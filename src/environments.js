@@ -14,6 +14,8 @@ const ENVIRONMENTS = {
     hooksDir: path.join(HOME, '.claude', 'hooks'),
     settingsFile: path.join(HOME, '.claude', 'settings.json'),
     versionFile: path.join(HOME, '.claude', '.slashdo-version'),
+    // format: documentation only — transformCommand always emits YAML frontmatter
+    // now that the legacy Gemini TOML path was removed.
     format: 'yaml-frontmatter',
     ext: '.md',
     namespacing: 'subdirectory',

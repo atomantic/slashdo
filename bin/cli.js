@@ -3,7 +3,7 @@
 
 const path = require('path');
 const readline = require('readline');
-const { detectInstalled, getEnv, allEnvNames, allEnvAliases, ENVIRONMENTS } = require('../src/environments');
+const { detectInstalled, getEnv, allEnvNames, allEnvAliases, canonicalEnvName, ENVIRONMENTS } = require('../src/environments');
 const { install, list } = require('../src/installer');
 
 const PACKAGE_DIR = path.resolve(__dirname, '..');
@@ -31,7 +31,7 @@ function usage() {
 
 Options:
   --env <envs>    Comma-separated environments: ${allEnvNames().join(', ')}
-                  (aliases: ${allEnvAliases().join(', ')} → antigravity)
+                  (aliases: ${allEnvAliases().map(a => `${a} → ${canonicalEnvName(a)}`).join(', ')})
   --list          Show all commands and their install status
   --dry-run       Preview changes without applying them
   --uninstall     Remove all slashdo-installed commands

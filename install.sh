@@ -273,15 +273,19 @@ else
 fi
 printf "  Detected: ${GREEN}%s${RESET}\n\n" "${envs[*]}"
 
+npx_needed=false
 for env in "${envs[@]}"; do
   case "$env" in
     claude)      install_claude ;;
     opencode)    install_opencode ;;
-    antigravity) printf "  ${DIM}Antigravity CLI: use 'npx slash-do@latest --env antigravity' (Agent Skills require Node.js for content inlining)${RESET}\n" ;;
-    codex)       printf "  ${DIM}Codex: use 'npx slash-do@latest --env codex' (requires Node.js for content inlining)${RESET}\n" ;;
+    antigravity) printf "  ${DIM}Antigravity CLI: use 'npx slash-do@latest --env antigravity' (Agent Skills require Node.js for content inlining)${RESET}\n"; npx_needed=true ;;
+    codex)       printf "  ${DIM}Codex: use 'npx slash-do@latest --env codex' (requires Node.js for content inlining)${RESET}\n"; npx_needed=true ;;
   esac
   printf "\n"
 done
 
 printf "  ${GREEN}Done!${RESET} Commands are available as /do:<name> in your AI coding assistant.\n"
-printf "  ${DIM}(Antigravity / Codex users: run the npx command above to complete installation.)${RESET}\n\n"
+if [ "$npx_needed" = true ]; then
+  printf "  ${DIM}(Antigravity / Codex users: run the npx command above to complete installation.)${RESET}\n"
+fi
+printf "\n"
