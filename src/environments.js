@@ -73,6 +73,25 @@ const ENVIRONMENTS = {
   },
 };
 
+// Legacy environments from prior slashdo versions — detected for migration/uninstall
+// only, never used for new installs. Not exposed via allEnvNames().
+const LEGACY_ENVIRONMENTS = {
+  'gemini-legacy': {
+    name: 'Gemini CLI (legacy)',
+    commandsDir: path.join(HOME, '.gemini', 'commands', 'do'),
+    libDir: path.join(HOME, '.gemini', 'lib'),
+    hooksDir: null,
+    versionFile: path.join(HOME, '.gemini', '.slashdo-version'),
+    format: 'yaml-frontmatter',
+    ext: '.md',
+    namespacing: 'subdirectory',
+    libPathPrefix: null,
+    supportsHooks: false,
+    supportsCatInclusion: false,
+    supportsTeams: false,
+  },
+};
+
 // Alternate names that resolve to a canonical environment key. The Antigravity
 // CLI (binary `agy`) is the successor to the Gemini CLI, so the historical
 // `gemini` slug and the `agy` binary name both point at the `antigravity` env.
@@ -93,11 +112,17 @@ function detectInstalled() {
       detected.push(key);
     }
   }
+  // Also detect legacy environments so the npm uninstaller can clean them up.
+  for (const [key, env] of Object.entries(LEGACY_ENVIRONMENTS)) {
+    if (fs.existsSync(env.commandsDir)) {
+      detected.push(key);
+    }
+  }
   return detected;
 }
 
 function getEnv(name) {
-  return ENVIRONMENTS[canonicalEnvName(name)] || null;
+  return ENVIRONMENTS[canonicalEnvName(name)] || LEGACY_ENVIRONMENTS[name] || null;
 }
 
 function allEnvNames() {
@@ -108,4 +133,4 @@ function allEnvAliases() {
   return Object.keys(ALIASES);
 }
 
-module.exports = { ENVIRONMENTS, ALIASES, detectInstalled, getEnv, canonicalEnvName, allEnvNames, allEnvAliases };
+module.exports = { ENVIRONMENTS, LEGACY_ENVIRONMENTS, ALIASES, detectInstalled, getEnv, canonicalEnvName, allEnvNames, allEnvAliases };

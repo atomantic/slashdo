@@ -45,6 +45,14 @@ describe('getEnv', () => {
     assert.equal(getEnv('unknown'), null);
     assert.equal(getEnv(''), null);
   });
+
+  it('resolves gemini-legacy to the legacy cleanup env (not listed in allEnvNames)', () => {
+    const env = getEnv('gemini-legacy');
+    assert.ok(env, 'gemini-legacy should resolve');
+    assert.equal(env.name, 'Gemini CLI (legacy)');
+    const names = allEnvNames();
+    assert.ok(!names.includes('gemini-legacy'), 'gemini-legacy must not appear in allEnvNames()');
+  });
 });
 
 // ── canonicalEnvName ────────────────────────────────────────────────
