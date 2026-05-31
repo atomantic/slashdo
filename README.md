@@ -77,32 +77,32 @@ These commands accept a shared set of flags that control which reviewer(s) run a
 
 | Flag | Default | What it does |
 |:---|:---|:---|
-| `--review-with <agent>[,<agent>...]` | empty — **no default reviewer** (except `/do:rpr`, see below) | Pick one or more reviewers, run in the order given. Omit the flag and no external review runs (each command still runs its own unconditional self-review gate). Accepted slugs: `copilot` (GitHub cloud review), `codex`, `gemini`, `claude` (each non-copilot slug spawns that local CLI in headless mode). Whatever you list is exactly what runs — `--review-with codex` runs codex only; copilot is never added implicitly. Example: `--review-with codex,gemini,copilot` runs codex first, then gemini, then copilot, each reviewing the branch as the previous pass left it. On `/do:better`, `/do:better-swift`, and `/do:depfree`, omitting the flag means the review loop **and the auto-merge** are skipped — PRs are left open for manual review. |
-| `--review-iterations <n>` | `1` | Cap how many review-and-fix cycles a **Copilot** pass runs. Default `1`: request one review, apply every fix it surfaces, then stop (exiting early if the review returns 0 comments). `0` restores the legacy "loop until 0 comments" behavior, bounded by a 10-iteration safety guardrail. No effect on `codex`/`gemini`/`claude` passes (fixed 3-iteration cap), and no effect when copilot isn't in the list. Accepted by `/do:better`, `/do:better-swift`, and `/do:depfree` too. |
+| `--review-with <agent>[,<agent>...]` | empty — **no default reviewer** (except `/do:rpr`, see below) | Pick one or more reviewers, run in the order given. Omit the flag and no external review runs (each command still runs its own unconditional self-review gate). Accepted slugs: `copilot` (GitHub cloud review), `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude` (each non-copilot slug spawns that local CLI in headless mode). Whatever you list is exactly what runs — `--review-with codex` runs codex only; copilot is never added implicitly. Example: `--review-with codex,agy,copilot` runs codex first, then Antigravity, then copilot, each reviewing the branch as the previous pass left it. On `/do:better`, `/do:better-swift`, and `/do:depfree`, omitting the flag means the review loop **and the auto-merge** are skipped — PRs are left open for manual review. |
+| `--review-iterations <n>` | `1` | Cap how many review-and-fix cycles a **Copilot** pass runs. Default `1`: request one review, apply every fix it surfaces, then stop (exiting early if the review returns 0 comments). `0` restores the legacy "loop until 0 comments" behavior, bounded by a 10-iteration safety guardrail. No effect on `codex`/`agy`/`claude` passes (fixed 3-iteration cap), and no effect when copilot isn't in the list. Accepted by `/do:better`, `/do:better-swift`, and `/do:depfree` too. |
 | `--review-stop-on-findings` | off | Stop the multi-reviewer loop after the first reviewer that fixes at least one finding (subsequent reviewers in the list are skipped). Mutually exclusive with `--review-stop-on-clean`. |
 | `--review-stop-on-clean` | off | Stop after the first reviewer that reports zero findings (clean). Mutually exclusive with `--review-stop-on-findings`. |
-| `--reviewer-applies` | off | Edit the working tree directly from the reviewing CLI instead of routing findings back through the orchestrating thread. No effect on copilot passes (Copilot reviews are read-only); takes effect on each codex / gemini / claude pass in the list. |
+| `--reviewer-applies` | off | Edit the working tree directly from the reviewing CLI instead of routing findings back through the orchestrating thread. No effect on copilot passes (Copilot reviews are read-only); takes effect on each codex / agy / claude pass in the list. |
 
-By default every listed reviewer runs in order, and the orchestrator that opened the PR also applies the fixes — it reads each reviewer's findings and edits the working tree itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking gemini to both find and patch its own concerns). For `/do:release`, the merge gate requires the multi-reviewer aggregate status to be `clean` (or `partial`, if you explicitly opted into a stop-mode short-circuit) — a `dirty` aggregate (build/test broken on some pass) or an `inconclusive` aggregate (any executed pass timed out, errored, hit its guardrail, or was skipped — even if other passes returned clean) blocks the merge.
+By default every listed reviewer runs in order, and the orchestrator that opened the PR also applies the fixes — it reads each reviewer's findings and edits the working tree itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking Antigravity (`agy`) to both find and patch its own concerns). For `/do:release`, the merge gate requires the multi-reviewer aggregate status to be `clean` (or `partial`, if you explicitly opted into a stop-mode short-circuit) — a `dirty` aggregate (build/test broken on some pass) or an `inconclusive` aggregate (any executed pass timed out, errored, hit its guardrail, or was skipped — even if other passes returned clean) blocks the merge.
 
 For `/do:review`, the listed agents run **after** the host CLI's own self-review (the multi-agent review built into `do:review`). The list names *additional* reviewers; whichever CLI is hosting `/do:review` does its own pass first regardless.
 
-`/do:better`, `/do:better-swift`, and `/do:depfree` run the chosen reviewer(s) as their post-PR review loop (per PR, in parallel for the multi-PR `better` commands). With no `--review-with`, they skip the review loop and auto-merge and leave PRs open. `/do:rpr` is special: it **resolves review threads from any author** (Copilot, human, or other bot), and its `--review-with` default is a *conditional* `copilot` — it requests a Copilot review only when the PR has no review yet, or when Copilot is already the reviewer in play; pass `--review-with codex|gemini|claude` to run a local review loop instead. From this table `/do:rpr` accepts **only** `--review-with` and `--reviewer-applies` — not `--review-iterations` or the stop-mode flags (it drives a single reviewer to clean, not the multi-reviewer stop-mode loop).
+`/do:better`, `/do:better-swift`, and `/do:depfree` run the chosen reviewer(s) as their post-PR review loop (per PR, in parallel for the multi-PR `better` commands). With no `--review-with`, they skip the review loop and auto-merge and leave PRs open. `/do:rpr` is special: it **resolves review threads from any author** (Copilot, human, or other bot), and its `--review-with` default is a *conditional* `copilot` — it requests a Copilot review only when the PR has no review yet, or when Copilot is already the reviewer in play; pass `--review-with codex|agy|claude` to run a local review loop instead. From this table `/do:rpr` accepts **only** `--review-with` and `--reviewer-applies` — not `--review-iterations` or the stop-mode flags (it drives a single reviewer to clean, not the multi-reviewer stop-mode loop).
 
 ## Supported Environments
 
 ```
-  Claude Code   ~/.claude/commands/do/        YAML frontmatter + subdirectories
-  OpenCode      ~/.config/opencode/commands/  YAML frontmatter + flat naming
-  Gemini CLI    ~/.gemini/commands/do/         TOML headers + subdirectories
-  Codex         ~/.codex/skills/              SKILL.md per-command directories
+  Claude Code      ~/.claude/commands/do/             YAML frontmatter + subdirectories
+  OpenCode         ~/.config/opencode/commands/       YAML frontmatter + flat naming
+  Antigravity CLI  ~/.gemini/antigravity-cli/skills/  Agent Skills (SKILL.md) — aliases: gemini, agy
+  Codex            ~/.codex/skills/                   SKILL.md per-command directories
 ```
 
 slashdo auto-detects which environments you have installed. Or specify manually:
 
 ```bash
 npx slash-do@latest --env claude             # just Claude Code
-npx slash-do@latest --env opencode,gemini    # multiple environments
+npx slash-do@latest --env opencode,antigravity  # multiple environments
 ```
 
 ## Install Options
@@ -126,8 +126,8 @@ npx slash-do@latest push pr release           # install specific commands only
   +------------------+
   |   Transformer    |  Converts format per environment:
   |                  |  - YAML frontmatter (Claude, OpenCode)
-  +------------------+  - TOML headers (Gemini)
-       |                - SKILL.md with inlined libs (Codex)
+  +------------------+  - Agent Skills / SKILL.md with inlined libs (Antigravity, Codex)
+       |
        v
   +------------------+
   |    Installer     |  Diff-based: only writes changed files
@@ -137,7 +137,7 @@ npx slash-do@latest push pr release           # install specific commands only
        v
   ~/.claude/commands/do/push.md
   ~/.config/opencode/commands/do-push.md
-  ~/.gemini/commands/do/push.md
+  ~/.gemini/antigravity-cli/skills/do-push/SKILL.md
   ~/.codex/skills/do-push/SKILL.md
 ```
 

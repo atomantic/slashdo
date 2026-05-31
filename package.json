@@ -1,7 +1,7 @@
 {
   "name": "slash-do",
-  "version": "3.3.0",
-  "description": "Curated slash commands for AI coding assistants — Claude Code, OpenCode, Gemini CLI, and Codex",
+  "version": "3.4.0",
+  "description": "Curated slash commands for AI coding assistants — Claude Code, OpenCode, Antigravity CLI, and Codex",
   "author": "Adam Eivy <adam@eivy.com>",
   "license": "MIT",
   "repository": {
@@ -16,7 +16,8 @@
     "claude-code",
     "slash-commands",
     "opencode",
-    "gemini-cli",
+    "antigravity-cli",
+    "agy",
     "codex",
     "devops",
     "devsecops",

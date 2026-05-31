@@ -14,6 +14,8 @@ const ENVIRONMENTS = {
     hooksDir: path.join(HOME, '.claude', 'hooks'),
     settingsFile: path.join(HOME, '.claude', 'settings.json'),
     versionFile: path.join(HOME, '.claude', '.slashdo-version'),
+    // format: documentation only — transformCommand always emits YAML frontmatter
+    // now that the legacy Gemini TOML path was removed.
     format: 'yaml-frontmatter',
     ext: '.md',
     namespacing: 'subdirectory',
@@ -36,18 +38,23 @@ const ENVIRONMENTS = {
     supportsCatInclusion: true,
     supportsTeams: false,
   },
-  gemini: {
-    name: 'Gemini CLI',
-    commandsDir: path.join(HOME, '.gemini', 'commands'),
-    libDir: path.join(HOME, '.gemini', 'lib'),
+  antigravity: {
+    name: 'Antigravity CLI',
+    // agy stores Agent Skills under ~/.gemini/antigravity-cli/ (it shares the
+    // ~/.gemini parent with the legacy Gemini CLI but uses its own subtree).
+    commandsDir: path.join(HOME, '.gemini', 'antigravity-cli', 'skills'),
+    libDir: null,
     hooksDir: null,
-    versionFile: path.join(HOME, '.gemini', '.slashdo-version'),
-    format: 'toml',
-    ext: '.md',
-    namespacing: 'subdirectory',
-    libPathPrefix: '~/.gemini/lib/',
+    versionFile: path.join(HOME, '.gemini', 'antigravity-cli', '.slashdo-version'),
+    // Antigravity uses the Agent Skills standard: one SKILL.md per skill
+    // directory, YAML frontmatter, lib content inlined (no runtime !cat
+    // injection) — the same shape as Codex skills.
+    format: 'yaml-frontmatter',
+    ext: null,
+    namespacing: 'directory',
+    libPathPrefix: null,
     supportsHooks: false,
-    supportsCatInclusion: true,
+    supportsCatInclusion: false,
     supportsTeams: false,
   },
   codex: {
@@ -66,6 +73,37 @@ const ENVIRONMENTS = {
   },
 };
 
+// Legacy environments from prior slashdo versions — detected for migration/uninstall
+// only, never used for new installs. Not exposed via allEnvNames().
+const LEGACY_ENVIRONMENTS = {
+  'gemini-legacy': {
+    name: 'Gemini CLI (legacy)',
+    commandsDir: path.join(HOME, '.gemini', 'commands', 'do'),
+    libDir: path.join(HOME, '.gemini', 'lib'),
+    hooksDir: null,
+    versionFile: path.join(HOME, '.gemini', '.slashdo-version'),
+    format: 'yaml-frontmatter',
+    ext: '.md',
+    namespacing: 'subdirectory',
+    libPathPrefix: null,
+    supportsHooks: false,
+    supportsCatInclusion: false,
+    supportsTeams: false,
+  },
+};
+
+// Alternate names that resolve to a canonical environment key. The Antigravity
+// CLI (binary `agy`) is the successor to the Gemini CLI, so the historical
+// `gemini` slug and the `agy` binary name both point at the `antigravity` env.
+const ALIASES = {
+  gemini: 'antigravity',
+  agy: 'antigravity',
+};
+
+function canonicalEnvName(name) {
+  return ALIASES[name] || name;
+}
+
 function detectInstalled() {
   const detected = [];
   for (const [key, env] of Object.entries(ENVIRONMENTS)) {
@@ -74,15 +112,25 @@ function detectInstalled() {
       detected.push(key);
     }
   }
+  // Also detect legacy environments so the npm uninstaller can clean them up.
+  for (const [key, env] of Object.entries(LEGACY_ENVIRONMENTS)) {
+    if (fs.existsSync(env.commandsDir)) {
+      detected.push(key);
+    }
+  }
   return detected;
 }
 
 function getEnv(name) {
-  return ENVIRONMENTS[name] || null;
+  return ENVIRONMENTS[canonicalEnvName(name)] || LEGACY_ENVIRONMENTS[name] || null;
 }
 
 function allEnvNames() {
   return Object.keys(ENVIRONMENTS);
 }
 
-module.exports = { ENVIRONMENTS, detectInstalled, getEnv, allEnvNames };
+function allEnvAliases() {
+  return Object.keys(ALIASES);
+}
+
+module.exports = { ENVIRONMENTS, LEGACY_ENVIRONMENTS, ALIASES, detectInstalled, getEnv, canonicalEnvName, allEnvNames, allEnvAliases };

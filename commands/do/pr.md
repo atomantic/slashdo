@@ -6,11 +6,11 @@ argument-hint: "[--review-with <agent>[,<agent>...]] [--review-iterations <n>] [
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
-- Accepted values per slot: `copilot`, `codex`, `gemini`, `claude`
-- The value may be a single agent or a **comma-separated, ordered list** (e.g. `--review-with codex,gemini,copilot`). Split on `,`, trim whitespace around each slug.
+- Accepted values per slot: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`
+- The value may be a single agent or a **comma-separated, ordered list** (e.g. `--review-with codex,agy,copilot`). Split on `,`, trim whitespace around each slug. Normalize `gemini`/`antigravity` → `agy`.
 - Record the resulting list as `REVIEW_AGENTS`. **There is no default reviewer.** If `--review-with` is omitted, set `REVIEW_AGENTS=[]` — no external review pass runs (the Local Code Review gate below still runs unconditionally). Whatever you list is exactly what runs, in order: `--review-with codex` runs codex only; copilot is never added implicitly.
-- Dedupe preserving first-occurrence order; if duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
-- If any value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
+- Dedupe preserving first-occurrence order (compare on the normalized slug); if duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
+- If any value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude.`
 
 Parse `$ARGUMENTS` for the stop-mode flags (mutually exclusive):
 - `--review-stop-on-findings` — stop the multi-reviewer loop after the first reviewer that fixed at least one finding (subsequent reviewers in the list are skipped).
@@ -94,7 +94,7 @@ Otherwise, hand off to the **multi-reviewer loop** with the parsed inputs:
 The wrapper runs each reviewer in order, deciding when to stop per the stop-mode. Each individual pass uses the matching single-reviewer loop:
 
 - `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`)
-- `codex` | `gemini` | `claude` → local-agent headless review loop (`lib/local-agent-review-loop.md`) — the local CLI runs `/do:review` (or an equivalent self-contained review prompt) against the branch; this main thread then verifies its output, runs build + tests, and pushes the verified fixes
+- `codex` | `agy` | `claude` → local-agent headless review loop (`lib/local-agent-review-loop.md`) — the local CLI runs its installed review command (`/do:review` under claude, `/do-review` under agy) or an equivalent self-contained review prompt against the branch; this main thread then verifies its output, runs build + tests, and pushes the verified fixes
 
 ### Multi-reviewer wrapper
 
