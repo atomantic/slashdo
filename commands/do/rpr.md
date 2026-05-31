@@ -14,9 +14,9 @@ Address the latest code review feedback on the current branch's pull request usi
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
-- Accepted slugs: `copilot`, `codex`, `gemini`, `claude` (comma-separated, ordered list; split on `,`, trim whitespace, dedupe preserving first-occurrence order). Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
+- Accepted slugs: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude` (comma-separated, ordered list; split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, dedupe preserving first-occurrence order). Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude.`
 - Record as `REVIEW_AGENTS`. **rpr's default is `copilot`** (its established identity is driving a Copilot review to clean) — but the default is *conditional*: see step 2 and step 8. If `--review-with` is omitted, set `REVIEW_AGENTS=[copilot]`.
-- If `REVIEW_AGENTS` names a **local CLI** (`codex`/`gemini`/`claude`, in any combination, with or without `copilot`), rpr requests each non-copilot reviewer via the **local-agent review loop** (`lib/local-agent-review-loop.md`) against the PR branch instead of requesting a Copilot cloud review for that slug. `copilot` entries still go through the Copilot request/poll path below.
+- If `REVIEW_AGENTS` names a **local CLI** (`codex`/`agy`/`claude`, in any combination, with or without `copilot`), rpr requests each non-copilot reviewer via the **local-agent review loop** (`lib/local-agent-review-loop.md`) against the PR branch instead of requesting a Copilot cloud review for that slug. `copilot` entries still go through the Copilot request/poll path below.
 
 Parse `$ARGUMENTS` for `--reviewer-applies` (boolean): record `REVIEWER_APPLIES=true`/`false` (default `false`). Forwarded to any local-agent review loop; no effect on the Copilot path (a warning is printed if combined with a copilot-only list).
 
@@ -30,7 +30,7 @@ Parse `$ARGUMENTS` for `--reviewer-applies` (boolean): record `REVIEWER_APPLIES=
    ```
    Note whether **any** completed review exists (from a copilot bot, a human, or another bot) — call this `HAS_EXISTING_REVIEW` — and specifically whether a **completed** `copilot-pull-request-reviewer` review exists (a node in `reviews.nodes`, NOT merely a pending review request) — call this `HAS_COPILOT_REVIEW`. Track a Copilot review that is only **pending** (Copilot present in `reviewRequests.nodes[].requestedReviewer` with no completed Copilot review yet) separately as `COPILOT_REVIEW_PENDING` — a pending-only review must NOT set `HAS_COPILOT_REVIEW`, or the "completed review exists" branch below would fire and resolve threads before Copilot has posted anything. Then dispatch on `REVIEW_AGENTS`:
 
-   - **If `REVIEW_AGENTS` contains a local CLI (`codex`/`gemini`/`claude`):** run the **local-agent review loop** (`lib/local-agent-review-loop.md`, referenced below) for each such agent against the PR branch, forwarding `REVIEWER_APPLIES`. This produces findings (and, in reviewer-applies mode, fixes) locally — it does **not** request a Copilot cloud review for those slugs. Then proceed to step 3 to fetch and resolve any pre-existing unresolved threads as well. (If `REVIEW_AGENTS` also contains `copilot`, additionally run the Copilot path below.)
+   - **If `REVIEW_AGENTS` contains a local CLI (`codex`/`agy`/`claude`):** run the **local-agent review loop** (`lib/local-agent-review-loop.md`, referenced below) for each such agent against the PR branch, forwarding `REVIEWER_APPLIES`. This produces findings (and, in reviewer-applies mode, fixes) locally — it does **not** request a Copilot cloud review for those slugs. Then proceed to step 3 to fetch and resolve any pre-existing unresolved threads as well. (If `REVIEW_AGENTS` also contains `copilot`, additionally run the Copilot path below.)
    - **If `REVIEW_AGENTS` contains `copilot` (including the default):**
      - **A completed Copilot review exists** (`HAS_COPILOT_REVIEW`): skip requesting a new one — proceed to step 3 to address its threads.
      - **A Copilot review is currently pending** (`COPILOT_REVIEW_PENDING` — Copilot in `reviewRequests.nodes[].requestedReviewer`, with no completed Copilot review yet): treat it as in progress. Poll per "Poll for review completion" and consider it complete once a new Copilot review appears in `reviews.nodes` with a `submittedAt` later than the latest Copilot review timestamp observed before polling. Then proceed to step 3.
@@ -82,7 +82,7 @@ Parse `$ARGUMENTS` for `--reviewer-applies` (boolean): record `REVIEWER_APPLIES=
 
    **Re-request gate (which reviewer, if any):**
    - **Only re-request a Copilot review if Copilot is the reviewer actually in play** — i.e. `REVIEW_AGENTS` contains `copilot` **and** the threads you just resolved came from a Copilot review (`HAS_COPILOT_REVIEW`). If the round resolved only non-Copilot threads (e.g. a human review), do NOT request a Copilot review — resolve and proceed to step 9. (rpr summons Copilot only when Copilot is already reviewing.)
-   - If `REVIEW_AGENTS` names a **local CLI** (`codex`/`gemini`/`claude`), "another round" means re-running that agent's local-agent review loop — not a Copilot request. The local-agent loop manages its own fixed iteration cap, so typically one pass suffices; loop again only if you made substantive fixes that warrant a fresh local pass.
+   - If `REVIEW_AGENTS` names a **local CLI** (`codex`/`agy`/`claude`), "another round" means re-running that agent's local-agent review loop — not a Copilot request. The local-agent loop manages its own fixed iteration cap, so typically one pass suffices; loop again only if you made substantive fixes that warrant a fresh local pass.
 
    **Worthiness evaluation** (applies to whichever reviewer is in play): Classify all threads/findings addressed in the last round and decide:
    - **Stop and merge** if ALL of the following are true:
@@ -109,7 +109,7 @@ Parse `$ARGUMENTS` for `--reviewer-applies` (boolean): record `REVIEWER_APPLIES=
 
 !`cat ~/.claude/lib/graphql-escaping.md`
 
-## Local-Agent Review Loop (for `--review-with codex|gemini|claude`)
+## Local-Agent Review Loop (for `--review-with codex|agy|claude`)
 
 When `REVIEW_AGENTS` names a local CLI, step 2 (and the step-8 re-request) runs that agent's review against the PR branch via the shared local-agent loop instead of requesting a Copilot cloud review. Pass `{REVIEW_AGENT}`, `{REVIEWER_APPLIES}`, the PR branch (`headRefName`), the base branch (`baseRefName`), and the project `{BUILD_CMD}`. The loop verifies build + tests in the main thread before pushing; afterward, continue to step 3 to resolve any pre-existing threads.
 
