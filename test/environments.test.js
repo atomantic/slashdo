@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { getEnv, allEnvNames, ENVIRONMENTS } = require('../src/environments');
+const { getEnv, allEnvNames, allEnvAliases, canonicalEnvName, ENVIRONMENTS } = require('../src/environments');
 
 // ── getEnv ──────────────────────────────────────────────────────────
 
@@ -21,10 +21,17 @@ describe('getEnv', () => {
     assert.equal(env.namespacing, 'flat');
   });
 
-  it('returns gemini env config', () => {
-    const env = getEnv('gemini');
-    assert.equal(env.name, 'Gemini CLI');
-    assert.equal(env.format, 'toml');
+  it('returns antigravity env config', () => {
+    const env = getEnv('antigravity');
+    assert.equal(env.name, 'Antigravity CLI');
+    assert.equal(env.format, 'yaml-frontmatter');
+    assert.equal(env.namespacing, 'directory');
+  });
+
+  it('resolves gemini and agy aliases to the antigravity env', () => {
+    const antigravity = getEnv('antigravity');
+    assert.equal(getEnv('gemini'), antigravity);
+    assert.equal(getEnv('agy'), antigravity);
   });
 
   it('returns codex env config', () => {
@@ -40,6 +47,21 @@ describe('getEnv', () => {
   });
 });
 
+// ── canonicalEnvName ────────────────────────────────────────────────
+
+describe('canonicalEnvName', () => {
+  it('maps the gemini and agy aliases to antigravity', () => {
+    assert.equal(canonicalEnvName('gemini'), 'antigravity');
+    assert.equal(canonicalEnvName('agy'), 'antigravity');
+  });
+
+  it('passes canonical names through unchanged', () => {
+    assert.equal(canonicalEnvName('antigravity'), 'antigravity');
+    assert.equal(canonicalEnvName('claude'), 'claude');
+    assert.equal(canonicalEnvName('unknown'), 'unknown');
+  });
+});
+
 // ── allEnvNames ─────────────────────────────────────────────────────
 
 describe('allEnvNames', () => {
@@ -48,8 +70,22 @@ describe('allEnvNames', () => {
     assert.equal(names.length, 4);
     assert.ok(names.includes('claude'));
     assert.ok(names.includes('opencode'));
-    assert.ok(names.includes('gemini'));
+    assert.ok(names.includes('antigravity'));
     assert.ok(names.includes('codex'));
+  });
+
+  it('does not list aliases as canonical names', () => {
+    const names = allEnvNames();
+    assert.ok(!names.includes('gemini'));
+    assert.ok(!names.includes('agy'));
+  });
+});
+
+describe('allEnvAliases', () => {
+  it('exposes the gemini and agy aliases', () => {
+    const aliases = allEnvAliases();
+    assert.ok(aliases.includes('gemini'));
+    assert.ok(aliases.includes('agy'));
   });
 });
 
@@ -89,14 +125,14 @@ describe('environment shape', () => {
   it('only claude supports hooks', () => {
     assert.equal(ENVIRONMENTS.claude.supportsHooks, true);
     assert.equal(ENVIRONMENTS.opencode.supportsHooks, false);
-    assert.equal(ENVIRONMENTS.gemini.supportsHooks, false);
+    assert.equal(ENVIRONMENTS.antigravity.supportsHooks, false);
     assert.equal(ENVIRONMENTS.codex.supportsHooks, false);
   });
 
   it('only claude supports teams', () => {
     assert.equal(ENVIRONMENTS.claude.supportsTeams, true);
     assert.equal(ENVIRONMENTS.opencode.supportsTeams, false);
-    assert.equal(ENVIRONMENTS.gemini.supportsTeams, false);
+    assert.equal(ENVIRONMENTS.antigravity.supportsTeams, false);
     assert.equal(ENVIRONMENTS.codex.supportsTeams, false);
   });
 

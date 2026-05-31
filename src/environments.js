@@ -36,18 +36,23 @@ const ENVIRONMENTS = {
     supportsCatInclusion: true,
     supportsTeams: false,
   },
-  gemini: {
-    name: 'Gemini CLI',
-    commandsDir: path.join(HOME, '.gemini', 'commands'),
-    libDir: path.join(HOME, '.gemini', 'lib'),
+  antigravity: {
+    name: 'Antigravity CLI',
+    // agy stores Agent Skills under ~/.gemini/antigravity-cli/ (it shares the
+    // ~/.gemini parent with the legacy Gemini CLI but uses its own subtree).
+    commandsDir: path.join(HOME, '.gemini', 'antigravity-cli', 'skills'),
+    libDir: null,
     hooksDir: null,
-    versionFile: path.join(HOME, '.gemini', '.slashdo-version'),
-    format: 'toml',
-    ext: '.md',
-    namespacing: 'subdirectory',
-    libPathPrefix: '~/.gemini/lib/',
+    versionFile: path.join(HOME, '.gemini', 'antigravity-cli', '.slashdo-version'),
+    // Antigravity uses the Agent Skills standard: one SKILL.md per skill
+    // directory, YAML frontmatter, lib content inlined (no runtime !cat
+    // injection) — the same shape as Codex skills.
+    format: 'yaml-frontmatter',
+    ext: null,
+    namespacing: 'directory',
+    libPathPrefix: null,
     supportsHooks: false,
-    supportsCatInclusion: true,
+    supportsCatInclusion: false,
     supportsTeams: false,
   },
   codex: {
@@ -66,6 +71,18 @@ const ENVIRONMENTS = {
   },
 };
 
+// Alternate names that resolve to a canonical environment key. The Antigravity
+// CLI (binary `agy`) is the successor to the Gemini CLI, so the historical
+// `gemini` slug and the `agy` binary name both point at the `antigravity` env.
+const ALIASES = {
+  gemini: 'antigravity',
+  agy: 'antigravity',
+};
+
+function canonicalEnvName(name) {
+  return ALIASES[name] || name;
+}
+
 function detectInstalled() {
   const detected = [];
   for (const [key, env] of Object.entries(ENVIRONMENTS)) {
@@ -78,11 +95,15 @@ function detectInstalled() {
 }
 
 function getEnv(name) {
-  return ENVIRONMENTS[name] || null;
+  return ENVIRONMENTS[canonicalEnvName(name)] || null;
 }
 
 function allEnvNames() {
   return Object.keys(ENVIRONMENTS);
 }
 
-module.exports = { ENVIRONMENTS, detectInstalled, getEnv, allEnvNames };
+function allEnvAliases() {
+  return Object.keys(ALIASES);
+}
+
+module.exports = { ENVIRONMENTS, ALIASES, detectInstalled, getEnv, canonicalEnvName, allEnvNames, allEnvAliases };

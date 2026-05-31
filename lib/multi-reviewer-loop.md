@@ -1,12 +1,12 @@
 ## Multi-Reviewer Loop
 
-Orchestrate one or more reviewers (`copilot`, `codex`, `gemini`, `claude`) sequentially against the same branch / PR. Each individual reviewer runs its own single-reviewer loop (the Copilot loop or the local-agent loop). This wrapper iterates over the ordered list and decides when to stop.
+Orchestrate one or more reviewers (`copilot`, `codex`, `agy`, `claude`) sequentially against the same branch / PR. Each individual reviewer runs its own single-reviewer loop (the Copilot loop or the local-agent loop). This wrapper iterates over the ordered list and decides when to stop.
 
 ### Inputs
 
 The calling command must populate these before reaching this loop:
 
-- `{REVIEW_AGENTS}` — ordered list of reviewer slugs, e.g. `[codex, gemini, copilot]`. May contain a single entry. Deduped left-to-right by the parser; the first occurrence wins.
+- `{REVIEW_AGENTS}` — ordered list of reviewer slugs, e.g. `[codex, agy, copilot]`. May contain a single entry. The `gemini` and `antigravity` slugs normalize to `agy`. Deduped left-to-right by the parser (after normalization); the first occurrence wins.
 - `{REVIEW_STOP_MODE}` — one of:
   - `all` (default) — run every listed reviewer in order, regardless of what each reports
   - `on-findings` — stop after the first reviewer that produced a verdict status (`clean`, or copilot `too-large`) AND added at least one commit since `PASS_START_SHA` (i.e. the orchestrator actually landed a fix). Reviewer-reported "comments" without resulting commits do NOT trigger the stop — the signal is the commit-graph delta, not the count of suggestions. The assumption is that once a verdict pass has landed fixes, subsequent reviewers would mostly duplicate the same surface and the user wants speed
@@ -17,10 +17,10 @@ The calling command must populate these before reaching this loop:
 ### Pre-flight
 
 1. **Validate the list is non-empty.** If empty, abort with `--review-with requires at least one agent`.
-2. **Validate each slug** is one of `copilot`, `codex`, `gemini`, `claude`. Abort on the first unknown value with `Unknown --review-with value: {value}. Use one of: copilot, codex, gemini, claude.`
-3. **Dedupe** preserving first-occurrence order. Print a warning if duplicates were dropped: `Note: deduped --review-with list to {final list}.`
+2. **Validate each slug** is one of `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity`), `claude`. Abort on the first unknown value with `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude.` Normalize `gemini`/`antigravity` → `agy` before proceeding.
+3. **Dedupe** preserving first-occurrence order (compare on the normalized slug, so `gemini` and `agy` are treated as duplicates). Print a warning if duplicates were dropped: `Note: deduped --review-with list to {final list}.`
 4. **Validate stop-mode flags are not combined.** `--review-stop-on-findings` and `--review-stop-on-clean` are mutually exclusive; if both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
-5. **Probe binary availability** for each non-copilot agent: `command -v {agent}`. For any agent whose binary is missing:
+5. **Probe binary availability** for each non-copilot agent: `command -v {binary}`, where `{binary}` is the agent's executable name (`claude`, `codex`, or `agy` — note the `agy`/`gemini`/`antigravity` slugs all probe the `agy` binary). For any agent whose binary is missing:
    - **Default mode**: print a warning (`{agent} CLI not installed — recording as skipped`) and **keep the agent in `REVIEW_AGENTS`** so it appears in the per-pass table. When the dispatch loop reaches it, the inner loop is short-circuited and the pass is recorded with status `skipped` (preconditions not met — binary missing). This propagates into `{OVERALL_STATUS}=inconclusive` per the aggregate rule, which is the correct merge-gate outcome — the user explicitly asked for that reviewer's perspective and didn't get it. **Do not silently drop**: dropping would let `{OVERALL_STATUS}=clean` even when a requested reviewer never ran, undermining the merge gate. **Do not append `copilot` (or any other reviewer) as a fallback** — the executed list must never contain a reviewer the user didn't ask for. If `--review-with codex` is passed and codex is missing, the pass is recorded `skipped` and the aggregate is `inconclusive`; copilot does not silently run in its place.
    - **Interactive mode (`--interactive`)**: ask the user whether to install, skip (record as `skipped` per the default-mode rule above), or abort. If install succeeds, keep the agent and proceed normally; if skip, leave it in the list to be recorded as `skipped`; if abort, exit the wrapper.
 
@@ -32,9 +32,9 @@ Iterate `REVIEW_AGENTS` in order. For each `{REVIEW_AGENT}`:
 
 1. **Print a banner**: `--- Review pass {n}/{N}: {REVIEW_AGENT} ---`
 2. **Capture baseline**: `PASS_START_SHA=$(git rev-parse HEAD)` so the wrapper can tell whether this reviewer changed anything (independent of the inner loop's own tracking).
-3. **Dispatch** to the matching single-reviewer loop. The loop file lives under the host CLI's lib directory (`~/.claude/lib/` for Claude, `~/.config/opencode/lib/` for OpenCode, `~/.gemini/lib/` for Gemini — slashdo's installer rewrites command-spec `!cat` references for each env, so use the same lib basename in whichever env this wrapper executes; the path itself is env-specific and not hardcoded here):
+3. **Dispatch** to the matching single-reviewer loop. The loop file lives under the host CLI's lib directory (`~/.claude/lib/` for Claude, `~/.config/opencode/lib/` for OpenCode — slashdo's installer rewrites command-spec `!cat` references for each env, so use the same lib basename in whichever env this wrapper executes. For Antigravity and Codex there is no separate lib path: slashdo inlines the loop bodies directly into the installed skill, so the dispatch targets below are already present in-context rather than at a file path):
    - `copilot` → `{LIB_DIR}/copilot-review-loop.md` (forward `{REVIEW_ITERATIONS}` as its iteration cap)
-   - `codex` | `gemini` | `claude` → `{LIB_DIR}/local-agent-review-loop.md` (`{REVIEW_ITERATIONS}` does not apply — the local-agent loop uses its own fixed cap)
+   - `codex` | `agy` | `claude` → `{LIB_DIR}/local-agent-review-loop.md` (`{REVIEW_ITERATIONS}` does not apply — the local-agent loop uses its own fixed cap)
 
    The inner loop already handles its own iterations, fix-and-push cycles, and verification. It returns a `{STATUS}` value:
    - Copilot loop: `clean | capped | timeout | error | guardrail | too-large`
@@ -69,7 +69,7 @@ Reviewers run:     {actually executed subset}
 | Pass | Agent  | Status        | Commits added | Notes                     |
 |------|--------|---------------|---------------|---------------------------|
 | 1    | codex  | clean         | 2             | log: /tmp/local-review-…  |
-| 2    | gemini | clean         | 0             | log: /tmp/local-review-…  |
+| 2    | agy    | clean         | 0             | log: /tmp/local-review-…  |
 | 3    | copilot| too-large     | 0             | PR exceeded 20k-line cap  |
 
 Overall status: {OVERALL_STATUS}
