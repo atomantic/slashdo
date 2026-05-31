@@ -260,7 +260,7 @@ function install({ env, packageDir, filterNames, dryRun, uninstall }) {
 
   for (const cmd of filtered) {
     const content = fs.readFileSync(cmd.absPath, 'utf8');
-    const transformed = transformCommand(content, env, libDir);
+    const transformed = transformCommand(content, env, libDir, cmd.relPath);
     const targetRel = getTargetFilename(cmd.relPath, env);
     const targetPath = path.join(env.commandsDir, targetRel);
 
@@ -510,7 +510,7 @@ function list({ env, packageDir }) {
 
   for (const cmd of commands) {
     const content = fs.readFileSync(cmd.absPath, 'utf8');
-    const transformed = transformCommand(content, env, path.join(packageDir, 'lib'));
+    const transformed = transformCommand(content, env, path.join(packageDir, 'lib'), cmd.relPath);
     const targetRel = getTargetFilename(cmd.relPath, env);
     const targetPath = path.join(env.commandsDir, targetRel);
 
