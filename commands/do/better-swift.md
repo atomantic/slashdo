@@ -1,6 +1,6 @@
 ---
 description: SwiftUI DevSecOps audit, remediation, test enhancement, per-category PRs, CI verification, and an optional multi-reviewer review loop with worktree isolation — optimized for multi-platform Swift/SwiftUI apps (iOS, macOS, watchOS, tvOS, visionOS)
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [path filter or focus areas]"
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues] [--issues-label <name>] [path filter or focus areas]"
 ---
 
 # Better Swift — Unified DevSecOps Pipeline for SwiftUI Apps
@@ -19,6 +19,7 @@ Parse `$ARGUMENTS` for:
 - **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to the multi-reviewer loop for each PR; control when a per-PR reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
 - **`--reviewer-applies`**: forwarded to each PR's review loop — the reviewing CLI applies fixes directly instead of the orchestrator (no effect on copilot passes). Record `REVIEWER_APPLIES=true`/`false`.
 - **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** pass runs per PR (Phase 6); no effect on `codex`/`agy`/`claude` passes (fixed 3-iteration cap). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass per PR, exiting early on 0 comments). `0` = loop until Copilot returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).`
+- **`--issues`** / **`--issues-label <name>`**: track deferred findings as GitHub/GitLab issues instead of PLAN.md lines (see Phase 2). Record `ISSUE_MODE=true`/`false` and `PLAN_LABEL` (default `plan`).
 - **Path filter**: limit scanning scope to specific directories or files
 - **Focus areas**: e.g., "security only", "platform coverage and accessibility"
 
@@ -497,6 +498,17 @@ Wait for ALL agents to complete before proceeding.
 
 ## Phase 2: Plan Generation
 
+> **Issue mode (`--issues`):** Keep the consolidated findings (steps 2–4 below) as
+> your **in-run working plan in context** — do **not** create or write the
+> `## Better Swift Audit` section to `PLAN.md`, and skip step 1's "read/create
+> PLAN.md". Remediation (Phase 3+) proceeds from that in-context plan exactly as
+> normal. The only persistent records are issues: for any finding you **defer**
+> (don't remediate this run, per the finding-disposition rules), file a labeled
+> tracker issue instead of a PLAN.md line — see the disposition partial below.
+> Report the created issue numbers (`#<n>`) in the Phase 2 summary where you'd
+> report slugs. Setup (VCS host + label) is already covered: reuse `CLI_TOOL` from
+> Phase 0a.
+
 1. Read the existing `PLAN.md` (create if it doesn't exist)
 2. Consolidate all findings from Phase 1, deduplicating across agents (same file:line flagged by multiple agents → keep the most specific description)
 3. Identify **shared utility extractions** — patterns duplicated 3+ times that should become reusable extensions, view modifiers, or utility types. Group these as "Foundation" work for Phase 3b.
@@ -536,7 +548,9 @@ For each file touched by multiple categories, document why it was assigned to on
 ### Test Quality & Coverage
 ```
 
-**Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct findings via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case derived from the title text, ≤50 chars, unique against every `[slug]` already in PLAN.md. Recommended pattern for audit findings: `<category-prefix>-<file-basename>-<short-hint>` (e.g. `[sec-keychain-token-leak]`, `[swift-mainactor-binding]`).
+**Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct findings via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case derived from the title text, ≤50 chars, unique against every `[slug]` already in PLAN.md. Recommended pattern for audit findings: `<category-prefix>-<file-basename>-<short-hint>` (e.g. `[sec-keychain-token-leak]`, `[swift-mainactor-binding]`). _(Issue mode skips slugs entirely — the issue number is the ID.)_
+
+!`cat ~/.claude/lib/plan-issue-mode.md`
 
 6. Print a summary table (short labels → full category → branch slug):
    - Security → Security & Secrets → `security`

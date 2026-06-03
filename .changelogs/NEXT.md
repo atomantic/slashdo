@@ -1,0 +1,13 @@
+# Unreleased Changes
+
+## Added
+
+- **`/do:replan --issues`: track the plan in your GitHub/GitLab issue tracker instead of PLAN.md.** Pass `--issues` to run the same audit/triage/prune lifecycle against issues: replan reads the open issues carrying a scoping label (default `plan`, override with `--issues-label <name>`), closes the ones it finds done or stale with an evidence comment, files new issues for the opportunities it surfaces, and comments + `drift`-labels any item that would now remove a newer feature — never auto-closing a drifted item. The stable item ID becomes the issue number (`#42` → `cos/<task>/issue-42/<agent>` branches); the kebab-slug IDs don't apply. Issue mode **always reads `PLAN.md` if one exists**: every open item is migrated into the tracker (one labeled issue each) and `PLAN.md` is emptied to a short note that the roadmap now lives on the Issues page — it never records issue numbers, which is the whole point: PLAN.md stops churning and causing merge conflicts while the team works on issues. Reuses the `gh`/`glab` host detection from `/do:better`; aborts if neither CLI is authenticated rather than silently writing PLAN.md. Composes with `--interactive`. **Actionable-issues invariant:** before migrating an item, replan surfaces any open question or pending decision attached to it and prompts the human to resolve it (folding the decision into the issue body); a migration normally leaves PLAN.md empty, and the only thing that may remain is an item whose decision the human explicitly defers — so every issue it files is actionable and immediately claimable.
+
+- **`--issues` is honored by every command that records plan items, not just `/do:replan`.** `/do:better`, `/do:better-swift`, and `/do:depfree` now file their **deferred** findings/removals as labeled GitHub/GitLab issues instead of writing a `## … Audit` section to PLAN.md (the in-run remediation plan stays in context; only deferred items persist, as issues). `/do:review` and `/do:rpr` file a deferred finding as an issue instead of a PLAN.md line. All accept the same `--issues` / `--issues-label <name>` flags and the issue-number-as-ID model, via a shared `lib/plan-issue-mode.md` partial, so a repo can adopt issue-tracking consistently across the whole toolchain.
+
+## Changed
+
+## Fixed
+
+## Removed
