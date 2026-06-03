@@ -1,6 +1,6 @@
 ---
 description: Resolve PR review feedback with parallel agents
-argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--reviewer-applies]"
+argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--reviewer-applies] [--issues] [--issues-label <name>]"
 ---
 
 **Default mode: fully autonomous.** Fetches review feedback, fixes issues, pushes, resolves threads, and loops reviews without prompting. Auto-skips on timeout/errors after retries.
@@ -19,6 +19,8 @@ Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
 - If `REVIEW_AGENTS` names a **local CLI** (`codex`/`agy`/`claude`, in any combination, with or without `copilot`), rpr requests each non-copilot reviewer via the **local-agent review loop** (`lib/local-agent-review-loop.md`) against the PR branch instead of requesting a Copilot cloud review for that slug. `copilot` entries still go through the Copilot request/poll path below.
 
 Parse `$ARGUMENTS` for `--reviewer-applies` (boolean): record `REVIEWER_APPLIES=true`/`false` (default `false`). Forwarded to any local-agent review loop; no effect on the Copilot path (a warning is printed if combined with a copilot-only list).
+
+Parse `$ARGUMENTS` for `--issues` / `--issues-label <name>`: when a finding is **deferred** to the plan (see Finding Disposition), file it as a GitHub/GitLab issue instead of a PLAN.md line. Record `ISSUE_MODE=true`/`false` and `PLAN_LABEL` (default `plan`).
 
 ## Steps
 
@@ -102,6 +104,8 @@ Parse `$ARGUMENTS` for `--reviewer-applies` (boolean): record `REVIEWER_APPLIES=
 10. **Convention encoding**: After printing the summary, run the Convention Encoding phase against the issues addressed in this session. For each recurring pattern, apply the **smallest** code-level action that makes the convention self-evident (in-tree comment at the canonical site, a clarifying rename, or a surgical refactor that removes the footgun). CLAUDE.md / AGENTS.md additions are a **fallback** — used only when the convention can't be expressed locally. Encoded actions land in the same branch as the rpr fixes.
 
 !`cat ~/.claude/lib/finding-disposition.md`
+
+!`cat ~/.claude/lib/plan-issue-mode.md`
 
 !`cat ~/.claude/lib/per-finding-root-cause.md`
 

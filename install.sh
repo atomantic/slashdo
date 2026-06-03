@@ -62,7 +62,7 @@ LIBS=(
   code-review-checklist copilot-review-loop finding-disposition
   graphql-escaping
   local-agent-review-loop multi-reviewer-loop
-  per-finding-root-cause plan-id-format
+  per-finding-root-cause plan-id-format plan-issue-mode
   post-review-doc-recommendations remediation-agent-template
   swift-review-checklist swift-gotchas
   review-surface-scan review-surface-quality review-security-audit

@@ -66,7 +66,7 @@ All commands live under the `do:` namespace:
 | `/do:scan` | Read-only safety audit of an unfamiliar directory — flags malware patterns, network calls, and vulnerable deps without executing code |
 | `/do:depfree` | Audit dependencies, remove unnecessary ones, write replacement code |
 | `/do:goals` | Generate GOALS.md from codebase analysis |
-| `/do:replan` | Review and clean up PLAN.md |
+| `/do:replan` | Review and clean up PLAN.md — or, with `--issues`, your GitHub/GitLab issue tracker (see [Issue mode](#replan-issue-mode-doreplan---issues)) |
 | `/do:omd` | Audit and optimize markdown files |
 | `/do:update` | Update slashdo to latest version |
 | `/do:help` | List all available commands |
@@ -86,6 +86,19 @@ These commands accept a shared set of flags that control which reviewer(s) run a
 By default every listed reviewer runs in order, and the orchestrator that opened the PR also applies the fixes — it reads each reviewer's findings and edits the working tree itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking Antigravity (`agy`) to both find and patch its own concerns). For `/do:release`, the merge gate requires the multi-reviewer aggregate status to be `clean` (or `partial`, if you explicitly opted into a stop-mode short-circuit) — a `dirty` aggregate (build/test broken on some pass) or an `inconclusive` aggregate (any executed pass timed out, errored, hit its guardrail, or was skipped — even if other passes returned clean) blocks the merge.
 
 For `/do:review`, the listed agents run **after** the host CLI's own self-review (the multi-agent review built into `do:review`). The list names *additional* reviewers; whichever CLI is hosting `/do:review` does its own pass first regardless.
+
+### Replan issue mode (`/do:replan --issues`)
+
+By default `/do:replan` tracks the plan in `PLAN.md`. Pass `--issues` to track it in your GitHub/GitLab issue tracker instead — the same audit/triage/prune lifecycle runs against issues rather than checklist lines.
+
+| Flag | Default | What it does |
+|:---|:---|:---|
+| `--issues` | off — plan lives in `PLAN.md` | Track plan items as issues. Replan reads the open labeled issues, closes the ones it finds done or stale (with an evidence comment), files new issues for the opportunities it surfaces, and comments + `drift`-labels any item that would now remove a newer feature. It **always reads `PLAN.md` if one exists**: every open item is migrated into the tracker (one labeled issue each) and `PLAN.md` is emptied to a short note that the roadmap now lives on the Issues page. `PLAN.md` never records issue numbers — the point of this mode is to keep it from churning and causing merge conflicts while the team works on issues. Requires an authenticated `gh` (GitHub) or `glab` (GitLab); replan aborts if neither is available rather than silently falling back. |
+| `--issues-label <name>` | `plan` | The label that scopes which issues are plan items (so bug reports and questions in the same tracker aren't mistaken for the plan). Only issues carrying this label are triaged, and new issues replan files get it. |
+
+The stable item ID in issue mode is the **issue number** (e.g. `#42`), so concurrent agents claim work via `cos/<task>/issue-42/<agent>` branches — the kebab-slug IDs used in PLAN.md mode don't apply. Compose with `--interactive` to approve closes/creates before they happen. Before migrating an item, replan surfaces any **open question or decision** it finds and asks you to resolve it (folding the answer into the issue body), so every issue it files is actionable and immediately claimable — a migration normally leaves `PLAN.md` empty; the only thing that may remain is an item whose decision you explicitly defer.
+
+**`--issues` works across every command that records plan items**, so adopting issue-tracking is consistent: `/do:better`, `/do:better-swift`, and `/do:depfree` file their **deferred** findings/removals as labeled issues instead of writing a PLAN.md audit section, and `/do:review` / `/do:rpr` file a deferred finding as an issue instead of a PLAN.md line. All of them take the same `--issues` / `--issues-label <name>` flags and the same issue-number-as-ID model. (`/do:push` still only marks/commits whatever is already in PLAN.md — in a fully issue-tracked repo that's just the empty stub.)
 
 `/do:better`, `/do:better-swift`, and `/do:depfree` run the chosen reviewer(s) as their post-PR review loop (per PR, in parallel for the multi-PR `better` commands). With no `--review-with`, they skip the review loop and auto-merge and leave PRs open. `/do:rpr` is special: it **resolves review threads from any author** (Copilot, human, or other bot), and its `--review-with` default is a *conditional* `copilot` — it requests a Copilot review only when the PR has no review yet, or when Copilot is already the reviewer in play; pass `--review-with codex|agy|claude` to run a local review loop instead. From this table `/do:rpr` accepts **only** `--review-with` and `--reviewer-applies` — not `--review-iterations` or the stop-mode flags (it drives a single reviewer to clean, not the multi-reviewer stop-mode loop).
 
