@@ -1,6 +1,6 @@
 ---
 description: Deep code review of changed files against software engineering best practices
-argument-hint: "[--strict|--nuclear] [--draft] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [PR-URL | base-branch]"
+argument-hint: "[--strict|--nuclear] [--draft] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues] [--issues-label <name>] [PR-URL | base-branch]"
 ---
 
 ## Parse Arguments
@@ -12,6 +12,7 @@ Parse `$ARGUMENTS` for:
 - **`--review-stop-on-findings` / `--review-stop-on-clean`** (mutually exclusive, optional): stop-mode for the delegated passes. Default `REVIEW_STOP_MODE=all` (run every listed agent). `on-findings` stops after the first delegated reviewer that surfaces a non-empty change set; `on-clean` stops after the first delegated reviewer that reports zero findings. Abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined` if both appear.
 - **`--reviewer-applies`** (optional, boolean): forwarded to each delegated local-agent pass to route fixes through the reviewing CLI instead of the orchestrator. See `lib/local-agent-review-loop.md` "Editing mode" for the trade-offs. No effect on the copilot path or on the host's self-review.
 - **`--review-iterations <n>`** (optional): caps how many review-and-fix cycles a delegated **copilot** pass runs. Record as `REVIEW_ITERATIONS`; default `1` (one Copilot review-and-fix pass, exiting early on 0 comments). Must be a non-negative integer — abort with `--review-iterations must be a non-negative integer (got: {value}).` otherwise. `0` means "loop until Copilot returns 0 comments" (legacy behavior, bounded by the copilot loop's 10-iteration safety guardrail). No effect on local-agent passes (fixed 3-iteration cap) or on the host's self-review.
+- **`--issues`** / **`--issues-label <name>`** (optional): when a finding is **deferred** (local-branch mode only — see Finding Disposition), file it as a GitHub/GitLab issue instead of a PLAN.md line. Record `ISSUE_MODE=true`/`false` and `PLAN_LABEL` (default `plan`). No effect in PR mode (PR mode posts comments, it doesn't defer to a plan).
 - **GitHub PR reference** — any non-flag token that looks like a PR reference. A token matches if **any** of the following holds (the rules are OR-ed; the `github` substring is sufficient but not required):
   - Full URL: `https://github.com/{owner}/{repo}/pull/{number}` (and any subpath like `/files`, `/commits`)
   - SSH-style URL with `github.com` host
@@ -203,6 +204,8 @@ In `PR_MODE`, skip the local build/test step — the PR's CI is the source of tr
 **Skip this section entirely when `PR_MODE=true`** — in PR mode, jump to "Post Review to GitHub PR" below. The whole point of PR mode is to publish review comments on the remote PR, not to mutate the local working tree (the PR may be on a fork or a branch we can't push to).
 
 !`cat ~/.claude/lib/finding-disposition.md`
+
+!`cat ~/.claude/lib/plan-issue-mode.md`
 
 For each verified finding (local branch mode):
 1. Classify severity: **CRITICAL** (runtime crash, data leak, security) vs **IMPROVEMENT** (consistency, robustness, conventions)

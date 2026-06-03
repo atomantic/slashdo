@@ -1,19 +1,76 @@
 ---
-description: Automated audit/triage of PLAN.md — prune completed items, suggest new work, keep PLAN.md lean
-argument-hint: "[--interactive]"
+description: Automated audit/triage of PLAN.md (or your GitHub/GitLab issue tracker) — prune completed items, suggest new work, keep the plan lean
+argument-hint: "[--interactive] [--issues] [--issues-label <name>]"
 ---
 
 # Replan Command
 
-Automatically audit PLAN.md against the codebase, prune completed/stale items, suggest new work, and leave PLAN.md lean and actionable.
+Automatically audit the plan against the codebase, prune completed/stale items, suggest new work, and leave the plan lean and actionable. The plan lives in **PLAN.md** by default, or — with `--issues` — in your **GitHub/GitLab issue tracker**.
 
 **Default mode: fully autonomous.** Scans the codebase, removes done and stale items, adds suggested new items, and commits — no user interaction.
 
 **`--interactive` mode:** Pauses after evidence gathering to present findings and get user approval before making changes.
 
-**Philosophy:** PLAN.md should be short enough to paste into a prompt. Completed items don't belong in the active plan — the audit trail lives in git history and the changelog.
+**Philosophy:** PLAN.md should be short enough to paste into a prompt. Completed items don't belong in the active plan — the audit trail lives in git history and the changelog. In issue mode, the equivalent rule is that closed issues are the audit trail; the open labeled set stays lean.
 
 **Phase ordering:** This command runs phases 0 → 6.
+
+## Parse Arguments
+
+Parse `$ARGUMENTS` for:
+- **`--interactive`**: pause after evidence gathering to present findings and get approval before applying changes (composes with both modes). Record `INTERACTIVE=true` (default `false`).
+- **`--issues`**: enable **issue mode** — track plan items as GitHub/GitLab issues instead of PLAN.md. Record `ISSUE_MODE=true` (default `false`).
+- **`--issues-label <name>`**: the label that scopes which issues are plan items. Record `PLAN_LABEL` (default `plan`). Only meaningful with `--issues`; if passed without `--issues`, warn that it has no effect and continue in PLAN.md mode.
+
+## Mode Selection
+
+This command operates in one of two modes, selected by the `--issues` flag:
+
+**PLAN.md mode (default).** The plan lives in `PLAN.md`. Every phase below runs as
+written: assign slug IDs, gather evidence, triage, prune, rebuild PLAN.md, commit.
+
+**Issue mode (`--issues`).** The plan lives in your GitHub/GitLab issue tracker;
+only issues carrying the `PLAN_LABEL` (default `plan`) are plan items. **The point
+of this mode is to stop PLAN.md from churning — and generating merge conflicts —
+while the team works on issues.** So PLAN.md is not a live tracking file here.
+Issue mode **always reads PLAN.md if one exists**, and when it has content,
+migrates every open item out to the tracker (one labeled issue each) and **empties
+PLAN.md**. PLAN.md **never tracks issue numbers** — it ends as an empty stub
+pointing at the tracker, so it no longer changes as issues come and go. After the
+first migration it stays empty, so later runs read it, find nothing to migrate, and
+leave it untouched. (GOALS.md edits in Phase 5 are still committed.) Each phase has
+an **"Issue mode:"** callout describing how it deviates. The phase-by-phase
+mapping:
+
+| Phase | PLAN.md mode | Issue mode |
+|-------|--------------|------------|
+| 0 | Assign kebab-slug IDs to PLAN.md checkboxes | VCS host detection + ensure the `PLAN_LABEL` exists; **no slug pass** (the issue number *is* the ID) |
+| 1 | Gather evidence on PLAN.md lines | Gather evidence on open `PLAN_LABEL` issues **+ every open PLAN.md item** (migration candidates), flagging open questions |
+| 2 | Triage each line | Triage each issue/item (same classification) |
+| 3 | Edit PLAN.md (remove done/stale, add, annotate drift) | **Resolve open questions, then** close / create / comment+label issues; **migrate every pending PLAN.md item to an issue** |
+| 4 | Rebuild PLAN.md to target structure | Print the open-issue list; **empty PLAN.md** to a note pointing at the tracker (no issue numbers recorded) |
+| 5 | Move GOALS.md tactical items into PLAN.md | Create issues from GOALS.md tactical items |
+| 6 | Commit PLAN.md (+ GOALS.md/docs) | Commit only the PLAN.md stub / GOALS.md edits; issue ops are the audit trail |
+
+**Actionable-issues invariant.** Every issue replan files must be immediately
+claimable — a well-formed task, not a question. Before migrating an item, replan
+surfaces any **open question or pending decision** attached to it (see Phase 3) and
+asks the human to resolve it; the resolution is folded into the issue body. The
+expected outcome of a migration is that **all** items are resolved and filed, so
+PLAN.md ends empty. The one exception: if the human explicitly **defers** a
+decision, that single item cannot become a claimable issue, so it stays in PLAN.md
+(reported in the summary) until someone decides — it is the only thing that may
+remain. The tracker never accumulates un-actionable issues.
+
+**Item IDs.** In PLAN.md mode the stable ID is the kebab-slug (see
+[lib/plan-id-format.md](../../lib/plan-id-format.md)); concurrent agents claim
+items via `cos/<task>/<plan-id>/<agent>` branches. In issue mode the stable ID is
+the **issue number**; the equivalent branch is `cos/<task>/issue-<n>/<agent>`. The
+slug pass (Phase 0) and the kebab-slug rules do **not** apply in issue mode.
+
+**Scope.** `--issues` changes the behavior of `/do:replan` only. Other slashdo
+commands (`do:better`, `do:push`, `do:depfree`) still append slugged items to
+PLAN.md regardless of this flag — issue mode is a replan-local concept.
 
 ## Boundary Rule: PLAN.md vs GOALS.md
 
@@ -27,7 +84,20 @@ GOALS.md answers: *Why does this project exist? What does success look like? Wha
 - Completed items (the changelog and git history are the audit trail)
 - Detailed documentation (those belong in `docs/`)
 
-## Phase 0: Assign Plan-Item IDs
+## Phase 0: Assign Plan-Item IDs (or Set Up Issue Tracker)
+
+> **Issue mode (`--issues`):** Skip the entire slug-assignment pass below — the
+> issue number *is* the ID, assigned by the tracker on creation. Instead do this:
+>
+> 1. **Detect the VCS host.** Run `gh auth status` to check the GitHub CLI. If it
+>    fails, run `glab auth status` for GitLab. Set `VCS_HOST` to `github` or
+>    `gitlab` and `CLI_TOOL` to `gh` or `glab`. **If neither is authenticated,
+>    abort** with: "Issue mode needs an authenticated `gh` or `glab`. Run
+>    `gh auth login` (or `glab auth login`), or drop `--issues` to plan against
+>    PLAN.md instead." Do not silently fall back to PLAN.md.
+> 2. **Ensure the scoping label exists.** `gh label create <PLAN_LABEL> --description "Tracked by /do:replan" 2>/dev/null || true` (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" 2>/dev/null || true` — glab requires a color). Creating it if absent is harmless; the `|| true` swallows the "already exists" error.
+>
+> Then proceed to Phase 1. Everything in the rest of Phase 0 is PLAN.md-only.
 
 **`/do:replan` owns the ID-assignment pass.** Every `- [ ]` / `- [x]` checkbox
 in PLAN.md must carry a stable slug ID in `[brackets]` immediately after the
@@ -83,6 +153,32 @@ re-canonicalises the namespace.
 
 Launch these agents in parallel — no user interaction needed.
 
+> **Issue mode (`--issues`):** Wherever the agents below say "PLAN.md item," read
+> "open `PLAN_LABEL` issue." Source the item list once, up front:
+> `gh issue list --label <PLAN_LABEL> --state open --json number,title,body,labels,createdAt,updatedAt`
+> (glab: `glab issue list --label <PLAN_LABEL> --output json`). Only **open**
+> labeled issues are triaged — GitHub may have already auto-closed issues via
+> "Fixes #N" in a merged PR, and those are already pruned. Agents 1–3 and 5
+> operate per open issue; **Agent 4 (GOALS.md) is unchanged** (GOALS.md is still a
+> file). For Agent 5's drift dating, use each issue's `createdAt` as the
+> `<plan-item-date>` (no `git blame` — there's no PLAN.md line); use `updatedAt`
+> for the staleness window in Phase 2.
+>
+> **Migration candidates + open-question detection.** **Always read PLAN.md if one
+> exists.** Every open item in it (`- [ ]`, plus any open prose/numbered roadmap
+> entries) is a migration candidate that will become a labeled issue in Phase 3 —
+> the goal is to move the whole plan into the tracker and leave PLAN.md empty.
+> Completed (`- [x]`) and stale items are not migrated; they're simply dropped when
+> PLAN.md is emptied. While reading both the migration candidates and the
+> opportunity-scanner suggestions (Agent 3), flag every item that carries an **open
+> question or undecided choice** the human must resolve before it can be worked.
+> Treat these as signals: an `## Open Questions` / `## Decisions` section; a line
+> ending in `?`; markers like `TBD`, `TODO: decide`, `decision needed`, `unclear`,
+> `needs input`, `should we`, or an unresolved `A vs B` / `either…or`; a
+> `> QUESTION:` / `> DECISION:` blockquote. Record each as
+> `{item, question, options-if-any}` for the Phase 3 resolution gate. An item with
+> no open question is already actionable and skips the gate.
+
 **Agent 1: Git History Analysis**
 - `git log --oneline -50` — identify commits that completed plan items
 - `git log --since="2 weeks ago" --oneline` — surface recent work not yet reflected in the plan
@@ -131,6 +227,10 @@ For every `drift-conflict` / `drift-unclear`, record: the item, the conflicting 
 
 ## Phase 2: Auto-Triage
 
+> **Issue mode (`--issues`):** Classify every open `PLAN_LABEL` issue using the
+> same table — "Remove from PLAN.md" becomes "Close the issue" (Phase 3 maps the
+> actions). Staleness is measured from the issue's `updatedAt`.
+
 Using agent results, classify every PLAN.md item:
 
 | Status | Criteria | Action |
@@ -144,6 +244,55 @@ Using agent results, classify every PLAN.md item:
 **Drift takes precedence over done-ness.** If an item is both `likely-done` and `drifted`, treat it as `drifted` and surface it — the human needs to confirm what "done" actually means now.
 
 ## Phase 3: Apply Changes (or Checkpoint if Interactive)
+
+> **Issue mode (`--issues`): resolve open questions FIRST.** Before filing any
+> issue, walk the open-question signals collected in Phase 1. For each item that
+> carries an unresolved question or decision, ask the human to resolve it — even in
+> autonomous (non-`--interactive`) runs, because filing a non-actionable issue
+> would violate the actionable-issues invariant:
+>
+> ```
+> AskUserQuestion([{
+>   question: "Before I file this as an issue, it needs a decision:\n\n> {item text}\n\n**Open question:** {question}",
+>   multiSelect: false,
+>   options: [
+>     { label: "{option A}", description: "File the issue scoped to option A" },
+>     { label: "{option B}", description: "File the issue scoped to option B" },
+>     { label: "Defer — don't file yet", description: "Leave this item in PLAN.md until the decision is made" }
+>   ]
+> }])
+> ```
+>
+> (When the item names explicit choices, surface them as options; otherwise offer
+> "Decide now" with free-text and "Defer.") Fold the chosen decision into the issue
+> body so the filed issue is self-contained and claimable (e.g. a `## Decision`
+> line). If the human **defers**, do not file the issue — keep the item in PLAN.md
+> (it is not migrated this run) and list it under "deferred — needs a decision" in
+> the summary. Only items with no open question, or whose question was resolved
+> here, proceed to creation below.
+>
+> **Apply the triage decisions** as issue operations instead of PLAN.md edits. The
+> mapping (GitHub `gh`; glab equivalents in parens):
+>
+> - `confirmed-done` / `likely-done` → **close** the issue with an evidence
+>   comment: `gh issue close <n> --comment "Closed by /do:replan — <evidence>"`
+>   (glab: `glab issue note <n> -m "<evidence>"` then `glab issue close <n>`).
+> - `stale` → close with a stale-reason comment (note the last-activity date).
+> - new suggestions **and every pending PLAN.md item being migrated** (questions
+>   resolved above) → **create** an issue:
+>   `gh issue create --title "<title>" --body "<body incl. any ## Decision>" --label <PLAN_LABEL>`
+>   (glab: `glab issue create --title "<title>" --description "<body>" --label <PLAN_LABEL>`).
+>   Capture the returned issue number for the summary and for clearing the migrated
+>   item from PLAN.md in Phase 4.
+> - `drifted` → **never auto-close.** Post the `⚠️ DRIFT:` description as a
+>   comment (`gh issue comment <n> --body "⚠️ DRIFT: <collision> — conflicting commit <sha>"`)
+>   and apply a `drift` label (`gh label create drift 2>/dev/null || true` first, then
+>   `gh issue edit <n> --add-label drift`; glab: `glab label create --name drift --color "#E8A33D" 2>/dev/null || true` first, then `glab issue note <n> -m "<drift>"` + `glab issue update <n> --label drift`).
+>
+> The audit trail is the issue's close event + comment — **not** git log. In issue
+> mode there is no PLAN.md edit in this phase; skip steps 1–5 below and use the
+> issue operations above, then jump to the issue-mode summary at the end of this
+> phase. (`--interactive` still applies — see the Interactive Mode note below.)
 
 ### Default Mode (autonomous)
 
@@ -168,9 +317,38 @@ Replan complete:
    Re-run with --interactive to resolve (replan / examine / delete).
 ```
 
+**Issue mode** prints the issue-number variant instead (list the actual numbers
+so they're clickable / greppable):
+
+```
+Replan complete (issue mode, label: {PLAN_LABEL}):
+- Closed {N} completed issue(s): #a, #b, …
+- Closed {S} stale issue(s): #c, …
+- Created {P} new issue(s): #d, …  ({Mg} migrated from PLAN.md, {Op} from the opportunity scan)
+- {any GOALS.md boundary fixes}
+
+⚠️ {D} drifted issue(s) require human review — commented + labeled `drift`: #e, …
+   Re-run with --interactive to resolve (replan / examine / close).
+
+⏸️ {Q} item(s) deferred — need a decision before they can be filed (left in PLAN.md):
+   {one line each}
+```
+
+Omit the deferred block when `{Q}` is 0. List the migrated-vs-scanner split only
+when a PLAN.md was present (migration only happens then).
+
 If `D > 0`, emphasize the drift count visually in the printed summary (e.g. bold + the `⚠️` prefix shown above) so the user notices it. Do **not** actually exit with a non-zero process exit code — `/do:replan` is often chained into other commands and a non-zero exit would break that automation. Do not commit drifted-item resolutions silently.
 
 ### Interactive Mode (`--interactive`)
+
+> **Issue mode (`--issues`):** The consolidated prompt is identical, but each
+> selected action runs the issue operation from the Phase 3 mapping instead of a
+> PLAN.md edit — "Remove …" options close the corresponding issues, "Add suggested
+> items" creates them, and the per-drifted walk-through offers **Replan — rewrite
+> issue** (edit the issue title/body via `gh issue edit <n>` after approval) /
+> **Examine — leave commented** (keep the `drift` label + comment) / **Close the
+> issue** (the new feature supersedes it). Reference items by `#<number>` in the
+> presented lists.
 
 Present ONE consolidated summary to the user:
 
@@ -214,6 +392,26 @@ If "Replan — rewrite item": draft a revised item that explicitly accounts for 
 
 ## Phase 4: Rebuild PLAN.md
 
+> **Issue mode (`--issues`):** Don't rebuild PLAN.md into the target structure.
+> Instead: (1) print the resulting lean plan as the current open labeled set
+> (`gh issue list --label <PLAN_LABEL> --state open`, glab equivalent) so the user
+> sees the post-replan backlog; (2) **empty PLAN.md** — remove every item (migrated
+> ones became issues; completed/stale ones are dropped), keeping only an item the
+> human explicitly deferred. **Do not list issue numbers in PLAN.md** — that would
+> reintroduce the churn this mode exists to avoid. Replace the body with a short
+> note that the roadmap now lives in the tracker:
+>
+> ```markdown
+> # Development Plan
+>
+> This project tracks its roadmap as issues — see the open issues labeled
+> `{PLAN_LABEL}` on the repository's Issues page. Managed by `/do:replan --issues`.
+> ```
+>
+> (If an item was deferred, list it under a `## Pending a decision` heading below
+> the note; everything else is gone.) The PLAN.md edit is staged and committed in
+> Phase 6. Then continue to Phase 5.
+
 Rewrite PLAN.md to be lean and actionable:
 
 ### Target Structure
@@ -256,6 +454,12 @@ If tactical items (checkboxes, implementation details) were found in GOALS.md:
 - Move them into the appropriate PLAN.md section
 - Update GOALS.md to remove tactical content
 
+> **Issue mode (`--issues`):** Same intent, different destination — create an
+> issue for each leaked tactical item
+> (`gh issue create --title … --body … --label <PLAN_LABEL>`), then strip the
+> tactical content from GOALS.md. GOALS.md is still a tracked file, so its edit is
+> committed in Phase 6.
+
 ## Phase 6: Commit
 
 Stage and commit all files modified during this replan:
@@ -269,6 +473,15 @@ git commit -m "docs: replan — completed [slug-a], [slug-b]; pruned {S} stale, 
 
 The commit subject is the audit trail — list the completed slugs explicitly so `git log --grep=<slug>` finds them later.
 
+> **Issue mode (`--issues`):** The issue tracker is the audit trail (close events
+> + comments), not a commit. Commit **only** the on-disk changes this run actually
+> made: the PLAN.md migration edit from Phase 4 (cleared migrated items / stub) and
+> any GOALS.md or `docs/` edits from Phase 5 — e.g.
+> `git add PLAN.md GOALS.md 2>/dev/null || true; git commit -m "docs: replan — migrated plan to issues #c, #d; pruned PLAN.md"`.
+> If nothing on disk changed (steady-state run: no PLAN.md, no GOALS.md edits),
+> there is no commit; the closed/created issue numbers from the Phase 3 summary are
+> the record. Do NOT push unless explicitly asked.
+
 Do NOT push unless explicitly asked.
 
 ## Notes
@@ -277,4 +490,18 @@ Do NOT push unless explicitly asked.
 - The opportunity scanner suggestion is the key differentiator — every replan should surface at least one new idea
 - Keep PLAN.md under ~50 lines whenever possible — it should be scannable in seconds
 - Adapt to existing project structure and conventions
-- **Never silently resolve a `drifted` item.** Autonomous mode annotates and surfaces; only the human decides between replan / examine / delete.
+- **Never silently resolve a `drifted` item.** Autonomous mode annotates and surfaces; only the human decides between replan / examine / delete (or, in issue mode, replan / examine / close).
+- **Issue mode (`--issues`), migration:** issue mode always reads PLAN.md if one
+  exists. When it has content, every open item is migrated into the tracker as a
+  labeled issue (after its open questions are resolved), and PLAN.md is emptied to a
+  short note that the roadmap now lives on the Issues page — it never records issue
+  numbers, so it stops generating merge conflicts as work proceeds. If there's no
+  PLAN.md (or it's already empty), seed the backlog from the opportunity scanner.
+  Either way, every replan should surface at least one new idea.
+- **Issue mode — actionable-issues invariant:** never file an issue that still
+  contains an open question or undecided choice. Resolve it with the human first
+  (Phase 3 gate) and fold the decision into the issue body, or defer the item and
+  leave it in PLAN.md. The tracker holds only claimable tasks.
+- **Issue mode** still changes only `/do:replan`. Items created by other slashdo
+  commands land in PLAN.md, not the tracker; reconciling the two is out of scope
+  for this flag.

@@ -1,6 +1,6 @@
 ---
 description: Audit third-party dependencies and remove unnecessary ones by writing replacement code
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [--heavy] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [specific packages to evaluate]"
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [--heavy] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues] [--issues-label <name>] [specific packages to evaluate]"
 ---
 
 # Depfree — Dependency Freedom Audit
@@ -22,6 +22,7 @@ Parse `$ARGUMENTS` for:
 - **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to the multi-reviewer loop; control when the reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
 - **`--reviewer-applies`**: forwarded to the review loop — the reviewing CLI applies fixes directly instead of the orchestrator (no effect on copilot passes). Record `REVIEWER_APPLIES=true`/`false`.
 - **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** pass runs (Phase 5c); no effect on `codex`/`agy`/`claude` passes (fixed 3-iteration cap). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass, exiting early on 0 comments). `0` = loop until Copilot returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).`
+- **`--issues`** / **`--issues-label <name>`**: track deferred removals as GitHub/GitLab issues instead of PLAN.md lines (see Phase 2). Record `ISSUE_MODE=true`/`false` and `PLAN_LABEL` (default `plan`).
 - **Specific packages**: limit audit scope to named packages (e.g., "chalk dotenv")
 
 Set `HEAVY_MODE` to `true` if `--heavy` was passed, `false` otherwise.
@@ -305,6 +306,15 @@ Update `DEPENDENCY_MAP` with transitive check results before proceeding to Phase
 
 ## Phase 2: Replacement Plan
 
+> **Issue mode (`--issues`):** Keep the replacement plan (steps 2–5 below) as your
+> **in-run working plan in context** — do **not** create or write the
+> `## Depfree Audit` section to `PLAN.md`, and skip step 1's "read/create PLAN.md".
+> Remediation proceeds from that in-context plan as normal. For any removal you
+> **defer** (don't carry out this run), file a labeled tracker issue instead of a
+> PLAN.md line — see the disposition partial below. Report the created issue
+> numbers (`#<n>`) in the Phase 2 summary where you'd report slugs. Setup (VCS host
+> + label) is already covered: reuse `CLI_TOOL` from Phase 0.
+
 1. Read the existing `PLAN.md` (create if it doesn't exist)
 2. Filter to only REMOVE recommendations from Phase 1c/1d (exclude any downgraded to KEEP (transitive) in Phase 1d)
 3. For EVALUATE recommendations: **Default mode** — treat as KEEP (conservative). **Heavy mode** — treat as REMOVE (aggressive). **Interactive mode** — present to user via `AskUserQuestion` for each. If both `--interactive` and `--heavy` are set, still prompt for each EVALUATE item (interactive takes precedence), but present REMOVE as the default suggestion
@@ -346,7 +356,9 @@ For each dependency to remove:
 - [ ] [drop-{package-slug}] **{package}** — {strategy}. Replace {N} call sites in {M} files. Write {utility name} ({est. lines} lines). Complexity: {level}.
 ```
 
-**Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct removals via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case, ≤50 chars, unique against every `[slug]` already in PLAN.md. Recommended pattern: `drop-<package-name-kebabed>` (e.g. `[drop-uuid]`, `[drop-chalk]`); collide-suffix with `-2`/`-3` if the same package was removed in a prior audit and re-added.
+**Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct removals via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case, ≤50 chars, unique against every `[slug]` already in PLAN.md. Recommended pattern: `drop-<package-name-kebabed>` (e.g. `[drop-uuid]`, `[drop-chalk]`); collide-suffix with `-2`/`-3` if the same package was removed in a prior audit and re-added. _(Issue mode skips slugs entirely — the issue number is the ID.)_
+
+!`cat ~/.claude/lib/plan-issue-mode.md`
 
 **Scoped npm packages** (e.g. `@types/node`, `@scope/pkg`) lose their leading `@` to the kebab-case rule and collapse `/` to `-`, so a naïve `drop-<package-name-kebabed>` would produce `drop-types-node` for both `@types/node` and any hypothetical `@othertypes/node`. Preserve the scope explicitly in the slug: `drop-<scope>-<pkg>` (so `@types/node` → `[drop-types-node]`, `@scope/pkg` → `[drop-scope-pkg]`). If a non-scoped package with the same shape already owns that slug, fall through to the standard `-2`/`-3` collision suffix.
 
