@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { getTargetFilename, transformCommand, transformLib } = require('./transformer');
+const { readConfig, writeConfig } = require('./config');
 
 function collectCommands(commandsDir) {
   const commands = [];
@@ -240,7 +241,7 @@ function deregisterHooksFromSettings(env, dryRun) {
   return actions;
 }
 
-function install({ env, packageDir, filterNames, dryRun, uninstall }) {
+function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }) {
   const commandsDir = path.join(packageDir, 'commands');
   const libDir = path.join(packageDir, 'lib');
   const hooksDir = path.join(packageDir, 'hooks');
@@ -394,6 +395,17 @@ function install({ env, packageDir, filterNames, dryRun, uninstall }) {
     }
   }
 
+  // Persist the auto-update preference (only when explicitly provided, so a
+  // filtered/command-only install doesn't clobber an existing choice).
+  if (!dryRun && env.configFile && typeof autoUpdate === 'boolean') {
+    const config = readConfig(env.configFile);
+    if (config.autoUpdate !== autoUpdate) {
+      config.autoUpdate = autoUpdate;
+      writeConfig(env.configFile, config);
+      results.actions.push({ name: '.slashdo-config.json', status: autoUpdate ? 'auto-update enabled' : 'auto-update disabled' });
+    }
+  }
+
   if (!dryRun && env.versionFile) {
     const pkg = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
     fs.writeFileSync(env.versionFile, pkg.version, 'utf8');
@@ -498,6 +510,10 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
 
   if (!dryRun && env.versionFile && fs.existsSync(env.versionFile)) {
     fs.unlinkSync(env.versionFile);
+  }
+
+  if (!dryRun && env.configFile && fs.existsSync(env.configFile)) {
+    fs.unlinkSync(env.configFile);
   }
 
   return results;
