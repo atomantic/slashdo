@@ -250,12 +250,18 @@ Wait for ALL agents to complete before proceeding.
 > **Issue mode (`--issues`):** Keep the consolidated findings (steps 2–4 below) as
 > your **in-run working plan in context** — do **not** create or write the
 > `## Better Audit` section to `PLAN.md`, and skip step 1's "read/create PLAN.md".
+> The tracker, not `PLAN.md`, is the source of truth for already-known work, so the
+> disposition partial below has you fetch the open issues into `EXISTING_ISSUES`
+> during setup. When consolidating findings (step 2), **dedup against
+> `EXISTING_ISSUES`** as well as across agents: a finding that already has an open
+> issue is not new — reuse that issue's `#<number>` instead of filing a duplicate.
 > Remediation (Phase 3+) proceeds from that in-context plan exactly as normal. The
 > only persistent records are issues: for any finding you **defer** (don't
 > remediate this run, per the finding-disposition rules), file a labeled tracker
 > issue instead of a PLAN.md line — see the disposition partial below. Report the
-> created issue numbers (`#<n>`) in the Phase 2 summary where you'd report slugs.
-> Setup (VCS host + label) is already covered: reuse `CLI_TOOL` from Phase 0a.
+> created **and** reused issue numbers (`#<n>`) in the Phase 2 summary where you'd
+> report slugs. Setup (VCS host + label + `EXISTING_ISSUES` fetch) is covered by the
+> partial: reuse `CLI_TOOL` from Phase 0a.
 
 1. Read the existing `PLAN.md` (create if it doesn't exist)
 2. Consolidate all findings from Phase 1, deduplicating across agents (same file:line flagged by multiple agents → keep the most specific description)

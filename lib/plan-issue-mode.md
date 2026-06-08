@@ -25,19 +25,31 @@ the two stay consistent and `PLAN.md` doesn't churn while work happens on issues
 2. **Label.** Ensure the scoping label exists:
    `gh label create <PLAN_LABEL> --description "Tracked by slashdo" 2>/dev/null || true`
    (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" 2>/dev/null || true` — glab requires a color).
+3. **Fetch existing open issues.** In issue mode the tracker — not `PLAN.md` — is
+   the source of truth for already-known work, so pull the open issues up front and
+   keep them in context for dedup:
+   `gh issue list --state open --limit 500 --json number,title,labels,body --jq '.'`
+   (glab: `glab issue list --state opened --per-page 100 -F json`). Record this as
+   `EXISTING_ISSUES`. Listing **all** open issues (not just `--label <PLAN_LABEL>`)
+   avoids re-filing a finding someone already opened by hand under a different label.
 
 ## Recording a plan item
 
 - **PLAN.md mode (default):** append
   `- [ ] [<slug>] **Title** — rationale` per [plan-id-format.md](./plan-id-format.md).
-- **Issue mode (`--issues`):**
+- **Issue mode (`--issues`):** **first dedup against `EXISTING_ISSUES`.** Before
+  filing, check whether the finding already has an open issue — match on the same
+  file path / symbol or a clearly equivalent title, not just an exact string match.
+  If it does, **skip creation** and reuse that issue's `#<number>` as the ID;
+  optionally add a comment if the new finding adds detail. Only when no existing
+  issue covers it, create one:
   `gh issue create --title "<Title>" --body "<rationale + context: file paths, category, why it was deferred>" --label <PLAN_LABEL>`
   (glab: `glab issue create --title "<Title>" --description "<body>" --label <PLAN_LABEL>`).
   The **issue number is the ID** — assign **no** slug, and write **nothing** to
   `PLAN.md`. Make the title a self-contained, claimable task and put enough context
-  in the body that someone can pick it up cold. Capture the created issue numbers
-  for the command's final summary (report `#<number>` where it would have reported
-  a `[slug]`).
+  in the body that someone can pick it up cold. Capture the issue numbers (created
+  **and** reused) for the command's final summary (report `#<number>` where it would
+  have reported a `[slug]`), and note which were skipped as duplicates.
 
 Everything else about the command is unchanged: in issue mode it simply files
 labeled issues wherever it would have written `PLAN.md` lines.
