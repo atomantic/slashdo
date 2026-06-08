@@ -100,6 +100,12 @@ uninstall_claude() {
     count=$((count + 1))
   fi
 
+  if [ -f "$HOME/.claude/.slashdo-config.json" ]; then
+    rm -f "$HOME/.claude/.slashdo-config.json"
+    printf "    removed: .slashdo-config.json    ${GREEN}ok${RESET}\n"
+    count=$((count + 1))
+  fi
+
   # Deregister from settings.json (requires Node.js)
   if command -v node &>/dev/null; then
     if node -e '

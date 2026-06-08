@@ -143,6 +143,14 @@ install_claude() {
       const settingsPath = path.join(home, ".claude", "settings.json");
       const hooksDir = path.join(home, ".claude", "hooks");
 
+      // Default auto-update to enabled on first install. The curl installer
+      // is piped (no TTY to prompt), so we pick the same default the npx
+      // installer offers; re-run "npx slash-do@latest" interactively to change.
+      const configPath = path.join(home, ".claude", ".slashdo-config.json");
+      if (!fs.existsSync(configPath)) {
+        try { fs.writeFileSync(configPath, JSON.stringify({ autoUpdate: true }, null, 2) + "\n"); } catch (e) {}
+      }
+
       let settings = {};
       if (fs.existsSync(settingsPath)) {
         try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch (e) {

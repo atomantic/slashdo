@@ -156,6 +156,8 @@ npx slash-do@latest push pr release           # install specific commands only
 
 ## Updating
 
+On install, slashdo asks whether to **auto-update** (default: yes, Claude Code only). When enabled, the SessionStart hook silently runs `npx slash-do@latest` whenever it detects a newer version — no manual step needed. When disabled, the statusline shows a `⬆ /do:update` hint instead, and you update manually:
+
 ```bash
 npx slash-do@latest        # from your terminal
 ```
@@ -163,6 +165,15 @@ npx slash-do@latest        # from your terminal
 ```
 /do:update                # from inside your AI coding assistant
 ```
+
+The preference lives in `~/.claude/.slashdo-config.json` (`{ "autoUpdate": true }`). Change it any time without the prompt:
+
+```bash
+npx slash-do@latest --auto-update      # enable
+npx slash-do@latest --no-auto-update   # disable
+```
+
+Existing installs from before this feature get asked on their next `npx slash-do@latest` run.
 
 ## Contributing
 

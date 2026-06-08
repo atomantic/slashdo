@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 const { detectInstalled, getEnv, allEnvNames, allEnvAliases, canonicalEnvName, ENVIRONMENTS } = require('../src/environments');
 const { install, list } = require('../src/installer');
+const { readConfig } = require('../src/config');
 
 const PACKAGE_DIR = path.resolve(__dirname, '..');
 
@@ -35,6 +37,8 @@ Options:
   --list          Show all commands and their install status
   --dry-run       Preview changes without applying them
   --uninstall     Remove all slashdo-installed commands
+  --auto-update     Enable auto-update without prompting (Claude Code)
+  --no-auto-update  Disable auto-update without prompting
   --help          Show this help message
 
 Environments:
@@ -52,6 +56,7 @@ function parseArgs(argv) {
     dryRun: false,
     uninstall: false,
     help: false,
+    autoUpdate: undefined,
     commands: [],
   };
 
@@ -71,6 +76,12 @@ function parseArgs(argv) {
         break;
       case '--uninstall':
         args.uninstall = true;
+        break;
+      case '--auto-update':
+        args.autoUpdate = true;
+        break;
+      case '--no-auto-update':
+        args.autoUpdate = false;
         break;
       case '--env':
         i++;
@@ -107,6 +118,19 @@ function promptUser(question, choices) {
         .map(s => parseInt(s.trim(), 10) - 1)
         .filter(n => !isNaN(n) && n >= 0 && n < choices.length);
       resolve(indices);
+    });
+  });
+}
+
+function promptYesNo(question, defaultYes) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const hint = defaultYes ? '[Y/n]' : '[y/N]';
+    rl.question(`\n${question} ${hint} `, (answer) => {
+      rl.close();
+      const trimmed = answer.trim().toLowerCase();
+      if (trimmed === '') return resolve(defaultYes);
+      resolve(trimmed === 'y' || trimmed === 'yes');
     });
   });
 }
@@ -199,6 +223,44 @@ async function main() {
 
   console.log(BANNER);
 
+  // Auto-update preference: only relevant for full installs into hook-supporting
+  // environments (auto-update is driven by the SessionStart update-check hook).
+  //
+  //   --auto-update / --no-auto-update  → set explicitly, no prompt
+  //   already stored                    → leave as-is, no prompt (quiet re-runs)
+  //   first time (fresh or upgrade)     → ask once, default yes
+  //
+  // Upgrading installs land in the "first time" branch because pre-feature
+  // installs have a .slashdo-version but no .slashdo-config.json yet.
+  let autoUpdate;
+  if (!args.dryRun && !args.uninstall && !args.commands.length) {
+    const autoUpdateEnvs = selectedEnvs
+      .map(getEnv)
+      .filter(env => env.supportsHooks && env.configFile);
+
+    if (typeof args.autoUpdate === 'boolean') {
+      // Explicit flag overrides any stored choice and skips the prompt.
+      autoUpdate = args.autoUpdate;
+    } else if (autoUpdateEnvs.some(env => readConfig(env.configFile).autoUpdate === undefined)) {
+      // At least one relevant env has no stored choice — fresh install or an
+      // upgrade from a version that predates this feature.
+      const isUpgrade = autoUpdateEnvs.some(env => fs.existsSync(env.versionFile));
+      const question = isUpgrade
+        ? 'New: slashdo can now auto-update itself when a new version is detected. Enable it? (otherwise the statusline just shows a ⬆ /do:update hint)'
+        : 'Auto-update slashdo when a new version is detected? (otherwise the statusline just shows a ⬆ /do:update hint)';
+
+      if (process.stdin.isTTY) {
+        autoUpdate = await promptYesNo(question, true);
+      } else {
+        // Non-interactive caller (CI, piped stdin) — default to enabled so the
+        // intuitive behavior happens without a mandatory flag. Pass
+        // --no-auto-update to opt out non-interactively.
+        autoUpdate = true;
+        console.log('Non-interactive — enabling auto-update (pass --no-auto-update to opt out).');
+      }
+    }
+  }
+
   for (const envName of selectedEnvs) {
     const env = getEnv(envName);
     const results = install({
@@ -207,6 +269,7 @@ async function main() {
       filterNames: args.commands.length ? args.commands : null,
       dryRun: args.dryRun,
       uninstall: args.uninstall,
+      autoUpdate,
     });
     printResults(results, env.name, args.dryRun);
   }
