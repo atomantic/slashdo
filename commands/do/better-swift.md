@@ -5,7 +5,7 @@ argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent
 
 # Better Swift — Unified DevSecOps Pipeline for SwiftUI Apps
 
-Run the full DevSecOps lifecycle optimized for Swift/SwiftUI multi-platform projects: audit the codebase with 7 deduplicated agents, consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run the requested review loop(s), and merge.
+Run the full DevSecOps lifecycle optimized for Swift/SwiftUI multi-platform projects: audit the codebase with 8 deduplicated agents (including a UX Consistency & Responsive Layout agent — SwiftUI apps ship a user-facing UI by definition), consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run the requested review loop(s), and merge.
 
 **Default mode: fully autonomous.** Uses Balanced model profile, proceeds through all phases without prompting. **There is no default reviewer**: if `--review-with` is omitted, no external review runs and PRs are left open for manual review (no auto-merge). Pass `--review-with <agent>` to run a review loop and auto-merge PRs with clean reviews.
 
@@ -40,7 +40,7 @@ AskUserQuestion([
     header: "Model",
     multiSelect: false,
     options: [
-      { label: "Quality", description: "Opus for all agents — fewest false positives, best fixes (highest cost, 7+ Opus agents)" },
+      { label: "Quality", description: "Opus for all agents — fewest false positives, best fixes (highest cost, 8+ Opus agents)" },
       { label: "Balanced (Recommended)", description: "Sonnet for audit and remediation — good quality at moderate cost" },
       { label: "Budget", description: "Haiku for audit, Sonnet for remediation — fastest and cheapest" }
     ]
@@ -52,7 +52,7 @@ Record the selection as `MODEL_PROFILE` and derive agent models from this table:
 
 | Agent Role | Quality | Balanced | Budget |
 |------------|---------|----------|--------|
-| Audit agents (7 Explore agents, Phase 1) | opus | sonnet | haiku |
+| Audit agents (8 Explore agents, Phase 1) | opus | sonnet | haiku |
 | Remediation agents (general-purpose, Phase 3) | opus | sonnet | sonnet |
 
 Derive two variables:
@@ -220,7 +220,7 @@ Before launching audit agents, load the gotcha catalogue into your context so yo
 
 Use `GOTCHA_ENTRIES_IN_SCOPE` (recorded in Phase 0e) to filter which entries are relevant for this project. Pass each downstream agent ONLY the entries that match its category (per the table in Phase 0e), not the whole catalogue.
 
-Launch 7 Explore agents in two batches. Each agent must report findings in this format:
+Launch 8 Explore agents in two batches. Each agent must report findings in this format:
 ```
 - **[CRITICAL/HIGH/MEDIUM/LOW]** `file:line` - Description. Suggested fix: ... Complexity: Simple/Medium/Complex
 ```
@@ -332,7 +332,7 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - **iCloud ubiquity container silent failure — gotcha catalogue #4:** `FileManager.url(forUbiquityContainerIdentifier:)` returning a non-nil URL does NOT mean the container is accessible — it only means the entitlement is configured. Pattern to flag: `if let iCloudURL = fm.url(forUbiquityContainerIdentifier: ...) { ... try? fm.createDirectory(...) ... self.dataDirectory = iCloudURL ... }` — the `try?` swallows permission errors and the app silently operates on an inaccessible directory. Required pattern: after `createDirectory`, verify accessibility via `contentsOfDirectory(at:includingPropertiesForKeys:)` inside `do/catch` (not `try?`), and fall back to local Documents on any failure. Full catalogue entry: `~/.claude/lib/swift-gotchas.md` § 4.
    - **SwiftData CloudKit cross-Apple-ID sharing gap — gotcha catalogue #3:** `ModelConfiguration(cloudKitDatabase:)` only has `.private(...)` and `.automatic` — there is NO `.shared` case. Apps that need cross-user collaboration (family/team apps) will silently sync only across the user's own devices. Flag any app that has `cloudKitDatabase: .automatic` AND mentions "household", "family", "team", "shared", or "invite" in code/comments — they likely need a `CKShare`-on-custom-zone overlay pattern. Common compile errors that indicate this gap: `type 'CKShare.Metadata' has no member 'activityType'`, `(saved, _) = try await db.modifyRecords(...)` (modern async API returns dictionaries, not tuples of arrays). Full catalogue entry: `~/.claude/lib/swift-gotchas.md` § 3.
 
-### Batch 2 (2 agents after Batch 1 completes):
+### Batch 2 (3 agents after Batch 1 completes):
 
 **Model**: Same `AUDIT_MODEL` as Batch 1.
 
@@ -490,6 +490,38 @@ Skip step 4 if steps 1-3 reveal the code is correct.
 
    Report each finding with a severity prefix `**[CRITICAL]**`, `**[HIGH]**`, `**[MEDIUM]**`, or `**[LOW]**` followed immediately by a quality prefix `[VACUOUS]`, `[WEAK]`, or `[MISSING]` (for example, `**[HIGH][VACUOUS]**`) to distinguish quality issues from coverage gaps while keeping the format consistent with other agents. Include the specific test name and file:line for existing test issues.
 
+8. **UX Consistency & Responsive Layout**
+   Always runs — SwiftUI projects ship a user-facing UI by definition.
+   Sources: app entry points (`App` struct, `WindowGroup`/`Scene` declarations, root views), top-level screen views, navigation containers, design tokens/theme files (`Color`/`Font` extensions, asset catalogs), shared component library (custom `ViewModifier`s, `ButtonStyle`s, reusable views)
+
+   **First-launch & first-frame UX (highest priority — bump severity one tier when a finding affects the first screen the user sees):**
+   - Blank or spinner-only first frame: root view rendering bare `ProgressView()` or an empty view while initial data loads, with no skeleton placeholder (`.redacted(reason: .placeholder)` over sample-shaped content) reserving layout
+   - Synchronous heavy work delaying first frame: `ModelContainer`/Core Data store setup, large JSON decode, migrations, or network calls in `App.init()`, root view init, or eagerly-constructed singletons on the launch path
+   - Layout shift after first render: async content (`AsyncImage`, fetched lists, remote config) inserted into the first screen without reserved dimensions or placeholder sizing; banners injected after first paint that push content down
+   - Primary content or call-to-action requiring scroll on the smallest supported device (iPhone SE class, 320pt-width windows) because of oversized hero media or stacked banners/notices
+   - Permission prompts (notifications, tracking, location) fired at launch before the user sees any content
+   - Launch screen → first view discontinuity: mismatched background color or layout causing a visible jump at startup
+
+   **Responsive layout (device sizes & window geometry — Dynamic Type scaling belongs to Agent 6):**
+   - Hardcoded `.frame(width:height:)` on containers that break on the smallest supported device or fail to use space on the largest (13" iPad, wide Mac windows)
+   - Missing size-class adaptation: iPhone-shaped layouts forced onto iPad — no `@Environment(\.horizontalSizeClass)` branch or `NavigationSplitView` where regular width warrants it
+   - iPad multitasking & Stage Manager: layouts broken in Split View / narrow window widths; `UIRequiresFullScreen` blocking multitasking without justification (note: TestFlight orientation requirements are Agent 6's concern — flag here only the layout breakage)
+   - macOS window resizing: fixed-size content in resizable windows, missing `.defaultSize`/`.windowResizability`, content that neither expands nor recenters when the window grows
+   - `HStack`s holding variable-length text with no wrap fallback (`ViewThatFits` or width-conditional `VStack`) at narrow widths and default text size
+   - Truncation of user-generated or localized content at default text size — German/French run ~30% longer than English; `.lineLimit(1)` on variable-length labels users must read in full
+   - Landscape orientation visibly degraded when the project supports it
+   - Keyboard avoidance: text inputs the keyboard covers; tall forms without a `ScrollView`/`Form` container
+
+   **UX consistency:**
+   - One-off color/font/spacing literals in screens where a design system exists (`Color`/`Font` extensions or asset catalog tokens) — count occurrences per pattern (e.g., "hardcoded `Color(red:green:blue:)` in 14 views")
+   - Multiple bespoke implementations of the same UI concept: divergent button treatments instead of a shared `ButtonStyle`, duplicate card/row layouts, parallel form-field components
+   - Inconsistent loading/empty/error states across screens — some use `ContentUnavailableView`, some custom views, some render nothing; lists with no empty state at all
+   - Inconsistent feedback patterns: errors surfaced as alerts in one flow and silently swallowed in another; destructive actions sometimes behind `confirmationDialog`, sometimes immediate; haptics on some primary actions but not others
+   - Inconsistent navigation grammar: the same kind of task presented as a sheet in one place and a push in another; dismiss/cancel buttons in different toolbar positions across sheets
+   - Missing or inconsistent interactive states: pressed states on custom buttons, `.onHover`/pointer effects on macOS and iPadOS, focus effects on tvOS
+
+   Boundary notes (avoid duplicate findings): Dynamic Type scaling, accessibility, and platform-API coverage belong to Agent 6 — flag text-size or layout issues here only when they reproduce at the DEFAULT text size. Repeated literals and duplicate modifier chains as a deduplication concern belong to Agent 3 — flag them here only when they produce visibly divergent rendering; Phase 2 dedup keeps the most specific description. Tag this agent's category as `ux` for Phase 2 ownership mapping.
+
 Wait for ALL agents to complete before proceeding.
 
 </audit_instructions>
@@ -551,6 +583,7 @@ For each file touched by multiple categories, document why it was assigned to on
 ### Bugs, Performance & Error Handling
 ### Platform Coverage & SwiftUI Patterns
 ### Test Quality & Coverage
+### UX Consistency & Responsive Layout
 ```
 
 **Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct findings via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case derived from the title text, ≤50 chars, unique against every `[slug]` already in PLAN.md. Recommended pattern for audit findings: `<category-prefix>-<file-basename>-<short-hint>` (e.g. `[sec-keychain-token-leak]`, `[swift-mainactor-binding]`). _(Issue mode skips slugs entirely — the issue number is the ID.)_
@@ -565,6 +598,7 @@ For each file touched by multiple categories, document why it was assigned to on
    - Bugs & Perf → Bugs, Performance & Error Handling → `bugs-perf`
    - Platform & SwiftUI → Platform Coverage & SwiftUI Patterns → `platform-swiftui`
    - Tests → Test Quality & Coverage → `tests`
+   - UX → UX Consistency & Responsive Layout → `ux`
 
 ```
 | Category              | CRITICAL | HIGH | MEDIUM | LOW | Total |
@@ -576,6 +610,7 @@ For each file touched by multiple categories, document why it was assigned to on
 | Bugs & Perf           | ...      | ...  | ...    | ... | ...   |
 | Platform & SwiftUI    | ...      | ...  | ...    | ... | ...   |
 | Tests                 | ...      | ...  | ...    | ... | ...   |
+| UX                    | ...      | ...  | ...    | ... | ...   |
 | TOTAL                 | ...      | ...  | ...    | ... | ...   |
 ```
 
@@ -634,6 +669,7 @@ Remediation runs in parallel, one worker per category that has CRITICAL, HIGH, o
 - Architecture & SOLID
 - Bugs, Performance & Error Handling
 - Platform Coverage & SwiftUI Patterns
+- UX Consistency & Responsive Layout — remediation must be conservative and verifiable: fix layout mechanics and consolidate to existing design tokens/components without redesigning. First-frame fixes come first (reserve placeholder dimensions, move heavy work off the launch path, add skeleton states). When consolidating divergent components or one-off values, change call sites mechanically and preserve rendered output on every platform in `PLATFORMS` — never change copy or visual design intent. If a finding requires a design decision (e.g., which of two button styles is canonical), pick the variant with the most call sites and note the choice in the commit message
 
 <!-- if:teams -->
 1. Use `TeamCreate` with name `better-swift-{DATE}`.
@@ -684,7 +720,7 @@ When a finding cites a catalogue entry, READ that entry in `~/.claude/lib/swift-
 
 ### Conflict avoidance:
 - Review all findings before task assignment. If two categories touch the same file, assign both sets of findings to the same agent.
-- Security agent gets priority on Keychain/data protection; Platform agent gets priority on #if os(...) blocks.
+- Security agent gets priority on Keychain/data protection; Platform agent gets priority on #if os(...) blocks; UX agent gets priority on design-token/theme files and shared component files.
 
 </plan_and_remediate>
 
@@ -890,7 +926,7 @@ Initialize `CREATED_CATEGORY_SLUGS=""` (empty space-delimited string). After eac
 For each category that has findings:
 1. Switch to `{DEFAULT_BRANCH}`: `git checkout {DEFAULT_BRANCH}`
 2. Create a category branch: `git checkout -b better-swift/{CATEGORY_SLUG}`
-   - Use slugs: `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `platform-swiftui`, `tests`
+   - Use slugs: `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `platform-swiftui`, `tests`, `ux`
 3. For each file assigned to this category in `FILE_OWNER_MAP`:
    - **Modified files**: `git checkout better-swift/{DATE} -- {file_path}`
    - **New files (Added)**: `git checkout better-swift/{DATE} -- {file_path}`
@@ -1135,6 +1171,7 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 | Bugs & Perf            | ...      | ...   | ...     | #number  | pass   | approved |
 | Platform & SwiftUI     | ...      | ...   | ...     | #number  | pass   | approved |
 | Tests                  | ...      | ...   | ...     | #number  | pass   | approved |
+| UX                     | ...      | ...   | ...     | #number  | pass   | approved |
 | TOTAL                  | ...      | ...   | ...     | N PRs    |        |          |
 
 Platforms verified: {PLATFORMS}
@@ -1176,6 +1213,7 @@ Test Enhancement Stats:
 - Test Quality & Coverage findings are remediated in Phase 4c with a dedicated test enhancement agent that verifies tests fail when code is broken
 - **Every build and test verification runs on ALL supported platforms** — a fix that works on iOS but breaks macOS is not acceptable
 - Agent 6 (Platform Coverage & SwiftUI Patterns) is the differentiator from the generic `do:better` — it ensures multi-platform parity, catches deprecated SwiftUI APIs, and verifies accessibility compliance
+- Agent 8 (UX Consistency & Responsive Layout) always runs — SwiftUI projects ship a UI by definition (no `HAS_UI` gate, unlike `do:better`). It weights first-launch/first-frame UX highest — findings affecting the first screen the user sees are bumped one severity tier — then device-size/window-geometry responsiveness, then design consistency. Dynamic Type scaling and accessibility stay with Agent 6 to avoid duplicate findings
 - **No default reviewer**: without `--review-with`, Phase 6 and the auto-merge are skipped and all PRs are left open for manual review. Pass `--review-with <agent[,agent,...]>` to run a review loop and enable auto-merge on a clean result. `copilot` is never added implicitly
 - GitLab projects skip the Phase 6 review loop + auto-merge entirely and stop after MR creation
 - CI must pass on each PR before its review loop runs or it is merged
