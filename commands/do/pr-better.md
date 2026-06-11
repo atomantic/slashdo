@@ -9,7 +9,7 @@ Run the full `do:better` DevSecOps audit and remediation, but **commit all fixes
 
 This is the right command when:
 - You want the full `do:better` quality bar on a feature branch you're about to ship
-- You want a single PR (not 8 per-category PRs) so reviewers see one cohesive change
+- You want a single PR (not a stack of per-category PRs) so reviewers see one cohesive change
 - You're already on a feature branch and want all audit fixes folded into the same PR as your feature work
 
 ## Argument Forwarding
@@ -36,7 +36,7 @@ Constraints applied automatically:
 Execute the full `do:better` workflow defined in `~/.claude/commands/do/better.md` with these mandatory deviations:
 
 ### Phase 0 → 4a: unchanged
-Run discovery, audit (all 8 agents, plus the Structural Ambition agent when `--strict`/`--nuclear` is passed), plan generation, worktree setup, foundation utilities, parallel remediation, build/test verification, and internal code review exactly as specified in `do:better`.
+Run discovery, audit (all 8 core agents, plus the UX Consistency & Responsive Layout agent when the project ships a UI — `HAS_UI=true` — and the Structural Ambition agent when `--strict`/`--nuclear` is passed), plan generation, worktree setup, foundation utilities, parallel remediation, build/test verification, and internal code review exactly as specified in `do:better`.
 
 ### Phase 4b: Force the "Commit directly" path
 

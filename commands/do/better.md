@@ -5,7 +5,7 @@ argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent
 
 # Better — Unified DevSecOps Pipeline
 
-Run the full DevSecOps lifecycle: audit the codebase with 8 deduplicated agents (9 in strict mode), consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run the requested review loop(s), and merge.
+Run the full DevSecOps lifecycle: audit the codebase with up to 10 deduplicated agents (8 core, plus a UX Consistency & Responsive Layout agent for UI-bearing projects and a Structural Ambition agent in strict mode), consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run the requested review loop(s), and merge.
 
 **Default mode: fully autonomous.** Uses Balanced model profile, proceeds through all phases without prompting. **There is no default reviewer**: if `--review-with` is omitted, no external review runs and PRs are left open for manual review (no auto-merge). Pass `--review-with <agent>` to run a review loop and auto-merge PRs with clean reviews.
 
@@ -19,7 +19,7 @@ Parse `$ARGUMENTS` for:
 - **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to the multi-reviewer loop for each PR; control when a per-PR reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
 - **`--reviewer-applies`**: forwarded to each PR's review loop — the reviewing CLI applies fixes directly instead of the orchestrator (no effect on copilot passes). Record `REVIEWER_APPLIES=true`/`false`.
 - **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** pass runs per PR (Phase 6); no effect on `codex`/`agy`/`claude` passes (fixed 3-iteration cap). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass per PR, exiting early on 0 comments). `0` = loop until Copilot returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).`
-- **`--strict`** (alias: **`--nuclear`**): enable the Structural Ambition agent (9th audit agent) and promote its blocker-tier findings to CRITICAL severity for remediation. Flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications. Set `STRICT_MODE=true` when present
+- **`--strict`** (alias: **`--nuclear`**): enable the Structural Ambition agent (10th audit agent) and promote its blocker-tier findings to CRITICAL severity for remediation. Flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications. Set `STRICT_MODE=true` when present
 - **`--issues`** / **`--issues-label <name>`**: track deferred findings as GitHub/GitLab issues instead of PLAN.md lines (see Phase 2). Record `ISSUE_MODE=true`/`false` and `PLAN_LABEL` (default `plan`).
 - **Path filter**: limit scanning scope to specific directories or files
 - **Focus areas**: e.g., "security only", "DRY and bugs"
@@ -53,7 +53,7 @@ Record the selection as `MODEL_PROFILE` and derive agent models from this table:
 
 | Agent Role | Quality | Balanced | Budget |
 |------------|---------|----------|--------|
-| Audit agents (8 Explore agents, Phase 1) | opus | sonnet | haiku |
+| Audit agents (8–10 Explore agents, Phase 1) | opus | sonnet | haiku |
 | Remediation agents (general-purpose, Phase 3) | opus | sonnet | sonnet |
 
 Derive two variables:
@@ -76,6 +76,7 @@ When compacting during this workflow, always preserve:
 - `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR`, `REPO_DIR` values
 - `VCS_HOST`, `CLI_TOOL`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
 - `STRICT_MODE` (true/false — determines whether the Structural Ambition agent runs and whether structural findings are promoted to CRITICAL)
+- `HAS_UI` (true/false — determines whether the UX Consistency & Responsive Layout agent runs and whether the `ux` category exists downstream)
 - `PHASE_4C_START_SHA` (needed for FILE_OWNER_MAP update in Phase 4c.3)
 - `VACUOUS_TESTS_FIXED`, `WEAK_TESTS_STRENGTHENED`, `NEW_TEST_CASES`, `NEW_TEST_FILES`
 - `CREATED_CATEGORY_SLUGS` (list of branch slugs created in Phase 5)
@@ -103,6 +104,13 @@ Check for project manifests to determine the tech stack:
 
 Record the detected stack as `PROJECT_TYPE` for agent context.
 
+Additionally, detect whether the project ships a user-facing UI:
+- Web frontend dependencies (`react`, `vue`, `svelte`, `next`, `nuxt`, `astro`, `angular`, `solid-js`) or UI source files (`*.html`, `*.css`/`*.scss`, JSX/TSX, `*.vue`, `*.svelte`)
+- Desktop shells (Electron, Tauri) or mobile UI code (React Native, Flutter)
+- Server-rendered templates (ERB, Jinja, Blade, Razor, Go templates) that emit HTML
+
+Record `HAS_UI=true`/`false` — this gates the UX Consistency & Responsive Layout audit agent (Phase 1, agent 9) and its `ux` category downstream.
+
 ### 0c: Build & Test Command Detection
 Derive build and test commands from the project type:
 - Node.js: check `package.json` scripts for `build`, `test`, `typecheck`, `lint`
@@ -128,7 +136,7 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 
 Project conventions are already in your context. Pass relevant conventions to each agent.
 
-Launch 8 Explore agents in two batches. Each agent must report findings in this format:
+Launch the Explore agents in two batches (8 core agents; agent 9 runs only when `HAS_UI=true`, agent 10 only when `STRICT_MODE=true`). Each agent must report findings in this format:
 ```
 - **[CRITICAL/HIGH/MEDIUM/LOW]** `file:line` - Description. Suggested fix: ... Complexity: Simple/Medium/Complex
 ```
@@ -181,7 +189,7 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    Resilience: external calls without timeouts, missing fallback for unavailable downstream services, retry without backoff ceiling/jitter, missing health check endpoints
    Observability: production paths without structured logging, error logs missing reproduction context (request ID, input params), async flows without correlation IDs
 
-### Batch 2 (3 agents after Batch 1 completes):
+### Batch 2 (3–5 agents after Batch 1 completes):
 
 **Model**: Same `AUDIT_MODEL` as Batch 1.
 
@@ -234,7 +242,35 @@ Skip step 4 if steps 1-3 reveal the code is correct.
 
    Report each finding with a severity prefix `**[CRITICAL]**`, `**[HIGH]**`, `**[MEDIUM]**`, or `**[LOW]**` followed immediately by a quality prefix `[VACUOUS]`, `[WEAK]`, or `[MISSING]` (for example, `**[HIGH][VACUOUS]**`) to distinguish quality issues from coverage gaps while keeping the format consistent with other agents. Include the specific test name and file:line for existing test issues.
 
-9. **Structural Ambition** _(strict mode only — dispatch only when `STRICT_MODE=true`, otherwise skip)_
+9. **UX Consistency & Responsive Layout** _(UI projects only — dispatch only when `HAS_UI=true`, otherwise skip)_
+   Sources: page/screen entry points (routes, top-level views, landing pages), layout components, global styles, design tokens/theme files, shared component library
+
+   **Above-the-fold UX (highest priority — bump severity one tier when a finding affects initial-viewport content):**
+   - Primary content or call-to-action pushed below the fold at common viewports (360×640 mobile, 768×1024 tablet, 1280×800 desktop) by oversized hero media, stacked banners, tall nav bars, or notice pileups (cookie consent + announcement + promo)
+   - Layout shift in initial-viewport content: images/embeds/ads without explicit `width`/`height` or `aspect-ratio`, web fonts without `font-display` fallback, late-injected banners that push content down after first paint
+   - The likely LCP element lazy-loaded (`loading="lazy"` on the hero image), gated behind client-side hydration, or blocked by a render-blocking resource
+   - Critical interactions (search, primary nav, main CTA) requiring scroll or hidden behind disclosure UI on mobile
+   - Blank or spinner-only first paint: above-the-fold loading states with no skeleton or reserved dimensions
+
+   **Responsive layout:**
+   - Fixed pixel widths/heights on containers that break below ~400px or above ~1440px; missing or incorrect viewport meta tag
+   - Horizontal overflow risks: flex rows without wrap fallback, tables, long unbroken strings, absolutely-positioned elements with fixed offsets
+   - Breakpoint gaps: components styled for some breakpoints but not the project's full breakpoint scale; one-off media queries that don't match the shared scale
+   - `100vh` on mobile (browser chrome eats the viewport) without `dvh`/`svh` fallback
+   - Images without responsive `srcset`/`sizes`; raster assets far larger than their rendered size
+   - Touch targets under 44×44px; hover-only interactions with no touch equivalent
+   - Text truncated where wrapping is expected (`overflow: hidden` + `white-space: nowrap` on variable-length or user-generated content)
+
+   **UX consistency:**
+   - One-off spacing/typography/color values where a design-token or theme scale exists (count occurrences per pattern, e.g., "hardcoded hex colors in 14 components")
+   - Multiple bespoke implementations of the same UI concept: divergent button styles, duplicate modal/dialog variants, parallel form-field components
+   - Inconsistent loading/empty/error state handling across views (some skeletons, some spinners, some nothing)
+   - Inconsistent feedback patterns: form validation messaging, toast vs inline errors, disabled vs hidden controls
+   - Missing or inconsistent focus/hover/active states across interactive components
+
+   Note: general accessibility (alt text, ARIA, contrast) belongs to the Stack-Specific agent — flag accessibility here only when it is also a layout failure (touch target size, content clipped at zoom or small viewports). Tag this agent's category as `ux` for Phase 2 ownership mapping.
+
+10. **Structural Ambition** _(strict mode only — dispatch only when `STRICT_MODE=true`, otherwise skip)_
    Sources: `~/.claude/lib/review-structural-ambition.md` — read this file and use its full content as the agent's instructions.
    Focus: missed code-judo simplifications (reframings that delete whole branches/modes/helpers), file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers / identity abstractions, boundary leaks (feature logic in shared modules), bespoke duplicates of canonical helpers, cast-heavy / `any`-heavy / optional-soup contracts, sequential orchestration where the parallel/atomic shape is obviously cleaner.
    Report findings using the standard severity format. The skill file's presumptive blockers (file pushed past 1000 lines, spaghetti growth in existing code, thin wrappers, boundary leaks, canonical-helper duplication) must be marked `[CRITICAL]` so Phase 2 picks them up for remediation. Every finding must name a concrete suggested reframing — drop findings that only say "could be cleaner" without a path. Tag this agent's category as `structural` for Phase 2 ownership mapping.
@@ -300,6 +336,7 @@ For each file touched by multiple categories, document why it was assigned to on
 ### Stack-Specific
 ### Dependency Freedom
 ### Test Quality & Coverage
+### UX Consistency & Responsive Layout  _(only when HAS_UI=true)_
 ### Structural Ambition  _(only when STRICT_MODE=true)_
 ```
 
@@ -316,6 +353,7 @@ For each file touched by multiple categories, document why it was assigned to on
    - Stack-Specific → Stack-Specific → `stack-specific`
    - Dep Freedom → Dependency Freedom → `deps`
    - Tests → Test Quality & Coverage → `tests`
+   - UX → UX Consistency & Responsive Layout → `ux` _(UI projects only)_
    - Structural → Structural Ambition → `structural` _(strict mode only)_
 
 ```
@@ -329,11 +367,12 @@ For each file touched by multiple categories, document why it was assigned to on
 | Stack-Specific    | ...      | ...  | ...    | ... | ...   |
 | Dep Freedom       | ...      | ...  | ...    | ... | ...   |
 | Tests             | ...      | ...  | ...    | ... | ...   |
+| UX                | ...      | ...  | ...    | ... | ...   |
 | Structural        | ...      | ...  | ...    | ... | ...   |
 | TOTAL             | ...      | ...  | ...    | ... | ...   |
 ```
 
-Omit the **Structural** row when `STRICT_MODE=false`.
+Omit the **UX** row when `HAS_UI=false` and the **Structural** row when `STRICT_MODE=false`.
 
 **GATE: If `--scan-only` was passed, STOP HERE.** Print the summary and exit.
 
@@ -385,6 +424,7 @@ Remediation runs in parallel, one worker per category that has CRITICAL, HIGH, o
 - Bugs, Performance & Error Handling
 - Stack-Specific
 - Dependency Freedom
+- UX Consistency & Responsive Layout _(UI projects only)_ — remediation must be conservative and verifiable: fix layout, markup, and CSS mechanics without redesigning. Above-the-fold fixes come first (reserve dimensions, fix LCP loading, unblock first paint). When consolidating one-off values to design tokens or shared components, change call sites mechanically and preserve rendered output — never change copy or visual design intent. If a finding requires a design decision (e.g., which of two button styles is canonical), pick the variant with the most call sites and note the choice in the commit message
 - Structural Ambition _(strict mode only)_ — remediation worker must apply the specific reframing named in each finding (extract module, collapse condition chain, delete wrapper, move logic to canonical layer). Do NOT settle for "cleaner version of the same idea" — if the finding says "delete this branch by reframing X as Y," the fix must actually delete the branch. If a reframing turns out to be infeasible after investigation, leave the finding as-is and document why in the commit message rather than substituting a cosmetic change
 
 <!-- if:teams -->
@@ -604,7 +644,7 @@ Initialize `CREATED_CATEGORY_SLUGS=""` (empty space-delimited string). After eac
 For each category that has findings:
 1. Switch to `{DEFAULT_BRANCH}`: `git checkout {DEFAULT_BRANCH}`
 2. Create a category branch: `git checkout -b better/{CATEGORY_SLUG}`
-   - Use slugs: `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`, and `structural` (strict mode only)
+   - Use slugs: `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`, `ux` (UI projects only), and `structural` (strict mode only)
 3. For each file assigned to this category in `FILE_OWNER_MAP`:
    - **Modified files**: `git checkout better/{DATE} -- {file_path}`
    - **New files (Added)**: `git checkout better/{DATE} -- {file_path}`
@@ -834,10 +874,11 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 | Stack-Specific     | ...      | ...   | ...     | #number  | pass   | approved |
 | Dep Freedom        | ...      | ...   | ...     | #number  | pass   | approved |
 | Tests              | ...      | ...   | ...     | #number  | pass   | approved |
+| UX                 | ...      | ...   | ...     | #number  | pass   | approved |
 | Structural         | ...      | ...   | ...     | #number  | pass   | approved |
 | TOTAL              | ...      | ...   | ...     | N PRs    |        |          |
 
-Omit the **Structural** row when `STRICT_MODE=false`.
+Omit the **UX** row when `HAS_UI=false` and the **Structural** row when `STRICT_MODE=false`.
 
 Test Enhancement Stats:
 - Vacuous tests fixed: {VACUOUS_TESTS_FIXED}
@@ -873,6 +914,7 @@ Test Enhancement Stats:
 - Only CRITICAL, HIGH, and MEDIUM findings are auto-remediated for code categories; LOW findings remain tracked in PLAN.md
 - Dependency Freedom findings replace unnecessary third-party packages with owned code — see `/do:depfree` for standalone usage
 - Test Quality & Coverage findings are remediated in Phase 4c with a dedicated test enhancement agent that verifies tests fail when code is broken
+- The UX Consistency & Responsive Layout agent runs only when the project ships a user-facing UI (`HAS_UI=true`). It weights above-the-fold UX highest — findings affecting initial-viewport content are bumped one severity tier — then responsive layout correctness, then design consistency. General accessibility stays with the Stack-Specific agent to avoid duplicate findings
 - **No default reviewer**: without `--review-with`, Phase 6 and the auto-merge are skipped and all PRs are left open for manual review. Pass `--review-with <agent[,agent,...]>` to run a review loop and enable auto-merge on a clean result. `copilot` is never added implicitly
 - GitLab projects skip the Phase 6 review loop + auto-merge entirely and stop after MR creation (the loop drives GitHub PRs; local-agent reviewers aside, there is no GitLab merge path here)
 - CI must pass on each PR before its review loop runs or it is merged
