@@ -124,6 +124,7 @@ git push -u origin "next/${SLUG}" || echo "WARN: could not publish next/${SLUG} 
 Immediately after the worktree is verified, claim the issue **on the host** so a `/do:next --issues` on any other machine sees it as taken (Phase 1's assignee check is the reader). Do this before writing code — it's the cross-machine half of the claim:
 
 ```bash
+ISSUE_NUM="<picked-issue-number>"; SLUG="issue-${ISSUE_NUM}"; WORKTREE="../next-${SLUG}"   # re-declare — shell vars don't cross snippets
 # Load-bearing marker — if the assign itself FAILS (no triage/write access, API
 # error), you have NOT claimed the issue. Abort immediately; do NOT fall through to
 # the read-back, which would see zero assignees, take the `else` path, and proceed
@@ -210,6 +211,10 @@ Write the code, tests, and docs the item requires, following the **target repo's
 
 > **Re-sync with the default branch BEFORE editing tracked files — required when claims run in parallel.** Every claim touches the same hot changelog (and, in PLAN.md mode, the backlog list). This worktree was cut at claim-start; editing that stale snapshot silently *re-adds* lines sibling claims removed. Sync first, from inside the worktree:
 > ```bash
+> # Re-declare — shell vars don't survive across Bash snippets (only cwd does):
+> SLUG="<picked-slug>"; WORKTREE="../next-${SLUG}"
+> DEFAULT_BRANCH="$(git -C "${WORKTREE}" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
+> DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(git -C "${WORKTREE}" remote show origin | sed -n 's/.*HEAD branch: //p')}"
 > cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit "origin/${DEFAULT_BRANCH}"
 > ```
 > **Conflict rule — deletions win.** Resolve any PLAN.md / changelog conflict so a line removed on *either* side stays removed; keep additions from both. Then `git add` and `git commit --no-edit`.
@@ -263,6 +268,10 @@ State any skip/trim and why ("Diff is 3 lines in one file; skipping the quality 
 **Re-sync, then merge.** A long review loop can let sibling claims merge after your Phase-5 sync — re-sync once more so a stale PLAN.md can't resurrect their removed items at merge time:
 
 ```bash
+# Re-declare — shell vars don't survive across Bash snippets (only cwd does):
+SLUG="<picked-slug>"; WORKTREE="../next-${SLUG}"
+DEFAULT_BRANCH="$(git -C "${WORKTREE}" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
+DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(git -C "${WORKTREE}" remote show origin | sed -n 's/.*HEAD branch: //p')}"
 cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit "origin/${DEFAULT_BRANCH}"
 # Resolve any PLAN.md / changelog conflict deletions-win (Phase 5 rule), then:
 git push
