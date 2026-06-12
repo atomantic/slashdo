@@ -85,7 +85,11 @@ slashdo's worktree convention is a **sibling directory** (`../next-<slug>`) on b
 
 ```bash
 SLUG="<picked-slug>" && \
-DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)" && \
+# Host-agnostic default-branch lookup — works on GitHub AND GitLab (and with no
+# `gh`/`glab` at all), unlike `gh repo view`. Try the local origin/HEAD ref first,
+# fall back to querying the remote if it isn't set.
+DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')" && \
+DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(git remote show origin | sed -n 's/.*HEAD branch: //p')}" && \
 WORKTREE="../next-${SLUG}" && \
 git fetch origin "${DEFAULT_BRANCH}" && \
 git worktree add -b "next/${SLUG}" "${WORKTREE}" "origin/${DEFAULT_BRANCH}" && \
@@ -110,14 +114,20 @@ gh issue edit "$ISSUE_NUM" --add-assignee @me                                   
 ASSIGNEES="$(gh issue view "$ISSUE_NUM" --json assignees -q '[.assignees[].login] | join(",")')"
 ME="$(gh api user -q .login)"
 if printf '%s' "$ASSIGNEES" | tr ',' '\n' | grep -qvxF "$ME" ; then
+  # A sibling won the race. Release the marker and STOP — do NOT add the label,
+  # do NOT continue to Phase 3+. Run Phase 7 cleanup (remove the worktree + branch)
+  # and re-run Phase 1 to pick the NEXT issue. This is a hard exit from the claim.
   echo "Issue #$ISSUE_NUM already claimed by: $ASSIGNEES — yielding."
   gh issue edit "$ISSUE_NUM" --remove-assignee @me 2>/dev/null || true
-  # then remove the worktree (Phase 7) and re-run Phase 1
+else
+  # Claim is exclusive (only you assigned) — mark in-progress for human visibility
+  # and proceed to Phase 3.
+  gh label create in-progress --color FFA500 --description "Claimed and being worked" 2>/dev/null || true
+  gh issue edit "$ISSUE_NUM" --add-label in-progress 2>/dev/null || true
 fi
-
-gh label create in-progress --color FFA500 --description "Claimed and being worked" 2>/dev/null || true
-gh issue edit "$ISSUE_NUM" --add-label in-progress 2>/dev/null || true          # human-visibility only
 ```
+
+**The race-detected branch is a hard stop, not a warning.** When the read-back shows another assignee, you have NOT claimed the issue — release your assignee, run Phase 7 cleanup to remove the worktree + branch you just created, and re-enter Phase 1 to pick the next eligible issue. Only the `else` branch (you are the sole assignee) proceeds to Phase 3.
 
 The re-read narrows the race from "the whole implementation" to "the sub-second window between `--add-assignee` and the read-back" — still not a true distributed lock (two reads can interleave so both yield, or in a tie both proceed), but close to compare-and-swap and far tighter than a blind assign. The assignee is the marker; the label is convenience (`|| true` keeps a label failure from aborting). **If you must stop after this (worktree failed, or the read-back showed a sibling won), release the marker before stopping:** `gh issue edit "$ISSUE_NUM" --remove-assignee @me --remove-label in-progress 2>/dev/null || true` — so a half-claimed issue isn't stranded as permanently "taken."
 
@@ -199,13 +209,15 @@ git diff --cached --quiet || git commit -m "docs([issue-<num>]): log issue #<num
 
 `/do:pr` already owns the entire review/ship pipeline — the required Local Code Review gate, `--review-with` multi-reviewer loop, `--review-iterations`, stop-modes, and `--reviewer-applies`. **Do not re-implement any of it here.** From inside the worktree, decide the review intensity, then invoke `/do:pr` with the flags this command received:
 
+> **A note on `/simplify`.** It's a quality-pass command in the slashdo ecosystem but **not part of a stock slashdo install** (slashdo ships only `/do:*`). Treat it as **optional**: run `/simplify` when your environment provides it; otherwise do the equivalent reuse/quality pass by hand (or skip it for a trivial diff). Never let a missing `/simplify` block the run — the load-bearing review is `/do:pr`'s gate plus any `--review-with` pass.
+
 | The user passed… | Run |
 |---|---|
-| `--review-with=<agents>` | `/simplify` (unless the diff is genuinely trivial), then `/do:pr --review-with=<agents>` (pass through `--review-iterations` / stop-mode / `--reviewer-applies` verbatim) |
+| `--review-with=<agents>` | `/simplify` if available (skip when the diff is genuinely trivial), then `/do:pr --review-with=<agents>` (pass through `--review-iterations` / stop-mode / `--reviewer-applies` verbatim) |
 | `--no-review` | `/do:pr` with no `--review-with` — its Local Code Review gate still fires; no external pass, no `/simplify` |
-| neither | **Judge the diff.** New code paths / abstractions / multi-file work → `/simplify` then `/do:pr --review-with=…` with a sensible reviewer. A value swap / typo / single-line fix → `/do:pr` alone. State the call before acting. |
+| neither | **Judge the diff.** New code paths / abstractions / multi-file work → `/simplify` (if available) then `/do:pr --review-with=…` with a sensible reviewer. A value swap / typo / single-line fix → `/do:pr` alone. State the call before acting. |
 
-State any skip/trim and why ("Diff is 3 lines in one file; skipping `/simplify` and external review — matches existing pattern"). `/do:pr` pushes `next/<slug>`, opens the PR (include `Closes #<num>` in issues mode), runs the chosen review loop, and reports the aggregate status.
+State any skip/trim and why ("Diff is 3 lines in one file; skipping the quality pass and external review — matches existing pattern"). `/do:pr` pushes `next/<slug>`, opens the PR (include `Closes #<num>` in issues mode), runs the chosen review loop, and reports the aggregate status.
 
 **Encode the slug in the PR title** for grep-ability if `/do:pr` didn't: `gh pr edit <num> --title "feat([<slug>]): <description>"`.
 
