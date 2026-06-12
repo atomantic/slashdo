@@ -89,6 +89,12 @@ slashdo's worktree convention is a **sibling directory** (`../next-<slug>`) on b
 
 ```bash
 SLUG="<picked-slug>" && \
+# Fail-closed pre-check: if origin ALREADY has this claim branch, a sibling machine
+# claimed it between Phase 1's scan and now — abort and re-pick (don't build a worktree
+# you'll just discard). This catches the common cross-machine collision cheaply.
+if git ls-remote --exit-code --heads origin "next/${SLUG}" >/dev/null 2>&1; then
+  echo "next/${SLUG} already on origin — another machine claimed it; re-run /do:next to pick the next item."; exit 1
+fi && \
 # Host-agnostic default-branch lookup — works on GitHub AND GitLab (and with no
 # `gh`/`glab` at all), unlike `gh repo view`. Try the local origin/HEAD ref first,
 # fall back to querying the remote if it isn't set.
@@ -111,6 +117,8 @@ git push -u origin "next/${SLUG}" || echo "WARN: could not publish next/${SLUG} 
 
 **Verify `pwd` is the worktree path**, not the main repo. If it printed the main repo path, the worktree creation or `cd` failed — STOP, report the error, do not proceed. **Re-anchor every later Bash call** with `cd "${WORKTREE}"` or absolute paths; working directory persists but a stray `cd` can drop you back at the main repo silently. **Stash both `WORKTREE` and `DEFAULT_BRANCH` for the later phases — and re-export them at the top of each subsequent Bash snippet.** Shell *variables* do NOT persist across separate Bash tool calls (only the working directory does), so `${DEFAULT_BRANCH}` and `${WORKTREE}` referenced in Phases 5/6/7 would otherwise expand empty (`git fetch origin ""` fails *after* you've already done the work). Either re-assign them literally at the start of each snippet, or recompute `DEFAULT_BRANCH` with the same git-native one-liner used above.
 
+> **Claim exclusivity is best-effort by design — not a distributed lock.** The `ls-remote` pre-check + immediate push narrow the cross-machine race to the sub-second window between two machines that both pass the pre-check before either's push lands; in that window a plain `git push` of an identical-commit branch succeeds for both, so neither "wins" atomically. This is intentional and matches the issue-mode assignee marker (and PortOS's original design): the load-bearing protection is the in-flight branch/PR scan, the markers just shrink the window. slashdo is single-user/few-machines, so this is the right trade-off — true ref-CAS locking (e.g. a lock branch with `--force-with-lease`, or a server-side hook) is deliberately out of scope. If two of your machines genuinely race the same item sub-second, the duplicate surfaces at PR time (two PRs for one slug) and you close one.
+
 ### Phase 2 — mark the issue in progress (issues mode only)
 
 Immediately after the worktree is verified, claim the issue **on the host** so a `/do:next --issues` on any other machine sees it as taken (Phase 1's assignee check is the reader). Do this before writing code — it's the cross-machine half of the claim:
@@ -120,7 +128,14 @@ Immediately after the worktree is verified, claim the issue **on the host** so a
 # error), you have NOT claimed the issue. Abort immediately; do NOT fall through to
 # the read-back, which would see zero assignees, take the `else` path, and proceed
 # without a marker (letting a second machine work the same issue).
-gh issue edit "$ISSUE_NUM" --add-assignee @me || { echo "Could not claim issue #$ISSUE_NUM (missing write access?) — aborting."; exit 1; }
+gh issue edit "$ISSUE_NUM" --add-assignee @me || {
+  echo "Could not claim issue #$ISSUE_NUM (missing write access?) — aborting."
+  # Phase 2 already created and (best-effort) pushed next/issue-<num>. Retract it so a
+  # failed assignment doesn't strand a branch that future Phase 1 scans read as in-flight.
+  git push origin --delete "next/${SLUG}" 2>/dev/null || true   # remote claim
+  cd .. && git worktree remove "$WORKTREE" 2>/dev/null && git branch -D "next/${SLUG}" 2>/dev/null   # local worktree + branch
+  exit 1
+}
 
 # Confirm exclusivity: --add-assignee is NOT a compare-and-swap — GitHub issues
 # allow MULTIPLE assignees, so a sibling machine that picked the same issue in the
@@ -135,9 +150,12 @@ if printf '%s' "$ASSIGNEES" | tr ',' '\n' | grep -qvxF "$ME" ; then
   # and re-run Phase 1 to pick the NEXT issue. This is a hard exit from the claim.
   echo "Issue #$ISSUE_NUM already claimed by: $ASSIGNEES — yielding."
   gh issue edit "$ISSUE_NUM" --remove-assignee @me 2>/dev/null || true
-  exit 1   # HARD STOP — do not fall through to the label step or Phase 3. The agent
-           # then runs Phase 7 cleanup (cd back to the main repo, remove the worktree
-           # + branch) and re-enters Phase 1 to pick the next issue.
+  # Retract the Phase-2 claim branch (remote + local worktree/branch) so the yielded
+  # issue doesn't read as in-flight to the next picker.
+  git push origin --delete "next/${SLUG}" 2>/dev/null || true
+  cd .. && git worktree remove "$WORKTREE" 2>/dev/null && git branch -D "next/${SLUG}" 2>/dev/null
+  exit 1   # HARD STOP — do not fall through to the label step or Phase 3. Re-run
+           # /do:next to pick the next issue.
 else
   # Claim is exclusive (only you assigned) — mark in-progress for human visibility
   # and proceed to Phase 3.
@@ -266,15 +284,13 @@ git worktree remove "${WORKTREE}" && \
 git fetch origin "${DEFAULT_BRANCH}" && \
 git checkout "${DEFAULT_BRANCH}" && \
 git pull --rebase --autostash && \
-git branch -d "next/${SLUG}"
-# Delete the REMOTE claim branch published in Phase 2. On the happy path the
-# `gh pr merge --delete-branch` already removed it (this is then a harmless no-op);
-# on an ABANDONED claim (Phase 3 skip / Phase 3.5 reject — no PR was ever merged)
-# this is what retracts the remote claim so the item returns to the queue.
-git push origin --delete "next/${SLUG}" 2>/dev/null || true
+git branch -d "next/${SLUG}" && \
+{ git push origin --delete "next/${SLUG}" 2>/dev/null || true; }   # remote no-op after --delete-branch merge
 ```
 
-(Order matters: remove the worktree, **switch to and sync the default branch, then delete the claim branch** — branch delete is LAST in the `&&` chain so two invariants both hold: (1) a `git branch -d` failure ("not fully merged" after a squash- or rebase-merge) can't skip the sync, because the sync already ran; and (2) any earlier failure (worktree-remove, fetch, checkout, or a rebase conflict) short-circuits the chain *before* the delete, so the local claim branch is never removed while the default branch is still stale. Checking out `DEFAULT_BRANCH` first guarantees the merge commit lands on the right local branch even when `/do:next` was launched from a feature branch. The trailing remote-branch delete runs unconditionally — it retracts the Phase-2 early-push claim on abandonment and is a no-op after a `--delete-branch` merge. Only fall back to `-D` after confirming no unmerged work.)
+(Order matters: remove the worktree, **sync the default branch, delete the local claim branch, and only THEN touch the remote** — every step is `&&`-gated so the chain short-circuits on the first failure. Three invariants hold: (1) a `git branch -d` failure ("not fully merged") can't skip the sync, because the sync already ran; (2) any earlier failure (worktree-remove, fetch, checkout, rebase conflict) stops the chain *before* the local delete, so the claim branch is never removed while the default branch is stale; and (3) **the remote-delete is the LAST link**, so a failed/partial cleanup — which may still hold unmerged work in the worktree — never retracts the remote claim and re-exposes the item to other machines. On the happy path `gh pr merge --delete-branch` already removed the remote branch, so the trailing delete is a harmless no-op.)
+
+**Abandoned a claim (Phase 3 skip / Phase 3.5 reject — no PR, work discarded)?** The branch is unmerged, so `git branch -d` won't remove it. Retract the claim explicitly instead (force-delete local, delete remote) so the item returns to the queue: from the main repo, `git worktree remove --force "${WORKTREE}"; git branch -D "next/${SLUG}"; git push origin --delete "next/${SLUG}" 2>/dev/null || true`. (Issues-mode abort branches in Phase 2 already do this inline.)
 
 **Issues mode — confirm closed, then clear the marker.** A `Closes #<num>` in the PR body auto-closes on merge to the **default branch**. Verify with `gh issue view <num> --json state -q .state` (expect `CLOSED`); if still `OPEN`, close explicitly: `gh issue close <num> --comment "Shipped in PR #<PR_NUM>."`. Then drop the stale label: `gh issue edit "$ISSUE_NUM" --remove-label in-progress 2>/dev/null || true`. (Leave the assignee — it records who shipped it; a closed issue is never a Phase 1 candidate anyway.)
 
