@@ -31,13 +31,13 @@ Parse `$ARGUMENTS` for `--review-iterations <n>` (affects the copilot pass only)
 
 ## Detect VCS Host
 
-Determine whether this repo lives on GitHub or GitLab so the right CLI is used for every host-specific step below. Follow the same detection the rest of slashdo uses (see `lib/plan-issue-mode.md`):
+Determine whether this repo lives on GitHub or GitLab so the right CLI is used for every host-specific step below. The **`origin` remote URL is the authoritative signal** of which host the repo is on — `auth status` only tells you which CLI is usable, not where the repo lives (a developer may have `gh` authenticated globally while working in a GitLab repo). So detect from the remote first, then confirm the matching CLI is authenticated:
 
-1. Run `gh auth status` to check the GitHub CLI. If it succeeds, set `VCS_HOST=github` and `CLI_TOOL=gh`.
-2. Otherwise run `glab auth status` for GitLab. If it succeeds, set `VCS_HOST=gitlab` and `CLI_TOOL=glab`.
-3. If **neither** is authenticated, abort with: "`/do:pr` needs an authenticated `gh` (GitHub) or `glab` (GitLab). Run `gh auth login` or `glab auth login`."
+1. Read the remote host: `git remote get-url origin`. If the host is a GitLab instance (e.g. `gitlab.com`, or a self-hosted GitLab), set `VCS_HOST=gitlab` and `CLI_TOOL=glab`; otherwise (GitHub or ambiguous) set `VCS_HOST=github` and `CLI_TOOL=gh`.
+2. Confirm the matching CLI is authenticated: `gh auth status` for GitHub, `glab auth status` for GitLab. If it is not, abort with: "`/do:pr` detected a {VCS_HOST} repo but `{CLI_TOOL}` is not authenticated. Run `{CLI_TOOL} auth login`."
+3. If there is no `origin` remote at all, fall back to whichever CLI is authenticated (`gh` first, then `glab`); if neither is authenticated, abort with: "`/do:pr` needs an authenticated `gh` (GitHub) or `glab` (GitLab). Run `gh auth login` or `glab auth login`."
 
-If both are authenticated, prefer the one whose host matches the `origin` remote URL (`git remote get-url origin`): `glab` when the URL host is a GitLab instance (e.g. `gitlab.com`), otherwise `gh`. Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`.
+Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`.
 
 ## Detect Branches
 
