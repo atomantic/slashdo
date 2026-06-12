@@ -1,0 +1,11 @@
+# Unreleased Changes
+
+## Added
+
+## Changed
+
+- `/do:pr`: no longer gates on GitHub only — now supports GitLab via the `glab` CLI. Added a VCS host detection step (`gh auth status` → `glab auth status`, the same pattern `/do:replan` uses), GitLab paths for default-branch detection (`glab repo view -F json`) and opening the change (`glab mr create`), and clarified that the Copilot review pass is GitHub-only (skipped with a warning on GitLab MRs while the host-agnostic local-agent reviewers — `codex`/`agy`/`claude` — still run).
+
+## Fixed
+
+## Removed

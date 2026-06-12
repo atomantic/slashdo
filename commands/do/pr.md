@@ -1,5 +1,5 @@
 ---
-description: Commit, push, and open a PR against the repo's default branch
+description: Commit, push, and open a PR (GitHub) or merge request (GitLab) against the repo's default branch
 argument-hint: "[--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies]"
 ---
 
@@ -29,12 +29,25 @@ Parse `$ARGUMENTS` for `--review-iterations <n>` (affects the copilot pass only)
 - If the value is missing or not a non-negative integer, abort with: `--review-iterations must be a non-negative integer (got: {value}).`
 - This flag has no effect on local-agent reviewers (`codex`/`gemini`/`claude`); they keep their own fixed 3-iteration cap.
 
+## Detect VCS Host
+
+Determine whether this repo lives on GitHub or GitLab so the right CLI is used for every host-specific step below. Follow the same detection the rest of slashdo uses (see `lib/plan-issue-mode.md`):
+
+1. Run `gh auth status` to check the GitHub CLI. If it succeeds, set `VCS_HOST=github` and `CLI_TOOL=gh`.
+2. Otherwise run `glab auth status` for GitLab. If it succeeds, set `VCS_HOST=gitlab` and `CLI_TOOL=glab`.
+3. If **neither** is authenticated, abort with: "`/do:pr` needs an authenticated `gh` (GitHub) or `glab` (GitLab). Run `gh auth login` or `glab auth login`."
+
+If both are authenticated, prefer the one whose host matches the `origin` remote URL (`git remote get-url origin`): `glab` when the URL host is a GitLab instance (e.g. `gitlab.com`), otherwise `gh`. Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`.
+
 ## Detect Branches
 
-1. **Detect the default branch** — run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` to get the repo's default branch (e.g., `main`, `master`, `develop`)
+1. **Detect the default branch**:
+   - GitHub: `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`
+   - GitLab: `glab repo view -F json 2>/dev/null` and read `.default_branch` (fallback: `git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@'`)
+   - This yields the repo's default branch (e.g., `main`, `master`, `develop`)
 2. **Determine the current branch** — use `git branch --show-current`
 3. If you're already on the default branch, commit to a new feature branch named after the work being done
-4. The PR will target the **default branch** as base
+4. The PR (GitHub) / merge request (GitLab) will target the **default branch** as base
 
 Print: `PR flow: {current_branch} → {default_branch}`
 
@@ -77,12 +90,15 @@ Verification — confirm before proceeding:
 
 ## Open the PR
 
-- Create a PR from `{current_branch}` to `{default_branch}`
-- Create a rich PR description
+- Create a PR / merge request from `{current_branch}` to `{default_branch}`:
+  - GitHub: `gh pr create --base {default_branch} --head {current_branch} --title "..." --body "..."`
+  - GitLab: `glab mr create --source-branch {current_branch} --target-branch {default_branch} --title "..." --description "..."` (add `--yes` to skip the interactive prompt; `--remove-source-branch` if the project deletes merged branches)
+- Create a rich PR/MR description
+- Capture the resulting PR/MR URL to report at the end
 
 ## Run the Review Loop
 
-**If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), skip this entire section — the Local Code Review gate above was the only review. Report the PR URL and stop; there is no multi-reviewer aggregate to report.
+**If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), skip this entire section — the Local Code Review gate above was the only review. Report the PR/MR URL and stop; there is no multi-reviewer aggregate to report.
 
 Otherwise, hand off to the **multi-reviewer loop** with the parsed inputs:
 
@@ -93,8 +109,8 @@ Otherwise, hand off to the **multi-reviewer loop** with the parsed inputs:
 
 The wrapper runs each reviewer in order, deciding when to stop per the stop-mode. Each individual pass uses the matching single-reviewer loop:
 
-- `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`)
-- `codex` | `agy` | `claude` → local-agent headless review loop (`lib/local-agent-review-loop.md`) — the local CLI runs its installed review command (`/do:review` under claude, `/do-review` under agy) or an equivalent self-contained review prompt against the branch; this main thread then verifies its output, runs build + tests, and pushes the verified fixes
+- `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`). **GitHub only** — Copilot cloud review has no GitLab equivalent. When `VCS_HOST=gitlab` and `REVIEW_AGENTS` contains `copilot`, print a warning (`copilot review is GitHub-only and was skipped on this GitLab MR; use a local-agent reviewer (codex/agy/claude) instead`) and skip the copilot pass — continue with the remaining (host-agnostic) reviewers in the list.
+- `codex` | `agy` | `claude` → local-agent headless review loop (`lib/local-agent-review-loop.md`) — host-agnostic; the local CLI reviews the working tree directly and does not care whether the remote is GitHub or GitLab. The local CLI runs its installed review command (`/do:review` under claude, `/do-review` under agy) or an equivalent self-contained review prompt against the branch; this main thread then verifies its output, runs build + tests, and pushes the verified fixes
 
 ### Multi-reviewer wrapper
 
@@ -106,4 +122,4 @@ The wrapper runs each reviewer in order, deciding when to stop per the stop-mode
 
 !`cat ~/.claude/lib/local-agent-review-loop.md`
 
-**Report the final status** to the user including the PR URL and the multi-reviewer aggregate report (per-pass status table plus overall status).
+**Report the final status** to the user including the PR/MR URL and the multi-reviewer aggregate report (per-pass status table plus overall status).

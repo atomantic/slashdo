@@ -55,7 +55,7 @@ All commands live under the `do:` namespace:
 | Command | What it does |
 |:---|:---|
 | `/do:push` | Commit and push all work with changelog |
-| `/do:pr` | Open a PR with self-review; runs an external review loop only when you pass `--review-with` (no default reviewer; see [Review loop flags](#review-loop-flags-dopr-dorelease-dopr-better-doreview-dobetter-dobetter-swift-dodepfree-dorpr)) |
+| `/do:pr` | Open a PR (GitHub `gh`) or merge request (GitLab `glab`) with self-review; runs an external review loop only when you pass `--review-with` (no default reviewer; see [Review loop flags](#review-loop-flags-dopr-dorelease-dopr-better-doreview-dobetter-dobetter-swift-dodepfree-dorpr)) |
 | `/do:pr-better` | Run a full do:better audit on the current branch, commit fixes directly, then open a single PR |
 | `/do:fpr` | Fork PR -- push to fork, PR against upstream |
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
