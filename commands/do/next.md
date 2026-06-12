@@ -35,7 +35,7 @@ Build the in-flight set first (identical in both modes):
 ```bash
 git fetch --prune 2>/dev/null
 git branch -a --no-color --format='%(refname:short)'
-gh pr list --state open --limit 500 --json headRefName -q '.[].headRefName' 2>/dev/null   # glab: glab mr list --per-page 100 -F json | jq -r '.[].source_branch'
+gh pr list --state open --limit 500 --json headRefName -q '.[].headRefName' 2>/dev/null || true   # glab: glab mr list --per-page 100 -F json | jq -r '.[].source_branch'; non-fatal — PLAN.md mode must work with no gh auth (the scan just degrades to local branches)
 ```
 
 For every ref, split on `/` and collect each segment — that's the raw in-flight set.
@@ -108,7 +108,11 @@ pwd
 Immediately after the worktree is verified, claim the issue **on the host** so a `/do:next --issues` on any other machine sees it as taken (Phase 1's assignee check is the reader). Do this before writing code — it's the cross-machine half of the claim:
 
 ```bash
-gh issue edit "$ISSUE_NUM" --add-assignee @me                                   # load-bearing marker
+# Load-bearing marker — if the assign itself FAILS (no triage/write access, API
+# error), you have NOT claimed the issue. Abort immediately; do NOT fall through to
+# the read-back, which would see zero assignees, take the `else` path, and proceed
+# without a marker (letting a second machine work the same issue).
+gh issue edit "$ISSUE_NUM" --add-assignee @me || { echo "Could not claim issue #$ISSUE_NUM (missing write access?) — aborting."; exit 1; }
 
 # Confirm exclusivity: --add-assignee is NOT a compare-and-swap — GitHub issues
 # allow MULTIPLE assignees, so a sibling machine that picked the same issue in the
