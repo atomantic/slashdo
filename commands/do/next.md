@@ -26,7 +26,7 @@ Split `$ARGUMENTS` on whitespace — tokens starting with `--` are flags, the fi
 - **`--issues`** — switch the source from PLAN.md to the **tracker**. Set `ISSUE_MODE=true`. Setup (host detection, label, abort-if-unauthenticated) follows [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md). In this mode PLAN.md is never read or edited.
 - **`--issues-label <name>`** — label scoping tracked issues. `PLAN_LABEL` (default `plan`). Only meaningful with `--issues`.
 - **`--plan`** — before writing code, enter an **interactive plan-mode session** (Phase 3.5): present a written plan, surface open questions, get explicit approval before implementing. Runs *after* the worktree is claimed so you plan with full context. Rejection routes to Phase 7 cleanup exactly like a Phase 3 skip.
-- **`--review-with` / `--review-iterations` / `--review-stop-on-* / `--reviewer-applies` / `--no-review`** — **passed through to `/do:pr`** in Phase 6, which owns the review/ship machinery. Same grammar as every other slashdo command (see `/do:pr`). `--no-review` opts out of both `/simplify` and the external pass. When neither `--review-with` nor `--no-review` is given, you decide in Phase 6 whether the diff warrants `/simplify` and/or an external review (a value swap doesn't; a multi-file change does).
+- **`--review-with` / `--review-iterations` / `--review-stop-on-findings` / `--review-stop-on-clean` / `--reviewer-applies` / `--no-review`** — **passed through to `/do:pr`** in Phase 6, which owns the review/ship machinery. Same grammar as every other slashdo command (see `/do:pr`). `--no-review` opts out of both `/simplify` and the external pass. When neither `--review-with` nor `--no-review` is given, you decide in Phase 6 whether the diff warrants `/simplify` and/or an external review (a value swap doesn't; a multi-file change does).
 
 ## Phase 1: Pick
 
@@ -163,7 +163,8 @@ Stage and commit:
 
 ```bash
 # PLAN.md mode:
-git add PLAN.md && [ -e .changelogs/NEXT.md ] && git add .changelogs/NEXT.md; [ -e .changelog/NEXT.md ] && git add .changelog/NEXT.md
+git add PLAN.md
+git add .changelogs/NEXT.md 2>/dev/null || git add .changelog/NEXT.md 2>/dev/null || true
 git commit -m "docs([<slug>]): remove from PLAN.md and log to changelog"
 
 # Issues mode (no PLAN.md edit):
