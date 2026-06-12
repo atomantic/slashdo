@@ -35,7 +35,7 @@ Build the in-flight set first (identical in both modes):
 ```bash
 git fetch --prune 2>/dev/null
 git branch -a --no-color --format='%(refname:short)'
-gh pr list --state open --json headRefName -q '.[].headRefName' 2>/dev/null   # glab: glab mr list --json | jq -r '.[].source_branch'
+gh pr list --state open --limit 500 --json headRefName -q '.[].headRefName' 2>/dev/null   # glab: glab mr list --per-page 100 -F json | jq -r '.[].source_branch'
 ```
 
 For every ref, split on `/` and collect each segment — that's the raw in-flight set.
@@ -67,9 +67,10 @@ Then:
 
 1. **List candidates** — open, **carrying `PLAN_LABEL`** (default `plan`; set by `--issues-label`), oldest-first (`gh issue list` never returns pull requests, so PRs are excluded automatically). **`PLAN_LABEL` is the only gate — there is no author filter.** The label is slashdo's plan-item definition (`/do:replan --issues` and `lib/plan-issue-mode.md` treat *only* labeled issues as plan items), and applying it already requires triage/write access — so it does the job an author filter would, *without* excluding correctly-labeled plan issues that a collaborator, bot, or `/do:replan` run by anyone in an org-owned repo created. An unlabeled issue (a raw bug report) is simply not auto-claimable work:
    ```bash
-   gh issue list --state open --label "$PLAN_LABEL" --limit 100 \
+   gh issue list --state open --label "$PLAN_LABEL" --limit 500 \
      --json number,title,assignees,labels,createdAt -q 'sort_by(.createdAt) | .[]'
    ```
+   The high `--limit` (500) avoids silently truncating the queue before the client-side oldest-first sort — `gh issue list` defaults to 30, which would hide older eligible work. If a repo ever has >500 open `PLAN_LABEL` issues the queue is pathologically large (run `/do:replan --issues` to prune); note the cap rather than silently dropping the overflow.
 2. **Determine in-flight issues.** Issue `N` is in flight if EITHER `issue-N` appears in the raw in-flight set, OR the issue **already has an assignee** (someone took it via the Phase 2 marker, possibly on another machine). The assignee check is the cross-machine half of the claim — a local-only `next/issue-N` branch on a sibling machine is invisible here, but its assignee is not.
 3. **Pick the target issue:**
    - **With argument** — the issue number (strip `#`). Verify open and NOT in flight. If it lacks `PLAN_LABEL`, this is an **explicit override** (the user named a specific issue): proceed, but state that you're claiming an unlabeled issue so the choice is visible. If any other check fails, print why and stop.
