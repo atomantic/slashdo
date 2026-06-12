@@ -67,6 +67,7 @@ All commands live under the `do:` namespace:
 | `/do:depfree` | Audit dependencies, remove unnecessary ones, write replacement code |
 | `/do:goals` | Generate GOALS.md from codebase analysis |
 | `/do:replan` | Review and clean up PLAN.md — or, with `--issues`, your GitHub/GitLab issue tracker (see [Issue mode](#replan-issue-mode-doreplan---issues)) |
+| `/do:next` | Claim the next unclaimed PLAN.md item (or tracker issue with `--issues`), implement it in an isolated worktree, ship a reviewed PR, and clean up — the consumer counterpart to `/do:replan` |
 | `/do:omd` | Audit and optimize markdown files |
 | `/do:update` | Update slashdo to latest version |
 | `/do:help` | List all available commands |
