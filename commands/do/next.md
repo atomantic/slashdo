@@ -286,7 +286,11 @@ SLUG="<picked-slug>"; WORKTREE="../next-${SLUG}"
 DEFAULT_BRANCH="$(git -C "${WORKTREE}" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)"
 [ -n "$DEFAULT_BRANCH" ] || DEFAULT_BRANCH="$(git -C "${WORKTREE}" remote show origin | sed -n 's/.*HEAD branch: //p')"
 cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit "origin/${DEFAULT_BRANCH}"
-# Resolve any PLAN.md / changelog conflict deletions-win (Phase 5 rule), then:
+# If the merge hit a PLAN.md / changelog conflict, resolve it deletions-win (Phase 5
+# rule), then STAGE AND COMMIT the resolution before pushing — otherwise the repo is
+# left mid-merge and `git push` sends the stale tip, so `gh pr merge` sees an
+# unmergeable PR. (A clean merge / "Already up to date" needs no commit.)
+git diff --name-only --diff-filter=U | grep -q . && { git add -A && git commit --no-edit; }
 git push
 gh pr merge <num> --merge --delete-branch   # only reached when OVERALL_STATUS is clean (or explicitly-opted partial)
 ```
