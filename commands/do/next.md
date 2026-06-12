@@ -57,9 +57,13 @@ For every ref, split on `/` and collect each segment — that's the raw in-fligh
 
 ### Phase 1 — issues mode (`--issues`)
 
-Run the issue-mode setup from [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) (detect `gh`/`glab` as `CLI_TOOL`, ensure `PLAN_LABEL` exists, abort if neither host is authenticated). Then:
+First run the shared issue-mode setup — detect `gh`/`glab` as `CLI_TOOL`, ensure `PLAN_LABEL` exists, and abort if neither host is authenticated (this file is inlined at install time, so it's available in every environment — not a dead link):
 
-> **Issue mode requires GitHub (`gh`).** `/do:next`'s claim mechanics depend on the GitHub assignee model as the cross-machine marker (Phase 2). **If the setup selected `CLI_TOOL=glab`, abort issue mode** with: "`/do:next --issues` currently supports GitHub only — the cross-machine claim relies on GitHub issue assignees. Use PLAN.md mode (drop `--issues`), or track GitLab claim support as a feature request." Don't attempt the GitLab path with untested `glab` assignee commands — a half-working claim is worse than a clean abort. (The shared label/list *setup* in `lib/plan-issue-mode.md` is cross-host, but the claim/marker flow below is not yet.) All commands below are therefore `gh`.
+!`cat ~/.claude/lib/plan-issue-mode.md`
+
+> **Issue mode requires GitHub (`gh`).** `/do:next`'s claim mechanics depend on the GitHub assignee model as the cross-machine marker (Phase 2). **If the setup selected `CLI_TOOL=glab`, abort issue mode** with: "`/do:next --issues` currently supports GitHub only — the cross-machine claim relies on GitHub issue assignees. Use PLAN.md mode (drop `--issues`), or track GitLab claim support as a feature request." Don't attempt the GitLab path with untested `glab` assignee commands — a half-working claim is worse than a clean abort. (The shared label/list *setup* above is cross-host, but the claim/marker flow below is not yet.) All commands below are therefore `gh`.
+
+Then:
 
 1. **Resolve the repo creator** — only creator-authored issues are auto-pick candidates: `CREATOR="$(gh repo view --json owner -q .owner.login)"`. (Reads `origin`; for fork users this is their own login, which is correct. Pass an explicit `owner/repo` to target upstream.)
 2. **List candidates** — open, authored by `$CREATOR`, **carrying `PLAN_LABEL`** (default `plan`; set by `--issues-label`), oldest-first (`gh issue list` never returns pull requests, so PRs are excluded automatically). The label filter is what makes this consistent with the rest of slashdo's issue mode: `/do:replan --issues` and `lib/plan-issue-mode.md` treat **only labeled issues** as plan items, so an unlabeled owner-authored bug report is NOT auto-claimable work:
