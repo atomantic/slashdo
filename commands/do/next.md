@@ -130,11 +130,12 @@ Immediately after the worktree is verified, claim the issue **on the host** so a
 # without a marker (letting a second machine work the same issue).
 gh issue edit "$ISSUE_NUM" --add-assignee @me || {
   echo "Could not claim issue #$ISSUE_NUM (missing write access?) — aborting."
-  # Phase 2 already created and (best-effort) pushed next/issue-<num>. Retract it so a
-  # failed assignment doesn't strand a branch that future Phase 1 scans read as in-flight.
-  git push origin --delete "next/${SLUG}" 2>/dev/null || true   # remote claim
-  cd .. && git worktree remove "$WORKTREE" 2>/dev/null && git branch -D "next/${SLUG}" 2>/dev/null   # local worktree + branch
-  exit 1
+  # Phase 2 already created and (best-effort) pushed next/issue-<num>. Retract the
+  # REMOTE claim here (works from the worktree); then STOP and run Phase 7 cleanup from
+  # the MAIN repo to drop the local worktree + branch. (Do NOT try to remove the worktree
+  # from inside it — `cd ..` here lands in the worktree's parent, not the main repo.)
+  git push origin --delete "next/${SLUG}" 2>/dev/null || true
+  exit 1   # then: cd <main repo>, git worktree remove --force "$WORKTREE", git branch -D "next/${SLUG}"
 }
 
 # Confirm exclusivity: --add-assignee is NOT a compare-and-swap — GitHub issues
@@ -150,12 +151,13 @@ if printf '%s' "$ASSIGNEES" | tr ',' '\n' | grep -qvxF "$ME" ; then
   # and re-run Phase 1 to pick the NEXT issue. This is a hard exit from the claim.
   echo "Issue #$ISSUE_NUM already claimed by: $ASSIGNEES — yielding."
   gh issue edit "$ISSUE_NUM" --remove-assignee @me 2>/dev/null || true
-  # Retract the Phase-2 claim branch (remote + local worktree/branch) so the yielded
-  # issue doesn't read as in-flight to the next picker.
+  # Retract the REMOTE claim branch here (works from the worktree) so the yielded issue
+  # doesn't read as in-flight to the next picker; the local worktree + branch are dropped
+  # by Phase 7 cleanup run from the MAIN repo (not from inside the worktree).
   git push origin --delete "next/${SLUG}" 2>/dev/null || true
-  cd .. && git worktree remove "$WORKTREE" 2>/dev/null && git branch -D "next/${SLUG}" 2>/dev/null
-  exit 1   # HARD STOP — do not fall through to the label step or Phase 3. Re-run
-           # /do:next to pick the next issue.
+  exit 1   # HARD STOP — do not fall through to the label step or Phase 3. Then run Phase 7
+           # cleanup from the main repo (cd out, git worktree remove --force, git branch -D)
+           # and re-run /do:next to pick the next issue.
 else
   # Claim is exclusive (only you assigned) — mark in-progress for human visibility
   # and proceed to Phase 3.
