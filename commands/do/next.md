@@ -1,5 +1,5 @@
 ---
-description: Claim the next unclaimed PLAN.md item (or GitHub/GitLab issue with --issues) by its ID, do the work in an isolated worktree, ship a PR, and clean up.
+description: Claim the next unclaimed PLAN.md item (or GitHub issue with --issues) by its ID, do the work in an isolated worktree, ship a PR, and clean up. Requires GitHub (gh) — it ships via /do:pr.
 argument-hint: "[<slug>|#<issue>] [--issues] [--issues-label <name>] [--plan] [--review-with <agent>[,…]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--no-review]"
 ---
 
@@ -30,12 +30,18 @@ Split `$ARGUMENTS` on whitespace — tokens starting with `--` are flags, the fi
 
 ## Phase 1: Pick
 
-Build the in-flight set first (identical in both modes):
+> **Pre-flight — `/do:next` requires GitHub (`gh`), in BOTH modes.** The command ships via `/do:pr` and merges with `gh pr merge`, both of which are GitHub-only. So even PLAN.md mode (whose *claiming* is git-only) can't *complete* on a non-GitHub host. **Abort up front — before claiming or implementing anything — if the repo's `origin` isn't GitHub or `gh` isn't authenticated**, so the user never claims work they can't ship:
+> ```bash
+> gh auth status >/dev/null 2>&1 && git remote get-url origin 2>/dev/null | grep -qi github.com || {
+>   echo "/do:next requires a GitHub repo with an authenticated gh CLI (it ships via /do:pr). Run 'gh auth login', or use a different workflow for non-GitHub hosts."; exit 1; }
+> ```
+
+Build the in-flight set (identical in both modes):
 
 ```bash
 git fetch --prune 2>/dev/null
 git branch -a --no-color --format='%(refname:short)'
-gh pr list --state open --limit 500 --json headRefName -q '.[].headRefName' 2>/dev/null || true   # glab: glab mr list --per-page 100 -F json | jq -r '.[].source_branch'; non-fatal — PLAN.md mode must work with no gh auth (the scan just degrades to local branches)
+gh pr list --state open --limit 500 --json headRefName -q '.[].headRefName' 2>/dev/null || true   # 500 cap avoids silent truncation; || true keeps a transient gh hiccup from aborting the scan (the pre-flight already confirmed gh works)
 ```
 
 For every ref, split on `/` and collect each segment — that's the raw in-flight set.
@@ -95,9 +101,9 @@ SLUG="<picked-slug>" && \
 if git ls-remote --exit-code --heads origin "next/${SLUG}" >/dev/null 2>&1; then
   echo "next/${SLUG} already on origin — another machine claimed it; re-run /do:next to pick the next item."; exit 1
 fi && \
-# Host-agnostic default-branch lookup — works on GitHub AND GitLab (and with no
-# `gh`/`glab` at all), unlike `gh repo view`. Try the local origin/HEAD ref first,
-# fall back to querying the remote if it isn't set.
+# Default-branch lookup via git (not `gh repo view`) — one less gh round-trip and
+# works even mid-auth-hiccup. Try the local origin/HEAD ref first, fall back to
+# querying the remote if it isn't set.
 DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')" && \
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(git remote show origin | sed -n 's/.*HEAD branch: //p')}" && \
 WORKTREE="../next-${SLUG}" && \
@@ -322,5 +328,5 @@ Shipped issue #<num> "<Title>". PR #<PR_NUM>. Issue closed. Worktree + branch cl
 - **`/do:next` only *consumes* the queue.** New work comes from `/do:replan`, `/do:better`, `/do:depfree`, or human edits — never invented here, except *discovered* work split out of the current item (Phase 4/6).
 - **`--issues` is per-invocation, consistent with every other slashdo command.** There is no separate config file (YAGNI) — a repo that works issues-first simply always passes `--issues`, the same way it would to `/do:replan --issues`.
 - **Auto-redirect makes `--issues` optional for issue-tracked repos.** When there's no PLAN.md, or PLAN.md is the stub `/do:replan --issues` leaves behind, a bare `/do:next` recognizes the repo is issue-tracked and continues in issue mode on its own (stating the switch). So a repo that ran `/do:replan --issues` once doesn't need every contributor to remember the flag — the stub *is* the config signal. Passing `--issues` explicitly still works and skips the detection.
-- **GitLab.** PLAN.md mode is fully host-agnostic (it touches no issue tracker). **Issue mode (`--issues`) is GitHub-only for now** — the cross-machine claim (Phase 2) relies on the GitHub assignee model, and slashdo doesn't yet ship verified `glab` equivalents for it, so a `glab`-only repo aborts issue mode with a clear message rather than running untested claim commands. The shared label/list setup in [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) is cross-host; only `/do:next`'s claim/marker flow is GitHub-scoped. Adding GitLab claim support is a clean follow-up (implement + test the `glab` assignee read-back, then lift the abort).
+- **Host support — GitHub only.** `/do:next` requires a GitHub repo with an authenticated `gh`, in **both** modes, and the Phase 1 pre-flight aborts up front otherwise. This is because it *ships* through `/do:pr` and `gh pr merge` (GitHub-only) — so even though PLAN.md *claiming* is pure git, the run can't complete on a non-GitHub host, and issue mode additionally depends on the GitHub assignee model for the cross-machine claim. GitLab support is a clean follow-up: it needs a host-agnostic ship path (a `/do:pr` that speaks `glab`) plus a tested `glab` assignee read-back for the claim marker — until both exist, aborting early is more honest than failing at the ship step after the work is done.
 - **`PLAN_LABEL` is the issue-mode queue — not authorship.** Auto-pick claims any open issue carrying the plan label, regardless of who filed it (so plan issues created by a collaborator, a bot, or `/do:replan --issues` run by anyone in an org-owned repo are all claimable). The gate against random community issues is the label itself: applying it takes triage/write access, so an unlabeled bug report is never auto-claimed. An explicit `#num` can override and claim an unlabeled issue (stated when it does).
