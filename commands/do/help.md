@@ -18,6 +18,7 @@ List all available `/do:*` commands with their descriptions.
 | `/do:fpr` | Commit, push to fork, and open a PR against the upstream repo |
 | `/do:goals` | Scan codebase to infer project goals, clarify with user, and generate GOALS.md |
 | `/do:help` | List all available slashdo commands |
+| `/do:next` | Claim the next unclaimed PLAN.md item (or tracker issue with `--issues`), implement it in an isolated worktree, ship a reviewed PR, and clean up |
 | `/do:omd` | Audit and optimize markdown files (CLAUDE.md, README.md, etc.) against best practices |
 | `/do:pr` | Commit, push, and open a PR against the repo's default branch |
 | `/do:pr-better` | Run a full do:better audit on the current branch, commit fixes directly, then open a single PR |
