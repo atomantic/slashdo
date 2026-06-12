@@ -1,6 +1,6 @@
 ---
 description: Claim the next unclaimed PLAN.md item (or GitHub/GitLab issue with --issues) by its ID, do the work in an isolated worktree, ship a PR, and clean up.
-argument-hint: "[<slug>|#<issue>] [--issues] [--issues-label <name>] [--plan] [--review-with <agent>[,…]] [--no-review]"
+argument-hint: "[<slug>|#<issue>] [--issues] [--issues-label <name>] [--plan] [--review-with <agent>[,…]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--no-review]"
 ---
 
 # Next — Pick the next plan item (or issue) and ship it
@@ -60,7 +60,7 @@ For every ref, split on `/` and collect each segment — that's the raw in-fligh
 Run the issue-mode setup from [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) (detect `gh`/`glab` as `CLI_TOOL`, ensure `PLAN_LABEL` exists, abort if neither host is authenticated). Then:
 
 1. **Resolve the repo creator** — only creator-authored issues are auto-pick candidates: `CREATOR="$(gh repo view --json owner -q .owner.login)"`. (Reads `origin`; for fork users this is their own login, which is correct. Pass an explicit `owner/repo` to target upstream.)
-2. **List candidates** — open, authored by `$CREATOR`, no PRs, oldest-first:
+2. **List candidates** — open, authored by `$CREATOR`, oldest-first (`gh issue list` never returns pull requests, so PRs are excluded automatically):
    ```bash
    gh issue list --state open --author "$CREATOR" --limit 100 \
      --json number,title,assignees,labels,createdAt -q 'sort_by(.createdAt) | .[]'
@@ -120,9 +120,9 @@ On "skip", run Phase 7 cleanup and re-run Phase 1 for the next item. **In issues
 Skip unless `--plan` is set. When present, don't touch code yet:
 
 1. **Gather just enough context to plan** — read the files the item names, grep its identifiers, confirm integration points.
-2. **Enter plan mode** (`EnterPlanMode`) and present: the item (slug/`issue-<num>`), approach, files to add/change, tests, and any migration/compat/changelog obligations the repo's CLAUDE.md triggers.
+2. **Enter plan mode** (via the harness's plan-mode entry, e.g. `EnterPlanMode` under Claude Code) and present: the item (slug/`issue-<num>`), approach, files to add/change, tests, and any migration/compat/changelog obligations the repo's CLAUDE.md triggers.
 3. **Clarify interactively** — ask only the questions whose answers change the implementation; pick obvious defaults and state them.
-4. **Get explicit approval** (`ExitPlanMode`) before Phase 4. Don't implement on an unapproved plan.
+4. **Get explicit approval** (via the harness's plan-approval exit, e.g. `ExitPlanMode`) before Phase 4. Don't implement on an unapproved plan.
 5. **On rejection/stop** — treat exactly like a Phase 3 skip: Phase 7 cleanup, and in issues mode release the marker.
 
 ## Phase 4: Implement
@@ -207,11 +207,11 @@ From the **main repo** (not the worktree), as a single Bash invocation, re-subst
 SLUG="<picked-slug>" && \
 WORKTREE="../next-${SLUG}" && \
 git worktree remove "${WORKTREE}" && \
-git branch -d "next/${SLUG}" && \
 git pull --rebase --autostash
+git branch -d "next/${SLUG}"
 ```
 
-(`-d` is safe-delete; only fall back to `-D` after confirming no unmerged work.)
+(Sync the main repo BEFORE deleting the local branch — `git branch -d` is safe-delete and **fails with "not fully merged" when the PR was squash- or rebase-merged**, so chaining the pull after it with `&&` would skip the sync and strand main behind the merge. Keep the delete as its own statement; only fall back to `-D` after confirming no unmerged work.)
 
 **Issues mode — confirm closed, then clear the marker.** A `Closes #<num>` in the PR body auto-closes on merge to the **default branch**. Verify with `gh issue view <num> --json state -q .state` (expect `CLOSED`); if still `OPEN`, close explicitly: `gh issue close <num> --comment "Shipped in PR #<PR_NUM>."`. Then drop the stale label: `gh issue edit "$ISSUE_NUM" --remove-label in-progress 2>/dev/null || true`. (Leave the assignee — it records who shipped it; a closed issue is never a Phase 1 candidate anyway.)
 
