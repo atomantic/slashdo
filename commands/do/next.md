@@ -98,7 +98,15 @@ WORKTREE="../next-${SLUG}" && \
 git fetch origin "${DEFAULT_BRANCH}" && \
 git worktree add -b "next/${SLUG}" "${WORKTREE}" "origin/${DEFAULT_BRANCH}" && \
 cd "${WORKTREE}" && \
-pwd
+pwd && \
+# Publish the (empty) claim branch IMMEDIATELY so the claim is remote-visible to
+# other clones/machines right now — not only after /do:pr pushes in Phase 6. This
+# is the PLAN.md-mode analog of the issue-mode assignee marker: Phase 1's in-flight
+# scan on another machine fetches remote branches, so an early push is what stops two
+# machines from claiming the same PLAN line. Non-fatal: if the push fails (no write
+# access yet), warn and continue — the claim degrades to LOCAL-only (still protects
+# parallel claims on THIS machine, just not across machines).
+git push -u origin "next/${SLUG}" || echo "WARN: could not publish next/${SLUG} — claim is local-only (no cross-machine protection until /do:pr pushes)."
 ```
 
 **Verify `pwd` is the worktree path**, not the main repo. If it printed the main repo path, the worktree creation or `cd` failed — STOP, report the error, do not proceed. **Re-anchor every later Bash call** with `cd "${WORKTREE}"` or absolute paths; working directory persists but a stray `cd` can drop you back at the main repo silently. **Stash both `WORKTREE` and `DEFAULT_BRANCH` for the later phases — and re-export them at the top of each subsequent Bash snippet.** Shell *variables* do NOT persist across separate Bash tool calls (only the working directory does), so `${DEFAULT_BRANCH}` and `${WORKTREE}` referenced in Phases 5/6/7 would otherwise expand empty (`git fetch origin ""` fails *after* you've already done the work). Either re-assign them literally at the start of each snippet, or recompute `DEFAULT_BRANCH` with the same git-native one-liner used above.
@@ -259,9 +267,14 @@ git fetch origin "${DEFAULT_BRANCH}" && \
 git checkout "${DEFAULT_BRANCH}" && \
 git pull --rebase --autostash && \
 git branch -d "next/${SLUG}"
+# Delete the REMOTE claim branch published in Phase 2. On the happy path the
+# `gh pr merge --delete-branch` already removed it (this is then a harmless no-op);
+# on an ABANDONED claim (Phase 3 skip / Phase 3.5 reject — no PR was ever merged)
+# this is what retracts the remote claim so the item returns to the queue.
+git push origin --delete "next/${SLUG}" 2>/dev/null || true
 ```
 
-(Order matters: remove the worktree, **switch to and sync the default branch, then delete the claim branch** — branch delete is LAST in the chain so two invariants both hold: (1) a `git branch -d` failure ("not fully merged" after a squash- or rebase-merge) can't skip the sync, because the sync already ran; and (2) any earlier failure (worktree-remove, fetch, checkout, or a rebase conflict) short-circuits the `&&` chain *before* the delete, so the local claim branch is never removed while the default branch is still stale. Checking out `DEFAULT_BRANCH` first guarantees the merge commit lands on the right local branch even when `/do:next` was launched from a feature branch. Only fall back to `-D` after confirming no unmerged work.)
+(Order matters: remove the worktree, **switch to and sync the default branch, then delete the claim branch** — branch delete is LAST in the `&&` chain so two invariants both hold: (1) a `git branch -d` failure ("not fully merged" after a squash- or rebase-merge) can't skip the sync, because the sync already ran; and (2) any earlier failure (worktree-remove, fetch, checkout, or a rebase conflict) short-circuits the chain *before* the delete, so the local claim branch is never removed while the default branch is still stale. Checking out `DEFAULT_BRANCH` first guarantees the merge commit lands on the right local branch even when `/do:next` was launched from a feature branch. The trailing remote-branch delete runs unconditionally — it retracts the Phase-2 early-push claim on abandonment and is a no-op after a `--delete-branch` merge. Only fall back to `-D` after confirming no unmerged work.)
 
 **Issues mode — confirm closed, then clear the marker.** A `Closes #<num>` in the PR body auto-closes on merge to the **default branch**. Verify with `gh issue view <num> --json state -q .state` (expect `CLOSED`); if still `OPEN`, close explicitly: `gh issue close <num> --comment "Shipped in PR #<PR_NUM>."`. Then drop the stale label: `gh issue edit "$ISSUE_NUM" --remove-label in-progress 2>/dev/null || true`. (Leave the assignee — it records who shipped it; a closed issue is never a Phase 1 candidate anyway.)
 
