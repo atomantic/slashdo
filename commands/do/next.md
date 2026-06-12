@@ -104,7 +104,7 @@ fi && \
 # Default-branch lookup via git (not `gh repo view`) — one less gh round-trip and
 # works even mid-auth-hiccup. Try the local origin/HEAD ref first, fall back to
 # querying the remote if it isn't set.
-DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')" && \
+DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)" && \
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(git remote show origin | sed -n 's/.*HEAD branch: //p')}" && \
 WORKTREE="../next-${SLUG}" && \
 git fetch origin "${DEFAULT_BRANCH}" && \
@@ -219,8 +219,8 @@ Write the code, tests, and docs the item requires, following the **target repo's
 > ```bash
 > # Re-declare — shell vars don't survive across Bash snippets (only cwd does):
 > SLUG="<picked-slug>"; WORKTREE="../next-${SLUG}"
-> DEFAULT_BRANCH="$(git -C "${WORKTREE}" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
-> DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(git -C "${WORKTREE}" remote show origin | sed -n 's/.*HEAD branch: //p')}"
+> DEFAULT_BRANCH="$(git -C "${WORKTREE}" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)"
+> [ -n "$DEFAULT_BRANCH" ] || DEFAULT_BRANCH="$(git -C "${WORKTREE}" remote show origin | sed -n 's/.*HEAD branch: //p')"
 > cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit "origin/${DEFAULT_BRANCH}"
 > ```
 > **Conflict rule — deletions win.** Resolve any PLAN.md / changelog conflict so a line removed on *either* side stays removed; keep additions from both. Then `git add` and `git commit --no-edit`.
@@ -269,19 +269,21 @@ git diff --cached --quiet || git commit -m "docs([issue-<num>]): log issue #<num
 
 State any skip/trim and why ("Diff is 3 lines in one file; skipping the quality pass and external review — matches existing pattern"). `/do:pr` pushes `next/<slug>`, opens the PR (include `Closes #<num>` in issues mode), runs the chosen review loop, and reports the aggregate status.
 
+**Gate the merge on the review result — do NOT merge unconditionally.** `/do:pr` (via the multi-reviewer loop) reports an aggregate `OVERALL_STATUS`, and that loop explicitly leaves merge eligibility to the caller: **never merge on `dirty` (build/test broken, or a hard-error short-circuit) or `inconclusive` (a requested reviewer was missing / timed out / errored / was skipped — you asked for that perspective and didn't get it).** Merge only when the status is `clean` (or `partial` *and* you explicitly passed a `--review-stop-on-*` flag — that's the only case where a short-circuited reviewer list is acceptable). On `dirty`/`inconclusive`, **stop and leave the PR open** for the user: report the status and the PR URL, do NOT run the merge below, and do NOT run Phase 7 cleanup (the worktree/branch must stay so the work can be finished). The whole point of `--review-with` is the gate; merging through a non-clean result silently defeats it.
+
 **Encode the slug in the PR title** for grep-ability if `/do:pr` didn't: `gh pr edit <num> --title "feat([<slug>]): <description>"`.
 
-**Re-sync, then merge.** A long review loop can let sibling claims merge after your Phase-5 sync — re-sync once more so a stale PLAN.md can't resurrect their removed items at merge time:
+**Re-sync, then merge (only when the gate above passed).** A long review loop can let sibling claims merge after your Phase-5 sync — re-sync once more so a stale PLAN.md can't resurrect their removed items at merge time:
 
 ```bash
 # Re-declare — shell vars don't survive across Bash snippets (only cwd does):
 SLUG="<picked-slug>"; WORKTREE="../next-${SLUG}"
-DEFAULT_BRANCH="$(git -C "${WORKTREE}" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
-DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(git -C "${WORKTREE}" remote show origin | sed -n 's/.*HEAD branch: //p')}"
+DEFAULT_BRANCH="$(git -C "${WORKTREE}" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)"
+[ -n "$DEFAULT_BRANCH" ] || DEFAULT_BRANCH="$(git -C "${WORKTREE}" remote show origin | sed -n 's/.*HEAD branch: //p')"
 cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit "origin/${DEFAULT_BRANCH}"
 # Resolve any PLAN.md / changelog conflict deletions-win (Phase 5 rule), then:
 git push
-gh pr merge <num> --merge --delete-branch
+gh pr merge <num> --merge --delete-branch   # only reached when OVERALL_STATUS is clean (or explicitly-opted partial)
 ```
 
 ## Phase 7: Clean up
@@ -295,7 +297,7 @@ WORKTREE="../next-${SLUG}" && \
 # THAT branch explicitly — not "whatever HEAD happens to be". /do:next may have been
 # launched from a feature branch in the main repo, in which case a bare `git pull`
 # would update the wrong branch and leave the merged default stale.
-DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')" && \
+DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)" && \
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(git remote show origin | sed -n 's/.*HEAD branch: //p')}" && \
 git worktree remove "${WORKTREE}" && \
 git fetch origin "${DEFAULT_BRANCH}" && \
