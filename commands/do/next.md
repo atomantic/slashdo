@@ -60,15 +60,15 @@ For every ref, split on `/` and collect each segment — that's the raw in-fligh
 Run the issue-mode setup from [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) (detect `gh`/`glab` as `CLI_TOOL`, ensure `PLAN_LABEL` exists, abort if neither host is authenticated). Then:
 
 1. **Resolve the repo creator** — only creator-authored issues are auto-pick candidates: `CREATOR="$(gh repo view --json owner -q .owner.login)"`. (Reads `origin`; for fork users this is their own login, which is correct. Pass an explicit `owner/repo` to target upstream.)
-2. **List candidates** — open, authored by `$CREATOR`, oldest-first (`gh issue list` never returns pull requests, so PRs are excluded automatically):
+2. **List candidates** — open, authored by `$CREATOR`, **carrying `PLAN_LABEL`** (default `plan`; set by `--issues-label`), oldest-first (`gh issue list` never returns pull requests, so PRs are excluded automatically). The label filter is what makes this consistent with the rest of slashdo's issue mode: `/do:replan --issues` and `lib/plan-issue-mode.md` treat **only labeled issues** as plan items, so an unlabeled owner-authored bug report is NOT auto-claimable work:
    ```bash
-   gh issue list --state open --author "$CREATOR" --limit 100 \
+   gh issue list --state open --author "$CREATOR" --label "$PLAN_LABEL" --limit 100 \
      --json number,title,assignees,labels,createdAt -q 'sort_by(.createdAt) | .[]'
    ```
 3. **Determine in-flight issues.** Issue `N` is in flight if EITHER `issue-N` appears in the raw in-flight set, OR the issue **already has an assignee** (someone took it via the Phase 2 marker, possibly on another machine). The assignee check is the cross-machine half of the claim — a local-only `next/issue-N` branch on a sibling machine is invisible here, but its assignee is not.
 4. **Pick the target issue:**
-   - **With argument** — the issue number (strip `#`). Verify open, creator-authored, NOT in flight. If any check fails, print why and stop.
-   - **Without argument** — pick the FIRST (oldest) candidate NOT in flight and NOT carrying a parking label (`blocked`, `needs-input`, `wontfix`, `discussion`, `future`, or any repo-specific parking label — skip and note it). An explicit `#num` can still claim a `future`-labelled issue; auto-pick never surfaces it.
+   - **With argument** — the issue number (strip `#`). Verify open, creator-authored, NOT in flight. If it lacks `PLAN_LABEL`, this is an **explicit override** (the user named a specific issue): proceed, but state that you're claiming an unlabeled issue so the choice is visible. If any other check fails, print why and stop.
+   - **Without argument** — pick the FIRST (oldest) candidate (the candidate list is already `PLAN_LABEL`-scoped) NOT in flight and NOT carrying a parking label (`blocked`, `needs-input`, `wontfix`, `discussion`, `future`, or any repo-specific parking label — skip and note it). An explicit `#num` can still claim a `future`-labelled issue; auto-pick never surfaces it.
 5. **Set `ISSUE_NUM=<num>` and `SLUG="issue-${ISSUE_NUM}"`** — later phases use `SLUG` for worktree/branch/commit/PR and `ISSUE_NUM` for `gh issue` calls.
 6. **If no eligible issue exists**, print why and stop. Do NOT open new issues here — that only happens for work *discovered while implementing* (Phase 4/6).
 
@@ -167,9 +167,12 @@ git add PLAN.md
 git add .changelogs/NEXT.md 2>/dev/null || git add .changelog/NEXT.md 2>/dev/null || true
 git commit -m "docs([<slug>]): remove from PLAN.md and log to changelog"
 
-# Issues mode (no PLAN.md edit):
+# Issues mode (no PLAN.md edit): commit ONLY if a changelog was actually staged.
+# A repo with no .changelogs/.changelog dir stages nothing here, and PLAN.md is
+# untouched in issue mode — so an unconditional `git commit` would exit non-zero
+# ("nothing to commit") and abort an otherwise-valid run. Guard with a staged check:
 git add .changelogs/NEXT.md 2>/dev/null || git add .changelog/NEXT.md 2>/dev/null || true
-git commit -m "docs([issue-<num>]): log issue #<num> to changelog"
+git diff --cached --quiet || git commit -m "docs([issue-<num>]): log issue #<num> to changelog"
 ```
 
 ## Phase 6: Review and ship — delegate to `/do:pr`
