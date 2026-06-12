@@ -59,7 +59,9 @@ For every ref, split on `/` and collect each segment — that's the raw in-fligh
 
 Run the issue-mode setup from [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) (detect `gh`/`glab` as `CLI_TOOL`, ensure `PLAN_LABEL` exists, abort if neither host is authenticated). Then:
 
-1. **Resolve the repo creator** — only creator-authored issues are auto-pick candidates: `CREATOR="$(gh repo view --json owner -q .owner.login)"`. (Reads `origin`; for fork users this is their own login, which is correct. Pass an explicit `owner/repo` to target upstream.)
+> **Use `$CLI_TOOL`, not a hard-coded `gh`.** The setup just selected the host; honor it. The commands below show the **GitHub/`gh`** form (the common case) with the **GitLab/`glab`** equivalent inline. If `CLI_TOOL=glab`, run the `glab` form throughout — including the Phase 2 assignee marker and the Phase 6/7 close, where GitLab's assignee model (`glab issue update <n> --assignee @me`, read back via `glab issue view <n>`) is the cross-machine claim. Don't invoke `gh` in a GitLab-only repo.
+
+1. **Resolve the repo creator** — only creator-authored issues are auto-pick candidates. GitHub: `CREATOR="$(gh repo view --json owner -q .owner.login)"`. GitLab: `CREATOR="$(glab repo view -F json -q .namespace.path)"` (project owner/namespace). (Reads `origin`; for fork users this is their own login, which is correct. Pass an explicit `owner/repo` to target upstream.)
 2. **List candidates** — open, authored by `$CREATOR`, **carrying `PLAN_LABEL`** (default `plan`; set by `--issues-label`), oldest-first (`gh issue list` never returns pull requests, so PRs are excluded automatically). The label filter is what makes this consistent with the rest of slashdo's issue mode: `/do:replan --issues` and `lib/plan-issue-mode.md` treat **only labeled issues** as plan items, so an unlabeled owner-authored bug report is NOT auto-claimable work:
    ```bash
    gh issue list --state open --author "$CREATOR" --label "$PLAN_LABEL" --limit 100 \
@@ -99,11 +101,25 @@ Immediately after the worktree is verified, claim the issue **on the host** so a
 
 ```bash
 gh issue edit "$ISSUE_NUM" --add-assignee @me                                   # load-bearing marker
+
+# Confirm exclusivity: --add-assignee is NOT a compare-and-swap — GitHub issues
+# allow MULTIPLE assignees, so a sibling machine that picked the same issue in the
+# race window can also add itself and keep going. Re-read the assignees; if anyone
+# OTHER than you is now assigned, a sibling won the race — yield: release your marker
+# and stop (re-run Phase 1 to pick the next issue).
+ASSIGNEES="$(gh issue view "$ISSUE_NUM" --json assignees -q '[.assignees[].login] | join(",")')"
+ME="$(gh api user -q .login)"
+if printf '%s' "$ASSIGNEES" | tr ',' '\n' | grep -qvxF "$ME" ; then
+  echo "Issue #$ISSUE_NUM already claimed by: $ASSIGNEES — yielding."
+  gh issue edit "$ISSUE_NUM" --remove-assignee @me 2>/dev/null || true
+  # then remove the worktree (Phase 7) and re-run Phase 1
+fi
+
 gh label create in-progress --color FFA500 --description "Claimed and being worked" 2>/dev/null || true
 gh issue edit "$ISSUE_NUM" --add-label in-progress 2>/dev/null || true          # human-visibility only
 ```
 
-The assignee is the marker; the label is convenience (`|| true` keeps a label failure from aborting). **If you must stop after this (worktree failed, or `--add-assignee` shows a sibling machine grabbed it in the race window), release the marker before stopping:** `gh issue edit "$ISSUE_NUM" --remove-assignee @me --remove-label in-progress 2>/dev/null || true` — so a half-claimed issue isn't stranded as permanently "taken."
+The re-read narrows the race from "the whole implementation" to "the sub-second window between `--add-assignee` and the read-back" — still not a true distributed lock (two reads can interleave so both yield, or in a tie both proceed), but close to compare-and-swap and far tighter than a blind assign. The assignee is the marker; the label is convenience (`|| true` keeps a label failure from aborting). **If you must stop after this (worktree failed, or the read-back showed a sibling won), release the marker before stopping:** `gh issue edit "$ISSUE_NUM" --remove-assignee @me --remove-label in-progress 2>/dev/null || true` — so a half-claimed issue isn't stranded as permanently "taken."
 
 ## Phase 3: Verify still valid
 
@@ -235,5 +251,5 @@ Shipped issue #<num> "<Title>". PR #<PR_NUM>. Issue closed. Worktree + branch cl
 - **`/do:next` only *consumes* the queue.** New work comes from `/do:replan`, `/do:better`, `/do:depfree`, or human edits — never invented here, except *discovered* work split out of the current item (Phase 4/6).
 - **`--issues` is per-invocation, consistent with every other slashdo command.** There is no separate config file (YAGNI) — a repo that works issues-first simply always passes `--issues`, the same way it would to `/do:replan --issues`.
 - **Auto-redirect makes `--issues` optional for issue-tracked repos.** When there's no PLAN.md, or PLAN.md is the stub `/do:replan --issues` leaves behind, a bare `/do:next` recognizes the repo is issue-tracked and continues in issue mode on its own (stating the switch). So a repo that ran `/do:replan --issues` once doesn't need every contributor to remember the flag — the stub *is* the config signal. Passing `--issues` explicitly still works and skips the detection.
-- **GitLab.** Examples show `gh` (GitHub); GitLab is supported via `glab` following the same model in [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) — substitute the `glab issue`/`glab mr` equivalents and GitLab's assignee semantics.
+- **GitLab.** The issue-mode setup detects `gh`/`glab` as `CLI_TOOL`; honor it rather than hard-coding `gh`. The worked examples show the GitHub form with the `glab` equivalent inline at each load-bearing command (creator resolution, candidate list, the Phase 2 assignee marker, and the Phase 6/7 close). GitLab's assignee model differs from GitHub's but plays the same role — `glab issue update <n> --assignee @me` sets the cross-machine claim, read back via `glab issue view <n>`. The shared label/list setup lives in [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md).
 - **Issues-mode creator filter is a hard filter.** Auto-pick and explicit `#num` both reject issues NOT authored by the repo owner, so `/do:next --issues` never acts on community/bot-filed issues without a human triaging them first (those surface via `/do:replan`).
