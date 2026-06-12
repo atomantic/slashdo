@@ -5,14 +5,14 @@ argument-hint: "[<slug>|#<issue>] [--issues] [--issues-label <name>] [--plan] [-
 
 # Next — Pick the next plan item (or issue) and ship it
 
-Claim the next unclaimed `- [ ]` item from **PLAN.md** via the slug-ID system — or, with `--issues`, the next open tracker issue filed by the repo creator — work it in an **isolated worktree**, run review, open a PR, merge, and clean up. This is the **consumer** counterpart to `/do:replan`, `/do:better`, and `/do:depfree` (which *populate* the queue): `/do:next` *drains* it, one item per run.
+Claim the next unclaimed `- [ ]` item from **PLAN.md** via the slug-ID system — or, with `--issues`, the next open tracker issue carrying the plan label — work it in an **isolated worktree**, run review, open a PR, merge, and clean up. This is the **consumer** counterpart to `/do:replan`, `/do:better`, and `/do:depfree` (which *populate* the queue): `/do:next` *drains* it, one item per run.
 
 **Two work sources.** The work queue comes from one of two places, selected by `--issues`:
 
 | Source | Selected by | Work unit | Branch | "Done" action | Discovered work goes to |
 |---|---|---|---|---|---|
 | **PLAN.md** (default) | no flag | a `- [ ]` line with a `[<slug>]` ID | `next/<slug>` | remove the line + log to the changelog | a new PLAN.md item (only if genuinely large) |
-| **Tracker issues** | `--issues` | an open issue **filed by the repo creator** | `next/issue-<num>` | close the issue via `Closes #<num>` in the PR | a new tracker issue (only if genuinely large) — never PLAN.md |
+| **Tracker issues** | `--issues` | an open issue **carrying `PLAN_LABEL`** | `next/issue-<num>` | close the issue via `Closes #<num>` in the PR | a new tracker issue (only if genuinely large) — never PLAN.md |
 
 The two sources never mix in one run. In issues mode, treat `issue-<num>` as the "slug" everywhere the PLAN.md flow says `<slug>` — worktree (`../next-issue-<num>`), branch (`next/issue-<num>`), commit/PR-title prefix (`[issue-<num>]`), and in-flight scan all work unchanged because `issue-<num>` is a single `/`-segment in the branch name just like a PLAN slug.
 
@@ -22,7 +22,7 @@ The two sources never mix in one run. In issues mode, treat `issue-<num>` as the
 
 Split `$ARGUMENTS` on whitespace — tokens starting with `--` are flags, the first remaining non-flag token is the target slug/issue. Value flags accept either `--flag=value` or `--flag value` (consume the next token as the value, don't mistake it for the slug). Order is free.
 
-- **`<slug>` / `#<issue>`** — claim THAT specific item instead of auto-picking (cherry-pick out of order). PLAN.md mode: a slug that must already exist as a `- [ ]` line (this command never *assigns* IDs — that's `/do:replan`'s job). Issues mode: an issue number, bare (`123`) or `#`-prefixed (`#123`, strip the `#`); must be open and creator-authored.
+- **`<slug>` / `#<issue>`** — claim THAT specific item instead of auto-picking (cherry-pick out of order). PLAN.md mode: a slug that must already exist as a `- [ ]` line (this command never *assigns* IDs — that's `/do:replan`'s job). Issues mode: an issue number, bare (`123`) or `#`-prefixed (`#123`, strip the `#`); must be open (an explicit number may claim an unlabeled issue as an override — auto-pick is `PLAN_LABEL`-scoped).
 - **`--issues`** — switch the source from PLAN.md to the **tracker**. Set `ISSUE_MODE=true`. Setup (host detection, label, abort-if-unauthenticated) follows [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md). In this mode PLAN.md is never read or edited.
 - **`--issues-label <name>`** — label scoping tracked issues. `PLAN_LABEL` (default `plan`). Only meaningful with `--issues`.
 - **`--plan`** — before writing code, enter an **interactive plan-mode session** (Phase 3.5): present a written plan, surface open questions, get explicit approval before implementing. Runs *after* the worktree is claimed so you plan with full context. Rejection routes to Phase 7 cleanup exactly like a Phase 3 skip.
@@ -65,18 +65,17 @@ First run the shared issue-mode setup — detect `gh`/`glab` as `CLI_TOOL`, ensu
 
 Then:
 
-1. **Resolve the repo creator** — only creator-authored issues are auto-pick candidates: `CREATOR="$(gh repo view --json owner -q .owner.login)"`. (Reads `origin`; for fork users this is their own login, which is correct. Pass an explicit `owner/repo` to target upstream.)
-2. **List candidates** — open, authored by `$CREATOR`, **carrying `PLAN_LABEL`** (default `plan`; set by `--issues-label`), oldest-first (`gh issue list` never returns pull requests, so PRs are excluded automatically). The label filter is what makes this consistent with the rest of slashdo's issue mode: `/do:replan --issues` and `lib/plan-issue-mode.md` treat **only labeled issues** as plan items, so an unlabeled owner-authored bug report is NOT auto-claimable work:
+1. **List candidates** — open, **carrying `PLAN_LABEL`** (default `plan`; set by `--issues-label`), oldest-first (`gh issue list` never returns pull requests, so PRs are excluded automatically). **`PLAN_LABEL` is the only gate — there is no author filter.** The label is slashdo's plan-item definition (`/do:replan --issues` and `lib/plan-issue-mode.md` treat *only* labeled issues as plan items), and applying it already requires triage/write access — so it does the job an author filter would, *without* excluding correctly-labeled plan issues that a collaborator, bot, or `/do:replan` run by anyone in an org-owned repo created. An unlabeled issue (a raw bug report) is simply not auto-claimable work:
    ```bash
-   gh issue list --state open --author "$CREATOR" --label "$PLAN_LABEL" --limit 100 \
+   gh issue list --state open --label "$PLAN_LABEL" --limit 100 \
      --json number,title,assignees,labels,createdAt -q 'sort_by(.createdAt) | .[]'
    ```
-3. **Determine in-flight issues.** Issue `N` is in flight if EITHER `issue-N` appears in the raw in-flight set, OR the issue **already has an assignee** (someone took it via the Phase 2 marker, possibly on another machine). The assignee check is the cross-machine half of the claim — a local-only `next/issue-N` branch on a sibling machine is invisible here, but its assignee is not.
-4. **Pick the target issue:**
-   - **With argument** — the issue number (strip `#`). Verify open, creator-authored, NOT in flight. If it lacks `PLAN_LABEL`, this is an **explicit override** (the user named a specific issue): proceed, but state that you're claiming an unlabeled issue so the choice is visible. If any other check fails, print why and stop.
+2. **Determine in-flight issues.** Issue `N` is in flight if EITHER `issue-N` appears in the raw in-flight set, OR the issue **already has an assignee** (someone took it via the Phase 2 marker, possibly on another machine). The assignee check is the cross-machine half of the claim — a local-only `next/issue-N` branch on a sibling machine is invisible here, but its assignee is not.
+3. **Pick the target issue:**
+   - **With argument** — the issue number (strip `#`). Verify open and NOT in flight. If it lacks `PLAN_LABEL`, this is an **explicit override** (the user named a specific issue): proceed, but state that you're claiming an unlabeled issue so the choice is visible. If any other check fails, print why and stop.
    - **Without argument** — pick the FIRST (oldest) candidate (the candidate list is already `PLAN_LABEL`-scoped) NOT in flight and NOT carrying a parking label (`blocked`, `needs-input`, `wontfix`, `discussion`, `future`, or any repo-specific parking label — skip and note it). An explicit `#num` can still claim a `future`-labelled issue; auto-pick never surfaces it.
-5. **Set `ISSUE_NUM=<num>` and `SLUG="issue-${ISSUE_NUM}"`** — later phases use `SLUG` for worktree/branch/commit/PR and `ISSUE_NUM` for `gh issue` calls.
-6. **If no eligible issue exists**, print why and stop. Do NOT open new issues here — that only happens for work *discovered while implementing* (Phase 4/6).
+4. **Set `ISSUE_NUM=<num>` and `SLUG="issue-${ISSUE_NUM}"`** — later phases use `SLUG` for worktree/branch/commit/PR and `ISSUE_NUM` for `gh issue` calls.
+5. **If no eligible issue exists**, print why and stop. Do NOT open new issues here — that only happens for work *discovered while implementing* (Phase 4/6).
 
 ## Phase 2: Claim (worktree) — REQUIRED, NOT OPTIONAL
 
@@ -101,7 +100,7 @@ cd "${WORKTREE}" && \
 pwd
 ```
 
-**Verify `pwd` is the worktree path**, not the main repo. If it printed the main repo path, the worktree creation or `cd` failed — STOP, report the error, do not proceed. **Re-anchor every later Bash call** with `cd "${WORKTREE}"` or absolute paths; working directory persists but a stray `cd` can drop you back at the main repo silently. Stash the absolute worktree path for Phase 7.
+**Verify `pwd` is the worktree path**, not the main repo. If it printed the main repo path, the worktree creation or `cd` failed — STOP, report the error, do not proceed. **Re-anchor every later Bash call** with `cd "${WORKTREE}"` or absolute paths; working directory persists but a stray `cd` can drop you back at the main repo silently. **Stash both `WORKTREE` and `DEFAULT_BRANCH` for the later phases — and re-export them at the top of each subsequent Bash snippet.** Shell *variables* do NOT persist across separate Bash tool calls (only the working directory does), so `${DEFAULT_BRANCH}` and `${WORKTREE}` referenced in Phases 5/6/7 would otherwise expand empty (`git fetch origin ""` fails *after* you've already done the work). Either re-assign them literally at the start of each snippet, or recompute `DEFAULT_BRANCH` with the same git-native one-liner used above.
 
 ### Phase 2 — mark the issue in progress (issues mode only)
 
@@ -244,12 +243,20 @@ From the **main repo** (not the worktree), as a single Bash invocation, re-subst
 ```bash
 SLUG="<picked-slug>" && \
 WORKTREE="../next-${SLUG}" && \
+# Recompute the default branch (shell vars don't survive across snippets) and sync
+# THAT branch explicitly — not "whatever HEAD happens to be". /do:next may have been
+# launched from a feature branch in the main repo, in which case a bare `git pull`
+# would update the wrong branch and leave the merged default stale.
+DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')" && \
+DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(git remote show origin | sed -n 's/.*HEAD branch: //p')}" && \
 git worktree remove "${WORKTREE}" && \
+git fetch origin "${DEFAULT_BRANCH}" && \
+git checkout "${DEFAULT_BRANCH}" && \
 git pull --rebase --autostash && \
 git branch -d "next/${SLUG}"
 ```
 
-(Order matters: remove the worktree, **then sync, then delete the branch** — branch delete is LAST in the chain so two invariants both hold: (1) a `git branch -d` failure ("not fully merged" after a squash- or rebase-merge) can't skip the sync, because the sync already ran; and (2) a worktree-remove or sync failure (rebase conflict, transient fetch error) short-circuits the `&&` chain *before* the delete, so the local claim branch is never removed while main is still stale. Only fall back to `-D` after confirming no unmerged work.)
+(Order matters: remove the worktree, **switch to and sync the default branch, then delete the claim branch** — branch delete is LAST in the chain so two invariants both hold: (1) a `git branch -d` failure ("not fully merged" after a squash- or rebase-merge) can't skip the sync, because the sync already ran; and (2) any earlier failure (worktree-remove, fetch, checkout, or a rebase conflict) short-circuits the `&&` chain *before* the delete, so the local claim branch is never removed while the default branch is still stale. Checking out `DEFAULT_BRANCH` first guarantees the merge commit lands on the right local branch even when `/do:next` was launched from a feature branch. Only fall back to `-D` after confirming no unmerged work.)
 
 **Issues mode — confirm closed, then clear the marker.** A `Closes #<num>` in the PR body auto-closes on merge to the **default branch**. Verify with `gh issue view <num> --json state -q .state` (expect `CLOSED`); if still `OPEN`, close explicitly: `gh issue close <num> --comment "Shipped in PR #<PR_NUM>."`. Then drop the stale label: `gh issue edit "$ISSUE_NUM" --remove-label in-progress 2>/dev/null || true`. (Leave the assignee — it records who shipped it; a closed issue is never a Phase 1 candidate anyway.)
 
@@ -266,9 +273,9 @@ Shipped issue #<num> "<Title>". PR #<PR_NUM>. Issue closed. Worktree + branch cl
 ## Notes
 
 - **Concurrency model.** The worry isn't strangers — it's *your own parallel agents* (a second tab, a scheduled job) picking the same item. The branch+PR scan in Phase 1 catches both; issues mode's assignee marker extends the protection across machines.
-- **Empty pick is not a failure.** Everything in flight / drifted / NEEDS_INPUT (PLAN.md), or every creator-authored issue in flight / assigned / parking-labelled (issues) is a healthy queue — exit clean and say so.
+- **Empty pick is not a failure.** Everything in flight / drifted / NEEDS_INPUT (PLAN.md), or every `PLAN_LABEL` issue in flight / assigned / parking-labelled (issues) is a healthy queue — exit clean and say so.
 - **`/do:next` only *consumes* the queue.** New work comes from `/do:replan`, `/do:better`, `/do:depfree`, or human edits — never invented here, except *discovered* work split out of the current item (Phase 4/6).
 - **`--issues` is per-invocation, consistent with every other slashdo command.** There is no separate config file (YAGNI) — a repo that works issues-first simply always passes `--issues`, the same way it would to `/do:replan --issues`.
 - **Auto-redirect makes `--issues` optional for issue-tracked repos.** When there's no PLAN.md, or PLAN.md is the stub `/do:replan --issues` leaves behind, a bare `/do:next` recognizes the repo is issue-tracked and continues in issue mode on its own (stating the switch). So a repo that ran `/do:replan --issues` once doesn't need every contributor to remember the flag — the stub *is* the config signal. Passing `--issues` explicitly still works and skips the detection.
 - **GitLab.** PLAN.md mode is fully host-agnostic (it touches no issue tracker). **Issue mode (`--issues`) is GitHub-only for now** — the cross-machine claim (Phase 2) relies on the GitHub assignee model, and slashdo doesn't yet ship verified `glab` equivalents for it, so a `glab`-only repo aborts issue mode with a clear message rather than running untested claim commands. The shared label/list setup in [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) is cross-host; only `/do:next`'s claim/marker flow is GitHub-scoped. Adding GitLab claim support is a clean follow-up (implement + test the `glab` assignee read-back, then lift the abort).
-- **Issues-mode creator filter is a hard filter.** Auto-pick and explicit `#num` both reject issues NOT authored by the repo owner, so `/do:next --issues` never acts on community/bot-filed issues without a human triaging them first (those surface via `/do:replan`).
+- **`PLAN_LABEL` is the issue-mode queue — not authorship.** Auto-pick claims any open issue carrying the plan label, regardless of who filed it (so plan issues created by a collaborator, a bot, or `/do:replan --issues` run by anyone in an org-owned repo are all claimable). The gate against random community issues is the label itself: applying it takes triage/write access, so an unlabeled bug report is never auto-claimed. An explicit `#num` can override and claim an unlabeled issue (stated when it does).
