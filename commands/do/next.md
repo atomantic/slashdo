@@ -286,13 +286,13 @@ SLUG="<picked-slug>"; WORKTREE="../next-${SLUG}"
 DEFAULT_BRANCH="$(git -C "${WORKTREE}" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)"
 [ -n "$DEFAULT_BRANCH" ] || DEFAULT_BRANCH="$(git -C "${WORKTREE}" remote show origin | sed -n 's/.*HEAD branch: //p')"
 cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit "origin/${DEFAULT_BRANCH}"
-# If the merge hit a PLAN.md / changelog conflict, resolve it deletions-win (Phase 5
-# rule), then STAGE AND COMMIT the resolution before pushing — otherwise the repo is
-# left mid-merge and `git push` sends the stale tip, so `gh pr merge` sees an
-# unmergeable PR. (A clean merge / "Already up to date" needs no commit.)
-git diff --name-only --diff-filter=U | grep -q . && { git add -A && git commit --no-edit; }
+```
+
+**If that merge reports a conflict** (unmerged PLAN.md / changelog paths — `git merge` exits non-zero and leaves `<<<<<<<` markers), **STOP and resolve it by hand** before going further: apply the deletions-win rule (a line removed on *either* side stays removed; keep additions from both), then `git add` the **specific resolved files** and `git commit --no-edit`. **Do NOT `git add -A`/`git add .` while paths are still unmerged** — that would stage raw conflict markers and push a broken tree. Only once `git status` shows no unmerged paths (a clean merge or "Already up to date" needs no commit at all) is it safe to push and merge:
+
+```bash
 git push
-gh pr merge <num> --merge --delete-branch   # only reached when OVERALL_STATUS is clean (or explicitly-opted partial)
+gh pr merge <num> --merge --delete-branch   # only reached when the review gate passed AND the tree is conflict-free
 ```
 
 ## Phase 7: Clean up
