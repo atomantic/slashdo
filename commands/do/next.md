@@ -59,9 +59,9 @@ For every ref, split on `/` and collect each segment — that's the raw in-fligh
 
 Run the issue-mode setup from [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) (detect `gh`/`glab` as `CLI_TOOL`, ensure `PLAN_LABEL` exists, abort if neither host is authenticated). Then:
 
-> **Use `$CLI_TOOL`, not a hard-coded `gh`.** The setup just selected the host; honor it. The commands below show the **GitHub/`gh`** form (the common case) with the **GitLab/`glab`** equivalent inline. If `CLI_TOOL=glab`, run the `glab` form throughout — including the Phase 2 assignee marker and the Phase 6/7 close, where GitLab's assignee model (`glab issue update <n> --assignee @me`, read back via `glab issue view <n>`) is the cross-machine claim. Don't invoke `gh` in a GitLab-only repo.
+> **Issue mode requires GitHub (`gh`).** `/do:next`'s claim mechanics depend on the GitHub assignee model as the cross-machine marker (Phase 2). **If the setup selected `CLI_TOOL=glab`, abort issue mode** with: "`/do:next --issues` currently supports GitHub only — the cross-machine claim relies on GitHub issue assignees. Use PLAN.md mode (drop `--issues`), or track GitLab claim support as a feature request." Don't attempt the GitLab path with untested `glab` assignee commands — a half-working claim is worse than a clean abort. (The shared label/list *setup* in `lib/plan-issue-mode.md` is cross-host, but the claim/marker flow below is not yet.) All commands below are therefore `gh`.
 
-1. **Resolve the repo creator** — only creator-authored issues are auto-pick candidates. GitHub: `CREATOR="$(gh repo view --json owner -q .owner.login)"`. GitLab: `CREATOR="$(glab repo view -F json -q .namespace.path)"` (project owner/namespace). (Reads `origin`; for fork users this is their own login, which is correct. Pass an explicit `owner/repo` to target upstream.)
+1. **Resolve the repo creator** — only creator-authored issues are auto-pick candidates: `CREATOR="$(gh repo view --json owner -q .owner.login)"`. (Reads `origin`; for fork users this is their own login, which is correct. Pass an explicit `owner/repo` to target upstream.)
 2. **List candidates** — open, authored by `$CREATOR`, **carrying `PLAN_LABEL`** (default `plan`; set by `--issues-label`), oldest-first (`gh issue list` never returns pull requests, so PRs are excluded automatically). The label filter is what makes this consistent with the rest of slashdo's issue mode: `/do:replan --issues` and `lib/plan-issue-mode.md` treat **only labeled issues** as plan items, so an unlabeled owner-authored bug report is NOT auto-claimable work:
    ```bash
    gh issue list --state open --author "$CREATOR" --label "$PLAN_LABEL" --limit 100 \
@@ -119,6 +119,9 @@ if printf '%s' "$ASSIGNEES" | tr ',' '\n' | grep -qvxF "$ME" ; then
   # and re-run Phase 1 to pick the NEXT issue. This is a hard exit from the claim.
   echo "Issue #$ISSUE_NUM already claimed by: $ASSIGNEES — yielding."
   gh issue edit "$ISSUE_NUM" --remove-assignee @me 2>/dev/null || true
+  exit 1   # HARD STOP — do not fall through to the label step or Phase 3. The agent
+           # then runs Phase 7 cleanup (cd back to the main repo, remove the worktree
+           # + branch) and re-enters Phase 1 to pick the next issue.
 else
   # Claim is exclusive (only you assigned) — mark in-progress for human visibility
   # and proceed to Phase 3.
@@ -238,11 +241,11 @@ From the **main repo** (not the worktree), as a single Bash invocation, re-subst
 SLUG="<picked-slug>" && \
 WORKTREE="../next-${SLUG}" && \
 git worktree remove "${WORKTREE}" && \
-git pull --rebase --autostash
+git pull --rebase --autostash && \
 git branch -d "next/${SLUG}"
 ```
 
-(Sync the main repo BEFORE deleting the local branch — `git branch -d` is safe-delete and **fails with "not fully merged" when the PR was squash- or rebase-merged**, so chaining the pull after it with `&&` would skip the sync and strand main behind the merge. Keep the delete as its own statement; only fall back to `-D` after confirming no unmerged work.)
+(Order matters: remove the worktree, **then sync, then delete the branch** — branch delete is LAST in the chain so two invariants both hold: (1) a `git branch -d` failure ("not fully merged" after a squash- or rebase-merge) can't skip the sync, because the sync already ran; and (2) a worktree-remove or sync failure (rebase conflict, transient fetch error) short-circuits the `&&` chain *before* the delete, so the local claim branch is never removed while main is still stale. Only fall back to `-D` after confirming no unmerged work.)
 
 **Issues mode — confirm closed, then clear the marker.** A `Closes #<num>` in the PR body auto-closes on merge to the **default branch**. Verify with `gh issue view <num> --json state -q .state` (expect `CLOSED`); if still `OPEN`, close explicitly: `gh issue close <num> --comment "Shipped in PR #<PR_NUM>."`. Then drop the stale label: `gh issue edit "$ISSUE_NUM" --remove-label in-progress 2>/dev/null || true`. (Leave the assignee — it records who shipped it; a closed issue is never a Phase 1 candidate anyway.)
 
@@ -263,5 +266,5 @@ Shipped issue #<num> "<Title>". PR #<PR_NUM>. Issue closed. Worktree + branch cl
 - **`/do:next` only *consumes* the queue.** New work comes from `/do:replan`, `/do:better`, `/do:depfree`, or human edits — never invented here, except *discovered* work split out of the current item (Phase 4/6).
 - **`--issues` is per-invocation, consistent with every other slashdo command.** There is no separate config file (YAGNI) — a repo that works issues-first simply always passes `--issues`, the same way it would to `/do:replan --issues`.
 - **Auto-redirect makes `--issues` optional for issue-tracked repos.** When there's no PLAN.md, or PLAN.md is the stub `/do:replan --issues` leaves behind, a bare `/do:next` recognizes the repo is issue-tracked and continues in issue mode on its own (stating the switch). So a repo that ran `/do:replan --issues` once doesn't need every contributor to remember the flag — the stub *is* the config signal. Passing `--issues` explicitly still works and skips the detection.
-- **GitLab.** The issue-mode setup detects `gh`/`glab` as `CLI_TOOL`; honor it rather than hard-coding `gh`. The worked examples show the GitHub form with the `glab` equivalent inline at each load-bearing command (creator resolution, candidate list, the Phase 2 assignee marker, and the Phase 6/7 close). GitLab's assignee model differs from GitHub's but plays the same role — `glab issue update <n> --assignee @me` sets the cross-machine claim, read back via `glab issue view <n>`. The shared label/list setup lives in [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md).
+- **GitLab.** PLAN.md mode is fully host-agnostic (it touches no issue tracker). **Issue mode (`--issues`) is GitHub-only for now** — the cross-machine claim (Phase 2) relies on the GitHub assignee model, and slashdo doesn't yet ship verified `glab` equivalents for it, so a `glab`-only repo aborts issue mode with a clear message rather than running untested claim commands. The shared label/list setup in [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) is cross-host; only `/do:next`'s claim/marker flow is GitHub-scoped. Adding GitLab claim support is a clean follow-up (implement + test the `glab` assignee read-back, then lift the abort).
 - **Issues-mode creator filter is a hard filter.** Auto-pick and explicit `#num` both reject issues NOT authored by the repo owner, so `/do:next --issues` never acts on community/bot-filed issues without a human triaging them first (those surface via `/do:replan`).
