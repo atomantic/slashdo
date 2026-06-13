@@ -58,6 +58,8 @@ Local models have bounded context windows, so review the diff **one changed file
 LOG_FILE="$(mktemp -t ollama-review.XXXXXX.log)"
 : > "$LOG_FILE"
 CHANGED=$(git diff --name-only "$BASE_BRANCH...HEAD")
+TOTAL_FILES=$(printf '%s\n' "$CHANGED" | grep -c .)
+REVIEW_ERRORS=0   # files whose review invocation failed — tracked so a partial review never reports clean
 PER_FILE_CAP=24000   # max chars of diff sent per file; larger diffs are truncated with a note
 ```
 
@@ -84,7 +86,9 @@ $FILE_DIFF"
    printf '%s' "$PROMPT" | $TIMEOUT_CMD ollama run "$OLLAMA_MODEL" >> "$LOG_FILE" 2>&1
    printf '\n' >> "$LOG_FILE"
    ```
-4. If the invocation exits non-zero for a file, append a `[ollama error reviewing $F — see above]` marker to the log and continue to the next file (one file's failure should not abort the whole review). If *every* file errored, set `STATUS=cli-error`, print the last 80 lines of the log, and exit.
+4. If the invocation exits non-zero for a file, append a `[ollama error reviewing $F — see above]` marker to the log, **increment `REVIEW_ERRORS`**, and continue to the next file (one file's failure should not abort the whole review). Coverage accounting after the loop:
+   - If *every* file errored (`REVIEW_ERRORS == TOTAL_FILES` and `TOTAL_FILES > 0`), set `STATUS=cli-error`, print the last 80 lines of the log, and exit — nothing was reviewed.
+   - If *some but not all* files errored (`0 < REVIEW_ERRORS < TOTAL_FILES`), the diff was only **partially** reviewed. Still process the findings from the files that succeeded (apply their fixes in step 3), but the pass **must not report `clean`** — at the point step 3 would set `STATUS=clean`, set `STATUS=incomplete` instead (see step 3). `incomplete` is treated as inconclusive by the multi-reviewer aggregate (not eligible to merge), because part of the change was never reviewed.
 
 > Local models are less reliable at format adherence than agentic CLIs. Parse the log **leniently**: extract well-formed `FINDING` blocks, ignore malformed or partial blocks, and treat a file whose section is just `NO FINDINGS` (or contains no parsable findings) as clean for that file.
 
@@ -95,7 +99,7 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
 1. **Capture baseline**: `LOOP_START_SHA=$(git rev-parse HEAD)`.
 2. **Run the per-file chunked review** (above), aggregating findings into `$LOG_FILE`.
 3. **Parse findings and apply fixes** (orchestrator-applies — the same flow as the local-agent loop's review-only path):
-   - Extract the `FINDING <N>:` blocks from `$LOG_FILE`. If there are no parsable findings (every file section was `NO FINDINGS` or empty), set `STATUS=clean` and exit the loop.
+   - Extract the `FINDING <N>:` blocks from `$LOG_FILE`. If there are no parsable findings (every file section was `NO FINDINGS` or empty), set `STATUS=clean` — **but if `REVIEW_ERRORS > 0`, set `STATUS=incomplete` instead** (the diff was only partially reviewed, so "no findings" is not a clean verdict) — and exit the loop.
    - For each finding, read the cited file at the cited line and apply the fix. The model's `fix:` field is a *starting point* — local models hallucinate more than cloud agents, so your judgment overrides: drop any finding that is wrong, out of scope, or references a line that doesn't exist.
    - After each cohesive set of fixes, run `{BUILD_CMD}` (skip when empty) and `{TEST_CMD}`. If either fails, fix forward; if the failure stems from a bad finding, drop that finding.
    - Commit each fix (or coherent group) as `address review (ollama): <summary>`. The parenthesized agent name records which reviewer surfaced the finding. No co-author or "Generated with" lines.
@@ -104,7 +108,7 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
      NEW_COMMITS=$(git rev-list "$LOOP_START_SHA..HEAD" --count)
      UNCOMMITTED=$(git status --porcelain | wc -l)
      ```
-   - If `NEW_COMMITS == 0` (you rejected every finding as wrong/out-of-scope), set `STATUS=clean` and exit.
+   - If `NEW_COMMITS == 0` (you rejected every finding as wrong/out-of-scope), set `STATUS=clean` (or `STATUS=incomplete` if `REVIEW_ERRORS > 0` — partial coverage) and exit.
    - If `UNCOMMITTED > 0`, stage the explicitly listed files and commit as `address review (ollama): orchestrator-applied — remaining changes`, then proceed.
 4. **Verify in the main thread** (mandatory, non-skippable — this is the only line of defense between the model's output and the remote branch):
    - Read the diff `git diff "$LOOP_START_SHA..HEAD"` and inspect each new commit for out-of-scope refactors, reverted behavior to pass tests, disabled tests/assertions, `// TODO` placeholders, or secrets.
@@ -130,7 +134,8 @@ Print:
 
 Model: {OLLAMA_MODEL}
 Branch: {BRANCH_NAME}
-Status: {STATUS}    # clean / guardrail / cli-error / broken-build / test-failed / rejected / skipped
+Status: {STATUS}    # clean / incomplete / guardrail / cli-error / broken-build / test-failed / rejected / skipped
+Files reviewed: {TOTAL_FILES - REVIEW_ERRORS}/{TOTAL_FILES}    # if REVIEW_ERRORS > 0, status is `incomplete` (partial coverage — not eligible to merge)
 Iterations: {ITERATION}
 Commits added: {N}
 Files modified: {file list}

@@ -40,7 +40,7 @@ Iterate `REVIEW_AGENTS` in order. For each `{REVIEW_AGENT}`:
    The inner loop already handles its own iterations, fix-and-push cycles, and verification. It returns a `{STATUS}` value:
    - Copilot loop: `clean | capped | timeout | error | guardrail | too-large`
    - Local-agent loop: `clean | guardrail | cli-error | broken-build | test-failed | rejected`
-   - Ollama loop: `clean | guardrail | cli-error | broken-build | test-failed | rejected | skipped`
+   - Ollama loop: `clean | incomplete | guardrail | cli-error | broken-build | test-failed | rejected | skipped` (`incomplete` = the diff was only partially reviewed because some files' review invocations failed — treated as inconclusive, not eligible to merge)
 4. **Record the pass result** (status + number of new commits since `PASS_START_SHA`). Keep a per-pass row for the aggregate report.
 
 ### Stop-mode decision
@@ -55,7 +55,7 @@ After each pass completes (before moving to the next reviewer), evaluate `{REVIE
 
 **Hard-error short-circuit (applies in all modes)**: if the inner loop returns `cli-error`, `broken-build`, `test-failed`, or `rejected`, stop the multi-reviewer loop immediately. These statuses mean the branch is in a state subsequent reviewers shouldn't run against (broken build / reverted state / explicit reject). Surface the failing reviewer's status as the wrapper's overall status — do not silently continue.
 
-Inconclusive non-fix statuses (`copilot` `timeout`/`error`/`guardrail` and local-agent `guardrail`, plus the `skipped` precondition statuses) do NOT count as findings — they mean the reviewer couldn't produce a verdict, not that it found something to fix. Treat them as continue-signals in every stop mode, even if the inner loop somehow added commits before bailing out: a stop-mode short-circuit must require a *verdict* status (`clean`, `too-large`, `capped`) before honoring the commits-added / no-commits-added condition. This matches the table above and prevents a flaky reviewer that crashed mid-fix from claiming the stop-mode's "found something" signal.
+Inconclusive non-fix statuses (`copilot` `timeout`/`error`/`guardrail`, local-agent `guardrail`, ollama `incomplete`, plus the `skipped` precondition statuses) do NOT count as findings — they mean the reviewer couldn't produce a verdict, not that it found something to fix. Treat them as continue-signals in every stop mode, even if the inner loop somehow added commits before bailing out: a stop-mode short-circuit must require a *verdict* status (`clean`, `too-large`, `capped`) before honoring the commits-added / no-commits-added condition. This matches the table above and prevents a flaky reviewer that crashed mid-fix from claiming the stop-mode's "found something" signal.
 
 ### Aggregate report
 
@@ -79,7 +79,7 @@ Overall status: {OVERALL_STATUS}
 
 `{OVERALL_STATUS}` is computed by evaluating each rule top-down; the first matching rule wins:
 - `dirty` — the wrapper stopped due to a hard-error short-circuit (`cli-error`, `broken-build`, `test-failed`, `rejected`); the failing pass's status is the proximate cause
-- `inconclusive` — the executed list contains at least one pass whose status is inconclusive (`timeout`, `error`, `guardrail`, `skipped`), regardless of whether other passes returned `clean`. `skipped` covers preconditions-not-met cases — e.g., `codex` in `/do:review` PR mode (codex review --base only accepts a git ref) or `copilot` when no PR exists for the branch. Reached when, e.g., `--review-with copilot,codex` runs copilot which times out and codex which returns clean — the user asked for both perspectives and only got one, so the aggregate is not unconditionally `clean`. Also covers the all-inconclusive case (e.g., `--review-with copilot` that times out and the list exhausts). Distinct from `dirty` (build is fine) but still **not eligible to merge** — the user must re-run or intervene
+- `inconclusive` — the executed list contains at least one pass whose status is inconclusive (`timeout`, `error`, `guardrail`, `skipped`, or ollama `incomplete` — a partially-reviewed diff), regardless of whether other passes returned `clean`. `skipped` covers preconditions-not-met cases — e.g., `codex` in `/do:review` PR mode (codex review --base only accepts a git ref) or `copilot` when no PR exists for the branch. Reached when, e.g., `--review-with copilot,codex` runs copilot which times out and codex which returns clean — the user asked for both perspectives and only got one, so the aggregate is not unconditionally `clean`. Also covers the all-inconclusive case (e.g., `--review-with copilot` that times out and the list exhausts). Distinct from `dirty` (build is fine) but still **not eligible to merge** — the user must re-run or intervene
 - `partial` — some passes were skipped due to a stop-mode decision (`on-findings` or `on-clean` short-circuit) AND every executed pass returned `clean` (no inconclusive remaining)
 - `clean` — every executed pass returned `clean` (or copilot `too-large`/`capped`, both treated as clean for merge purposes per the copilot loop's own rule — `capped` means the configured `{REVIEW_ITERATIONS}` cap, default 1, was reached after applying every fix the review surfaced) AND no hard-error short-circuit fired AND no inconclusive statuses remain AND no stop-mode short-circuit fired
 
