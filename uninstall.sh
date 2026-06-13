@@ -202,6 +202,12 @@ uninstall_opencode() {
     fi
   done
 
+  if [ -f "$HOME/.config/opencode/.slashdo-config.json" ]; then
+    rm -f "$HOME/.config/opencode/.slashdo-config.json"
+    printf "    removed: .slashdo-config.json    ${GREEN}ok${RESET}\n"
+    count=$((count + 1))
+  fi
+
   if [ $count -eq 0 ]; then
     printf "    ${DIM}nothing to remove${RESET}\n"
   else
