@@ -218,6 +218,19 @@ describe('auto-update preference', () => {
     cleanup(tmpDir);
   });
 
+  it('does not write autoUpdate for non-hook envs (config reserved for /do:config defaults)', () => {
+    // Non-hook envs (codex/antigravity/opencode) now define configFile so
+    // /do:config can store defaults, but autoUpdate is consumed only by the
+    // Claude SessionStart hook — installing must not write it there.
+    const { tmpDir, env } = makeTmpEnv({ supportsHooks: false });
+
+    install({ env, packageDir: PACKAGE_DIR, dryRun: false, autoUpdate: true });
+
+    assert.ok(!fs.existsSync(env.configFile), 'no autoUpdate config written for non-hook env');
+
+    cleanup(tmpDir);
+  });
+
   it('writes autoUpdate: false to config when disabled', () => {
     const { tmpDir, env } = makeTmpEnv();
 
@@ -282,6 +295,23 @@ describe('auto-update preference', () => {
 
     install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false });
     assert.ok(!fs.existsSync(env.configFile), 'config file should be removed on uninstall');
+
+    cleanup(tmpDir);
+  });
+
+  it('preserves config file on a filtered (command-scoped) uninstall', () => {
+    // A filtered uninstall (e.g. removing just one command) must not delete
+    // saved /do:config defaults the remaining commands still rely on.
+    const { tmpDir, env } = makeTmpEnv();
+
+    install({ env, packageDir: PACKAGE_DIR, dryRun: false, autoUpdate: true });
+    fs.writeFileSync(env.configFile, JSON.stringify({ autoUpdate: true, defaults: { 'review-with': 'codex' } }), 'utf8');
+
+    install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false, filterNames: ['config'] });
+
+    assert.ok(fs.existsSync(env.configFile), 'config file must survive a filtered uninstall');
+    const cfg = JSON.parse(fs.readFileSync(env.configFile, 'utf8'));
+    assert.equal(cfg.defaults['review-with'], 'codex', 'saved defaults preserved');
 
     cleanup(tmpDir);
   });

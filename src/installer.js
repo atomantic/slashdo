@@ -396,8 +396,11 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
   }
 
   // Persist the auto-update preference (only when explicitly provided, so a
-  // filtered/command-only install doesn't clobber an existing choice).
-  if (!dryRun && env.configFile && typeof autoUpdate === 'boolean') {
+  // filtered/command-only install doesn't clobber an existing choice). Gated on
+  // supportsHooks: auto-update is only consumed by the SessionStart hook (Claude
+  // only), so non-hook envs — which now also define configFile for /do:config
+  // defaults — must not get an unused autoUpdate key written at install time.
+  if (!dryRun && env.configFile && env.supportsHooks && typeof autoUpdate === 'boolean') {
     const config = readConfig(env.configFile);
     if (config.autoUpdate !== autoUpdate) {
       config.autoUpdate = autoUpdate;
@@ -512,7 +515,10 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
     fs.unlinkSync(env.versionFile);
   }
 
-  if (!dryRun && env.configFile && fs.existsSync(env.configFile)) {
+  // Only remove the config file on a FULL uninstall — a filtered/command-scoped
+  // uninstall (e.g. `--uninstall do:config`) must not delete saved /do:config
+  // defaults that the remaining installed commands still rely on.
+  if (!dryRun && env.configFile && !filterNames?.length && fs.existsSync(env.configFile)) {
     fs.unlinkSync(env.configFile);
   }
 

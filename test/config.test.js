@@ -71,4 +71,20 @@ describe('writeConfig', () => {
   it('is a no-op for null path', () => {
     assert.doesNotThrow(() => writeConfig(null, { autoUpdate: true }));
   });
+
+  it('round-trips a nested defaults object alongside autoUpdate (do:config schema)', () => {
+    const { dir, file } = tmpFile();
+    const cfg = {
+      autoUpdate: true,
+      defaults: {
+        'review-with': 'claude,codex,ollama[gemma4:26b-mlx]',
+        'review-iterations': 2,
+        'reviewer-applies': true,
+        'review-stop-mode': 'on-findings',
+      },
+    };
+    writeConfig(file, cfg);
+    assert.deepEqual(readConfig(file), cfg);
+    fs.rmSync(dir, { recursive: true });
+  });
 });

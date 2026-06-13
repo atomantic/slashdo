@@ -14,11 +14,15 @@ Address the latest code review feedback on the current branch's pull request usi
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
-- Accepted slugs: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude` (comma-separated, ordered list; split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, dedupe preserving first-occurrence order). Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude.`
-- Record as `REVIEW_AGENTS`. **rpr's default is `copilot`** (its established identity is driving a Copilot review to clean) — but the default is *conditional*: see step 2 and step 8. If `--review-with` is omitted, set `REVIEW_AGENTS=[copilot]`.
-- If `REVIEW_AGENTS` names a **local CLI** (`codex`/`agy`/`claude`, in any combination, with or without `copilot`), rpr requests each non-copilot reviewer via the **local-agent review loop** (`lib/local-agent-review-loop.md`) against the PR branch instead of requesting a Copilot cloud review for that slug. `copilot` entries still go through the Copilot request/poll path below.
+- Accepted slugs: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`) (comma-separated, ordered list; split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, dedupe preserving first-occurrence order, with the `ollama` bracket suffix part of the dedup identity). Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, ollama.` The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no reviewer (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default (and rpr's conditional `copilot` default).
+- Record as `REVIEW_AGENTS`. **rpr's default is `copilot`** (its established identity is driving a Copilot review to clean) — but the default is *conditional*: see step 2 and step 8. If `--review-with` is omitted, leave `REVIEW_AGENTS` unset for now — the saved-defaults step below fills it from config if a default exists; **only if it is still unset after that** does rpr's conditional `copilot` default apply (`REVIEW_AGENTS=[copilot]`). This ordering is what lets a saved `review-with` default take precedence over the built-in copilot default.
+- If `REVIEW_AGENTS` names a **local CLI** (`codex`/`agy`/`claude`, in any combination, with or without `copilot`), rpr requests each non-copilot reviewer via the **local-agent review loop** (`lib/local-agent-review-loop.md`) against the PR branch instead of requesting a Copilot cloud review for that slug. An `ollama` entry instead goes through the **Ollama review loop** (`lib/ollama-review-loop.md`) — it requires the PR branch checked out locally, since the loop reviews a local `git diff`. `copilot` entries still go through the Copilot request/poll path below.
 
-Parse `$ARGUMENTS` for `--reviewer-applies` (boolean): record `REVIEWER_APPLIES=true`/`false` (default `false`). Forwarded to any local-agent review loop; no effect on the Copilot path (a warning is printed if combined with a copilot-only list).
+Parse `$ARGUMENTS` for `--reviewer-applies` (boolean): record `REVIEWER_APPLIES=true`/`false` (default `false`). Forwarded to any local-agent review loop; no effect on the Copilot path (a warning is printed if combined with a copilot-only list) or the ollama path (Ollama is non-agentic — always review-only).
+
+After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to `review-with` / `reviewer-applies` if the user did not pass them. Precedence for rpr: an explicit flag (or `--review-with none`) wins; otherwise a saved `review-with` default applies; otherwise rpr's built-in **conditional `copilot`** default takes over (see step 2 and step 8). rpr ignores saved `review-iterations` / `review-stop-mode` (it does not support those flags):
+
+!`cat ~/.claude/lib/review-config-defaults.md`
 
 Parse `$ARGUMENTS` for `--issues` / `--issues-label <name>`: when a finding is **deferred** to the plan (see Finding Disposition), file it as a GitHub/GitLab issue instead of a PLAN.md line. Record `ISSUE_MODE=true`/`false` and `PLAN_LABEL` (default `plan`).
 
@@ -33,6 +37,7 @@ Parse `$ARGUMENTS` for `--issues` / `--issues-label <name>`: when a finding is *
    Note whether **any** completed review exists (from a copilot bot, a human, or another bot) — call this `HAS_EXISTING_REVIEW` — and specifically whether a **completed** `copilot-pull-request-reviewer` review exists (a node in `reviews.nodes`, NOT merely a pending review request) — call this `HAS_COPILOT_REVIEW`. Track a Copilot review that is only **pending** (Copilot present in `reviewRequests.nodes[].requestedReviewer` with no completed Copilot review yet) separately as `COPILOT_REVIEW_PENDING` — a pending-only review must NOT set `HAS_COPILOT_REVIEW`, or the "completed review exists" branch below would fire and resolve threads before Copilot has posted anything. Then dispatch on `REVIEW_AGENTS`:
 
    - **If `REVIEW_AGENTS` contains a local CLI (`codex`/`agy`/`claude`):** run the **local-agent review loop** (`lib/local-agent-review-loop.md`, referenced below) for each such agent against the PR branch, forwarding `REVIEWER_APPLIES`. This produces findings (and, in reviewer-applies mode, fixes) locally — it does **not** request a Copilot cloud review for those slugs. Then proceed to step 3 to fetch and resolve any pre-existing unresolved threads as well. (If `REVIEW_AGENTS` also contains `copilot`, additionally run the Copilot path below.)
+   - **If `REVIEW_AGENTS` contains `ollama`:** run the **Ollama review loop** (`lib/ollama-review-loop.md`, referenced below) for each `ollama` entry against the PR branch (which must be checked out locally — the loop reviews a local `git diff`), forwarding that entry's `{OLLAMA_MODEL}` (empty = auto-select). Like the local-CLI path it produces findings the orchestrator applies locally (Ollama is always review-only) and does **not** request a Copilot review. Then proceed to step 3 to resolve any pre-existing threads. (If `REVIEW_AGENTS` also contains `copilot`, additionally run the Copilot path below.)
    - **If `REVIEW_AGENTS` contains `copilot` (including the default):**
      - **A completed Copilot review exists** (`HAS_COPILOT_REVIEW`): skip requesting a new one — proceed to step 3 to address its threads.
      - **A Copilot review is currently pending** (`COPILOT_REVIEW_PENDING` — Copilot in `reviewRequests.nodes[].requestedReviewer`, with no completed Copilot review yet): treat it as in progress. Poll per "Poll for review completion" and consider it complete once a new Copilot review appears in `reviews.nodes` with a `submittedAt` later than the latest Copilot review timestamp observed before polling. Then proceed to step 3.
@@ -85,6 +90,7 @@ Parse `$ARGUMENTS` for `--issues` / `--issues-label <name>`: when a finding is *
    **Re-request gate (which reviewer, if any):**
    - **Only re-request a Copilot review if Copilot is the reviewer actually in play** — i.e. `REVIEW_AGENTS` contains `copilot` **and** the threads you just resolved came from a Copilot review (`HAS_COPILOT_REVIEW`). If the round resolved only non-Copilot threads (e.g. a human review), do NOT request a Copilot review — resolve and proceed to step 9. (rpr summons Copilot only when Copilot is already reviewing.)
    - If `REVIEW_AGENTS` names a **local CLI** (`codex`/`agy`/`claude`), "another round" means re-running that agent's local-agent review loop — not a Copilot request. The local-agent loop manages its own fixed iteration cap, so typically one pass suffices; loop again only if you made substantive fixes that warrant a fresh local pass.
+   - If `REVIEW_AGENTS` names `ollama`, "another round" means re-running the **Ollama review loop** (`lib/ollama-review-loop.md`) against the locally checked-out PR branch, forwarding `{OLLAMA_MODEL}` — not a Copilot request. Like the local-agent loop it has its own fixed iteration cap, so loop again only if the last round made substantive fixes.
 
    **Worthiness evaluation** (applies to whichever reviewer is in play): Classify all threads/findings addressed in the last round and decide:
    - **Stop and merge** if ALL of the following are true:
@@ -93,7 +99,7 @@ Parse `$ARGUMENTS` for `--issues` / `--issues-label <name>`: when a finding is *
      - You made fewer than 3 actual code changes in the last round
    - **Request another review** if any finding was substantive — logic bugs, security issues, missing guards, contract violations, or meaningful refactors
 
-   If stopping: print "All remaining findings are nitpicks — skipping further review loop" and proceed to step 9. If looping with Copilot: request a fresh Copilot review per the "Requesting GitHub Copilot Code Review" section, then wait on the *existing* persistent monitor (do not start a second one) for the `copilot review:` event, then repeat from step 3. If looping with a local CLI: re-run its local-agent review loop, then repeat from step 3.
+   If stopping: print "All remaining findings are nitpicks — skipping further review loop" and proceed to step 9. If looping with Copilot: request a fresh Copilot review per the "Requesting GitHub Copilot Code Review" section, then wait on the *existing* persistent monitor (do not start a second one) for the `copilot review:` event, then repeat from step 3. If looping with a local CLI: re-run its local-agent review loop, then repeat from step 3. If looping with `ollama`: re-run the Ollama review loop, then repeat from step 3.
 
    **While waiting for review**: The monitor's CI events surface failures as they happen — see "CI failure handling".
 
@@ -118,6 +124,12 @@ Parse `$ARGUMENTS` for `--issues` / `--issues-label <name>`: when a finding is *
 When `REVIEW_AGENTS` names a local CLI, step 2 (and the step-8 re-request) runs that agent's review against the PR branch via the shared local-agent loop instead of requesting a Copilot cloud review. Pass `{REVIEW_AGENT}`, `{REVIEWER_APPLIES}`, the PR branch (`headRefName`), the base branch (`baseRefName`), and the project `{BUILD_CMD}`. The loop verifies build + tests in the main thread before pushing; afterward, continue to step 3 to resolve any pre-existing threads.
 
 !`cat ~/.claude/lib/local-agent-review-loop.md`
+
+## Ollama Review Loop (for `--review-with ollama[<model>]`)
+
+When `REVIEW_AGENTS` names `ollama`, step 2 (and the step-8 re-request) runs the Ollama review loop against the locally checked-out PR branch instead of requesting a Copilot cloud review. Pass `{OLLAMA_MODEL}` (empty = auto-select), the PR branch (`headRefName`) checked out locally, the base branch (`baseRefName`), and the project `{BUILD_CMD}`. The loop is always review-only (Ollama is non-agentic): it emits findings, the orchestrator applies them, and the main thread verifies build + tests before pushing.
+
+!`cat ~/.claude/lib/ollama-review-loop.md`
 
 ## Requesting GitHub Copilot Code Review
 
