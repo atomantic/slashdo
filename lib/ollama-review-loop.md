@@ -61,12 +61,14 @@ CHANGED=$(git diff --name-only "$BASE_BRANCH...HEAD")
 TOTAL_FILES=$(printf '%s\n' "$CHANGED" | grep -c .)
 REVIEW_ERRORS=0   # files whose review invocation failed entirely (zero coverage)
 TRUNCATED=0       # files reviewed only partially (diff exceeded the per-file cap)
-# Either counter > 0 is a coverage gap that blocks a `clean` verdict (see step 4).
+SKIPPED_EMPTY=0   # files in TOTAL_FILES with no reviewable hunks (pure rename/mode) — never sent to the model
+REVIEWABLE=$((TOTAL_FILES - SKIPPED_EMPTY))   # recompute after the loop; this is the denominator for the verdict checks below
+# Either REVIEW_ERRORS or TRUNCATED > 0 is a coverage gap that blocks a `clean` verdict (see step 4).
 PER_FILE_CAP=24000   # max chars of diff sent per file; larger diffs are truncated with a note
 ```
 
 For each file `F` in `$CHANGED`:
-1. Extract the file's diff: `FILE_DIFF=$(git diff "$BASE_BRANCH...HEAD" -- "$F")`. Skip files with an empty diff (pure renames/mode changes with no hunks).
+1. Extract the file's diff: `FILE_DIFF=$(git diff "$BASE_BRANCH...HEAD" -- "$F")`. Skip files with an empty diff (pure renames/mode changes with no hunks), incrementing `SKIPPED_EMPTY` for each — they are counted in `TOTAL_FILES` but were never sent to the model, so they must not inflate the reviewed-coverage denominator.
 2. If `${#FILE_DIFF}` exceeds `$PER_FILE_CAP`, truncate to the cap and append a line `[diff truncated — file exceeds per-file review budget]` so the model knows it saw a partial diff. A truncated file was **not** fully reviewed (its tail never reached the model), so increment `TRUNCATED` and note the file in the final report. This is a coverage gap that blocks a `clean` verdict (step 4) — but, unlike an invocation error, the file *was* partially reviewed, so it does not count toward the "every file errored" → `cli-error` check.
 3. Build the prompt and run the model via **stdin** (never as a positional arg — embedded diffs can exceed `ARG_MAX`):
    ```bash
@@ -88,9 +90,9 @@ $FILE_DIFF"
    printf '%s' "$PROMPT" | $TIMEOUT_CMD ollama run "$OLLAMA_MODEL" >> "$LOG_FILE" 2>&1
    printf '\n' >> "$LOG_FILE"
    ```
-4. If the invocation exits non-zero for a file, append a `[ollama error reviewing $F — see above]` marker to the log, **increment `REVIEW_ERRORS`**, and continue to the next file (one file's failure should not abort the whole review). Coverage accounting after the loop — define a coverage gap as any file that errored or was truncated (`REVIEW_ERRORS + TRUNCATED > 0`):
-   - If *every* file errored (`REVIEW_ERRORS == TOTAL_FILES` and `TOTAL_FILES > 0`), set `STATUS=cli-error`, print the last 80 lines of the log, and exit — nothing was reviewed.
-   - If there is any coverage gap but not a total failure (`REVIEW_ERRORS + TRUNCATED > 0` and `REVIEW_ERRORS < TOTAL_FILES`), the diff was only **partially** reviewed. Still process the findings from the parts that were reviewed (apply their fixes in step 3), but the pass **must not report `clean`** — at the point step 3 would set `STATUS=clean`, set `STATUS=incomplete` instead (see step 3). `incomplete` is treated as inconclusive by the multi-reviewer aggregate (not eligible to merge), because part of the change was never reviewed.
+4. If the invocation exits non-zero for a file, append a `[ollama error reviewing $F — see above]` marker to the log, **increment `REVIEW_ERRORS`**, and continue to the next file (one file's failure should not abort the whole review). Coverage accounting after the loop — first recompute `REVIEWABLE=$((TOTAL_FILES - SKIPPED_EMPTY))` (the files actually sent to the model; empty-diff skips never reached it), then define a coverage gap as any reviewable file that errored or was truncated (`REVIEW_ERRORS + TRUNCATED > 0`):
+   - If *every reviewable* file errored (`REVIEWABLE > 0` and `REVIEW_ERRORS == REVIEWABLE`), set `STATUS=cli-error`, print the last 80 lines of the log, and exit — nothing was reviewed. (Use `REVIEWABLE`, not `TOTAL_FILES`: an empty-diff skip would otherwise make `REVIEW_ERRORS == TOTAL_FILES` unreachable and misclassify a total failure as merely `incomplete`.)
+   - If there is any coverage gap but not a total failure (`REVIEW_ERRORS + TRUNCATED > 0` and `REVIEW_ERRORS < REVIEWABLE`), the diff was only **partially** reviewed. Still process the findings from the parts that were reviewed (apply their fixes in step 3), but the pass **must not report `clean`** — at the point step 3 would set `STATUS=clean`, set `STATUS=incomplete` instead (see step 3). `incomplete` is treated as inconclusive by the multi-reviewer aggregate (not eligible to merge), because part of the change was never reviewed.
 
 > Local models are less reliable at format adherence than agentic CLIs. Parse the log **leniently**: extract well-formed `FINDING` blocks, ignore malformed or partial blocks, and treat a file whose section is just `NO FINDINGS` (or contains no parsable findings) as clean for that file.
 
@@ -99,7 +101,7 @@ $FILE_DIFF"
 Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
 
 1. **Capture baseline**: `LOOP_START_SHA=$(git rev-parse HEAD)`.
-2. **Run the per-file chunked review** (above), aggregating findings into `$LOG_FILE`.
+2. **Run the per-file chunked review** (above), aggregating findings into `$LOG_FILE`. Re-run the Invocation block *in full* on every iteration — re-derive `CHANGED`/`TOTAL_FILES` for the current HEAD and re-initialize `REVIEW_ERRORS=0`, `TRUNCATED=0`, `SKIPPED_EMPTY=0`, and a fresh `$LOG_FILE` — so a coverage gap from an earlier iteration cannot pin `STATUS=incomplete` after a clean re-review of the new commits.
 3. **Parse findings and apply fixes** (orchestrator-applies — the same flow as the local-agent loop's review-only path):
    - Extract the `FINDING <N>:` blocks from `$LOG_FILE`. If there are no parsable findings (every file section was `NO FINDINGS` or empty), set `STATUS=clean` — **but if there was any coverage gap (`REVIEW_ERRORS + TRUNCATED > 0`), set `STATUS=incomplete` instead** (the diff was only partially reviewed, so "no findings" is not a clean verdict) — and exit the loop.
    - For each finding, read the cited file at the cited line and apply the fix. The model's `fix:` field is a *starting point* — local models hallucinate more than cloud agents, so your judgment overrides: drop any finding that is wrong, out of scope, or references a line that doesn't exist.
@@ -137,7 +139,7 @@ Print:
 Model: {OLLAMA_MODEL}
 Branch: {BRANCH_NAME}
 Status: {STATUS}    # clean / incomplete / guardrail / cli-error / broken-build / test-failed / rejected / skipped
-Coverage: {TOTAL_FILES - REVIEW_ERRORS - TRUNCATED}/{TOTAL_FILES} files fully reviewed ({REVIEW_ERRORS} errored, {TRUNCATED} truncated)    # any coverage gap → status `incomplete` (not eligible to merge)
+Coverage: {REVIEWABLE - REVIEW_ERRORS - TRUNCATED}/{REVIEWABLE} reviewable files fully reviewed ({REVIEW_ERRORS} errored, {TRUNCATED} truncated, {SKIPPED_EMPTY} skipped as empty-diff)    # any coverage gap → status `incomplete` (not eligible to merge)
 Iterations: {ITERATION}
 Commits added: {N}
 Files modified: {file list}
