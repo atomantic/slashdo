@@ -251,8 +251,11 @@ install_opencode() {
   for lib in "${LIBS[@]}"; do
     printf "    lib/%-20s" "$lib.md"
     if fetch_file "lib/$lib.md" "/tmp/slashdo-lib-$lib.md"; then
-      # Rewrite the config-path token so libs read OpenCode's config at runtime
-      sed 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
+      # Rewrite lib-path cross-references and the config-path token so libs
+      # resolve under OpenCode at runtime (mirrors the command loop and npm's
+      # transformLib).
+      sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
+          -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
           "/tmp/slashdo-lib-$lib.md" > "$target_lib/$lib.md"
       rm -f "/tmp/slashdo-lib-$lib.md"
       printf "${GREEN}ok${RESET}\n"

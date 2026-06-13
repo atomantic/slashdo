@@ -16,6 +16,7 @@ Parse `$ARGUMENTS` for:
 After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to the delegated-review flags the user did NOT pass — an explicit flag, or `--review-with none`, always overrides a saved default:
 
 !`cat ~/.claude/lib/review-config-defaults.md`
+
 - **`--issues`** / **`--issues-label <name>`** (optional): when a finding is **deferred** (local-branch mode only — see Finding Disposition), file it as a GitHub/GitLab issue instead of a PLAN.md line. Record `ISSUE_MODE=true`/`false` and `PLAN_LABEL` (default `plan`). No effect in PR mode (PR mode posts comments, it doesn't defer to a plan).
 - **GitHub PR reference** — any non-flag token that looks like a PR reference. A token matches if **any** of the following holds (the rules are OR-ed; the `github` substring is sufficient but not required):
   - Full URL: `https://github.com/{owner}/{repo}/pull/{number}` (and any subpath like `/files`, `/commits`)

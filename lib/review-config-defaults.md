@@ -2,7 +2,7 @@
 
 Saved defaults let you omit a shared review flag and have it filled in from config. Apply them **before** deciding a flag was "omitted". Precedence, highest first — the first source that provides a value wins:
 
-1. **Explicit flag in `$ARGUMENTS`** — always wins. The literal `--review-with none` (or `--no-review`) explicitly means "no external reviewer this run": set `REVIEW_AGENTS=[]` and ignore any saved `review-with` default.
+1. **Explicit flag in `$ARGUMENTS`** — always wins. The literal `--review-with none` explicitly means "no external reviewer this run": set `REVIEW_AGENTS=[]` and ignore any saved `review-with` default.
 2. **Per-project defaults** — a `.slashdo.json` file at the repo root, in its `defaults` object.
 3. **Global defaults** — the host CLI's slashdo config at `~/.claude/.slashdo-config.json` (this path is rewritten per host CLI at install time), in its `defaults` object.
 4. **Built-in default** — this command's own documented default (e.g. no reviewer; `--review-iterations` = 1).

@@ -218,6 +218,19 @@ describe('auto-update preference', () => {
     cleanup(tmpDir);
   });
 
+  it('does not write autoUpdate for non-hook envs (config reserved for /do:config defaults)', () => {
+    // Non-hook envs (codex/antigravity/opencode) now define configFile so
+    // /do:config can store defaults, but autoUpdate is consumed only by the
+    // Claude SessionStart hook — installing must not write it there.
+    const { tmpDir, env } = makeTmpEnv({ supportsHooks: false });
+
+    install({ env, packageDir: PACKAGE_DIR, dryRun: false, autoUpdate: true });
+
+    assert.ok(!fs.existsSync(env.configFile), 'no autoUpdate config written for non-hook env');
+
+    cleanup(tmpDir);
+  });
+
   it('writes autoUpdate: false to config when disabled', () => {
     const { tmpDir, env } = makeTmpEnv();
 
