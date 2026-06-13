@@ -112,8 +112,8 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
      NEW_COMMITS=$(git rev-list "$LOOP_START_SHA..HEAD" --count)
      UNCOMMITTED=$(git status --porcelain | wc -l)
      ```
-   - If `NEW_COMMITS == 0` (you rejected every finding as wrong/out-of-scope), set `STATUS=clean` (or `STATUS=incomplete` if there was any coverage gap, `REVIEW_ERRORS + TRUNCATED > 0`) and exit.
-   - If `UNCOMMITTED > 0`, stage the explicitly listed files and commit as `address review (ollama): orchestrator-applied — remaining changes`, then proceed.
+   - **Commit leftover edits first.** If `UNCOMMITTED > 0`, the orchestrator applied fixes it has not committed yet — stage the explicitly listed files and commit as `address review (ollama): orchestrator-applied — remaining changes`, then **recompute `NEW_COMMITS`**. This MUST run before the zero-commit check below: otherwise a dirty working tree (`NEW_COMMITS == 0` but `UNCOMMITTED > 0`) would exit `clean` without verification or push, leaking unverified edits.
+   - If `NEW_COMMITS == 0` **and** `UNCOMMITTED == 0` (you rejected every finding as wrong/out-of-scope, leaving a clean tree), set `STATUS=clean` (or `STATUS=incomplete` if there was any coverage gap, `REVIEW_ERRORS + TRUNCATED > 0`) and exit.
 4. **Verify in the main thread** (mandatory, non-skippable — this is the only line of defense between the model's output and the remote branch):
    - Read the diff `git diff "$LOOP_START_SHA..HEAD"` and inspect each new commit for out-of-scope refactors, reverted behavior to pass tests, disabled tests/assertions, `// TODO` placeholders, or secrets.
    - Run `{BUILD_CMD}` (skip when empty). On failure: **default mode** revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=broken-build`, exit; **interactive mode** ask retry/revert/accept-and-fix.
