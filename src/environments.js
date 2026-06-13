@@ -15,6 +15,9 @@ const ENVIRONMENTS = {
     settingsFile: path.join(HOME, '.claude', 'settings.json'),
     versionFile: path.join(HOME, '.claude', '.slashdo-version'),
     configFile: path.join(HOME, '.claude', '.slashdo-config.json'),
+    // `~`-style form of configFile, used by the transformer to rewrite the
+    // config-path token in command/lib text for each host CLI.
+    configPath: '~/.claude/.slashdo-config.json',
     // format: documentation only — transformCommand always emits YAML frontmatter
     // now that the legacy Gemini TOML path was removed.
     format: 'yaml-frontmatter',
@@ -31,6 +34,8 @@ const ENVIRONMENTS = {
     libDir: path.join(HOME, '.config', 'opencode', 'lib'),
     hooksDir: null,
     versionFile: path.join(HOME, '.config', 'opencode', '.slashdo-version'),
+    configFile: path.join(HOME, '.config', 'opencode', '.slashdo-config.json'),
+    configPath: '~/.config/opencode/.slashdo-config.json',
     format: 'yaml-frontmatter',
     ext: '.md',
     namespacing: 'flat',
@@ -47,6 +52,8 @@ const ENVIRONMENTS = {
     libDir: null,
     hooksDir: null,
     versionFile: path.join(HOME, '.gemini', 'antigravity-cli', '.slashdo-version'),
+    configFile: path.join(HOME, '.gemini', 'antigravity-cli', '.slashdo-config.json'),
+    configPath: '~/.gemini/antigravity-cli/.slashdo-config.json',
     // Antigravity uses the Agent Skills standard: one SKILL.md per skill
     // directory, YAML frontmatter, lib content inlined (no runtime !cat
     // injection) — the same shape as Codex skills.
@@ -64,6 +71,8 @@ const ENVIRONMENTS = {
     libDir: null,
     hooksDir: null,
     versionFile: path.join(HOME, '.codex', '.slashdo-version'),
+    configFile: path.join(HOME, '.codex', '.slashdo-config.json'),
+    configPath: '~/.codex/.slashdo-config.json',
     format: 'yaml-frontmatter',
     ext: null,
     namespacing: 'directory',

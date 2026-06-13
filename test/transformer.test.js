@@ -9,6 +9,7 @@ const os = require('os');
 const {
   parseFrontmatter,
   rewriteLibPaths,
+  rewriteConfigPath,
   inlineLibContent,
   applyConditionalBlocks,
   getSkillName,
@@ -83,6 +84,36 @@ describe('rewriteLibPaths', () => {
     const body = '~/.claude/lib/a.md and ~/.claude/lib/b.md';
     const result = rewriteLibPaths(body, '~/.config/opencode/lib/');
     assert.equal(result, '~/.config/opencode/lib/a.md and ~/.config/opencode/lib/b.md');
+  });
+});
+
+// ── rewriteConfigPath ───────────────────────────────────────────────
+
+describe('rewriteConfigPath', () => {
+  const codexEnv = { configPath: '~/.codex/.slashdo-config.json' };
+  const claudeEnv = { configPath: '~/.claude/.slashdo-config.json' };
+
+  it('rewrites the config-path token to the env config path', () => {
+    const body = 'read ~/.claude/.slashdo-config.json now';
+    assert.equal(rewriteConfigPath(body, codexEnv), 'read ~/.codex/.slashdo-config.json now');
+  });
+
+  it('replaces multiple occurrences', () => {
+    const body = '~/.claude/.slashdo-config.json then ~/.claude/.slashdo-config.json';
+    assert.equal(
+      rewriteConfigPath(body, codexEnv),
+      '~/.codex/.slashdo-config.json then ~/.codex/.slashdo-config.json'
+    );
+  });
+
+  it('is a no-op for claude (token already matches)', () => {
+    const body = 'read ~/.claude/.slashdo-config.json now';
+    assert.equal(rewriteConfigPath(body, claudeEnv), body);
+  });
+
+  it('is a no-op when env has no configPath', () => {
+    const body = 'read ~/.claude/.slashdo-config.json now';
+    assert.equal(rewriteConfigPath(body, {}), body);
   });
 });
 
@@ -267,6 +298,19 @@ describe('transformCommand', () => {
     const result = transformCommand(content, codexEnv, tmpDir);
     assert.ok(result.includes('Inlined content'));
     assert.ok(!result.includes('!`cat'));
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  it('rewrites the config-path token, including tokens from inlined lib content', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-test-'));
+    fs.writeFileSync(path.join(tmpDir, 'defaults.md'), 'read ~/.claude/.slashdo-config.json\n', 'utf8');
+    const env = { ...codexEnv, configPath: '~/.codex/.slashdo-config.json' };
+
+    const content = '---\ndescription: Test\n---\nglobal: ~/.claude/.slashdo-config.json\n!`cat ~/.claude/lib/defaults.md`';
+    const result = transformCommand(content, env, tmpDir);
+    assert.ok(result.includes('global: ~/.codex/.slashdo-config.json'), 'direct token rewritten');
+    assert.ok(result.includes('read ~/.codex/.slashdo-config.json'), 'inlined token rewritten');
+    assert.ok(!result.includes('~/.claude/.slashdo-config.json'), 'no claude token remains');
     fs.rmSync(tmpDir, { recursive: true });
   });
 

@@ -396,8 +396,11 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
   }
 
   // Persist the auto-update preference (only when explicitly provided, so a
-  // filtered/command-only install doesn't clobber an existing choice).
-  if (!dryRun && env.configFile && typeof autoUpdate === 'boolean') {
+  // filtered/command-only install doesn't clobber an existing choice). Gated on
+  // supportsHooks: auto-update is only consumed by the SessionStart hook (Claude
+  // only), so non-hook envs — which now also define configFile for /do:config
+  // defaults — must not get an unused autoUpdate key written at install time.
+  if (!dryRun && env.configFile && env.supportsHooks && typeof autoUpdate === 'boolean') {
     const config = readConfig(env.configFile);
     if (config.autoUpdate !== autoUpdate) {
       config.autoUpdate = autoUpdate;

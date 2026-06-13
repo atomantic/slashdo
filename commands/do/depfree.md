@@ -18,10 +18,15 @@ Parse `$ARGUMENTS` for:
 - **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation
 - **`--no-merge`**: run through PR creation, skip the review loop and merge
 - **`--heavy`**: aggressive mode — only keep foundational frameworks and language runtimes; replace everything else that is feasibly replaceable (see Heavy Mode below)
-- **`--review-with <agent[,agent,...]>`**: which reviewer(s) run the Phase 5c review loop on the PR. Accepted slugs: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude` (comma-separated, ordered list; split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, dedupe preserving first-occurrence order). Record as `REVIEW_AGENTS`. **There is no default** — if omitted, set `REVIEW_AGENTS=[]`: Phase 5c is skipped and the PR is left open without merging (see Phase 5c/5d). `copilot` is never added implicitly. Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude.`
+- **`--review-with <agent[,agent,...]>`**: which reviewer(s) run the Phase 5c review loop on the PR. Accepted slugs: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`) (comma-separated, ordered list; split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, dedupe preserving first-occurrence order, with the `ollama` bracket suffix part of the dedup identity). Record as `REVIEW_AGENTS`. **There is no default** — if omitted, set `REVIEW_AGENTS=[]`: Phase 5c is skipped and the PR is left open without merging (see Phase 5c/5d). `copilot` is never added implicitly. Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, ollama.`
 - **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to the multi-reviewer loop; control when the reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
 - **`--reviewer-applies`**: forwarded to the review loop — the reviewing CLI applies fixes directly instead of the orchestrator (no effect on copilot passes). Record `REVIEWER_APPLIES=true`/`false`.
 - **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** pass runs (Phase 5c); no effect on `codex`/`agy`/`claude` passes (fixed 3-iteration cap). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass, exiting early on 0 comments). `0` = loop until Copilot returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).`
+
+After parsing the review flags above, apply any **saved defaults** (set via `/do:config`) to the review flags the user did NOT pass — an explicit flag, or `--review-with none`, always overrides a saved default:
+
+!`cat ~/.claude/lib/review-config-defaults.md`
+
 - **`--issues`** / **`--issues-label <name>`**: track deferred removals as GitHub/GitLab issues instead of PLAN.md lines (see Phase 2). Record `ISSUE_MODE=true`/`false` and `PLAN_LABEL` (default `plan`).
 - **Specific packages**: limit audit scope to named packages (e.g., "chalk dotenv")
 
@@ -677,6 +682,8 @@ Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with 
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
 !`cat ~/.claude/lib/local-agent-review-loop.md`
+
+!`cat ~/.claude/lib/ollama-review-loop.md`
 
 Pass: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `depfree/{DATE}` (the branch the local-agent loop checks out and reviews), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the copilot iteration cap; default 1 — one review pass, returning `capped`, which counts as clean for the merge gate below). When `{REVIEW_ITERATIONS}` is 0, a copilot pass runs until 0 comments (bounded by the 10-iteration guardrail).
 

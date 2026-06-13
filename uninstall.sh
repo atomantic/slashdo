@@ -23,7 +23,7 @@ banner() {
 }
 
 COMMANDS=(
-  better better-swift depfree fpr goals help next omd
+  better better-swift config depfree fpr goals help next omd
   pr pr-better push release replan review rpr scan update
 )
 
@@ -34,9 +34,9 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 LIBS=(
   code-review-checklist copilot-review-loop finding-disposition
   graphql-escaping
-  local-agent-review-loop multi-reviewer-loop
+  local-agent-review-loop multi-reviewer-loop ollama-review-loop
   per-finding-root-cause plan-id-format plan-issue-mode
-  post-review-doc-recommendations remediation-agent-template
+  post-review-doc-recommendations remediation-agent-template review-config-defaults
   swift-review-checklist swift-gotchas
   review-surface-scan review-surface-quality review-security-audit
   review-cross-file-tracing review-cross-file-contract
