@@ -90,6 +90,7 @@ Parse `$ARGUMENTS` for `--issues` / `--issues-label <name>`: when a finding is *
    **Re-request gate (which reviewer, if any):**
    - **Only re-request a Copilot review if Copilot is the reviewer actually in play** — i.e. `REVIEW_AGENTS` contains `copilot` **and** the threads you just resolved came from a Copilot review (`HAS_COPILOT_REVIEW`). If the round resolved only non-Copilot threads (e.g. a human review), do NOT request a Copilot review — resolve and proceed to step 9. (rpr summons Copilot only when Copilot is already reviewing.)
    - If `REVIEW_AGENTS` names a **local CLI** (`codex`/`agy`/`claude`), "another round" means re-running that agent's local-agent review loop — not a Copilot request. The local-agent loop manages its own fixed iteration cap, so typically one pass suffices; loop again only if you made substantive fixes that warrant a fresh local pass.
+   - If `REVIEW_AGENTS` names `ollama`, "another round" means re-running the **Ollama review loop** (`lib/ollama-review-loop.md`) against the locally checked-out PR branch, forwarding `{OLLAMA_MODEL}` — not a Copilot request. Like the local-agent loop it has its own fixed iteration cap, so loop again only if the last round made substantive fixes.
 
    **Worthiness evaluation** (applies to whichever reviewer is in play): Classify all threads/findings addressed in the last round and decide:
    - **Stop and merge** if ALL of the following are true:
@@ -98,7 +99,7 @@ Parse `$ARGUMENTS` for `--issues` / `--issues-label <name>`: when a finding is *
      - You made fewer than 3 actual code changes in the last round
    - **Request another review** if any finding was substantive — logic bugs, security issues, missing guards, contract violations, or meaningful refactors
 
-   If stopping: print "All remaining findings are nitpicks — skipping further review loop" and proceed to step 9. If looping with Copilot: request a fresh Copilot review per the "Requesting GitHub Copilot Code Review" section, then wait on the *existing* persistent monitor (do not start a second one) for the `copilot review:` event, then repeat from step 3. If looping with a local CLI: re-run its local-agent review loop, then repeat from step 3.
+   If stopping: print "All remaining findings are nitpicks — skipping further review loop" and proceed to step 9. If looping with Copilot: request a fresh Copilot review per the "Requesting GitHub Copilot Code Review" section, then wait on the *existing* persistent monitor (do not start a second one) for the `copilot review:` event, then repeat from step 3. If looping with a local CLI: re-run its local-agent review loop, then repeat from step 3. If looping with `ollama`: re-run the Ollama review loop, then repeat from step 3.
 
    **While waiting for review**: The monitor's CI events surface failures as they happen — see "CI failure handling".
 
