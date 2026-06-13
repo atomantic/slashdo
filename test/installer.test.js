@@ -298,6 +298,23 @@ describe('auto-update preference', () => {
 
     cleanup(tmpDir);
   });
+
+  it('preserves config file on a filtered (command-scoped) uninstall', () => {
+    // A filtered uninstall (e.g. removing just one command) must not delete
+    // saved /do:config defaults the remaining commands still rely on.
+    const { tmpDir, env } = makeTmpEnv();
+
+    install({ env, packageDir: PACKAGE_DIR, dryRun: false, autoUpdate: true });
+    fs.writeFileSync(env.configFile, JSON.stringify({ autoUpdate: true, defaults: { 'review-with': 'codex' } }), 'utf8');
+
+    install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false, filterNames: ['config'] });
+
+    assert.ok(fs.existsSync(env.configFile), 'config file must survive a filtered uninstall');
+    const cfg = JSON.parse(fs.readFileSync(env.configFile, 'utf8'));
+    assert.equal(cfg.defaults['review-with'], 'codex', 'saved defaults preserved');
+
+    cleanup(tmpDir);
+  });
 });
 
 // ── install with different environments ─────────────────────────────

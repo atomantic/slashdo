@@ -515,7 +515,10 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
     fs.unlinkSync(env.versionFile);
   }
 
-  if (!dryRun && env.configFile && fs.existsSync(env.configFile)) {
+  // Only remove the config file on a FULL uninstall — a filtered/command-scoped
+  // uninstall (e.g. `--uninstall do:config`) must not delete saved /do:config
+  // defaults that the remaining installed commands still rely on.
+  if (!dryRun && env.configFile && !filterNames?.length && fs.existsSync(env.configFile)) {
     fs.unlinkSync(env.configFile);
   }
 
