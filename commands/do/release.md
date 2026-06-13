@@ -182,7 +182,7 @@ The merge gate consumes the **wrapper's `{OVERALL_STATUS}`** plus, for any copil
 
 - `clean` — every executed pass returned `clean` (copilot `too-large` and `capped` both count as clean here, per the copilot loop's own rule; `capped` is the default `--review-iterations 1` outcome — one review ran and all its fixes were applied), **or** no external reviewer was requested (`--review-with` omitted → `REVIEW_AGENTS=[]`) and the Local Code Review gate plus build/tests passed (the no-review path set `OVERALL_STATUS=clean`). **Eligible to merge.**
 - `partial` — the wrapper stopped early because of an explicit stop-mode flag (`--review-stop-on-findings` or `--review-stop-on-clean`) and the executed passes all completed normally. **Eligible to merge** — the user opted into the short-circuit.
-- `inconclusive` — the executed list contained **at least one** pass whose status was inconclusive (`timeout`, `error`, `guardrail`, `skipped`), regardless of whether other passes returned `clean`. **Do NOT merge** — the user asked for multiple perspectives and at least one never produced a verdict.
+- `inconclusive` — the executed list contained **at least one** pass whose status was inconclusive (`timeout`, `error`, `guardrail`, `skipped`, or ollama `incomplete` — a partially-reviewed diff), regardless of whether other passes returned `clean`. **Do NOT merge** — the user asked for multiple perspectives and at least one never produced a verdict.
 - `dirty` — a pass returned a hard-error status (`cli-error`, `broken-build`, `test-failed`, `rejected`) and the wrapper short-circuited. **Do NOT merge.**
 
 For `dirty` or `inconclusive`:

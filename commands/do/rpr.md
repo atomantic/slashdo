@@ -125,7 +125,7 @@ When `REVIEW_AGENTS` names a local CLI, step 2 (and the step-8 re-request) runs 
 
 !`cat ~/.claude/lib/local-agent-review-loop.md`
 
-## Ollama Review Loop (for `--review-with ollama[ model]`)
+## Ollama Review Loop (for `--review-with ollama[<model>]`)
 
 When `REVIEW_AGENTS` names `ollama`, step 2 (and the step-8 re-request) runs the Ollama review loop against the locally checked-out PR branch instead of requesting a Copilot cloud review. Pass `{OLLAMA_MODEL}` (empty = auto-select), the PR branch (`headRefName`) checked out locally, the base branch (`baseRefName`), and the project `{BUILD_CMD}`. The loop is always review-only (Ollama is non-agentic): it emits findings, the orchestrator applies them, and the main thread verifies build + tests before pushing.
 

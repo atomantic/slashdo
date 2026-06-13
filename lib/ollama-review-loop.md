@@ -1,4 +1,4 @@
-## Ollama Code Review Loop (for `--review-with ollama[ model]`)
+## Ollama Code Review Loop (for `--review-with ollama[<model>]`)
 
 Run a **local Ollama model** to review the PR branch, then read its findings back into the orchestrating thread, which applies the fixes and verifies before pushing. Selected via `--review-with ollama` (auto-select the most capable installed coding model) or `--review-with ollama[<model>]` (pin a specific installed model, e.g. `ollama[qwen2.5-coder:32b]`).
 

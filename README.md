@@ -85,7 +85,7 @@ These commands accept a shared set of flags that control which reviewer(s) run a
 | `--review-stop-on-clean` | off | Stop after the first reviewer that reports zero findings (clean). Mutually exclusive with `--review-stop-on-findings`. |
 | `--reviewer-applies` | off | Edit the working tree directly from the reviewing CLI instead of routing findings back through the orchestrating thread. No effect on copilot passes (Copilot reviews are read-only) or ollama passes (Ollama is non-agentic — always review-only); takes effect on each codex / agy / claude pass in the list. |
 
-By default every listed reviewer runs in order, and the orchestrator that opened the PR also applies the fixes — it reads each reviewer's findings and edits the working tree itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking Antigravity (`agy`) to both find and patch its own concerns). For `/do:release`, the merge gate requires the multi-reviewer aggregate status to be `clean` (or `partial`, if you explicitly opted into a stop-mode short-circuit) — a `dirty` aggregate (build/test broken on some pass) or an `inconclusive` aggregate (any executed pass timed out, errored, hit its guardrail, or was skipped — even if other passes returned clean) blocks the merge.
+By default every listed reviewer runs in order, and the orchestrator that opened the PR also applies the fixes — it reads each reviewer's findings and edits the working tree itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking Antigravity (`agy`) to both find and patch its own concerns). For `/do:release`, the merge gate requires the multi-reviewer aggregate status to be `clean` (or `partial`, if you explicitly opted into a stop-mode short-circuit) — a `dirty` aggregate (build/test broken on some pass) or an `inconclusive` aggregate (any executed pass timed out, errored, hit its guardrail, was skipped, or — for ollama — only partially reviewed the diff, even if other passes returned clean) blocks the merge.
 
 For `/do:review`, the listed agents run **after** the host CLI's own self-review (the multi-agent review built into `do:review`). The list names *additional* reviewers; whichever CLI is hosting `/do:review` does its own pass first regardless.
 
@@ -109,7 +109,7 @@ The stable item ID in issue mode is the **issue number** (e.g. `#42`), so concur
 Rather than passing the review flags every time, save them once with `/do:config` and let future commands pick them up automatically:
 
 ```
-/do:config --review-with=claude,codex,ollama[gemma4:26b-mlx]
+/do:config --review-with=claude,codex,ollama[qwen2.5-coder:32b]
 ```
 
 After that, `/do:pr`, `/do:release`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:depfree`, and `/do:rpr` behave as if you'd passed that `--review-with` value — until you override it on a run.

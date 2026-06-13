@@ -40,7 +40,7 @@ Iterate `REVIEW_AGENTS` in order. For each `{REVIEW_AGENT}`:
    The inner loop already handles its own iterations, fix-and-push cycles, and verification. It returns a `{STATUS}` value:
    - Copilot loop: `clean | capped | timeout | error | guardrail | too-large`
    - Local-agent loop: `clean | guardrail | cli-error | broken-build | test-failed | rejected`
-   - Ollama loop: `clean | incomplete | guardrail | cli-error | broken-build | test-failed | rejected | skipped` (`incomplete` = the diff was only partially reviewed because some files' review invocations failed — treated as inconclusive, not eligible to merge)
+   - Ollama loop: `clean | incomplete | guardrail | cli-error | broken-build | test-failed | rejected | skipped` (`incomplete` = the diff was only partially reviewed — some files' review invocations failed, or their diff exceeded the per-file budget and was truncated — treated as inconclusive, not eligible to merge)
 4. **Record the pass result** (status + number of new commits since `PASS_START_SHA`). Keep a per-pass row for the aggregate report.
 
 ### Stop-mode decision

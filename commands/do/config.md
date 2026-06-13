@@ -8,10 +8,10 @@ argument-hint: "[--show] [--project] [--review-with <list>] [--review-iterations
 `/do:config` reads and writes **saved defaults** for the shared review-loop flags so you can omit them on future commands. Set them once:
 
 ```
-/do:config --review-with=claude,codex,ollama[gemma4:26b-mlx]
+/do:config --review-with=claude,codex,ollama[qwen2.5-coder:32b]
 ```
 
-…and afterward `/do:pr`, `/do:release`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:depfree`, and `/do:rpr` behave as if you had passed `--review-with=claude,codex,ollama[gemma4:26b-mlx]` — unless you pass an explicit flag on that run (which always wins) or `--review-with none` to skip reviewers for a single run.
+…and afterward `/do:pr`, `/do:release`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:depfree`, and `/do:rpr` behave as if you had passed `--review-with=claude,codex,ollama[qwen2.5-coder:32b]` — unless you pass an explicit flag on that run (which always wins) or `--review-with none` to skip reviewers for a single run.
 
 The config is a generic JSON store keyed under a `defaults` object, so new keys can be added later without changing the file shape. It coexists with other top-level keys (e.g. `autoUpdate`) — never clobber them.
 
@@ -72,7 +72,7 @@ Effective (project overrides global):
   review-stop-mode   = {merged value or "all (built-in default)"}
 ```
 
-After a Set/Unset/Reset action, re-print this block so the result is visible, prefixed with a one-line confirmation, e.g. `Saved global default: review-with = claude,codex,ollama[gemma4:26b-mlx]`.
+After a Set/Unset/Reset action, re-print this block so the result is visible, prefixed with a one-line confirmation, e.g. `Saved global default: review-with = claude,codex,ollama[qwen2.5-coder:32b]`.
 
 ## Notes
 
