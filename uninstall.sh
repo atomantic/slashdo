@@ -238,6 +238,12 @@ uninstall_antigravity() {
     count=$((count + 1))
   fi
 
+  if [ -f "$HOME/.gemini/antigravity-cli/.slashdo-config.json" ]; then
+    rm -f "$HOME/.gemini/antigravity-cli/.slashdo-config.json"
+    printf "    removed: .slashdo-config.json    ${GREEN}ok${RESET}\n"
+    count=$((count + 1))
+  fi
+
   if [ $count -eq 0 ]; then
     printf "    ${DIM}nothing to remove${RESET}\n"
   else
