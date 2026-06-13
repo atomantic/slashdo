@@ -10,11 +10,13 @@ argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-i
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
-- Accepted values per slot: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`
+- Accepted values per slot: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `ollama`
+- `ollama` reviews with a local Ollama model. Bare `ollama` auto-selects the most capable installed coding model; pin a specific installed model with the bracket form `ollama[<model>]`, e.g. `ollama[qwen2.5-coder:32b]`. Strip the bracket suffix into a per-entry `OLLAMA_MODEL` (empty for bare `ollama`) and keep the base slug `ollama`.
+- **Reserved value `none`:** the token `none` (case-insensitive) is not a reviewer slug. `--review-with none` means *no external reviewer this run* — set `REVIEW_AGENTS=[]`, skip the slug validation below, and skip applying any saved `review-with` default. This is the explicit escape hatch over a default saved via `/do:config`.
 - The value may be a single agent or a **comma-separated, ordered list** (e.g. `--review-with codex,agy,copilot`). Split on `,`, trim whitespace around each slug. Normalize `gemini`/`antigravity` → `agy`.
-- Record the resulting list as `REVIEW_AGENTS`. **There is no default reviewer.** If `--review-with` is omitted, set `REVIEW_AGENTS=[]` — no external review pass runs (the Local Code Review gate below still runs unconditionally). Whatever you list is exactly what runs, in order: `--review-with codex` runs codex only; copilot is never added implicitly.
-- Dedupe preserving first-occurrence order (compare on the normalized slug); if duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
-- If any value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude.`
+- Record the resulting list as `REVIEW_AGENTS`. **There is no built-in default reviewer.** If `--review-with` is omitted, leave `REVIEW_AGENTS` **unset for now** — the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** does the built-in default apply (`REVIEW_AGENTS=[]` — no external review pass; the Local Code Review gate below still runs unconditionally). Whatever ends up in the list is exactly what runs, in order: `--review-with codex` runs codex only; copilot is never added implicitly.
+- Dedupe preserving first-occurrence order (compare on the normalized slug — for `ollama` the bracket suffix is part of the identity, so `ollama[a]` and `ollama[b]` are distinct while two bare `ollama`s collapse); if duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
+- If any value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, ollama.`
 
 Parse `$ARGUMENTS` for the stop-mode flags (mutually exclusive):
 - `--review-stop-on-findings` — stop the multi-reviewer loop after the first reviewer that fixed at least one finding.
@@ -26,12 +28,17 @@ Parse `$ARGUMENTS` for `--reviewer-applies` (boolean, no value):
 - Record as `REVIEWER_APPLIES=true` if present, otherwise `REVIEWER_APPLIES=false` (default).
 - This flag picks who applies fixes the reviewer surfaces: by default the orchestrating thread (this session) reads the reviewer's findings and applies fixes itself; with `--reviewer-applies` the reviewing CLI applies fixes in the working tree directly. See `lib/local-agent-review-loop.md` "Editing mode" for the rationale and trade-offs.
 - The flag is **not supported on the copilot path** because Copilot reviews are read-only by design (cloud-side comments, no working-tree access). If `REVIEW_AGENTS` contains `copilot` and `REVIEWER_APPLIES=true`, print a warning (`--reviewer-applies has no effect on the copilot pass; fixes there are always applied by the orchestrator's sub-agent`) and continue — the flag still takes effect on the non-copilot passes in the list.
+- The flag is **also a no-op on the ollama path** because Ollama is non-agentic (`ollama run` returns text and cannot edit files), so the orchestrator always applies the fixes. If `REVIEW_AGENTS` contains an `ollama` entry and `REVIEWER_APPLIES=true`, print a warning (`--reviewer-applies has no effect on the ollama pass; Ollama is non-agentic, so the orchestrator always applies the fixes`) and continue — the flag still takes effect on the codex/agy/claude passes in the list.
 
 Parse `$ARGUMENTS` for `--review-iterations <n>` (affects the copilot pass only):
 - Record as `REVIEW_ITERATIONS`. If `--review-iterations` is omitted, default to `1` — a single Copilot review-and-fix pass (request one review, fix everything it surfaces, stop).
 - Must be a non-negative integer. Any positive `n` runs at most `n` review-and-fix cycles, still exiting early if a review returns 0 comments. `0` means "loop until Copilot returns 0 comments" (the legacy behavior, bounded by the copilot loop's 10-iteration safety guardrail).
 - If the value is missing or not a non-negative integer, abort with: `--review-iterations must be a non-negative integer (got: {value}).`
 - This flag has no effect on local-agent reviewers (`codex`/`gemini`/`claude`); they keep their own fixed 3-iteration cap. The default `capped` verdict (cap reached after applying fixes) counts as clean-equivalent for the merge gate — see the merge section below.
+
+Then apply any **saved defaults** (set via `/do:config`) to the flags above that the user did NOT pass on this invocation — an explicit flag, or `--review-with none`, always overrides a saved default:
+
+!`cat ~/.claude/lib/review-config-defaults.md`
 
 ## Detect Release Workflow
 
@@ -153,6 +160,7 @@ Each pass uses the matching single-reviewer loop:
 
 - `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`)
 - `codex` | `agy` | `claude` → local-agent headless review loop (`lib/local-agent-review-loop.md`)
+- `ollama` → Ollama local-model review loop (`lib/ollama-review-loop.md`)
 
 ### Multi-reviewer wrapper
 
@@ -163,6 +171,8 @@ Each pass uses the matching single-reviewer loop:
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
 !`cat ~/.claude/lib/local-agent-review-loop.md`
+
+!`cat ~/.claude/lib/ollama-review-loop.md`
 
 ## Merge the PR (only after a CLEAN multi-reviewer result)
 

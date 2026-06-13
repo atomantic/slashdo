@@ -46,7 +46,7 @@ banner() {
 }
 
 COMMANDS=(
-  better better-swift depfree fpr goals help next omd
+  better better-swift config depfree fpr goals help next omd
   pr pr-better push release replan review rpr scan update
 )
 
@@ -61,9 +61,9 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 LIBS=(
   code-review-checklist copilot-review-loop finding-disposition
   graphql-escaping
-  local-agent-review-loop multi-reviewer-loop
+  local-agent-review-loop multi-reviewer-loop ollama-review-loop
   per-finding-root-cause plan-id-format plan-issue-mode
-  post-review-doc-recommendations remediation-agent-template
+  post-review-doc-recommendations remediation-agent-template review-config-defaults
   swift-review-checklist swift-gotchas
   review-surface-scan review-surface-quality review-security-audit
   review-cross-file-tracing review-cross-file-contract
@@ -237,8 +237,10 @@ install_opencode() {
   for cmd in "${COMMANDS[@]}"; do
     printf "    /do-%-20s" "$cmd"
     if fetch_file "commands/do/$cmd.md" "/tmp/slashdo-$cmd.md"; then
-      # Rewrite lib paths for OpenCode
-      sed 's|~/.claude/lib/|~/.config/opencode/lib/|g' "/tmp/slashdo-$cmd.md" > "$target_cmd/do-$cmd.md"
+      # Rewrite lib paths and the config-path token for OpenCode
+      sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
+          -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
+          "/tmp/slashdo-$cmd.md" > "$target_cmd/do-$cmd.md"
       rm -f "/tmp/slashdo-$cmd.md"
       printf "${GREEN}ok${RESET}\n"
     else
@@ -248,7 +250,14 @@ install_opencode() {
 
   for lib in "${LIBS[@]}"; do
     printf "    lib/%-20s" "$lib.md"
-    if fetch_file "lib/$lib.md" "$target_lib/$lib.md"; then
+    if fetch_file "lib/$lib.md" "/tmp/slashdo-lib-$lib.md"; then
+      # Rewrite lib-path cross-references and the config-path token so libs
+      # resolve under OpenCode at runtime (mirrors the command loop and npm's
+      # transformLib).
+      sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
+          -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
+          "/tmp/slashdo-lib-$lib.md" > "$target_lib/$lib.md"
+      rm -f "/tmp/slashdo-lib-$lib.md"
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"

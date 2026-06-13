@@ -69,6 +69,7 @@ All commands live under the `do:` namespace:
 | `/do:replan` | Review and clean up PLAN.md — or, with `--issues`, your GitHub/GitLab issue tracker (see [Issue mode](#replan-issue-mode-doreplan---issues)) |
 | `/do:next` | Claim the next unclaimed PLAN.md item (or tracker issue with `--issues`), implement it in an isolated worktree, ship a reviewed PR, and clean up — the consumer counterpart to `/do:replan` |
 | `/do:omd` | Audit and optimize markdown files |
+| `/do:config` | View or set saved defaults (e.g. `--review-with`) so future commands can omit the flag (see [Saved defaults](#saved-defaults-doconfig)) |
 | `/do:update` | Update slashdo to latest version |
 | `/do:help` | List all available commands |
 
@@ -78,11 +79,11 @@ These commands accept a shared set of flags that control which reviewer(s) run a
 
 | Flag | Default | What it does |
 |:---|:---|:---|
-| `--review-with <agent>[,<agent>...]` | empty — **no default reviewer** (except `/do:rpr`, see below) | Pick one or more reviewers, run in the order given. Omit the flag and no external review runs (each command still runs its own unconditional self-review gate). Accepted slugs: `copilot` (GitHub cloud review), `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude` (each non-copilot slug spawns that local CLI in headless mode). Whatever you list is exactly what runs — `--review-with codex` runs codex only; copilot is never added implicitly. Example: `--review-with codex,agy,copilot` runs codex first, then Antigravity, then copilot, each reviewing the branch as the previous pass left it. On `/do:better`, `/do:better-swift`, and `/do:depfree`, omitting the flag means the review loop **and the auto-merge** are skipped — PRs are left open for manual review. |
+| `--review-with <agent>[,<agent>...]` | empty — **no default reviewer** (except `/do:rpr`, see below) | Pick one or more reviewers, run in the order given. Omit the flag and no external review runs (each command still runs its own unconditional self-review gate). Accepted slugs: `copilot` (GitHub cloud review), `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude` (each non-copilot slug spawns that local CLI in headless mode), and `ollama` (review with a local Ollama model — bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `--review-with=ollama[qwen2.5-coder:32b]`). Whatever you list is exactly what runs — `--review-with codex` runs codex only; copilot is never added implicitly. Example: `--review-with codex,agy,copilot` runs codex first, then Antigravity, then copilot, each reviewing the branch as the previous pass left it. On `/do:better`, `/do:better-swift`, and `/do:depfree`, omitting the flag means the review loop **and the auto-merge** are skipped — PRs are left open for manual review. |
 | `--review-iterations <n>` | `1` | Cap how many review-and-fix cycles a **Copilot** pass runs. Default `1`: request one review, apply every fix it surfaces, then stop (exiting early if the review returns 0 comments). `0` restores the legacy "loop until 0 comments" behavior, bounded by a 10-iteration safety guardrail. No effect on `codex`/`agy`/`claude` passes (fixed 3-iteration cap), and no effect when copilot isn't in the list. Accepted by `/do:better`, `/do:better-swift`, and `/do:depfree` too. |
 | `--review-stop-on-findings` | off | Stop the multi-reviewer loop after the first reviewer that fixes at least one finding (subsequent reviewers in the list are skipped). Mutually exclusive with `--review-stop-on-clean`. |
 | `--review-stop-on-clean` | off | Stop after the first reviewer that reports zero findings (clean). Mutually exclusive with `--review-stop-on-findings`. |
-| `--reviewer-applies` | off | Edit the working tree directly from the reviewing CLI instead of routing findings back through the orchestrating thread. No effect on copilot passes (Copilot reviews are read-only); takes effect on each codex / agy / claude pass in the list. |
+| `--reviewer-applies` | off | Edit the working tree directly from the reviewing CLI instead of routing findings back through the orchestrating thread. No effect on copilot passes (Copilot reviews are read-only) or ollama passes (Ollama is non-agentic — always review-only); takes effect on each codex / agy / claude pass in the list. |
 
 By default every listed reviewer runs in order, and the orchestrator that opened the PR also applies the fixes — it reads each reviewer's findings and edits the working tree itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking Antigravity (`agy`) to both find and patch its own concerns). For `/do:release`, the merge gate requires the multi-reviewer aggregate status to be `clean` (or `partial`, if you explicitly opted into a stop-mode short-circuit) — a `dirty` aggregate (build/test broken on some pass) or an `inconclusive` aggregate (any executed pass timed out, errored, hit its guardrail, or was skipped — even if other passes returned clean) blocks the merge.
 
@@ -102,6 +103,26 @@ The stable item ID in issue mode is the **issue number** (e.g. `#42`), so concur
 **`--issues` works across every command that records plan items**, so adopting issue-tracking is consistent: `/do:better`, `/do:better-swift`, and `/do:depfree` file their **deferred** findings/removals as labeled issues instead of writing a PLAN.md audit section, and `/do:review` / `/do:rpr` file a deferred finding as an issue instead of a PLAN.md line. All of them take the same `--issues` / `--issues-label <name>` flags and the same issue-number-as-ID model. (`/do:push` still only marks/commits whatever is already in PLAN.md — in a fully issue-tracked repo that's just the empty stub.)
 
 `/do:better`, `/do:better-swift`, and `/do:depfree` run the chosen reviewer(s) as their post-PR review loop (per PR, in parallel for the multi-PR `better` commands). With no `--review-with`, they skip the review loop and auto-merge and leave PRs open. `/do:rpr` is special: it **resolves review threads from any author** (Copilot, human, or other bot), and its `--review-with` default is a *conditional* `copilot` — it requests a Copilot review only when the PR has no review yet, or when Copilot is already the reviewer in play; pass `--review-with codex|agy|claude` to run a local review loop instead. From this table `/do:rpr` accepts **only** `--review-with` and `--reviewer-applies` — not `--review-iterations` or the stop-mode flags (it drives a single reviewer to clean, not the multi-reviewer stop-mode loop).
+
+### Saved defaults (`/do:config`)
+
+Rather than passing the review flags every time, save them once with `/do:config` and let future commands pick them up automatically:
+
+```
+/do:config --review-with=claude,codex,ollama[gemma4:26b-mlx]
+```
+
+After that, `/do:pr`, `/do:release`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:depfree`, and `/do:rpr` behave as if you'd passed that `--review-with` value — until you override it on a run.
+
+| Flag | What it does |
+|:---|:---|
+| `/do:config` (or `--show`) | Print the current global + per-project defaults and the effective merged values |
+| `/do:config --review-with=… [--review-iterations=N] [--reviewer-applies] [--review-stop-on-findings\|--review-stop-on-clean]` | Save defaults for those flags (validated with the same rules the review commands use) |
+| `--project` | Read/write a per-repo `.slashdo.json` at the repo root instead of the global config; per-project values override the global ones |
+| `--unset <key>` | Clear one saved default (`review-with`, `review-iterations`, `reviewer-applies`, `review-stop-mode`) |
+| `--reset` | Clear all saved defaults in the chosen scope |
+
+**Precedence (highest first):** an explicit flag on the command line (or `--review-with none`, which skips reviewers for that run) → per-project `.slashdo.json` → global `.slashdo-config.json` → the command's built-in default. Defaults are stored per host CLI (the one you run `/do:config` in) under a `defaults` key, alongside settings like `autoUpdate`.
 
 ## Supported Environments
 

@@ -23,7 +23,7 @@ banner() {
 }
 
 COMMANDS=(
-  better better-swift depfree fpr goals help next omd
+  better better-swift config depfree fpr goals help next omd
   pr pr-better push release replan review rpr scan update
 )
 
@@ -34,9 +34,9 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 LIBS=(
   code-review-checklist copilot-review-loop finding-disposition
   graphql-escaping
-  local-agent-review-loop multi-reviewer-loop
+  local-agent-review-loop multi-reviewer-loop ollama-review-loop
   per-finding-root-cause plan-id-format plan-issue-mode
-  post-review-doc-recommendations remediation-agent-template
+  post-review-doc-recommendations remediation-agent-template review-config-defaults
   swift-review-checklist swift-gotchas
   review-surface-scan review-surface-quality review-security-audit
   review-cross-file-tracing review-cross-file-contract
@@ -202,6 +202,12 @@ uninstall_opencode() {
     fi
   done
 
+  if [ -f "$HOME/.config/opencode/.slashdo-config.json" ]; then
+    rm -f "$HOME/.config/opencode/.slashdo-config.json"
+    printf "    removed: .slashdo-config.json    ${GREEN}ok${RESET}\n"
+    count=$((count + 1))
+  fi
+
   if [ $count -eq 0 ]; then
     printf "    ${DIM}nothing to remove${RESET}\n"
   else
@@ -229,6 +235,12 @@ uninstall_antigravity() {
   if [ -f "$HOME/.gemini/antigravity-cli/.slashdo-version" ]; then
     rm -f "$HOME/.gemini/antigravity-cli/.slashdo-version"
     printf "    removed: .slashdo-version        ${GREEN}ok${RESET}\n"
+    count=$((count + 1))
+  fi
+
+  if [ -f "$HOME/.gemini/antigravity-cli/.slashdo-config.json" ]; then
+    rm -f "$HOME/.gemini/antigravity-cli/.slashdo-config.json"
+    printf "    removed: .slashdo-config.json    ${GREEN}ok${RESET}\n"
     count=$((count + 1))
   fi
 

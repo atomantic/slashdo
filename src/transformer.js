@@ -38,6 +38,17 @@ function rewriteLibPaths(body, targetPrefix) {
   return body.replace(/~\/\.claude\/lib\//g, targetPrefix);
 }
 
+// Rewrites the slashdo config-path token (`~/.claude/.slashdo-config.json`) to
+// the host CLI's own config path so commands read/write the right file at
+// runtime. Unlike lib paths, this is a literal the agent resolves at runtime on
+// every host (cat-inclusion or not), so it is applied to the full command body
+// after any lib inlining. No-op for Claude (the token already matches) and for
+// envs without a configPath.
+function rewriteConfigPath(body, env) {
+  if (!env.configPath || env.configPath === '~/.claude/.slashdo-config.json') return body;
+  return body.replace(/~\/\.claude\/\.slashdo-config\.json/g, env.configPath);
+}
+
 function inlineLibContent(body, libDir) {
   return body.replace(/!`cat ~\/\.claude\/lib\/(.+?)`/g, (match, filename) => {
     const libFile = path.join(libDir, filename);
@@ -112,6 +123,10 @@ function transformCommand(content, env, sourceLibDir, relPath) {
     transformedBody = inlineLibContent(transformedBody, sourceLibDir);
   }
 
+  // Run on the full body (after inlining) so config-path tokens that arrived via
+  // inlined lib content are rewritten too.
+  transformedBody = rewriteConfigPath(transformedBody, env);
+
   // Run after inlining so conditionals inside inlined lib content are resolved too.
   transformedBody = applyConditionalBlocks(transformedBody, env);
 
@@ -139,12 +154,14 @@ function transformLib(content, env) {
   if (env.supportsCatInclusion && env.libPathPrefix) {
     transformed = rewriteLibPaths(transformed, env.libPathPrefix);
   }
+  transformed = rewriteConfigPath(transformed, env);
   return applyConditionalBlocks(transformed, env);
 }
 
 module.exports = {
   parseFrontmatter,
   rewriteLibPaths,
+  rewriteConfigPath,
   inlineLibContent,
   applyConditionalBlocks,
   getSkillName,
