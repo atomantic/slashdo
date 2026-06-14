@@ -70,19 +70,16 @@ LOCAL_PROMPT=$(printf '/%s %s\n\n%s' "$REVIEW_CMD" "$BASE_BRANCH" "$REVIEW_OVERR
 # Codex-only prompt for REVIEWER_APPLIES=true (codex exec invocation —
 # codex doesn't have slashdo installed, so describe the task directly).
 CODEX_APPLY_PROMPT="Review the diff from $BASE_BRANCH to HEAD in this repo against software-engineering best practices (correctness, security, test coverage, contract drift). For each finding, apply the fix in the working tree, then run \`$BUILD_CMD\` (skip if empty) and \`$TEST_CMD\` to verify, and commit each fix with message 'address review (codex): <summary>'. Do not introduce changes beyond the scope of fixing the findings. Do not skip tests or weaken assertions."
+
+# Resolve the timeout wrapper used by the step-2 invocation (`$TIMEOUT_CMD {INVOCATION}`).
+# macOS ships no `timeout(1)` unless coreutils is installed, so probing is required:
+# bare `timeout 1800 …` would exit 127 before the reviewer runs. Empty = no wrapper
+# (rely on the CLI's own internal limits). This is settled logic — run it, don't narrate it.
+TIMEOUT_CMD="$(command -v timeout >/dev/null 2>&1 && echo 'timeout 1800' \
+  || { command -v gtimeout >/dev/null 2>&1 && echo 'gtimeout 1800' || echo ''; })"
 ```
 
-Pick a timeout wrapper at this point too. The step-2 invocation below runs `$TIMEOUT_CMD {INVOCATION}`; on stock macOS without `coreutils`, plain `timeout(1)` is absent and `timeout 1800 …` exits 127 before the reviewer ever runs:
-
-```bash
-if command -v timeout >/dev/null 2>&1; then
-  TIMEOUT_CMD="timeout 1800"
-elif command -v gtimeout >/dev/null 2>&1; then
-  TIMEOUT_CMD="gtimeout 1800"
-else
-  TIMEOUT_CMD=""   # rely on the CLI's own internal limits
-fi
-```
+Run the pre-flight block above verbatim. The `TIMEOUT_CMD` resolution is deterministic — do NOT think out loud about whether `timeout`/`gtimeout` is installed or about falling back; just execute it and move on.
 
 Pick the invocation based on `{REVIEW_AGENT}` and `{REVIEWER_APPLIES}`:
 
@@ -136,7 +133,7 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
    $TIMEOUT_CMD {INVOCATION} > "$LOG_FILE" 2>&1
    EXIT_CODE=$?
    ```
-   - `$TIMEOUT_CMD` was selected during pre-flight (`timeout 1800`, `gtimeout 1800`, or empty when neither is installed). Empty expands to nothing, so the line becomes a direct invocation that relies on the CLI's own internal limits — preferred to exiting 127 before the reviewer runs.
+   - `$TIMEOUT_CMD` was already resolved during pre-flight (`timeout 1800`, `gtimeout 1800`, or empty). Just expand it here — empty becomes a direct invocation. No re-checking or commentary needed.
    - If `EXIT_CODE != 0` and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of the log, and exit the loop. Surface the log path so the user can inspect.
 
 3. **Detect changes and apply fixes** (logic depends on `{REVIEWER_APPLIES}`):
