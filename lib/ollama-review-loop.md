@@ -41,6 +41,17 @@ When to use this:
    else
      OLLAMA_FORMAT="json"               # legacy: valid JSON only; field shape comes from the prompt, parse leniently
    fi
+   # Probe optional output-hygiene flags from the help text and add only the supported ones.
+   # `--hidethinking` was added mid-0.x (absent on ~0.5–0.8); `--nowordwrap` is older. Passing an
+   # unsupported flag makes `ollama run` exit non-zero, which would error every per-file invocation
+   # and report cli-error — so detect support rather than assume it. `--format` is gated by version above.
+   # Use a shell ARRAY, not a string: zsh (a common host shell) does not word-split an unquoted
+   # `$OLLAMA_FLAGS`, so a two-flag string would be passed as one bogus flag. An array expands to
+   # separate words in bash and zsh alike, and to zero words when empty (legacy ollama, no flags).
+   OLLAMA_FLAGS=()
+   OLLAMA_RUN_HELP=$(ollama run --help 2>&1)
+   printf '%s' "$OLLAMA_RUN_HELP" | grep -q -- '--hidethinking' && OLLAMA_FLAGS+=(--hidethinking)
+   printf '%s' "$OLLAMA_RUN_HELP" | grep -q -- '--nowordwrap'   && OLLAMA_FLAGS+=(--nowordwrap)
    ```
 
 ### Model resolution
@@ -99,19 +110,18 @@ If the diff has no issues worth raising, return {\"findings\": []}.
 --- DIFF ---
 $FILE_DIFF"
    printf '\n===== FILE: %s =====\n' "$F" >> "$LOG_FILE"
-   printf '%s' "$PROMPT" | $TIMEOUT_CMD ollama run --hidethinking --nowordwrap --format "$OLLAMA_FORMAT" "$OLLAMA_MODEL" >> "$LOG_FILE" 2>> "$ERR_FILE"
+   printf '%s' "$PROMPT" | $TIMEOUT_CMD ollama run "${OLLAMA_FLAGS[@]}" --format "$OLLAMA_FORMAT" "$OLLAMA_MODEL" >> "$LOG_FILE" 2>> "$ERR_FILE"
    printf '\n' >> "$LOG_FILE"
    ```
-   Four things keep the captured findings a clean, parseable data structure rather than buried in terminal noise:
-   - **`--format "$OLLAMA_FORMAT"`.** Grammar-constrains the output to JSON (and, in schema mode, to the exact field names and the `severity` enum). This is the single biggest reliability win: the orchestrator parses a structure instead of scraping a free-text format that local models adhere to unreliably. The `===== FILE: =====` delimiter lets you split `$LOG_FILE` into one JSON object per reviewed file.
+   Three things keep the captured findings a clean, parseable data structure rather than buried in terminal noise:
+   - **`--format "$OLLAMA_FORMAT"`.** Grammar-constrains the output to JSON (and, in schema mode, to the exact field names and the `severity` enum). This is the single biggest reliability win: the orchestrator parses a structure instead of scraping a free-text format that local models adhere to unreliably. The delimiter lines (`===== FILE: <path> =====`, the path embedded per file) let you split `$LOG_FILE` into one JSON object per reviewed file — split on the regex `^===== FILE: (.+) =====$`, capturing the path.
    - **`2>> "$ERR_FILE"` (not `2>&1`).** `ollama run` writes the actual model response to **stdout** but renders its progress spinner — braille frames (`⠙ ⠹ ⠼`) wrapped in ANSI cursor codes (`\e[?25l`, `\e[1G`, `\e[K`) — to **stderr**. Merging the two with `2>&1` is what fills the log with spinner garbage. Send stderr to a separate file so `$LOG_FILE` holds only model JSON; no ANSI stripping pass is then needed.
-   - **`--hidethinking`.** Reasoning models (e.g. `qwen3`, `deepseek-r1`) otherwise stream their chain-of-thought into stdout ahead of the JSON. Even under `--format`, the thinking trace can precede the constrained object; this flag suppresses it while keeping reasoning quality. It is a no-op on non-thinking models, so pass it unconditionally.
-   - **`--nowordwrap`.** Prevents Ollama from hard-wrapping long lines to the terminal width, which would otherwise inject newlines into a long `fix` string.
+   - **`"${OLLAMA_FLAGS[@]}"` (`--hidethinking`, `--nowordwrap`).** Probed for support in pre-flight and included only when present (as a shell array, so it expands to separate words under both bash and zsh, and to nothing when empty) — passing a flag an older `ollama run` doesn't recognize makes it exit non-zero and error the whole pass. `--hidethinking` suppresses reasoning models' (e.g. `qwen3`, `deepseek-r1`) chain-of-thought, which can otherwise precede the constrained JSON even under `--format`; it is a no-op on non-thinking *models* but is absent on older ollama *versions* (~0.5–0.8), hence the probe. `--nowordwrap` stops Ollama hard-wrapping long lines to the terminal width, which would otherwise inject newlines into a long `fix` string.
 4. If the invocation exits non-zero for a file, append a `[ollama error reviewing $F — see $ERR_FILE]` marker to the log, **increment `REVIEW_ERRORS`**, and continue to the next file (one file's failure should not abort the whole review). Coverage accounting after the loop — first recompute `REVIEWABLE=$((TOTAL_FILES - SKIPPED_EMPTY))` (the files actually sent to the model; empty-diff skips never reached it), then define a coverage gap as any reviewable file that errored or was truncated (`REVIEW_ERRORS + TRUNCATED > 0`):
    - If *every reviewable* file errored (`REVIEWABLE > 0` and `REVIEW_ERRORS == REVIEWABLE`), set `STATUS=cli-error`, print the last 80 lines of `$ERR_FILE` (the model's actual error output now lives there, not in `$LOG_FILE`), and exit — nothing was reviewed. (Use `REVIEWABLE`, not `TOTAL_FILES`: an empty-diff skip would otherwise make `REVIEW_ERRORS == TOTAL_FILES` unreachable and misclassify a total failure as merely `incomplete`.)
    - If there is any coverage gap but not a total failure (`REVIEW_ERRORS + TRUNCATED > 0` and `REVIEW_ERRORS < REVIEWABLE`), the diff was only **partially** reviewed. Still process the findings from the parts that were reviewed (apply their fixes in step 3), but the pass **must not report `clean`** — at the point step 3 would set `STATUS=clean`, set `STATUS=incomplete` instead (see step 3). `incomplete` is treated as inconclusive by the multi-reviewer aggregate (not eligible to merge), because part of the change was never reviewed.
 
-> `--format` makes the output grammar-constrained JSON, so parsing is reliable — but still parse **defensively**, since local models are weaker than agentic CLIs. For each `===== FILE: =====` section, JSON-parse the block and read its `findings` array. An empty array means the file is clean. Treat a section that fails to parse (rare; possible on the legacy `json` fallback, or if a reasoning model leaked text despite `--hidethinking`) as no findings for that file — do not let a parse failure abort the pass. Before acting on a finding, validate it carries the required fields and a `line` that exists in the file (drop hallucinated lines, as step 3 already directs).
+> `--format` makes the output grammar-constrained JSON, so parsing is reliable — but still parse **defensively**, since local models are weaker than agentic CLIs. Split `$LOG_FILE` on the delimiter regex `^===== FILE: (.+) =====$` (the captured group is the file path); for each resulting section, JSON-parse the block and read its `findings` array. An empty array means the file is clean. Treat a section that fails to parse (rare; possible on the legacy `json` fallback, or if a reasoning model leaked text despite `--hidethinking`) as no findings for that file — do not let a parse failure abort the pass. Before acting on a finding, validate it carries the required fields and a `line` that exists in the file (drop hallucinated lines, as step 3 already directs).
 
 ### Loop
 
@@ -120,7 +130,7 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
 1. **Capture baseline**: `LOOP_START_SHA=$(git rev-parse HEAD)`.
 2. **Run the per-file chunked review** (above), aggregating findings into `$LOG_FILE`. Re-run the Invocation block *in full* on every iteration — re-derive `CHANGED`/`TOTAL_FILES` for the current HEAD and re-initialize `REVIEW_ERRORS=0`, `TRUNCATED=0`, `SKIPPED_EMPTY=0`, and fresh `$LOG_FILE`/`$ERR_FILE` (both truncated — `$ERR_FILE` is append-written with `2>>`, so a stale spinner/error tail from an earlier iteration would otherwise dominate the "last 80 lines of `$ERR_FILE`" printed on a later-iteration `cli-error`) — so a coverage gap from an earlier iteration cannot pin `STATUS=incomplete` after a clean re-review of the new commits.
 3. **Parse findings and apply fixes** (orchestrator-applies — the same flow as the local-agent loop's review-only path):
-   - Split `$LOG_FILE` on the `===== FILE: =====` delimiters and JSON-parse each section, collecting every entry across the `findings` arrays (see the defensive-parsing note above). If there are no findings (every section's array was empty or unparseable), set `STATUS=clean` — **but if there was any coverage gap (`REVIEW_ERRORS + TRUNCATED > 0`), set `STATUS=incomplete` instead** (the diff was only partially reviewed, so "no findings" is not a clean verdict) — and exit the loop.
+   - Split `$LOG_FILE` on the delimiter regex `^===== FILE: (.+) =====$` and JSON-parse each section, collecting every entry across the `findings` arrays (see the defensive-parsing note above). If there are no findings (every section's array was empty or unparseable), set `STATUS=clean` — **but if there was any coverage gap (`REVIEW_ERRORS + TRUNCATED > 0`), set `STATUS=incomplete` instead** (the diff was only partially reviewed, so "no findings" is not a clean verdict) — and exit the loop.
    - For each finding, read the cited `file` at the cited `line` and apply the fix. The model's `fix` field is a *starting point* — local models hallucinate more than cloud agents, so your judgment overrides: drop any finding that is wrong, out of scope, or references a line that doesn't exist.
    - After each cohesive set of fixes, run `{BUILD_CMD}` (skip when empty) and `{TEST_CMD}`. If either fails, fix forward; if the failure stems from a bad finding, drop that finding.
    - Commit each fix (or coherent group) as `address review (ollama): <summary>`. The parenthesized agent name records which reviewer surfaced the finding. No co-author or "Generated with" lines.
