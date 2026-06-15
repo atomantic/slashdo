@@ -55,7 +55,7 @@ All commands live under the `do:` namespace:
 | Command | What it does |
 |:---|:---|
 | `/do:push` | Commit and push all work with changelog |
-| `/do:pr` | Open a PR (GitHub `gh`) or merge request (GitLab `glab`) with self-review; runs an external review loop only when you pass `--review-with` (no default reviewer; see [Review loop flags](#review-loop-flags-dopr-dorelease-dopr-better-doreview-dobetter-dobetter-swift-dodepfree-dorpr)). Pass `--merge` to auto-merge once reviews and CI pass (saveable via `/do:config --merge`; see [Saved defaults](#saved-defaults-doconfig)) |
+| `/do:pr` | Open a PR (GitHub `gh`) or merge request (GitLab `glab`) with self-review; runs an external review loop only when you pass `--review-with` (no default reviewer; see [Review loop flags](#review-loop-flags-dopr-dorelease-dopr-better-doreview-dobetter-dobetter-swift-dodepfree-dorpr)). Pass `--merge` to auto-merge once reviews and CI pass (see [Auto-merge](#auto-merge-dopr---merge)) |
 | `/do:pr-better` | Run a full do:better audit on the current branch, commit fixes directly, then open a single PR |
 | `/do:fpr` | Fork PR -- push to fork, PR against upstream |
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
@@ -89,6 +89,21 @@ By default every listed reviewer runs in order, and the orchestrator that opened
 
 For `/do:review`, the listed agents run **after** the host CLI's own self-review (the multi-agent review built into `do:review`). The list names *additional* reviewers; whichever CLI is hosting `/do:review` does its own pass first regardless.
 
+### Auto-merge (`/do:pr --merge`)
+
+By default `/do:pr` opens the PR and hands it back for manual merge. Pass `--merge` to merge it automatically once **both** gates are green: the review loop returns a mergeable status **and** required CI checks pass. It's opt-in per run, or save it once with `/do:config --merge` (see [Saved defaults](#saved-defaults-doconfig)).
+
+| Flag | Default | What it does |
+|:---|:---|:---|
+| `--merge` | off — PR left open | After review **and** CI pass, merge the PR. Eligible only when the multi-reviewer aggregate is `clean` (or `partial` if you explicitly set a stop-mode); a `dirty` or `inconclusive` aggregate leaves the PR open. With no `--review-with`, the bar is the unconditional self-review gate plus passing CI. |
+| `--merge=<method>` | — | `--merge` plus pin the method in one token: `squash`, `rebase`, or `merge`. |
+| `--merge-method <method>` | repo's allowed method | Pin the merge method without restating `--merge` (useful when `--merge` comes from a saved default). When unset, slashdo uses the repo's allowed method — if several are allowed it prefers `squash`, then `merge`, then `rebase`. |
+| `--no-merge` | — | Leave the PR open for this run, overriding a saved `merge` default. |
+
+**How CI is awaited:** slashdo first enables GitHub-native auto-merge (`gh pr merge --auto`), so the merge lands when required checks pass even if your session ends. If the repo hasn't enabled auto-merge, it falls back to watching checks in-session (`gh pr checks --watch`) and merging once they're green — leaving the PR open if a required check fails. On GitLab it uses `glab mr merge --auto-merge` (merge-when-pipeline-succeeds). It never merges on a non-clean review aggregate, before checks pass, or over branch protection.
+
+Only `/do:pr` reads the `merge` / `merge-method` saved defaults — `/do:better`, `/do:better-swift`, `/do:depfree`, and `/do:release` keep their own merge behavior (each auto-merges after its own review loop / merge gate, as documented for that command).
+
 ### Replan issue mode (`/do:replan --issues`)
 
 By default `/do:replan` tracks the plan in `PLAN.md`. Pass `--issues` to track it in your GitHub/GitLab issue tracker instead — the same audit/triage/prune lifecycle runs against issues rather than checklist lines.
@@ -116,7 +131,7 @@ After that, `/do:pr`, `/do:release`, `/do:review`, `/do:better`, `/do:better-swi
 
 You can also save the **issue-mode** default the same way: `/do:config --issues` makes every command that accepts `--issues` (`/do:next`, `/do:replan`, `/do:better`, `/do:better-swift`, `/do:depfree`, `/do:review`, `/do:rpr`) default to filing/working tracker issues instead of `PLAN.md`. Pass `--no-issues` on a run to fall back to PLAN.md mode for that run, or `--issues-label <name>` to save the scoping label. A per-project `.slashdo.json` is a clean way to mark one repo issue-tracked: `/do:config --project --issues`.
 
-And you can make **`/do:pr` auto-merge** once reviews and CI are solid: `/do:config --merge` (optionally `--merge-method squash|rebase|merge`, or the shorthand `--merge=squash`). After that a bare `/do:pr` opens the PR, runs the review loop, waits for required checks (GitHub-native auto-merge, falling back to an in-session check-watch), and merges — using the repo's allowed method unless you pinned one. Pass `--no-merge` on a run to leave that PR open. Only `/do:pr` reads this default; `/do:better`/`/do:depfree`/`/do:release` keep their own merge behavior.
+And you can save **`/do:pr`'s auto-merge** default so a bare `/do:pr` merges once reviews and CI are solid: `/do:config --merge` (optionally `--merge-method squash|rebase|merge`, or the shorthand `--merge=squash`). Pass `--no-merge` on a run to leave that PR open. See [Auto-merge](#auto-merge-dopr---merge) for the full gate and merge-method rules; only `/do:pr` reads this default.
 
 | Flag | What it does |
 |:---|:---|
