@@ -258,15 +258,15 @@ git diff --cached --quiet || git commit -m "docs([issue-<num>]): log issue #<num
 >
 > **Issues mode — major review findings become tracker issues, not PLAN.md items.** A substantial finding you decide *not* to fix here gets filed as a NEW issue (`gh issue create --label "$PLAN_LABEL" …`, same form as Phase 4). Nit/style findings just get parked verbally.
 
-`/do:pr` already owns the entire review/ship pipeline — the required Local Code Review gate, `--review-with` multi-reviewer loop, `--review-iterations`, stop-modes, and `--reviewer-applies`. **Do not re-implement any of it here.** From inside the worktree, decide the review intensity, then invoke `/do:pr` with the flags this command received:
+`/do:pr` already owns the entire review/ship pipeline — the required Local Code Review gate, `--review-with` multi-reviewer loop, `--review-iterations`, stop-modes, and `--reviewer-applies`. **Do not re-implement any of it here.** From inside the worktree, decide the review intensity, then invoke `/do:pr` with the flags this command received. **Always pass `--no-merge` to `/do:pr`** so it opens the PR but does not merge it — `/do:next` owns the merge decision (the gate below) plus its post-merge worktree/branch cleanup and `Closes #<num>` handling, and must stay in control even if the user has a global `/do:config --merge` default that would otherwise make `/do:pr` auto-merge out from under it:
 
 > **A note on `/simplify`.** It's a quality-pass command in the slashdo ecosystem but **not part of a stock slashdo install** (slashdo ships only `/do:*`). Treat it as **optional**: run `/simplify` when your environment provides it; otherwise do the equivalent reuse/quality pass by hand (or skip it for a trivial diff). Never let a missing `/simplify` block the run — the load-bearing review is `/do:pr`'s gate plus any `--review-with` pass.
 
 | The user passed… | Run |
 |---|---|
-| `--review-with=<agents>` | `/simplify` if available (skip when the diff is genuinely trivial), then `/do:pr --review-with=<agents>` (pass through `--review-iterations` / stop-mode / `--reviewer-applies` verbatim) |
-| `--no-review` | `/do:pr` with no `--review-with` — its Local Code Review gate still fires; no external pass, no `/simplify` |
-| neither | **Judge the diff.** New code paths / abstractions / multi-file work → `/simplify` (if available) then `/do:pr --review-with=…` with a sensible reviewer. A value swap / typo / single-line fix → `/do:pr` alone. State the call before acting. |
+| `--review-with=<agents>` | `/simplify` if available (skip when the diff is genuinely trivial), then `/do:pr --no-merge --review-with=<agents>` (pass through `--review-iterations` / stop-mode / `--reviewer-applies` verbatim) |
+| `--no-review` | `/do:pr --no-merge` with no `--review-with` — its Local Code Review gate still fires; no external pass, no `/simplify` |
+| neither | **Judge the diff.** New code paths / abstractions / multi-file work → `/simplify` (if available) then `/do:pr --no-merge --review-with=…` with a sensible reviewer. A value swap / typo / single-line fix → `/do:pr --no-merge` alone. State the call before acting. |
 
 State any skip/trim and why ("Diff is 3 lines in one file; skipping the quality pass and external review — matches existing pattern"). `/do:pr` pushes `next/<slug>`, opens the PR (include `Closes #<num>` in issues mode), runs the chosen review loop, and reports the aggregate status.
 
