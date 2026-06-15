@@ -2,17 +2,22 @@
 
 Several commands record deferred work as **plan items**. By default each item is
 appended to `PLAN.md` as a `- [ ]` checkbox with a unique kebab-slug `[<id>]` (per
-[plan-id-format.md](./plan-id-format.md)). When the command is invoked with the
-**`--issues`** flag, file the item as a labeled issue in the GitHub/GitLab tracker
-**instead of** writing to `PLAN.md` — the same model `/do:replan --issues` uses, so
-the two stay consistent and `PLAN.md` doesn't churn while work happens on issues.
+[plan-id-format.md](./plan-id-format.md)). When the command resolves
+**`ISSUE_MODE=true`** — set by the `--issues` flag **or** a saved `issues=true`
+default (each command resolves this in its own argument parsing; the `(--issues)`
+labels below are shorthand for "this branch runs when `ISSUE_MODE` is true," whether
+the flag was typed or the default supplied it) — file the item as a labeled issue in
+the GitHub/GitLab tracker **instead of** writing to `PLAN.md` — the same model
+`/do:replan --issues` uses, so the two stay consistent and `PLAN.md` doesn't churn
+while work happens on issues.
 
 ## Flags
 
 - **`--issues`**: file plan items as tracker issues instead of `PLAN.md` lines.
-  Record `ISSUE_MODE=true` (default `false`).
+  Record `ISSUE_MODE=true` (default `false`). A saved `issues=true` default resolves
+  to the same `ISSUE_MODE=true` when neither `--issues` nor `--no-issues` is typed.
 - **`--issues-label <name>`**: the label that scopes plan-tracking issues. Record
-  `PLAN_LABEL` (default `plan`). Only meaningful with `--issues`.
+  `PLAN_LABEL` (default `plan`). Only meaningful when `ISSUE_MODE` is true.
 
 ## Setup — only when `ISSUE_MODE` is true
 
