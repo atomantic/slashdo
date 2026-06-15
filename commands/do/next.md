@@ -7,12 +7,12 @@ argument-hint: "[<slug>|#<issue>] [--issues|--no-issues] [--issues-label <name>]
 
 Claim the next unclaimed `- [ ]` item from **PLAN.md** via the slug-ID system — or, with `--issues`, the next open tracker issue carrying the plan label — work it in an **isolated worktree**, run review, open a PR, merge, and clean up. This is the **consumer** counterpart to `/do:replan`, `/do:better`, and `/do:depfree` (which *populate* the queue): `/do:next` *drains* it, one item per run.
 
-**Two work sources.** The work queue comes from one of two places, selected by `--issues`:
+**Two work sources.** The work queue comes from one of two places, selected by the resolved `ISSUE_MODE` (the `--issues`/`--no-issues` flag, a saved `issues` default, or the Phase 1 auto-redirect — see Parse Arguments):
 
 | Source | Selected by | Work unit | Branch | "Done" action | Discovered work goes to |
 |---|---|---|---|---|---|
-| **PLAN.md** (default) | no flag | a `- [ ]` line with a `[<slug>]` ID | `next/<slug>` | remove the line + log to the changelog | a new PLAN.md item (only if genuinely large) |
-| **Tracker issues** | `--issues` | an open issue **carrying `PLAN_LABEL`** | `next/issue-<num>` | close the issue via `Closes #<num>` in the PR | a new tracker issue (only if genuinely large) — never PLAN.md |
+| **PLAN.md** (default) | `ISSUE_MODE=false` | a `- [ ]` line with a `[<slug>]` ID | `next/<slug>` | remove the line + log to the changelog | a new PLAN.md item (only if genuinely large) |
+| **Tracker issues** | `ISSUE_MODE=true` (`--issues`, saved default, or auto-redirect) | an open issue **carrying `PLAN_LABEL`** | `next/issue-<num>` | close the issue via `Closes #<num>` in the PR | a new tracker issue (only if genuinely large) — never PLAN.md |
 
 The two sources never mix in one run. In issues mode, treat `issue-<num>` as the "slug" everywhere the PLAN.md flow says `<slug>` — worktree (`../next-issue-<num>`), branch (`next/issue-<num>`), commit/PR-title prefix (`[issue-<num>]`), and in-flight scan all work unchanged because `issue-<num>` is a single `/`-segment in the branch name just like a PLAN slug.
 

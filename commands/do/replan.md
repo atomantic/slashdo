@@ -25,7 +25,7 @@ Parse `$ARGUMENTS` for:
 
 ## Mode Selection
 
-This command operates in one of two modes, selected by the `--issues` flag:
+This command operates in one of two modes, selected by the resolved `ISSUE_MODE` (set in Parse Arguments — `true` when `--issues` was passed **or** a saved `issues=true` default applies and `--no-issues` was not passed; `false` otherwise). A bare `/do:replan` in a repo with `/do:config --issues` saved therefore runs in issue mode:
 
 **PLAN.md mode (default).** The plan lives in `PLAN.md`. Every phase below runs as
 written: assign slug IDs, gather evidence, triage, prune, rebuild PLAN.md, commit.
