@@ -1,6 +1,6 @@
 ---
 description: Automated audit/triage of PLAN.md (or your GitHub/GitLab issue tracker) — prune completed items, suggest new work, keep the plan lean
-argument-hint: "[--interactive] [--issues] [--issues-label <name>]"
+argument-hint: "[--interactive] [--issues|--no-issues] [--issues-label <name>]"
 ---
 
 # Replan Command
@@ -19,8 +19,9 @@ Automatically audit the plan against the codebase, prune completed/stale items, 
 
 Parse `$ARGUMENTS` for:
 - **`--interactive`**: pause after evidence gathering to present findings and get approval before applying changes (composes with both modes). Record `INTERACTIVE=true` (default `false`).
-- **`--issues`**: enable **issue mode** — track plan items as GitHub/GitLab issues instead of PLAN.md. Record `ISSUE_MODE=true` (default `false`).
-- **`--issues-label <name>`**: the label that scopes which issues are plan items. Record `PLAN_LABEL` (default `plan`). Only meaningful with `--issues`; if passed without `--issues`, warn that it has no effect and continue in PLAN.md mode.
+- **`--issues`** / **`--no-issues`**: enable **issue mode** — track plan items as GitHub/GitLab issues instead of PLAN.md — or force PLAN.md mode. `--issues` sets `ISSUE_MODE=true`; `--no-issues` sets `ISSUE_MODE=false`.
+- **`--issues-label <name>`**: the label that scopes which issues are plan items. Record `PLAN_LABEL` (default `plan`). Only meaningful in issue mode; if passed while issue mode is off (no `--issues` and no saved `issues` default), warn that it has no effect and continue in PLAN.md mode.
+- **Saved defaults.** If the user passed **neither** `--issues` nor `--no-issues`, resolve `ISSUE_MODE` from the saved `issues` default — per-project `.slashdo.json` overrides the global `~/.claude/.slashdo-config.json` (the precedence is the one in [lib/review-config-defaults.md](../../lib/review-config-defaults.md)), built-in default `false`. Likewise take `PLAN_LABEL` from the saved `issues-label` default when `--issues-label` is absent. So `/do:config --issues` makes a bare `/do:replan` plan against the tracker.
 
 ## Mode Selection
 
