@@ -55,7 +55,7 @@ All commands live under the `do:` namespace:
 | Command | What it does |
 |:---|:---|
 | `/do:push` | Commit and push all work with changelog |
-| `/do:pr` | Open a PR (GitHub `gh`) or merge request (GitLab `glab`) with self-review; runs an external review loop only when you pass `--review-with` (no default reviewer; see [Review loop flags](#review-loop-flags-dopr-dorelease-dopr-better-doreview-dobetter-dobetter-swift-dodepfree-dorpr)) |
+| `/do:pr` | Open a PR (GitHub `gh`) or merge request (GitLab `glab`) with self-review; runs an external review loop only when you pass `--review-with` (no default reviewer; see [Review loop flags](#review-loop-flags-dopr-dorelease-dopr-better-doreview-dobetter-dobetter-swift-dodepfree-dorpr)). Pass `--merge` to auto-merge once reviews and CI pass (saveable via `/do:config --merge`; see [Saved defaults](#saved-defaults-doconfig)) |
 | `/do:pr-better` | Run a full do:better audit on the current branch, commit fixes directly, then open a single PR |
 | `/do:fpr` | Fork PR -- push to fork, PR against upstream |
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
@@ -116,13 +116,16 @@ After that, `/do:pr`, `/do:release`, `/do:review`, `/do:better`, `/do:better-swi
 
 You can also save the **issue-mode** default the same way: `/do:config --issues` makes every command that accepts `--issues` (`/do:next`, `/do:replan`, `/do:better`, `/do:better-swift`, `/do:depfree`, `/do:review`, `/do:rpr`) default to filing/working tracker issues instead of `PLAN.md`. Pass `--no-issues` on a run to fall back to PLAN.md mode for that run, or `--issues-label <name>` to save the scoping label. A per-project `.slashdo.json` is a clean way to mark one repo issue-tracked: `/do:config --project --issues`.
 
+And you can make **`/do:pr` auto-merge** once reviews and CI are solid: `/do:config --merge` (optionally `--merge-method squash|rebase|merge`, or the shorthand `--merge=squash`). After that a bare `/do:pr` opens the PR, runs the review loop, waits for required checks (GitHub-native auto-merge, falling back to an in-session check-watch), and merges — using the repo's allowed method unless you pinned one. Pass `--no-merge` on a run to leave that PR open. Only `/do:pr` reads this default; `/do:better`/`/do:depfree`/`/do:release` keep their own merge behavior.
+
 | Flag | What it does |
 |:---|:---|
 | `/do:config` (or `--show`) | Print the current global + per-project defaults and the effective merged values |
 | `/do:config --review-with=… [--review-iterations=N] [--reviewer-applies] [--review-stop-on-findings\|--review-stop-on-clean]` | Save defaults for those flags (validated with the same rules the review commands use) |
 | `/do:config --issues\|--no-issues [--issues-label=<name>]` | Save the issue-mode default (and its scoping label) for every command that accepts `--issues` |
+| `/do:config --merge\|--no-merge [--merge-method=squash\|rebase\|merge]` | Save `/do:pr`'s auto-merge default (and the merge method it uses) |
 | `--project` | Read/write a per-repo `.slashdo.json` at the repo root instead of the global config; per-project values override the global ones |
-| `--unset <key>` | Clear one saved default (`review-with`, `review-iterations`, `reviewer-applies`, `review-stop-mode`, `issues`, `issues-label`) |
+| `--unset <key>` | Clear one saved default (`review-with`, `review-iterations`, `reviewer-applies`, `review-stop-mode`, `issues`, `issues-label`, `merge`, `merge-method`) |
 | `--reset` | Clear all saved defaults in the chosen scope |
 
 **Precedence (highest first):** an explicit flag on the command line (or `--review-with none`, which skips reviewers for that run) → per-project `.slashdo.json` → global `.slashdo-config.json` → the command's built-in default. Defaults are stored per host CLI (the one you run `/do:config` in) under a `defaults` key, alongside settings like `autoUpdate`.

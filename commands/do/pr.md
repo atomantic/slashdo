@@ -1,6 +1,6 @@
 ---
-description: Commit, push, and open a PR (GitHub) or merge request (GitLab) against the repo's default branch
-argument-hint: "[--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies]"
+description: Commit, push, and open a PR (GitHub) or merge request (GitLab) against the repo's default branch — optionally auto-merging once reviews and CI pass (--merge)
+argument-hint: "[--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--merge|--no-merge|--merge=<method>] [--merge-method <method>]"
 ---
 
 ## Parse Arguments
@@ -32,7 +32,14 @@ Parse `$ARGUMENTS` for `--review-iterations <n>` (affects the copilot pass only)
 - If the value is missing or not a non-negative integer, abort with: `--review-iterations must be a non-negative integer (got: {value}).`
 - This flag has no effect on local-agent reviewers (`codex`/`gemini`/`claude`); they keep their own fixed 3-iteration cap.
 
-Then apply any **saved defaults** (set via `/do:config`) to the flags above that the user did NOT pass on this invocation — an explicit flag, or `--review-with none`, always overrides a saved default:
+Parse `$ARGUMENTS` for the merge flags (control whether the PR is auto-merged after review — opt-in; the historical default is to open the PR and stop):
+- `--merge` — once the review loop returns a mergeable status **and** CI is green, auto-merge the PR. Record `MERGE_ENABLED=true`.
+- `--merge=<method>` — same as `--merge`, and pin the method: `<method>` ∈ {`squash`, `rebase`, `merge`}. Record `MERGE_ENABLED=true` and `MERGE_METHOD=<method>`. Abort on an unknown method with `--merge method must be one of squash, rebase, merge (got: {value}).`
+- `--no-merge` — leave the PR open for manual merge. Record `MERGE_ENABLED=false`. `--merge` and `--no-merge` are mutually exclusive; if both appear, abort with `--merge and --no-merge cannot be combined`.
+- `--merge-method <method>` — pin the method without restating `--merge` (useful when `--merge` comes from a saved default). Same `squash`/`rebase`/`merge` validation. Record `MERGE_METHOD`.
+- If neither `--merge` nor `--no-merge` is present, leave `MERGE_ENABLED` **unset for now** — the saved-defaults step below fills it from `/do:config` (`merge` key); only if it is still unset after that does the built-in default apply (`MERGE_ENABLED=false` — open the PR and stop). Likewise leave `MERGE_METHOD` unset so it is filled from the saved `merge-method` default, then the repo-default fallback at merge time.
+
+Then apply any **saved defaults** (set via `/do:config`) to the flags above that the user did NOT pass on this invocation — an explicit flag, or `--review-with none`, always overrides a saved default. `/do:pr` additionally reads the `merge` and `merge-method` keys here (resolve `MERGE_ENABLED` from `merge` and `MERGE_METHOD` from `merge-method` when the user didn't type them):
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
@@ -105,7 +112,7 @@ Verification — confirm before proceeding:
 
 ## Run the Review Loop
 
-**If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), skip this entire section — the Local Code Review gate above was the only review. Report the PR/MR URL and stop; there is no multi-reviewer aggregate to report.
+**If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), skip this entire section — the Local Code Review gate above was the only review. Set `OVERALL_STATUS=clean` (the no-reviewer path: the Local Code Review gate plus CI is the merge gate, exactly as `/do:release` treats it) and continue to the Merge section; there is no multi-reviewer aggregate to report.
 
 Otherwise, hand off to the **multi-reviewer loop** with the parsed inputs:
 
@@ -132,4 +139,24 @@ The wrapper runs each reviewer in order, deciding when to stop per the stop-mode
 
 !`cat ~/.claude/lib/ollama-review-loop.md`
 
-**Report the final status** to the user including the PR/MR URL and the multi-reviewer aggregate report (per-pass status table plus overall status).
+## Merge the PR (only when merge mode is enabled)
+
+**If `MERGE_ENABLED` is not `true`, skip this section** — report the PR/MR URL plus the review summary and stop. This is the historical `/do:pr` behavior: open the PR and hand it back for manual merge.
+
+When `MERGE_ENABLED=true`, gate the merge on **both** the review result and CI:
+
+1. **Review gate** — consume the review loop's `{OVERALL_STATUS}` exactly as `/do:release` does:
+   - `clean` — eligible (this includes the no-reviewer path above, which set `OVERALL_STATUS=clean` on a passing Local Code Review gate, and copilot `too-large`/`capped`).
+   - `partial` — eligible only when an explicit `--review-stop-on-findings`/`--review-stop-on-clean` flag was set (the user opted into the short-circuit).
+   - `inconclusive` or `dirty` — **do NOT merge.** Leave the PR open and report the proximate status + URL so the user can intervene. A requested reviewer that never produced a verdict is not a clean review.
+2. **Resolve the merge method** into `{MERGE_METHOD}`: the explicit flag or saved `merge-method` default if set; otherwise query `gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed` and pick from the repo's allowed methods — if exactly one is allowed use it; if several are, prefer `squash`, then `merge`, then `rebase`. State the chosen method. (GitLab: omit the method flag and let `glab` use the project default.)
+3. **Merge once CI is green** — GitHub (`gh`):
+   - First try GitHub-native auto-merge, so the merge lands when required checks pass even if this session ends: `gh pr merge {number} --auto --{MERGE_METHOD} --delete-branch`.
+   - If that errors because auto-merge is not enabled on the repo (e.g. `gh` reports auto-merge is not allowed / not enabled), **fall back to watching checks in-session, then merging directly**: `gh pr checks {number} --watch --fail-fast`; on success run `gh pr merge {number} --{MERGE_METHOD} --delete-branch`. If a required check **fails**, leave the PR open and report which check failed — do not merge.
+   - GitLab (`glab`): `glab mr merge {number} --auto-merge --yes --remove-source-branch` (merges when the pipeline succeeds). If the installed `glab` doesn't support `--auto-merge`, fall back to polling `glab ci status` until the pipeline passes, then `glab mr merge {number} --yes`.
+4. **Verify** the result: `gh pr view {number} --json state,mergedAt` (GitLab: `glab mr view {number}`). Distinguish *merged now* from *queued to auto-merge on green CI*.
+5. After a **completed** merge, switch back and sync the default branch locally: `git checkout {default_branch} && git pull --rebase --autostash`. When the merge is merely **queued** (native auto-merge, checks still running), skip the local sync — the merge hasn't happened yet — and say so.
+
+Never merge on `dirty`/`inconclusive`, never merge before required checks pass, and never override branch protection — `--auto` respects it, and the in-session fallback waits on `gh pr checks`.
+
+**Report the final status** to the user including the PR/MR URL, the multi-reviewer aggregate report (per-pass status table plus overall status), and — when merge mode was enabled — whether the PR merged, is queued to auto-merge on green CI, or was left open (with why).
