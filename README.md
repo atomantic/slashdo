@@ -100,7 +100,7 @@ By default `/do:replan` tracks the plan in `PLAN.md`. Pass `--issues` to track i
 
 The stable item ID in issue mode is the **issue number** (e.g. `#42`), so concurrent agents claim work via `cos/<task>/issue-42/<agent>` branches — the kebab-slug IDs used in PLAN.md mode don't apply. Compose with `--interactive` to approve closes/creates before they happen. Before migrating an item, replan surfaces any **open question or decision** it finds and asks you to resolve it (folding the answer into the issue body), so every issue it files is actionable and immediately claimable — a migration normally leaves `PLAN.md` empty; the only thing that may remain is an item whose decision you explicitly defer.
 
-**`--issues` works across every command that records plan items**, so adopting issue-tracking is consistent: `/do:better`, `/do:better-swift`, and `/do:depfree` file their **deferred** findings/removals as labeled issues instead of writing a PLAN.md audit section, and `/do:review` / `/do:rpr` file a deferred finding as an issue instead of a PLAN.md line. All of them take the same `--issues` / `--issues-label <name>` flags and the same issue-number-as-ID model. (`/do:push` still only marks/commits whatever is already in PLAN.md — in a fully issue-tracked repo that's just the empty stub.)
+**`--issues` works across every command that records plan items**, so adopting issue-tracking is consistent: `/do:better`, `/do:better-swift`, and `/do:depfree` file their **deferred** findings/removals as labeled issues instead of writing a PLAN.md audit section, and `/do:review` / `/do:rpr` file a deferred finding as an issue instead of a PLAN.md line. All of them take the same `--issues` / `--issues-label <name>` flags and the same issue-number-as-ID model. (`/do:push` still only marks/commits whatever is already in PLAN.md — in a fully issue-tracked repo that's just the empty stub.) To avoid repeating `--issues` on every command, save it once with `/do:config --issues` (globally or per-repo with `--project`) — see [Saved defaults](#saved-defaults-doconfig); `--no-issues` on a single run overrides a saved default.
 
 `/do:better`, `/do:better-swift`, and `/do:depfree` run the chosen reviewer(s) as their post-PR review loop (per PR, in parallel for the multi-PR `better` commands). With no `--review-with`, they skip the review loop and auto-merge and leave PRs open. `/do:rpr` is special: it **resolves review threads from any author** (Copilot, human, or other bot), and its `--review-with` default is a *conditional* `copilot` — it requests a Copilot review only when the PR has no review yet, or when Copilot is already the reviewer in play; pass `--review-with codex|agy|claude` to run a local review loop instead. From this table `/do:rpr` accepts **only** `--review-with` and `--reviewer-applies` — not `--review-iterations` or the stop-mode flags (it drives a single reviewer to clean, not the multi-reviewer stop-mode loop).
 
@@ -114,12 +114,15 @@ Rather than passing the review flags every time, save them once with `/do:config
 
 After that, `/do:pr`, `/do:release`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:depfree`, and `/do:rpr` behave as if you'd passed that `--review-with` value — until you override it on a run.
 
+You can also save the **issue-mode** default the same way: `/do:config --issues` makes every command that accepts `--issues` (`/do:next`, `/do:replan`, `/do:better`, `/do:better-swift`, `/do:depfree`, `/do:review`, `/do:rpr`) default to filing/working tracker issues instead of `PLAN.md`. Pass `--no-issues` on a run to fall back to PLAN.md mode for that run, or `--issues-label <name>` to save the scoping label. A per-project `.slashdo.json` is a clean way to mark one repo issue-tracked: `/do:config --project --issues`.
+
 | Flag | What it does |
 |:---|:---|
 | `/do:config` (or `--show`) | Print the current global + per-project defaults and the effective merged values |
 | `/do:config --review-with=… [--review-iterations=N] [--reviewer-applies] [--review-stop-on-findings\|--review-stop-on-clean]` | Save defaults for those flags (validated with the same rules the review commands use) |
+| `/do:config --issues\|--no-issues [--issues-label=<name>]` | Save the issue-mode default (and its scoping label) for every command that accepts `--issues` |
 | `--project` | Read/write a per-repo `.slashdo.json` at the repo root instead of the global config; per-project values override the global ones |
-| `--unset <key>` | Clear one saved default (`review-with`, `review-iterations`, `reviewer-applies`, `review-stop-mode`) |
+| `--unset <key>` | Clear one saved default (`review-with`, `review-iterations`, `reviewer-applies`, `review-stop-mode`, `issues`, `issues-label`) |
 | `--reset` | Clear all saved defaults in the chosen scope |
 
 **Precedence (highest first):** an explicit flag on the command line (or `--review-with none`, which skips reviewers for that run) → per-project `.slashdo.json` → global `.slashdo-config.json` → the command's built-in default. Defaults are stored per host CLI (the one you run `/do:config` in) under a `defaults` key, alongside settings like `autoUpdate`.

@@ -25,8 +25,10 @@ Procedure (run once, during argument parsing):
    - `review-iterations` → `--review-iterations` (integer)
    - `reviewer-applies` → `--reviewer-applies` (boolean; `true` means the flag is set)
    - `review-stop-mode` → the stop-mode flags: `"on-findings"` ≡ `--review-stop-on-findings`, `"on-clean"` ≡ `--review-stop-on-clean`, `"all"` (or absent) ≡ neither
+   - `issues` → the `--issues` / `--no-issues` flags (boolean; `true` ≡ `--issues` = issue mode, `false` or absent ≡ PLAN.md mode). The per-run override is a typed flag in **either** direction — `--issues` forces issue mode and `--no-issues` forces PLAN.md mode — exactly like `--reviewer-applies`/`--no-reviewer-applies`: whichever the user typed wins over the saved default. A stored `false` is an explicit opt-out a project uses (typically with `--project`) to mask an inherited global `issues=true`; `--unset issues` instead removes the key and falls back to the lower-precedence value.
+   - `issues-label` → `--issues-label <name>` (string; the label that scopes plan-tracking issues, built-in default `plan`). Only meaningful once issue mode is on (via flag or the `issues` default).
 5. After applying defaults, fall back to the command's built-in default for anything still unset (for `review-with` that is `REVIEW_AGENTS=[]`, except `/do:rpr` whose built-in default is the conditional `copilot`). A resolved `none` tombstone (above) counts as *set* — it does not fall through to rpr's conditional `copilot`.
 6. If any default was applied (i.e. not overridden by an explicit flag), print one line so the choice is visible, naming the source:
    `Using saved defaults: --review-with={value}{, --review-iterations=…}{ — project|global}`.
 
-Only the flags a given command actually documents are eligible — e.g. `/do:rpr` reads `review-with` and `reviewer-applies` but ignores `review-iterations` / `review-stop-mode`, matching its own flag set.
+Only the flags a given command actually documents are eligible — e.g. `/do:rpr` reads `review-with` and `reviewer-applies` but ignores `review-iterations` / `review-stop-mode`, matching its own flag set. The `issues` / `issues-label` keys are read by every command that accepts `--issues` (`/do:next`, `/do:replan`, `/do:better`, `/do:better-swift`, `/do:depfree`, `/do:review`, `/do:rpr`) and ignored by the rest.

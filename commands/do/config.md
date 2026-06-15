@@ -1,6 +1,6 @@
 ---
 description: View or set saved slashdo defaults (e.g. --review-with) so future commands can omit the flag
-argument-hint: "[--show] [--project] [--review-with <list>] [--review-iterations <n>] [--reviewer-applies|--no-reviewer-applies] [--review-stop-on-findings|--review-stop-on-clean|--review-stop-all] [--unset <key>] [--reset]"
+argument-hint: "[--show] [--project] [--review-with <list>] [--review-iterations <n>] [--reviewer-applies|--no-reviewer-applies] [--review-stop-on-findings|--review-stop-on-clean|--review-stop-all] [--issues|--no-issues] [--issues-label <name>] [--unset <key>] [--reset]"
 ---
 
 ## Purpose
@@ -12,6 +12,8 @@ argument-hint: "[--show] [--project] [--review-with <list>] [--review-iterations
 ```
 
 …and afterward `/do:pr`, `/do:release`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:depfree`, and `/do:rpr` behave as if you had passed `--review-with=claude,codex,ollama[qwen2.5-coder:32b]` — unless you pass an explicit flag on that run (which always wins) or `--review-with none` to skip reviewers for a single run.
+
+The same store also holds an **issue-mode default**: `/do:config --issues` makes every command that accepts `--issues` (`/do:next`, `/do:replan`, `/do:better`, `/do:better-swift`, `/do:depfree`, `/do:review`, `/do:rpr`) default to filing/working tracker issues instead of `PLAN.md`. Pass `--no-issues` on a single run to fall back to PLAN.md mode for that run, and `--issues-label <name>` to save the scoping label.
 
 The config is a generic JSON store keyed under a `defaults` object, so new keys can be added later without changing the file shape. It coexists with other top-level keys (e.g. `autoUpdate`) — never clobber them.
 
@@ -38,8 +40,10 @@ At read time, **per-project overrides global, key by key** (see `lib/review-conf
    - `--review-iterations <n>` → key `review-iterations`. Must be a non-negative integer; else abort with `--review-iterations must be a non-negative integer (got: {value}).` Store as a number.
    - `--reviewer-applies` → key `reviewer-applies`, value `true`. Its explicit opposite `--no-reviewer-applies` → key `reviewer-applies`, value `false` — store this (rather than `--unset`) when a **project** default needs to override an inherited global `reviewer-applies=true` back off. (`--unset reviewer-applies` removes the key entirely and falls back to the lower-precedence value.) `--reviewer-applies` and `--no-reviewer-applies` are mutually exclusive.
    - `--review-stop-on-findings` / `--review-stop-on-clean` → key `review-stop-mode`, value `"on-findings"` / `"on-clean"`. The explicit default `--review-stop-all` → key `review-stop-mode`, value `"all"` — store this when a **project** default needs to override an inherited global stop-mode back to "run every reviewer". These three are mutually exclusive — if more than one is present, abort with `--review-stop-on-findings, --review-stop-on-clean, and --review-stop-all are mutually exclusive`.
-   - Any other `--flag` that is not one of the above and not `--show`/`--project`/`--reset`/`--unset` → abort with: `Unknown /do:config option: {flag}. Supported: --review-with, --review-iterations, --reviewer-applies, --no-reviewer-applies, --review-stop-on-findings, --review-stop-on-clean, --review-stop-all, --unset <key>, --reset, --show, --project.`
-4. **`--unset <key>`**: `<key>` must be one of `review-with`, `review-iterations`, `reviewer-applies`, `review-stop-mode`. Reject others with `Unknown --unset key: {key}. Valid keys: review-with, review-iterations, reviewer-applies, review-stop-mode.`
+   - `--issues` → key `issues`, value `true`. Its explicit opposite `--no-issues` → key `issues`, value `false` — store this (rather than `--unset`) when a **project** default needs to override an inherited global `issues=true` back to PLAN.md mode. (`--unset issues` removes the key entirely and falls back to the lower-precedence value.) `--issues` and `--no-issues` are mutually exclusive. A saved `issues=true` makes every command that accepts `--issues` (`/do:next`, `/do:replan`, `/do:better`, `/do:better-swift`, `/do:depfree`, `/do:review`, `/do:rpr`) default to issue mode; an explicit `--issues`/`--no-issues` on a run still wins.
+   - `--issues-label <name>` → key `issues-label`. Store the string verbatim — the label that scopes plan-tracking issues (built-in default `plan`). Only meaningful once issue mode is on.
+   - Any other `--flag` that is not one of the above and not `--show`/`--project`/`--reset`/`--unset` → abort with: `Unknown /do:config option: {flag}. Supported: --review-with, --review-iterations, --reviewer-applies, --no-reviewer-applies, --review-stop-on-findings, --review-stop-on-clean, --review-stop-all, --issues, --no-issues, --issues-label, --unset <key>, --reset, --show, --project.`
+4. **`--unset <key>`**: `<key>` must be one of `review-with`, `review-iterations`, `reviewer-applies`, `review-stop-mode`, `issues`, `issues-label`. Reject others with `Unknown --unset key: {key}. Valid keys: review-with, review-iterations, reviewer-applies, review-stop-mode, issues, issues-label.`
 
 ## Apply (read → modify → write)
 
@@ -61,6 +65,8 @@ Global (~/.claude/.slashdo-config.json):
   review-iterations  = {value or "(unset)"}
   reviewer-applies   = {value or "(unset)"}
   review-stop-mode   = {value or "(unset)"}
+  issues             = {value or "(unset)"}
+  issues-label       = {value or "(unset)"}
 
 Project ({repo-root}/.slashdo.json):
   {same keys, or "(no .slashdo.json in this repo)"}
@@ -70,6 +76,8 @@ Effective (project overrides global):
   review-iterations  = {merged value or "1 (built-in default)"}
   reviewer-applies   = {merged value or "false (built-in default)"}
   review-stop-mode   = {merged value or "all (built-in default)"}
+  issues             = {merged value or "false (built-in default — PLAN.md mode)"}
+  issues-label       = {merged value or "plan (built-in default)"}
 ```
 
 After a Set/Unset/Reset action, re-print this block so the result is visible, prefixed with a one-line confirmation, e.g. `Saved global default: review-with = claude,codex,ollama[qwen2.5-coder:32b]`.

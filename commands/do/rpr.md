@@ -1,6 +1,6 @@
 ---
 description: Resolve PR review feedback with parallel agents
-argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--reviewer-applies] [--issues] [--issues-label <name>]"
+argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--reviewer-applies] [--issues|--no-issues] [--issues-label <name>]"
 ---
 
 **Default mode: fully autonomous.** Fetches review feedback, fixes issues, pushes, resolves threads, and loops reviews without prompting. Auto-skips on timeout/errors after retries.
@@ -20,11 +20,11 @@ Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
 
 Parse `$ARGUMENTS` for `--reviewer-applies` (boolean): record `REVIEWER_APPLIES=true`/`false` (default `false`). Forwarded to any local-agent review loop; no effect on the Copilot path (a warning is printed if combined with a copilot-only list) or the ollama path (Ollama is non-agentic — always review-only).
 
-After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to `review-with` / `reviewer-applies` if the user did not pass them. Precedence for rpr: an explicit flag (or `--review-with none`) wins; otherwise a saved `review-with` default applies; otherwise rpr's built-in **conditional `copilot`** default takes over (see step 2 and step 8). rpr ignores saved `review-iterations` / `review-stop-mode` (it does not support those flags):
+After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to `review-with` / `reviewer-applies` / `issues` / `issues-label` if the user did not pass them. Precedence for rpr: an explicit flag (or `--review-with none`) wins; otherwise a saved `review-with` default applies; otherwise rpr's built-in **conditional `copilot`** default takes over (see step 2 and step 8). rpr ignores saved `review-iterations` / `review-stop-mode` (it does not support those flags):
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
-Parse `$ARGUMENTS` for `--issues` / `--issues-label <name>`: when a finding is **deferred** to the plan (see Finding Disposition), file it as a GitHub/GitLab issue instead of a PLAN.md line. Record `ISSUE_MODE=true`/`false` and `PLAN_LABEL` (default `plan`).
+Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: when a finding is **deferred** to the plan (see Finding Disposition), file it as a GitHub/GitLab issue instead of a PLAN.md line. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`. If the user passes **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`.
 
 ## Steps
 

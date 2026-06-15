@@ -1,6 +1,6 @@
 ---
 description: Deep code review of changed files against software engineering best practices
-argument-hint: "[--strict|--nuclear] [--draft] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues] [--issues-label <name>] [PR-URL | base-branch]"
+argument-hint: "[--strict|--nuclear] [--draft] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues|--no-issues] [--issues-label <name>] [PR-URL | base-branch]"
 ---
 
 ## Parse Arguments
@@ -13,11 +13,11 @@ Parse `$ARGUMENTS` for:
 - **`--reviewer-applies`** (optional, boolean): forwarded to each delegated local-agent pass to route fixes through the reviewing CLI instead of the orchestrator. See `lib/local-agent-review-loop.md` "Editing mode" for the trade-offs. No effect on the copilot path, the ollama path (Ollama is non-agentic — always review-only), or the host's self-review.
 - **`--review-iterations <n>`** (optional): caps how many review-and-fix cycles a delegated **copilot** pass runs. Record as `REVIEW_ITERATIONS`; default `1` (one Copilot review-and-fix pass, exiting early on 0 comments). Must be a non-negative integer — abort with `--review-iterations must be a non-negative integer (got: {value}).` otherwise. `0` means "loop until Copilot returns 0 comments" (legacy behavior, bounded by the copilot loop's 10-iteration safety guardrail). No effect on local-agent passes (fixed 3-iteration cap) or on the host's self-review.
 
-After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to the delegated-review flags the user did NOT pass — an explicit flag, or `--review-with none`, always overrides a saved default:
+After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the delegated-review flags **and** `--issues` / `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
-- **`--issues`** / **`--issues-label <name>`** (optional): when a finding is **deferred** (local-branch mode only — see Finding Disposition), file it as a GitHub/GitLab issue instead of a PLAN.md line. Record `ISSUE_MODE=true`/`false` and `PLAN_LABEL` (default `plan`). No effect in PR mode (PR mode posts comments, it doesn't defer to a plan).
+- **`--issues`** / **`--no-issues`** / **`--issues-label <name>`** (optional): when a finding is **deferred** (local-branch mode only — see Finding Disposition), file it as a GitHub/GitLab issue instead of a PLAN.md line. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`. If the user passes **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`. No effect in PR mode (PR mode posts comments, it doesn't defer to a plan).
 - **GitHub PR reference** — any non-flag token that looks like a PR reference. A token matches if **any** of the following holds (the rules are OR-ed; the `github` substring is sufficient but not required):
   - Full URL: `https://github.com/{owner}/{repo}/pull/{number}` (and any subpath like `/files`, `/commits`)
   - SSH-style URL with `github.com` host
