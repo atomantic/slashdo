@@ -1,6 +1,6 @@
 ---
 description: Create a release PR using the project's documented release workflow
-argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies]"
+argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies]"
 ---
 
 **Default mode: fully autonomous.** Auto-detects branches, determines version bump from commits, runs review, creates and merges the release PR without prompting.
@@ -23,6 +23,12 @@ Parse `$ARGUMENTS` for the stop-mode flags (mutually exclusive):
 - `--review-stop-on-clean` — stop after the first reviewer that reports a clean pass with zero findings.
 - If neither is present, set `REVIEW_STOP_MODE=all` (default — always run every listed reviewer in order). For release PRs the default is appropriate: each reviewer's perspective adds to the merge-gate confidence.
 - If both are present, abort with: `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
+
+Parse `$ARGUMENTS` for `--review-mode <series|parallel>` (how the multi-reviewer loop dispatches its reviewers):
+- `series` (default) — reviewers run one-at-a-time in list order, each reviewing against the prior reviewer's committed fixes. Recommended for release PRs, where each perspective should build on the last.
+- `parallel` — reviewers' reviews run concurrently against one frozen baseline, then the orchestrator applies the deduped union of findings once (faster, but no reviewer sees another's fixes; `--reviewer-applies` and the stop-modes are ignored).
+- If `--review-mode` is omitted, leave `REVIEW_MODE` **unset for now** — the saved-defaults step fills it from the `review-mode` default; the built-in default is `series`.
+- If the value is anything other than `series` or `parallel`, abort with: `--review-mode must be one of series, parallel (got: {value}).`
 
 Parse `$ARGUMENTS` for `--reviewer-applies` (boolean, no value):
 - Record as `REVIEWER_APPLIES=true` if present, otherwise `REVIEWER_APPLIES=false` (default).
@@ -153,6 +159,7 @@ Otherwise, hand off to the **multi-reviewer loop** with the parsed inputs:
 
 - `{REVIEW_AGENTS}` — ordered list of the agents passed via `--review-with` (non-empty; the empty case was handled above)
 - `{REVIEW_STOP_MODE}` — `all` (default) | `on-findings` | `on-clean`
+- `{REVIEW_MODE}` — `series` (default) | `parallel`
 - `{REVIEWER_APPLIES}` — boolean
 - `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot iteration cap (`0` = loop until clean)
 

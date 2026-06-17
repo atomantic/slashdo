@@ -1,6 +1,8 @@
 ## Multi-Reviewer Loop
 
-Orchestrate one or more reviewers (`copilot`, `codex`, `agy`, `claude`, `ollama`) sequentially against the same branch / PR. Each individual reviewer runs its own single-reviewer loop (the Copilot loop, the local-agent loop, or the Ollama loop). This wrapper iterates over the ordered list and decides when to stop.
+Orchestrate one or more reviewers (`copilot`, `codex`, `agy`, `claude`, `ollama`) against the same branch / PR. Each individual reviewer runs its own single-reviewer loop (the Copilot loop, the local-agent loop, or the Ollama loop). This wrapper iterates over the ordered list and decides when to stop.
+
+**Series (default) vs parallel — `{REVIEW_MODE}`.** By default reviewers run **in series**: one fully completes (review → fix → verify → push) before the next starts, so each later reviewer sees the *committed fixes* from the earlier ones and can catch problems an earlier fix introduced. This is the recommended mode and the reason the reviewer list is **ordered** — put the cheapest/highest-signal reviewer first. The opt-in `parallel` mode runs every reviewer's **review** concurrently against one frozen baseline and then applies the deduped union of findings in a single pass; it is faster in wall-clock but **no reviewer sees another's fixes**, so a regression introduced by one fix won't be caught by a peer in the same run. Do NOT run reviewers concurrently unless `{REVIEW_MODE}=parallel` was explicitly resolved — defaulting to series is a hard requirement, not a performance hint.
 
 ### Inputs
 
@@ -13,6 +15,9 @@ The calling command must populate these before reaching this loop:
   - `on-clean` — stop after the first reviewer that reports zero findings (clean); the user is treating "any reviewer says clean" as sufficient signal
 - `{REVIEWER_APPLIES}` — boolean, forwarded to each reviewer's loop. No effect on the copilot path (already a no-op there).
 - `{REVIEW_ITERATIONS}` — non-negative integer (default 1), forwarded to the **copilot** loop only. Caps how many review-and-fix cycles the copilot loop runs; the loop still exits early when a review returns 0 comments. `0` means "loop until 0 comments" (legacy behavior, bounded by the copilot loop's 10-iteration safety guardrail). No effect on the local-agent loop, which keeps its own fixed 3-iteration cap.
+- `{REVIEW_MODE}` — `series` (default) | `parallel`. Selects the dispatch strategy:
+  - `series` (default) — run each reviewer's full single-reviewer loop one at a time, in list order; the next reviewer starts only after the previous one's fixes are committed and pushed, so it reviews against those fixes. Stop-modes and `--reviewer-applies` work as documented. **This is the default; use it unless the caller explicitly resolved `parallel`.**
+  - `parallel` — run every reviewer's *review-only* finding-collection concurrently against one frozen baseline commit, then have the orchestrator apply the deduped union of findings in a single verified pass. Faster wall-clock at the cost of cross-reviewer fix visibility (see the opening note). Because concurrent reviewers cannot share one working tree, `parallel` **forces review-only posture** — `{REVIEWER_APPLIES}` is ignored — and there is no first-finisher ordering, so the stop-modes are ignored. Both incompatibilities are warned (not aborted) in pre-flight.
 
 ### Pre-flight
 
@@ -23,12 +28,15 @@ The calling command must populate these before reaching this loop:
 5. **Probe binary availability** for each non-copilot agent: `command -v {binary}`, where `{binary}` is the agent's executable name (`claude`, `codex`, `agy`, or `ollama` — note the `agy`/`gemini`/`antigravity` slugs all probe the `agy` binary, and every `ollama[...]` entry probes the `ollama` binary). For any agent whose binary is missing:
    - **Default mode**: print a warning (`{agent} CLI not installed — recording as skipped`) and **keep the agent in `REVIEW_AGENTS`** so it appears in the per-pass table. When the dispatch loop reaches it, the inner loop is short-circuited and the pass is recorded with status `skipped` (preconditions not met — binary missing). This propagates into `{OVERALL_STATUS}=inconclusive` per the aggregate rule, which is the correct merge-gate outcome — the user explicitly asked for that reviewer's perspective and didn't get it. **Do not silently drop**: dropping would let `{OVERALL_STATUS}=clean` even when a requested reviewer never ran, undermining the merge gate. **Do not append `copilot` (or any other reviewer) as a fallback** — the executed list must never contain a reviewer the user didn't ask for. If `--review-with codex` is passed and codex is missing, the pass is recorded `skipped` and the aggregate is `inconclusive`; copilot does not silently run in its place.
    - **Interactive mode (`--interactive`)**: ask the user whether to install, skip (record as `skipped` per the default-mode rule above), or abort. If install succeeds, keep the agent and proceed normally; if skip, leave it in the list to be recorded as `skipped`; if abort, exit the wrapper.
+6. **Resolve incompatibilities when `{REVIEW_MODE}=parallel`** (warn, don't abort — the run still proceeds, just in the safe posture):
+   - If `{REVIEWER_APPLIES}=true`: print `--reviewer-applies is ignored in parallel review mode (concurrent reviewers can't share one working tree); reviewers run review-only and the orchestrator applies the deduped findings.` and force `{REVIEWER_APPLIES}=false`.
+   - If `{REVIEW_STOP_MODE}` is not `all`: print `--review-stop-on-* is ignored in parallel review mode (all reviewers run at once, so there is no first-finisher to stop on); use series mode to short-circuit.` and treat `{REVIEW_STOP_MODE}` as `all`.
 
-Print the resolved plan before starting: `Review plan: {REVIEW_AGENTS} (stop-mode: {REVIEW_STOP_MODE})`.
+Print the resolved plan before starting: `Review plan: {REVIEW_AGENTS} (mode: {REVIEW_MODE}, stop-mode: {REVIEW_STOP_MODE})`.
 
-### Per-reviewer dispatch
+### Series dispatch (default — `{REVIEW_MODE}=series`)
 
-Iterate `REVIEW_AGENTS` in order. For each `{REVIEW_AGENT}`:
+This is the default path. Iterate `REVIEW_AGENTS` in order, running each reviewer's full single-reviewer loop to completion (review → fix → verify → push) before starting the next, so a later reviewer reviews against the prior reviewers' committed fixes. For each `{REVIEW_AGENT}`:
 
 1. **Print a banner**: `--- Review pass {n}/{N}: {REVIEW_AGENT} ---`
 2. **Capture baseline**: `PASS_START_SHA=$(git rev-parse HEAD)` so the wrapper can tell whether this reviewer changed anything (independent of the inner loop's own tracking).
@@ -57,6 +65,23 @@ After each pass completes (before moving to the next reviewer), evaluate `{REVIE
 
 Inconclusive non-fix statuses (`copilot` `timeout`/`error`/`guardrail`, local-agent `guardrail`, ollama `incomplete`, plus the `skipped` precondition statuses) do NOT count as findings — they mean the reviewer couldn't produce a verdict, not that it found something to fix. Treat them as continue-signals in every stop mode, even if the inner loop somehow added commits before bailing out: a stop-mode short-circuit must require a *verdict* status (`clean`, `too-large`, `capped`) before honoring the commits-added / no-commits-added condition. This matches the table above and prevents a flaky reviewer that crashed mid-fix from claiming the stop-mode's "found something" signal.
 
+### Parallel dispatch (`{REVIEW_MODE}=parallel`)
+
+Run only when `{REVIEW_MODE}=parallel` was explicitly resolved (flag or saved default). Reviewers' **reviews** run concurrently against one frozen baseline; the orchestrator then applies the union of their findings once. This trades cross-reviewer fix visibility for wall-clock — see the opening note.
+
+1. **Freeze the baseline**: `PARALLEL_START_SHA=$(git rev-parse HEAD)`. Every reviewer reviews this exact commit.
+2. **Launch each reviewer's review concurrently, in review-only posture** (no reviewer applies, commits, or pushes — that would race the shared working tree):
+   - `codex` | `agy` | `claude` → run the local-agent loop's **single review-only invocation** (its `REVIEWER_APPLIES=false` review step that emits `FINDING <N>:` blocks / `NO FINDINGS` to a per-reviewer log) — NOT its full apply loop. Run them as concurrent background jobs.
+   - `ollama` → run the Ollama loop's per-file chunked review (already review-only) concurrently, to its own findings log.
+   - `copilot` → request the cloud review (read-only by nature) and collect its comments; it never touches the working tree, so it parallelizes for free.
+   Each reviewer's review is independent and writes to its own log. Record each reviewer's review-phase status: `clean` (no findings), `findings` (produced ≥1 finding), or an inconclusive status (`timeout`/`error`/`cli-error`/`skipped`/ollama `incomplete`).
+3. **Barrier**: wait for every launched review to finish (each is bounded by its own loop's timeout).
+4. **Dedupe the union** of findings across all reviewers — collapse findings that name the same file + line + substantively the same issue into one (keep the clearest description/fix, and note which reviewers raised it).
+5. **Apply once, sequentially, in the orchestrator** (the only writer): for each deduped finding, apply the fix, run `{BUILD_CMD}` (skip when empty) + `{TEST_CMD}`, dropping any finding whose fix breaks the build/tests or that is wrong on inspection. Commit the applied fixes (group sensibly) as `address review (parallel: <agents>): <summary>`, then **push once**. Because fixes are applied after collection, there is no per-reviewer commit attribution as in series — the aggregate report notes the parallel commit instead.
+6. **Re-review is NOT automatic in parallel mode.** The series loop's per-reviewer 3-iteration recursion (re-review the new commits) does not run here, because no single reviewer owns the apply. If the applied fixes warrant another look, that is a follow-up series run — say so in the report rather than silently re-fanning out.
+
+A hard-error during apply (build/tests cannot be made green, or a finding forces a revert) sets `{OVERALL_STATUS}=dirty` exactly as the series hard-error short-circuit does.
+
 ### Aggregate report
 
 After the wrapper exits, print a summary block per pass:
@@ -64,6 +89,7 @@ After the wrapper exits, print a summary block per pass:
 ```
 ## Multi-Reviewer Summary
 
+Review mode: {REVIEW_MODE}
 Stop mode: {REVIEW_STOP_MODE}
 Reviewers planned: {original REVIEW_AGENTS list}
 Reviewers run:     {actually executed subset}
@@ -82,5 +108,7 @@ Overall status: {OVERALL_STATUS}
 - `inconclusive` — the executed list contains at least one pass whose status is inconclusive (`timeout`, `error`, `guardrail`, `skipped`, or ollama `incomplete` — a partially-reviewed diff), regardless of whether other passes returned `clean`. `skipped` covers preconditions-not-met cases — e.g., `codex` in `/do:review` PR mode (codex review --base only accepts a git ref) or `copilot` when no PR exists for the branch. Reached when, e.g., `--review-with copilot,codex` runs copilot which times out and codex which returns clean — the user asked for both perspectives and only got one, so the aggregate is not unconditionally `clean`. Also covers the all-inconclusive case (e.g., `--review-with copilot` that times out and the list exhausts). Distinct from `dirty` (build is fine) but still **not eligible to merge** — the user must re-run or intervene
 - `partial` — some passes were skipped due to a stop-mode decision (`on-findings` or `on-clean` short-circuit) AND every executed pass returned `clean` (no inconclusive remaining)
 - `clean` — every executed pass returned `clean` (or copilot `too-large`/`capped`, both treated as clean for merge purposes per the copilot loop's own rule — `capped` means the configured `{REVIEW_ITERATIONS}` cap, default 1, was reached after applying every fix the review surfaced) AND no hard-error short-circuit fired AND no inconclusive statuses remain AND no stop-mode short-circuit fired
+
+In **parallel mode** the same rules apply to each reviewer's *review-phase* status (`clean` / `findings` / inconclusive) plus the single apply step: `dirty` if the apply step couldn't reach a green build/tests (or a finding forced a revert); `inconclusive` if any reviewer's review was inconclusive (`timeout`/`error`/`skipped`/ollama `incomplete`); otherwise `clean` once every reviewer was clean or its findings were applied and verified. `partial` never occurs in parallel mode (there is no stop-mode short-circuit).
 
 The calling command (do:pr / do:release / do:review) uses `{OVERALL_STATUS}` to decide its own next action. For do:release in particular, the merge gate must require `{OVERALL_STATUS}=clean` — never merge on `dirty` or `inconclusive`, and on `partial` only when the stop-mode was explicitly set (i.e. the user opted into the short-circuit).

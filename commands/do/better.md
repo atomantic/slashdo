@@ -1,6 +1,6 @@
 ---
 description: Unified DevSecOps audit, remediation, test enhancement, per-category PRs, CI verification, and an optional multi-reviewer review loop with worktree isolation
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--strict|--nuclear] [--issues|--no-issues] [--issues-label <name>] [path filter or focus areas]"
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--strict|--nuclear] [--issues|--no-issues] [--issues-label <name>] [path filter or focus areas]"
 ---
 
 # Better — Unified DevSecOps Pipeline
@@ -17,6 +17,7 @@ Parse `$ARGUMENTS` for:
 - **`--no-merge`**: run through PR creation (Phase 5), skip the review loop and merge
 - **`--review-with <agent[,agent,...]>`**: which reviewer(s) run the Phase 6 review loop on each PR. Accepted slugs: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`) (comma-separated, ordered list; split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, dedupe preserving first-occurrence order, with the `ollama` bracket suffix part of the dedup identity). Record as `REVIEW_AGENTS`. **There is no built-in default** — if omitted, leave `REVIEW_AGENTS` **unset for now**; the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (Phase 6 skipped, PRs left open without merging — see Phase 6). `copilot` is never added implicitly. Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, ollama.` The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no reviewer (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default.
 - **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to the multi-reviewer loop for each PR; control when a per-PR reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
+- **`--review-mode <series|parallel>`**: forwarded to each PR's multi-reviewer loop. `series` (default) runs the reviewers one-at-a-time so each sees the prior's committed fixes; `parallel` runs their reviews concurrently against one baseline and applies the deduped union once (`--reviewer-applies` and the stop-modes are ignored in parallel). Set `REVIEW_MODE`; if omitted, leave it **unset for now** (saved-defaults fills it from `review-mode`; built-in default `series`). Abort with `--review-mode must be one of series, parallel (got: {value}).` on any other value.
 - **`--reviewer-applies`**: forwarded to each PR's review loop — the reviewing CLI applies fixes directly instead of the orchestrator (no effect on copilot passes). Record `REVIEWER_APPLIES=true`/`false`.
 - **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** pass runs per PR (Phase 6); no effect on `codex`/`agy`/`claude` passes (fixed 3-iteration cap). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass per PR, exiting early on 0 comments). `0` = loop until Copilot returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).`
 
@@ -92,7 +93,7 @@ When compacting during this workflow, always preserve:
 Detect the project environment before any scanning or remediation.
 
 ### 0a: VCS Host Detection
-Run `gh auth status` to check GitHub CLI. If it fails, run `glab auth status` for GitLab.
+Run `gh auth status --active` to check GitHub CLI (`--active` scopes the check to the active account, so a stale token on another configured account doesn't falsely fail it). If it fails, run `glab auth status` for GitLab.
 - Set `VCS_HOST` to `github` or `gitlab`
 - Set `CLI_TOOL` to `gh` or `glab`
 - If neither is authenticated, warn the user and halt
@@ -766,7 +767,7 @@ After creating all PRs, verify CI passes on each one:
 
 **GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this entire phase AND the Phase 6.4 merge.** There is no default reviewer. Leave every PR open for manual review, print the PR URLs and summary (mark the Review column `none — left open`), then proceed to Phase 7 cleanup. PRs are merged only after a clean review loop, which requires an explicit `--review-with`.
 
-Otherwise, run each PR through the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot passes only; local-agent passes use their own fixed 3-iteration cap). A copilot pass with the default `--review-iterations 1` runs a single review-and-fix cycle and returns `capped` (clean-equivalent / ready-to-merge). `0` lets a copilot pass loop until 0 comments, bounded by the copilot loop's 10-iteration guardrail. **Default mode**: auto-stop at the guardrail. **Interactive mode (`--interactive`)**: prompt the parent agent to ask the user whether to continue or stop.
+Otherwise, run each PR through the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (series default — reviewers run one-at-a-time within a PR so each sees the prior's fixes; `parallel` collects reviews concurrently then applies the union once), `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot passes only; local-agent passes use their own fixed 3-iteration cap). A copilot pass with the default `--review-iterations 1` runs a single review-and-fix cycle and returns `capped` (clean-equivalent / ready-to-merge). `0` lets a copilot pass loop until 0 comments, bounded by the copilot loop's 10-iteration guardrail. **Default mode**: auto-stop at the guardrail. **Interactive mode (`--interactive`)**: prompt the parent agent to ask the user whether to continue or stop.
 
 **Sub-agent delegation** (prevents context exhaustion): delegate each PR's review loop to a **separate general-purpose sub-agent** via the Agent tool. Launch sub-agents in parallel (one per PR). Each sub-agent runs the multi-reviewer loop (which dispatches each listed agent to the copilot loop or the local-agent loop) autonomously against its PR's branch and returns only the final aggregate status.
 
@@ -782,7 +783,7 @@ For each PR, spawn a general-purpose sub-agent that runs the **multi-reviewer wr
 
 !`cat ~/.claude/lib/ollama-review-loop.md`
 
-Pass each sub-agent the PR-specific variables: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `better/{CATEGORY_SLUG}` (the branch the local-agent loop checks out and reviews), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the copilot iteration cap; default 1).
+Pass each sub-agent the PR-specific variables: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `better/{CATEGORY_SLUG}` (the branch the local-agent loop checks out and reviews), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the copilot iteration cap; default 1).
 
 Launch all PR sub-agents in parallel. Wait for all to complete.
 

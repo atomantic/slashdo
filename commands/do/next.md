@@ -1,6 +1,6 @@
 ---
 description: Claim the next unclaimed PLAN.md item (or GitHub issue with --issues) by its ID, do the work in an isolated worktree, ship a PR, and clean up. Requires GitHub (gh) — it ships via /do:pr.
-argument-hint: "[<slug>|#<issue>] [--issues|--no-issues] [--issues-label <name>] [--plan] [--review-with <agent>[,…]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--no-review]"
+argument-hint: "[<slug>|#<issue>] [--issues|--no-issues] [--issues-label <name>] [--plan] [--review-with <agent>[,…]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--no-review]"
 ---
 
 # Next — Pick the next plan item (or issue) and ship it
@@ -27,13 +27,16 @@ Split `$ARGUMENTS` on whitespace — tokens starting with `--` are flags, the fi
 - **`--issues-label <name>`** — label scoping tracked issues. `PLAN_LABEL` (default `plan`). Only meaningful in issue mode.
 - **Saved defaults.** If the user passed **neither** `--issues` nor `--no-issues`, resolve `ISSUE_MODE` from the saved `issues` default — per-project `.slashdo.json` overrides the global `~/.claude/.slashdo-config.json` (the precedence is the one in [lib/review-config-defaults.md](../../lib/review-config-defaults.md)), built-in default `false`. Likewise take `PLAN_LABEL` from the saved `issues-label` default when `--issues-label` is absent. (Only resolve `issues` / `issues-label` here — the review flags are passed through to `/do:pr`, which resolves *its* defaults itself; don't pre-resolve them.) The Phase 1 auto-redirect still applies independently: a repo with no PLAN.md / the issue-mode stub switches to issue mode even when no default is saved (or when a saved `issues=false` would otherwise pick PLAN.md mode — there's simply no PLAN.md backlog to read). The one exception is an **explicit** `--no-issues` on the command line, which wins over the redirect per the usual "typed flag wins" rule (see Phase 1).
 - **`--plan`** — before writing code, enter an **interactive plan-mode session** (Phase 3.5): present a written plan, surface open questions, get explicit approval before implementing. Runs *after* the worktree is claimed so you plan with full context. Rejection routes to Phase 7 cleanup exactly like a Phase 3 skip.
-- **`--review-with` / `--review-iterations` / `--review-stop-on-findings` / `--review-stop-on-clean` / `--reviewer-applies` / `--no-review`** — **passed through to `/do:pr`** in Phase 6, which owns the review/ship machinery. Same grammar as every other slashdo command (see `/do:pr`). `--no-review` opts out of both `/simplify` and the external pass. When neither `--review-with` nor `--no-review` is given, you decide in Phase 6 whether the diff warrants `/simplify` and/or an external review (a value swap doesn't; a multi-file change does).
+- **`--review-with` / `--review-iterations` / `--review-mode` / `--review-stop-on-findings` / `--review-stop-on-clean` / `--reviewer-applies` / `--no-review`** — **passed through to `/do:pr`** in Phase 6, which owns the review/ship machinery. (`--review-mode series|parallel` selects how `/do:pr`'s multi-reviewer loop dispatches the reviewers; series is the default.) Same grammar as every other slashdo command (see `/do:pr`). `--no-review` opts out of both `/simplify` and the external pass. When neither `--review-with` nor `--no-review` is given, you decide in Phase 6 whether the diff warrants `/simplify` and/or an external review (a value swap doesn't; a multi-file change does).
 
 ## Phase 1: Pick
 
 > **Pre-flight — `/do:next` requires GitHub (`gh`), in BOTH modes.** The command ships via `/do:pr` and merges with `gh pr merge`, both of which are GitHub-only. So even PLAN.md mode (whose *claiming* is git-only) can't *complete* on a non-GitHub host. **Abort up front — before claiming or implementing anything — if the repo's `origin` isn't GitHub or `gh` isn't authenticated**, so the user never claims work they can't ship:
 > ```bash
-> gh auth status >/dev/null 2>&1 && git remote get-url origin 2>/dev/null | grep -qi github.com || {
+> # `--active` scopes the check to the active account. A bare `gh auth status` exits
+> # non-zero if ANY configured account has a stale/invalid token — even when the active
+> # account is authenticated fine — which would fail this pre-flight on every run.
+> gh auth status --active >/dev/null 2>&1 && git remote get-url origin 2>/dev/null | grep -qi github.com || {
 >   echo "/do:next requires a GitHub repo with an authenticated gh CLI (it ships via /do:pr). Run 'gh auth login', or use a different workflow for non-GitHub hosts."; exit 1; }
 > ```
 
@@ -264,7 +267,7 @@ git diff --cached --quiet || git commit -m "docs([issue-<num>]): log issue #<num
 
 | The user passed… | Run |
 |---|---|
-| `--review-with=<agents>` | `/simplify` if available (skip when the diff is genuinely trivial), then `/do:pr --no-merge --review-with=<agents>` (pass through `--review-iterations` / stop-mode / `--reviewer-applies` verbatim) |
+| `--review-with=<agents>` | `/simplify` if available (skip when the diff is genuinely trivial), then `/do:pr --no-merge --review-with=<agents>` (pass through `--review-iterations` / `--review-mode` / stop-mode / `--reviewer-applies` verbatim) |
 | `--no-review` | `/do:pr --no-merge` with no `--review-with` — its Local Code Review gate still fires; no external pass, no `/simplify` |
 | neither | **Judge the diff.** New code paths / abstractions / multi-file work → `/simplify` (if available) then `/do:pr --no-merge --review-with=…` with a sensible reviewer. A value swap / typo / single-line fix → `/do:pr --no-merge` alone. State the call before acting. |
 

@@ -22,7 +22,9 @@ while work happens on issues.
 ## Setup — only when `ISSUE_MODE` is true
 
 1. **VCS host.** Reuse `CLI_TOOL` (`gh`/`glab`) if the command already detected it
-   in its own discovery phase. Otherwise run `gh auth status`, else
+   in its own discovery phase. Otherwise run `gh auth status --active` (the `--active`
+   flag scopes the check to the active account, so a stale token on another configured
+   account doesn't falsely fail it), else
    `glab auth status`, and set `CLI_TOOL` accordingly. If neither is authenticated,
    **abort** with: "`--issues` needs an authenticated `gh` or `glab`. Run
    `gh auth login` (or `glab auth login`), or drop `--issues` to record items in

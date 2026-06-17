@@ -1,6 +1,6 @@
 ---
 description: Commit, push, and open a PR (GitHub) or merge request (GitLab) against the repo's default branch — optionally auto-merging once reviews and CI pass (--merge)
-argument-hint: "[--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--merge|--no-merge|--merge=<method>] [--merge-method <method>]"
+argument-hint: "[--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--merge|--no-merge|--merge=<method>] [--merge-method <method>]"
 ---
 
 ## Parse Arguments
@@ -19,6 +19,12 @@ Parse `$ARGUMENTS` for the stop-mode flags (mutually exclusive):
 - `--review-stop-on-clean` — stop after the first reviewer that reports a clean pass with zero findings.
 - If neither is present, set `REVIEW_STOP_MODE=all` (default — always run every listed reviewer in order).
 - If both are present, abort with: `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
+
+Parse `$ARGUMENTS` for `--review-mode <series|parallel>` (how the multi-reviewer loop dispatches its reviewers):
+- `series` (default) — reviewers run one-at-a-time in list order, each reviewing against the prior reviewer's committed fixes. This is the recommended mode.
+- `parallel` — reviewers' reviews run concurrently against one frozen baseline, then the orchestrator applies the deduped union of findings once. Faster, but no reviewer sees another's fixes; `--reviewer-applies` and the stop-modes are ignored in this mode (the loop warns).
+- If `--review-mode` is omitted, leave `REVIEW_MODE` **unset for now** — the saved-defaults step below fills it from the `review-mode` default; the built-in default is `series`.
+- If the value is anything other than `series` or `parallel`, abort with: `--review-mode must be one of series, parallel (got: {value}).`
 
 Parse `$ARGUMENTS` for `--reviewer-applies` (boolean, no value):
 - Record as `REVIEWER_APPLIES=true` if present, otherwise `REVIEWER_APPLIES=false` (default).
@@ -48,7 +54,7 @@ Then apply any **saved defaults** (set via `/do:config`) to the flags above that
 Determine whether this repo lives on GitHub or GitLab so the right CLI is used for every host-specific step below. The **`origin` remote URL is the authoritative signal** of which host the repo is on — `auth status` only tells you which CLI is usable, not where the repo lives (a developer may have `gh` authenticated globally while working in a GitLab repo). So detect from the remote first, then confirm the matching CLI is authenticated:
 
 1. Read the remote host: `git remote get-url origin`. If the host is a GitLab instance (e.g. `gitlab.com`, or a self-hosted GitLab), set `VCS_HOST=gitlab` and `CLI_TOOL=glab`; otherwise (GitHub or ambiguous) set `VCS_HOST=github` and `CLI_TOOL=gh`.
-2. Confirm the matching CLI is authenticated: `gh auth status` for GitHub, `glab auth status` for GitLab. If it is not, abort with: "`/do:pr` detected a {VCS_HOST} repo but `{CLI_TOOL}` is not authenticated. Run `{CLI_TOOL} auth login`."
+2. Confirm the matching CLI is authenticated: `gh auth status --active` for GitHub, `glab auth status` for GitLab. (`--active` scopes the check to the active account — a bare `gh auth status` exits non-zero if any *other* configured account has a stale token, falsely reporting you as unauthenticated.) If it is not, abort with: "`/do:pr` detected a {VCS_HOST} repo but `{CLI_TOOL}` is not authenticated. Run `{CLI_TOOL} auth login`."
 3. If there is no `origin` remote at all, fall back to whichever CLI is authenticated (`gh` first, then `glab`); if neither is authenticated, abort with: "`/do:pr` needs an authenticated `gh` (GitHub) or `glab` (GitLab). Run `gh auth login` or `glab auth login`."
 
 Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`.
@@ -118,13 +124,14 @@ Otherwise, hand off to the **multi-reviewer loop** with the parsed inputs:
 
 - `{REVIEW_AGENTS}` — ordered list of the agents passed via `--review-with` (non-empty; the empty case was handled above)
 - `{REVIEW_STOP_MODE}` — `all` (default) | `on-findings` | `on-clean`
+- `{REVIEW_MODE}` — `series` (default) | `parallel`
 - `{REVIEWER_APPLIES}` — boolean
 - `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot iteration cap (`0` = loop until clean)
 
-The wrapper runs each reviewer in order, deciding when to stop per the stop-mode. Each individual pass uses the matching single-reviewer loop:
+The wrapper runs the reviewers per `{REVIEW_MODE}` (series by default — one reviewer at a time, each seeing the prior's fixes; the stop-mode applies only in series). Each individual pass uses the matching single-reviewer loop:
 
 - `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`). **GitHub only** — Copilot cloud review has no GitLab equivalent. When `VCS_HOST=gitlab` and `REVIEW_AGENTS` contains `copilot`, print a warning (`copilot review is GitHub-only and was skipped on this GitLab MR; use a local-agent reviewer (codex/agy/claude) instead`) and skip the copilot pass — continue with the remaining (host-agnostic) reviewers in the list.
-- `codex` | `agy` | `claude` → local-agent headless review loop (`lib/local-agent-review-loop.md`) — host-agnostic; the local CLI reviews the working tree directly and does not care whether the remote is GitHub or GitLab. The local CLI runs its installed review command (`/do:review` under claude, `/do-review` under agy) or an equivalent self-contained review prompt against the branch; this main thread then verifies its output, runs build + tests, and pushes the verified fixes
+- `codex` | `agy` | `claude` → local-agent headless review loop (`lib/local-agent-review-loop.md`) — host-agnostic; the local CLI reviews the working tree directly and does not care whether the remote is GitHub or GitLab. The local CLI runs a self-contained single-agent review prompt against the branch (codex uses its built-in `codex review`) — deliberately **not** the `/do:review` multi-sub-agent skill, which hangs under a headless/print-mode invocation; this main thread then verifies its output, runs build + tests, and pushes the verified fixes
 - `ollama` → Ollama local-model review loop (`lib/ollama-review-loop.md`) — host-agnostic and fully offline. The orchestrator resolves the model (auto-select or the `ollama[<model>]` override), feeds the per-file diff to `ollama run`, parses the findings, applies the fixes itself (Ollama is non-agentic — always review-only), then verifies build + tests and pushes
 
 ### Multi-reviewer wrapper
