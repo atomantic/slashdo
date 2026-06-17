@@ -97,7 +97,7 @@ Pick the invocation based on `{REVIEW_AGENT}` and `{REVIEWER_APPLIES}`:
 | `codex` | `codex --sandbox danger-full-access review --base "$BASE_BRANCH" --title "$REVIEW_TITLE"` | `codex --sandbox danger-full-access -a never exec "$CODEX_APPLY_PROMPT"` |
 | `agy` | `agy --dangerously-skip-permissions --print-timeout 30m -p "$LOCAL_PROMPT"` | `agy --dangerously-skip-permissions --print-timeout 30m -p "$LOCAL_PROMPT"` |
 
-For `claude` and `agy`, the same `$LOCAL_PROMPT` drives both modes — it already encodes the mode (review-only vs reviewer-applies) directly, branching on `$REVIEWER_APPLIES` above. For `codex`, the invocation itself swaps because `codex review` (review-only) and `codex exec` (apply-fixes) are different subcommands with incompatible flag sets. `--print-timeout 30m` raises agy's print-mode wait above its 5-minute default so a real review of a multi-file diff isn't cut off mid-stream; on stock macOS (no `timeout`/`gtimeout`, so `$TIMEOUT_CMD` is empty) it is also the only bound on the invocation. It does NOT cut off an actively-streaming agent — it bounds the wait for the *next* response chunk — which is why it's safe to set generously, and why it never masked the old skill hang (that hang was the orchestrator sitting idle waiting on background sub-agents, not a slow stream).
+For `claude` and `agy`, the same `$LOCAL_PROMPT` drives both modes — it already encodes the mode (review-only vs reviewer-applies) directly, branching on `$REVIEWER_APPLIES` above. For `codex`, the invocation itself swaps because `codex review` (review-only) and `codex exec` (apply-fixes) are different subcommands with incompatible flag sets. `--print-timeout 30m` raises agy's print-mode wait above its 5-minute default so a real review of a multi-file diff isn't cut off mid-stream; on stock macOS (no `timeout`/`gtimeout`, so `$TIMEOUT_CMD` is empty) it is also the only *shell-level* bound on the invocation. **But these bounds only take effect when the invocation runs in the background (Step 2).** Run as a blocking foreground Bash call, the run is killed first by the host tool's ~10-minute foreground cap — earlier than either `timeout 1800` or `--print-timeout 30m` — which is the timeout consumers were hitting. `--print-timeout 30m` does NOT cut off an actively-streaming agent — it bounds the wait for the *next* response chunk — which is why it's safe to set generously, and why it never masked the old skill hang (that hang was the orchestrator sitting idle waiting on background sub-agents, not a slow stream).
 
 > **Pass the prompt as a positional argument — never via stdin.** Both `claude -p` and `agy -p` (`--print`) take the prompt as the argument directly after the flag: `agy --dangerously-skip-permissions -p "$LOCAL_PROMPT"`. They do **not** read the prompt from stdin. Do NOT write `echo "$LOCAL_PROMPT" | agy --dangerously-skip-permissions -p`, `agy -p < prompt.txt`, or `printf … | agy -p` — agy ignores piped stdin and exits with `agy --print takes the prompt as an argument, not stdin`, forcing a wasted second invocation. The `> "$LOG_FILE" 2>&1` redirect in Step 2 captures the reviewer's *output*; it is unrelated to how the prompt goes in. Keep `"$LOCAL_PROMPT"` as the quoted argument to `-p` exactly as shown in the invocation table.
 
@@ -132,13 +132,28 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
    **For `codex` and `gemini`** (and for `claude` only if this loop somehow runs outside Claude Code), use the Bash invocation:
 <!-- /if:teams -->
 
-   ```bash
-   LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
-   $TIMEOUT_CMD {INVOCATION} > "$LOG_FILE" 2>&1
-   EXIT_CODE=$?
-   ```
+   **Run the invocation in the BACKGROUND, not as a blocking foreground Bash call.** This is the single most important detail in this step. A real multi-file review by `agy`/`codex`/`claude -p` routinely runs longer than ten minutes, and **the host CLI's Bash tool caps a single foreground command at ~10 minutes** (Claude Code's Bash tool `timeout` parameter maxes out at 600000 ms; other hosts impose a similar foreground ceiling). A blocking foreground call is therefore killed at the 10-minute mark *by the host*, before the reviewer prints its findings — regardless of `$TIMEOUT_CMD` (`timeout 1800`) or agy's `--print-timeout 30m`, which are both 30-minute bounds the host never lets the foreground call reach. The 10-minute cap is **not** in this loop's shell logic; it is the host tool ceiling, so the only way around it is to not block on a foreground call. Launch the reviewer detached and poll its log instead:
+
+   - **Claude Code / hosts with a backgroundable Bash tool**: invoke the command below with the host's background mode (Claude Code: set `run_in_background: true` on the Bash tool call). The host returns immediately with a task/shell id and re-notifies you when the process exits — there is no foreground timeout to hit. Capture the command to the log exactly as shown; the trailing `; echo $? > "$DONE_FILE"` records the real exit code where the poll loop can read it:
+
+     ```bash
+     LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
+     DONE_FILE="${LOG_FILE}.exit"
+     $TIMEOUT_CMD {INVOCATION} > "$LOG_FILE" 2>&1; echo $? > "$DONE_FILE"
+     ```
+
+     Then poll until the reviewer finishes: in separate short Bash calls (each well under the foreground cap), check `[ -f "$DONE_FILE" ]`; once it exists, read `EXIT_CODE=$(cat "$DONE_FILE")`. Tail `$LOG_FILE` between polls only if you need a progress signal — do not re-block on the reviewer. Keep polling until `$DONE_FILE` appears (bounded by `$TIMEOUT_CMD`/`--print-timeout 30m`, which now actually govern the run because nothing is foreground-capping it first).
+
+   - **Hosts with no background Bash mechanism** (the loop is running under a CLI whose shell tool cannot detach): fall back to the foreground call below, but set the host tool's timeout parameter to its maximum and be aware the run will still be cut at that maximum (~10 min on Claude Code). On such a host a long review is expected to be reported as `cli-error` (timed out) rather than silently truncated to zero findings:
+
+     ```bash
+     LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
+     $TIMEOUT_CMD {INVOCATION} > "$LOG_FILE" 2>&1
+     EXIT_CODE=$?
+     ```
+
    - `$TIMEOUT_CMD` was already resolved during pre-flight (`timeout 1800`, `gtimeout 1800`, or empty). Just expand it here — empty becomes a direct invocation. No re-checking or commentary needed.
-   - If `EXIT_CODE != 0` and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of the log, and exit the loop. Surface the log path so the user can inspect.
+   - If `EXIT_CODE != 0` and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of the log, and exit the loop. Surface the log path so the user can inspect. A `124` exit (from `timeout`/`gtimeout`) or an empty log after the poll loop gave up means the review genuinely ran past 30 minutes — report it as `cli-error` with the log path, do not record `clean`.
 
 3. **Detect changes and apply fixes** (logic depends on `{REVIEWER_APPLIES}`):
 
