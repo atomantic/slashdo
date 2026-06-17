@@ -1,6 +1,6 @@
 ---
 description: Run a full do:better audit/remediation on the current branch, commit fixes directly to it, then open a single PR with do:pr
-argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [path filter or focus areas]"
+argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [path filter or focus areas]"
 ---
 
 # PR-Better — Better Audit + Single PR
@@ -19,6 +19,7 @@ Split `$ARGUMENTS` into groups before forwarding — every `do:pr` review flag m
 - **`--review-stop-on-findings`** and **`--review-stop-on-clean`** are `do:pr` flags and are **mutually exclusive**. If both are present in `$ARGUMENTS`, abort with the same error `do:pr` would surface: `--review-stop-on-findings and --review-stop-on-clean cannot be combined` — do NOT silently drop one or forward only one (that would shift the error surface to an unrelated `do:better`/`do:pr` failure). If exactly one is present, extract it, record as `REVIEW_STOP_ARG` (the literal flag token, or empty string if absent), and remove it from the string passed to `do:better`.
 - **`--reviewer-applies`** is also a `do:pr` flag, NOT a `do:better` flag. Extract it from `$ARGUMENTS`, record as `REVIEWER_APPLIES_ARG` (the literal token `--reviewer-applies`, or empty string if not supplied), and remove it from the string passed to `do:better`.
 - **`--review-iterations <n>`** is a `do:pr` flag, NOT a `do:better` flag. Extract it from `$ARGUMENTS`, record the value as `REVIEW_ITERATIONS_ARG` (the full `--review-iterations <value>` token pair preserved verbatim, or empty string if not supplied), and remove it from the string passed to `do:better`. Leave validation to `do:pr` — forward the token as-is so `do:pr` surfaces the canonical `--review-iterations must be a non-negative integer` error.
+- **`--review-mode <series|parallel>`** is a `do:pr` flag, NOT a `do:better` flag. Extract it from `$ARGUMENTS`, record the value as `REVIEW_MODE_ARG` (the full `--review-mode <value>` token pair preserved verbatim, or empty string if not supplied), and remove it from the string passed to `do:better`. Leave validation to `do:pr` — forward the token as-is so `do:pr` surfaces the canonical `--review-mode must be one of series, parallel` error.
 - All remaining flags (`--interactive`, path filter, focus areas) pass through to `do:better` verbatim.
 
 Constraints applied automatically:
@@ -74,7 +75,7 @@ The only Phase 7-equivalent housekeeping that applies:
 
 ## Phase B: Run do:pr
 
-After Phase A leaves all fixes committed on `{CURRENT_BRANCH}`, hand off to the workflow defined in `~/.claude/commands/do/pr.md`, forwarding all four review flags extracted in argument forwarding — `REVIEW_AGENT_ARG` (the `--review-with <value>` pair, possibly comma-separated), `REVIEW_STOP_ARG` (the stop-mode flag, if any), `REVIEWER_APPLIES_ARG` (the `--reviewer-applies` token, if passed), and `REVIEW_ITERATIONS_ARG` (the `--review-iterations <value>` pair, if passed) — so the chosen reviewer(s), stop-mode, editing mode, and copilot iteration cap all run on the combined PR:
+After Phase A leaves all fixes committed on `{CURRENT_BRANCH}`, hand off to the workflow defined in `~/.claude/commands/do/pr.md`, forwarding all five review flags extracted in argument forwarding — `REVIEW_AGENT_ARG` (the `--review-with <value>` pair, possibly comma-separated), `REVIEW_STOP_ARG` (the stop-mode flag, if any), `REVIEW_MODE_ARG` (the `--review-mode <value>` pair, if passed), `REVIEWER_APPLIES_ARG` (the `--reviewer-applies` token, if passed), and `REVIEW_ITERATIONS_ARG` (the `--review-iterations <value>` pair, if passed) — so the chosen reviewer(s), stop-mode, dispatch mode (series/parallel), editing mode, and copilot iteration cap all run on the combined PR:
 
 1. **Detect branches** — already done in pre-flight, reuse those values
 2. **Commit and push** — commit any remaining staged changes (e.g., the PLAN.md update), then `git pull --rebase --autostash && git push -u origin {current_branch}`

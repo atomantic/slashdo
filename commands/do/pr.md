@@ -1,6 +1,6 @@
 ---
 description: Commit, push, and open a PR (GitHub) or merge request (GitLab) against the repo's default branch — optionally auto-merging once reviews and CI pass (--merge)
-argument-hint: "[--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--merge|--no-merge|--merge=<method>] [--merge-method <method>]"
+argument-hint: "[--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--merge|--no-merge|--merge=<method>] [--merge-method <method>]"
 ---
 
 ## Parse Arguments
@@ -19,6 +19,12 @@ Parse `$ARGUMENTS` for the stop-mode flags (mutually exclusive):
 - `--review-stop-on-clean` — stop after the first reviewer that reports a clean pass with zero findings.
 - If neither is present, set `REVIEW_STOP_MODE=all` (default — always run every listed reviewer in order).
 - If both are present, abort with: `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
+
+Parse `$ARGUMENTS` for `--review-mode <series|parallel>` (how the multi-reviewer loop dispatches its reviewers):
+- `series` (default) — reviewers run one-at-a-time in list order, each reviewing against the prior reviewer's committed fixes. This is the recommended mode.
+- `parallel` — reviewers' reviews run concurrently against one frozen baseline, then the orchestrator applies the deduped union of findings once. Faster, but no reviewer sees another's fixes; `--reviewer-applies` and the stop-modes are ignored in this mode (the loop warns).
+- If `--review-mode` is omitted, leave `REVIEW_MODE` **unset for now** — the saved-defaults step below fills it from the `review-mode` default; the built-in default is `series`.
+- If the value is anything other than `series` or `parallel`, abort with: `--review-mode must be one of series, parallel (got: {value}).`
 
 Parse `$ARGUMENTS` for `--reviewer-applies` (boolean, no value):
 - Record as `REVIEWER_APPLIES=true` if present, otherwise `REVIEWER_APPLIES=false` (default).
@@ -118,10 +124,11 @@ Otherwise, hand off to the **multi-reviewer loop** with the parsed inputs:
 
 - `{REVIEW_AGENTS}` — ordered list of the agents passed via `--review-with` (non-empty; the empty case was handled above)
 - `{REVIEW_STOP_MODE}` — `all` (default) | `on-findings` | `on-clean`
+- `{REVIEW_MODE}` — `series` (default) | `parallel`
 - `{REVIEWER_APPLIES}` — boolean
 - `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot iteration cap (`0` = loop until clean)
 
-The wrapper runs each reviewer in order, deciding when to stop per the stop-mode. Each individual pass uses the matching single-reviewer loop:
+The wrapper runs the reviewers per `{REVIEW_MODE}` (series by default — one reviewer at a time, each seeing the prior's fixes; the stop-mode applies only in series). Each individual pass uses the matching single-reviewer loop:
 
 - `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`). **GitHub only** — Copilot cloud review has no GitLab equivalent. When `VCS_HOST=gitlab` and `REVIEW_AGENTS` contains `copilot`, print a warning (`copilot review is GitHub-only and was skipped on this GitLab MR; use a local-agent reviewer (codex/agy/claude) instead`) and skip the copilot pass — continue with the remaining (host-agnostic) reviewers in the list.
 - `codex` | `agy` | `claude` → local-agent headless review loop (`lib/local-agent-review-loop.md`) — host-agnostic; the local CLI reviews the working tree directly and does not care whether the remote is GitHub or GitLab. The local CLI runs a self-contained single-agent review prompt against the branch (codex uses its built-in `codex review`) — deliberately **not** the `/do:review` multi-sub-agent skill, which hangs under a headless/print-mode invocation; this main thread then verifies its output, runs build + tests, and pushes the verified fixes

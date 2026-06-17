@@ -1,6 +1,6 @@
 ---
 description: View or set saved slashdo defaults (e.g. --review-with) so future commands can omit the flag
-argument-hint: "[--show] [--project] [--review-with <list>] [--review-iterations <n>] [--reviewer-applies|--no-reviewer-applies] [--review-stop-on-findings|--review-stop-on-clean|--review-stop-all] [--issues|--no-issues] [--issues-label <name>] [--merge|--no-merge|--merge=<method>] [--merge-method <method>] [--unset <key>] [--reset]"
+argument-hint: "[--show] [--project] [--review-with <list>] [--review-iterations <n>] [--review-mode <series|parallel>] [--reviewer-applies|--no-reviewer-applies] [--review-stop-on-findings|--review-stop-on-clean|--review-stop-all] [--issues|--no-issues] [--issues-label <name>] [--merge|--no-merge|--merge=<method>] [--merge-method <method>] [--unset <key>] [--reset]"
 ---
 
 ## Purpose
@@ -42,12 +42,13 @@ At read time, **per-project overrides global, key by key** (see `lib/review-conf
    - `--review-iterations <n>` → key `review-iterations`. Must be a non-negative integer; else abort with `--review-iterations must be a non-negative integer (got: {value}).` Store as a number.
    - `--reviewer-applies` → key `reviewer-applies`, value `true`. Its explicit opposite `--no-reviewer-applies` → key `reviewer-applies`, value `false` — store this (rather than `--unset`) when a **project** default needs to override an inherited global `reviewer-applies=true` back off. (`--unset reviewer-applies` removes the key entirely and falls back to the lower-precedence value.) `--reviewer-applies` and `--no-reviewer-applies` are mutually exclusive.
    - `--review-stop-on-findings` / `--review-stop-on-clean` → key `review-stop-mode`, value `"on-findings"` / `"on-clean"`. The explicit default `--review-stop-all` → key `review-stop-mode`, value `"all"` — store this when a **project** default needs to override an inherited global stop-mode back to "run every reviewer". These three are mutually exclusive — if more than one is present, abort with `--review-stop-on-findings, --review-stop-on-clean, and --review-stop-all are mutually exclusive`.
+   - `--review-mode <series|parallel>` → key `review-mode`. Must be one of `series`/`parallel`; else abort with `--review-mode must be one of series, parallel (got: {value}).` Store the string verbatim. Selects how the multi-reviewer loop dispatches reviewers (`series` — one-at-a-time, each sees the prior's fixes, the built-in default; `parallel` — reviews run concurrently then the union is applied once). Read by `/do:pr`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:depfree`, and `/do:release` (`/do:rpr` ignores it).
    - `--issues` → key `issues`, value `true`. Its explicit opposite `--no-issues` → key `issues`, value `false` — store this (rather than `--unset`) when a **project** default needs to override an inherited global `issues=true` back to PLAN.md mode. (`--unset issues` removes the key entirely and falls back to the lower-precedence value.) `--issues` and `--no-issues` are mutually exclusive. A saved `issues=true` makes every command that accepts `--issues` (`/do:next`, `/do:replan`, `/do:better`, `/do:better-swift`, `/do:depfree`, `/do:review`, `/do:rpr`) default to issue mode; an explicit `--issues`/`--no-issues` on a run still wins.
    - `--issues-label <name>` → key `issues-label`. Store the string verbatim — the label that scopes plan-tracking issues (built-in default `plan`). Only meaningful once issue mode is on.
    - `--merge` → key `merge`, value `true`. Its explicit opposite `--no-merge` → key `merge`, value `false` — store this (rather than `--unset`) when a **project** default needs to override an inherited global `merge=true` back to leave-open. (`--unset merge` removes the key entirely and falls back to the lower-precedence value.) `--merge` and `--no-merge` are mutually exclusive. The shorthand `--merge=<method>` sets `merge=true` **and** `merge-method=<method>` in one token (the `<method>` is validated against `squash`/`rebase`/`merge` with the same abort as `--merge-method` below). If both `--merge=<method>` and `--merge-method <method>` are given with **different** methods, abort with `--merge=<method> and --merge-method specify conflicting methods ({first} vs {second})`; identical methods are accepted. A saved `merge=true` makes `/do:pr` auto-merge once reviews and CI are solid; an explicit `--merge`/`--no-merge` on a run still wins. Only `/do:pr` reads this key.
    - `--merge-method <method>` → key `merge-method`. Must be one of `squash`, `rebase`, `merge`; else abort with `--merge-method must be one of squash, rebase, merge (got: {value}).` The method `/do:pr` uses when auto-merging; when unset, `/do:pr` falls back to the repo's allowed method. Only meaningful alongside merge mode.
-   - Any other `--flag` that is not one of the above and not `--show`/`--project`/`--reset`/`--unset` → abort with: `Unknown /do:config option: {flag}. Supported: --review-with, --review-iterations, --reviewer-applies, --no-reviewer-applies, --review-stop-on-findings, --review-stop-on-clean, --review-stop-all, --issues, --no-issues, --issues-label, --merge, --no-merge, --merge-method, --unset <key>, --reset, --show, --project.`
-4. **`--unset <key>`**: `<key>` must be one of `review-with`, `review-iterations`, `reviewer-applies`, `review-stop-mode`, `issues`, `issues-label`, `merge`, `merge-method`. Reject others with `Unknown --unset key: {key}. Valid keys: review-with, review-iterations, reviewer-applies, review-stop-mode, issues, issues-label, merge, merge-method.`
+   - Any other `--flag` that is not one of the above and not `--show`/`--project`/`--reset`/`--unset` → abort with: `Unknown /do:config option: {flag}. Supported: --review-with, --review-iterations, --review-mode, --reviewer-applies, --no-reviewer-applies, --review-stop-on-findings, --review-stop-on-clean, --review-stop-all, --issues, --no-issues, --issues-label, --merge, --no-merge, --merge-method, --unset <key>, --reset, --show, --project.`
+4. **`--unset <key>`**: `<key>` must be one of `review-with`, `review-iterations`, `review-mode`, `reviewer-applies`, `review-stop-mode`, `issues`, `issues-label`, `merge`, `merge-method`. Reject others with `Unknown --unset key: {key}. Valid keys: review-with, review-iterations, review-mode, reviewer-applies, review-stop-mode, issues, issues-label, merge, merge-method.`
 
 ## Apply (read → modify → write)
 
@@ -67,6 +68,7 @@ Print three things so the user understands what will actually apply:
 Global (~/.claude/.slashdo-config.json):
   review-with        = {value or "(unset)"}
   review-iterations  = {value or "(unset)"}
+  review-mode        = {value or "(unset)"}
   reviewer-applies   = {value or "(unset)"}
   review-stop-mode   = {value or "(unset)"}
   issues             = {value or "(unset)"}
@@ -80,6 +82,7 @@ Project ({repo-root}/.slashdo.json):
 Effective (project overrides global):
   review-with        = {merged value or "(none — no external reviewer)"}
   review-iterations  = {merged value or "1 (built-in default)"}
+  review-mode        = {merged value or "series (built-in default)"}
   reviewer-applies   = {merged value or "false (built-in default)"}
   review-stop-mode   = {merged value or "all (built-in default)"}
   issues             = {merged value or "false (built-in default — PLAN.md mode)"}
