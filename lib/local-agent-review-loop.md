@@ -81,6 +81,23 @@ CODEX_APPLY_PROMPT="Review the diff from $BASE_BRANCH to HEAD in this repo again
 # (rely on the CLI's own internal limits). This is settled logic — run it, don't narrate it.
 TIMEOUT_CMD="$(command -v timeout >/dev/null 2>&1 && echo 'timeout 1800' \
   || { command -v gtimeout >/dev/null 2>&1 && echo 'gtimeout 1800' || echo ''; })"
+
+# agy only: pin the review model. agy's DEFAULT can be a heavy "Thinking" model
+# (e.g. a Claude/Gemini *Thinking* tier) that spends many minutes in hidden
+# reasoning plus multi-round tool calls. How much progress is VISIBLE meanwhile
+# is model-dependent: lighter models (e.g. "Gemini 3.5 Flash (High)") narrate
+# their actions as they go, while heavy thinking tiers can emit nothing until the
+# final answer — so a slow-model review can sit at ~0% CPU with an empty log for
+# 20-30 min and look exactly like a hang (measured: a one-file review that
+# finishes in ~40s on Flash sat at 0% CPU with zero output for 24 min on the
+# heavy default). Pin a fast, capable model by default so reviews return
+# promptly; override via the AGY_REVIEW_MODEL env var to trade speed for depth
+# (the background launch + 30-minute print-timeout in Step 2 mean a heavier model
+# is safe, just slower). Confirm the name against `agy models` if you change it —
+# an unknown model name makes agy exit non-zero. Empty = agy's own default (not
+# recommended). NOTE: avoid prompts that make agy shell out to `agy` itself
+# (e.g. `agy models`) — a nested agy invocation inside a print session can stall.
+AGY_REVIEW_MODEL="${AGY_REVIEW_MODEL:-Gemini 3.5 Flash (High)}"
 ```
 
 Run the pre-flight block above verbatim. The `TIMEOUT_CMD` resolution is deterministic — do NOT think out loud about whether `timeout`/`gtimeout` is installed or about falling back; just execute it and move on.
@@ -95,9 +112,9 @@ Pick the invocation based on `{REVIEW_AGENT}` and `{REVIEWER_APPLIES}`:
 | `claude` | `claude -p "$LOCAL_PROMPT" --dangerously-skip-permissions` | `claude -p "$LOCAL_PROMPT" --dangerously-skip-permissions` |
 <!-- /if:teams -->
 | `codex` | `codex --sandbox danger-full-access review --base "$BASE_BRANCH" --title "$REVIEW_TITLE"` | `codex --sandbox danger-full-access -a never exec "$CODEX_APPLY_PROMPT"` |
-| `agy` | `agy --dangerously-skip-permissions --print-timeout 30m -p "$LOCAL_PROMPT"` | `agy --dangerously-skip-permissions --print-timeout 30m -p "$LOCAL_PROMPT"` |
+| `agy` | `agy --dangerously-skip-permissions --model "$AGY_REVIEW_MODEL" --print-timeout 30m -p "$LOCAL_PROMPT"` | `agy --dangerously-skip-permissions --model "$AGY_REVIEW_MODEL" --print-timeout 30m -p "$LOCAL_PROMPT"` |
 
-For `claude` and `agy`, the same `$LOCAL_PROMPT` drives both modes — it already encodes the mode (review-only vs reviewer-applies) directly, branching on `$REVIEWER_APPLIES` above. For `codex`, the invocation itself swaps because `codex review` (review-only) and `codex exec` (apply-fixes) are different subcommands with incompatible flag sets. `--print-timeout 30m` raises agy's print-mode wait above its 5-minute default so a real review of a multi-file diff isn't cut off mid-stream; on stock macOS (no `timeout`/`gtimeout`, so `$TIMEOUT_CMD` is empty) it is also the only bound on the invocation. It does NOT cut off an actively-streaming agent — it bounds the wait for the *next* response chunk — which is why it's safe to set generously, and why it never masked the old skill hang (that hang was the orchestrator sitting idle waiting on background sub-agents, not a slow stream).
+For `claude` and `agy`, the same `$LOCAL_PROMPT` drives both modes — it already encodes the mode (review-only vs reviewer-applies) directly, branching on `$REVIEWER_APPLIES` above. For `codex`, the invocation itself swaps because `codex review` (review-only) and `codex exec` (apply-fixes) are different subcommands with incompatible flag sets. `--print-timeout 30m` raises agy's print-mode wait above its 5-minute default so a real review of a multi-file diff isn't cut off mid-stream; on stock macOS (no `timeout`/`gtimeout`, so `$TIMEOUT_CMD` is empty) it is also the only *shell-level* bound on the invocation. **But these bounds only take effect when the invocation runs in the background (Step 2).** Run as a blocking foreground Bash call, the run is killed first by the host tool's ~10-minute foreground cap — earlier than either `timeout 1800` or `--print-timeout 30m` — which is the timeout consumers were hitting. `--print-timeout 30m` does NOT cut off an actively-streaming agent — it bounds the wait for the *next* response chunk — which is why it's safe to set generously, and why it never masked the old skill hang (that hang was the orchestrator sitting idle waiting on background sub-agents, not a slow stream). `--model "$AGY_REVIEW_MODEL"` pins the reviewing model (resolved in pre-flight): agy's *default* may be a heavy "Thinking" tier that spends many minutes in hidden reasoning plus multi-round tool calls. How much output is visible meanwhile is **model-dependent** — lighter models narrate their actions incrementally, heavy thinking tiers can emit nothing until the final answer — so on a slow model a routine review shows little or no output for 20-30 minutes and is easily mistaken for a hang. A quiet log during Step 2's poll is therefore NOT evidence the reviewer is stuck; only a `$DONE_FILE` with a non-zero code, or a 30-minute overrun, is. Pinning a fast-but-capable model keeps reviews prompt; bump `AGY_REVIEW_MODEL` to a heavier tier when you want more depth and accept the longer wait (the background launch + 30-minute bound cover it).
 
 > **Pass the prompt as a positional argument — never via stdin.** Both `claude -p` and `agy -p` (`--print`) take the prompt as the argument directly after the flag: `agy --dangerously-skip-permissions -p "$LOCAL_PROMPT"`. They do **not** read the prompt from stdin. Do NOT write `echo "$LOCAL_PROMPT" | agy --dangerously-skip-permissions -p`, `agy -p < prompt.txt`, or `printf … | agy -p` — agy ignores piped stdin and exits with `agy --print takes the prompt as an argument, not stdin`, forcing a wasted second invocation. The `> "$LOG_FILE" 2>&1` redirect in Step 2 captures the reviewer's *output*; it is unrelated to how the prompt goes in. Keep `"$LOCAL_PROMPT"` as the quoted argument to `-p` exactly as shown in the invocation table.
 
@@ -111,7 +128,7 @@ Flag rationale (reckless / unattended mode):
 - `codex review` — already non-interactive by design (per `codex review --help`: "Run a code review non-interactively"). Do NOT pass `-a` / `--approval`; the `codex review` subcommand does not accept it and will reject the flag. Also do NOT combine `--commit <SHA>` with `--base <BRANCH>` or with a positional `[PROMPT]` — codex enforces mutual exclusion across review targets and prompt mode, and the loop would exit with code 2 before any review work runs.
 - `codex --sandbox danger-full-access -a never exec` — `-a never` is a top-level Codex flag (never ask for approval; auto-approves all proposed actions). It MUST precede the `exec` subcommand; the `exec` subcommand's own parser does not accept `-a` and `codex exec -a never ...` exits 2 (`error: unexpected argument '-a' found`). Used in the reviewer-applies path alongside the top-level `--sandbox danger-full-access` flag (see below); `codex review` rejects `-a` entirely.
 - `codex --sandbox danger-full-access` — top-level sandbox-policy flag, used on BOTH codex invocations (it precedes the `review` / `exec` subcommand). Codex's default sandbox (`workspace-write`) blocks network and restricts command execution, so without this flag `codex review` can't reliably read the tree / run git and the apply path can't run build, tests, or network ops. PortOS-style hosts run on a trusted single-user machine, so full access is the intended posture (mirrors `claude --dangerously-skip-permissions` / `agy --dangerously-skip-permissions`). `--sandbox` and `-a` are independent top-level flags and may be combined (`codex --sandbox danger-full-access -a never exec …`).
-- `agy --dangerously-skip-permissions --print-timeout 30m` — `--dangerously-skip-permissions` auto-approves all tool permission requests so the Antigravity CLI runs unattended (the headless equivalent of confirming every prompt). This is the agy successor to the Gemini CLI's `gemini --yolo` + `env GEMINI_SANDBOX=false`: agy folds both "auto-approve tools" and "no sandbox gate" into the single flag, and runs the prompt non-interactively via `-p` — which takes the prompt as its positional argument (`agy … -p "$LOCAL_PROMPT"`), **not** from stdin. Piping into `agy -p` (e.g. `echo … | agy -p`) fails with `agy --print takes the prompt as an argument, not stdin` and wastes an invocation; always pass the quoted prompt as the argument. `--print-timeout 30m` raises the print-mode wait above agy's 5-minute default so a real multi-file review isn't cut off, and — since stock macOS has no `timeout`/`gtimeout` and `$TIMEOUT_CMD` is empty — is the effective bound on the invocation; it bounds the wait for the next response chunk, not the total runtime, so an actively-streaming review is never truncated. Unlike the old gemini invocation, no `env VAR=…` prefix is needed, so it composes cleanly with the `$TIMEOUT_CMD {INVOCATION}` wrapper at step 2 of the loop when one is present.
+- `agy --dangerously-skip-permissions --model "$AGY_REVIEW_MODEL" --print-timeout 30m` — `--dangerously-skip-permissions` auto-approves all tool permission requests so the Antigravity CLI runs unattended (the headless equivalent of confirming every prompt). `--model "$AGY_REVIEW_MODEL"` pins the reviewing model (resolved in pre-flight, default `Gemini 3.5 Flash (High)`, override via `AGY_REVIEW_MODEL`): without it agy picks its own default, which may be a heavy "Thinking" tier that spends many minutes in hidden reasoning and — depending on the model, emits little or no visible output meanwhile — makes a review look hung for 20-30 minutes; a fast capable model returns in well under a minute on a small diff. This is the agy successor to the Gemini CLI's `gemini --yolo` + `env GEMINI_SANDBOX=false`: agy folds both "auto-approve tools" and "no sandbox gate" into the single flag, and runs the prompt non-interactively via `-p` — which takes the prompt as its positional argument (`agy … -p "$LOCAL_PROMPT"`), **not** from stdin. Piping into `agy -p` (e.g. `echo … | agy -p`) fails with `agy --print takes the prompt as an argument, not stdin` and wastes an invocation; always pass the quoted prompt as the argument. `--print-timeout 30m` raises the print-mode wait above agy's 5-minute default so a real multi-file review isn't cut off, and — since stock macOS has no `timeout`/`gtimeout` and `$TIMEOUT_CMD` is empty — is the effective bound on the invocation; it bounds the wait for the next response chunk, not the total runtime, so an actively-streaming review is never truncated. Unlike the old gemini invocation, no `env VAR=…` prefix is needed, so it composes cleanly with the `$TIMEOUT_CMD {INVOCATION}` wrapper at step 2 of the loop when one is present.
 
 Because these flags grant the headless CLI full unattended write access to the working tree — and the Claude-Code sub-agent likewise shares this working tree — the verify step in this loop (build + tests + diff inspection by the main thread) is mandatory and non-skippable — it is the only line of defense between the reviewing agent's output and the remote branch. This applies in *both* editing modes: in review-only mode the orchestrator's own fixes are still verified before push, because the orchestrator may misread the CLI's findings or introduce its own regressions.
 
@@ -132,13 +149,28 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
    **For `codex` and `gemini`** (and for `claude` only if this loop somehow runs outside Claude Code), use the Bash invocation:
 <!-- /if:teams -->
 
-   ```bash
-   LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
-   $TIMEOUT_CMD {INVOCATION} > "$LOG_FILE" 2>&1
-   EXIT_CODE=$?
-   ```
+   **Run the invocation in the BACKGROUND, not as a blocking foreground Bash call.** This is the single most important detail in this step. A real multi-file review by `agy`/`codex`/`claude -p` routinely runs longer than ten minutes, and **the host CLI's Bash tool caps a single foreground command at ~10 minutes** (Claude Code's Bash tool `timeout` parameter maxes out at 600000 ms; other hosts impose a similar foreground ceiling). A blocking foreground call is therefore killed at the 10-minute mark *by the host*, before the reviewer prints its findings — regardless of `$TIMEOUT_CMD` (`timeout 1800`) or agy's `--print-timeout 30m`, which are both 30-minute bounds the host never lets the foreground call reach. The 10-minute cap is **not** in this loop's shell logic; it is the host tool ceiling, so the only way around it is to not block on a foreground call. Launch the reviewer detached and poll its log instead:
+
+   - **Claude Code / hosts with a backgroundable Bash tool**: invoke the command below with the host's background mode (Claude Code: set `run_in_background: true` on the Bash tool call). The host returns immediately with a task/shell id and re-notifies you when the process exits — there is no foreground timeout to hit. Capture the command to the log exactly as shown; the trailing `; echo $? > "$DONE_FILE"` records the real exit code where the poll loop can read it:
+
+     ```bash
+     LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
+     DONE_FILE="${LOG_FILE}.exit"
+     $TIMEOUT_CMD {INVOCATION} > "$LOG_FILE" 2>&1; echo $? > "$DONE_FILE"
+     ```
+
+     Then poll until the reviewer finishes: in separate short Bash calls (each well under the foreground cap), check `[ -f "$DONE_FILE" ]`; once it exists, read `EXIT_CODE=$(cat "$DONE_FILE")`. Tail `$LOG_FILE` between polls only if you need a progress signal — do not re-block on the reviewer. Keep polling until `$DONE_FILE` appears (bounded by `$TIMEOUT_CMD`/`--print-timeout 30m`, which now actually govern the run because nothing is foreground-capping it first).
+
+   - **Hosts with no background Bash mechanism** (the loop is running under a CLI whose shell tool cannot detach): fall back to the foreground call below, but set the host tool's timeout parameter to its maximum and be aware the run will still be cut at that maximum (~10 min on Claude Code). On such a host a long review is expected to be reported as `cli-error` (timed out) rather than silently truncated to zero findings:
+
+     ```bash
+     LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
+     $TIMEOUT_CMD {INVOCATION} > "$LOG_FILE" 2>&1
+     EXIT_CODE=$?
+     ```
+
    - `$TIMEOUT_CMD` was already resolved during pre-flight (`timeout 1800`, `gtimeout 1800`, or empty). Just expand it here — empty becomes a direct invocation. No re-checking or commentary needed.
-   - If `EXIT_CODE != 0` and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of the log, and exit the loop. Surface the log path so the user can inspect.
+   - If `EXIT_CODE != 0` and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of the log, and exit the loop. Surface the log path so the user can inspect. A `124` exit (from `timeout`/`gtimeout`) or an empty log after the poll loop gave up means the review genuinely ran past 30 minutes — report it as `cli-error` with the log path, do not record `clean`.
 
 3. **Detect changes and apply fixes** (logic depends on `{REVIEWER_APPLIES}`):
 
