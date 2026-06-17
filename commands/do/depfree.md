@@ -89,7 +89,7 @@ When compacting during this workflow, always preserve:
 ## Phase 0: Discovery & Setup
 
 ### 0a: VCS Host Detection
-Run `gh auth status` to check GitHub CLI. If it fails, run `glab auth status` for GitLab.
+Run `gh auth status --active` to check GitHub CLI (`--active` scopes the check to the active account, so a stale token on another configured account doesn't falsely fail it). If it fails, run `glab auth status` for GitLab.
 - Set `VCS_HOST` to `github` or `gitlab`
 - Set `CLI_TOOL` to `gh` or `glab`
 - If neither is authenticated, warn the user and halt
