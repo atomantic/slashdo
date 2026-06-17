@@ -33,7 +33,10 @@ Split `$ARGUMENTS` on whitespace — tokens starting with `--` are flags, the fi
 
 > **Pre-flight — `/do:next` requires GitHub (`gh`), in BOTH modes.** The command ships via `/do:pr` and merges with `gh pr merge`, both of which are GitHub-only. So even PLAN.md mode (whose *claiming* is git-only) can't *complete* on a non-GitHub host. **Abort up front — before claiming or implementing anything — if the repo's `origin` isn't GitHub or `gh` isn't authenticated**, so the user never claims work they can't ship:
 > ```bash
-> gh auth status >/dev/null 2>&1 && git remote get-url origin 2>/dev/null | grep -qi github.com || {
+> # `--active` scopes the check to the active account. A bare `gh auth status` exits
+> # non-zero if ANY configured account has a stale/invalid token — even when the active
+> # account is authenticated fine — which would fail this pre-flight on every run.
+> gh auth status --active >/dev/null 2>&1 && git remote get-url origin 2>/dev/null | grep -qi github.com || {
 >   echo "/do:next requires a GitHub repo with an authenticated gh CLI (it ships via /do:pr). Run 'gh auth login', or use a different workflow for non-GitHub hosts."; exit 1; }
 > ```
 

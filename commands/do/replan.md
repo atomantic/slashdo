@@ -90,7 +90,9 @@ GOALS.md answers: *Why does this project exist? What does success look like? Wha
 > **Issue mode (`--issues`):** Skip the entire slug-assignment pass below — the
 > issue number *is* the ID, assigned by the tracker on creation. Instead do this:
 >
-> 1. **Detect the VCS host.** Run `gh auth status` to check the GitHub CLI. If it
+> 1. **Detect the VCS host.** Run `gh auth status --active` to check the GitHub CLI
+>    (`--active` scopes the check to the active account, so a stale token on another
+>    configured account doesn't falsely fail it). If it
 >    fails, run `glab auth status` for GitLab. Set `VCS_HOST` to `github` or
 >    `gitlab` and `CLI_TOOL` to `gh` or `glab`. **If neither is authenticated,
 >    abort** with: "Issue mode needs an authenticated `gh` or `glab`. Run
