@@ -233,6 +233,22 @@ For every `drift-conflict` / `drift-unclear`, record: the item, the conflicting 
 > **Issue mode (`--issues`):** Classify every open `PLAN_LABEL` issue using the
 > same table — "Remove from PLAN.md" becomes "Close the issue" (Phase 3 maps the
 > actions). Staleness is measured from the issue's `updatedAt`.
+>
+> **Epics are classified by their children, not by code evidence.** An epic
+> (umbrella) issue has no single code artifact, so the Agent-2 codebase grep can't
+> judge it — judging it that way risks closing it while children are still open, or
+> never closing it at all. For any issue that is an epic (carries `epic`/a repo
+> umbrella label, has native sub-issues, or task-lists other issues in its body),
+> resolve its children and compute its completeness state with the shared epic logic
+> (inlined here so it's available in every environment):
+>
+> !`cat ~/.claude/lib/epic-children.md`
+>
+> Then map the epic's state onto the triage table: `epic-done` → `confirmed-done`
+> (close it); `epic-wrapup` or `epic-open` → `still-pending` (**keep open** — there
+> is outstanding work, whether the epic's own wrap-up tasks or unfinished children);
+> `epic-empty` → fall back to ordinary classification. **Never** close an
+> `epic-open`/`epic-wrapup` epic even if its title reads as done.
 
 Using agent results, classify every PLAN.md item:
 
@@ -280,6 +296,11 @@ Using agent results, classify every PLAN.md item:
 > - `confirmed-done` / `likely-done` → **close** the issue with an evidence
 >   comment: `gh issue close <n> --comment "Closed by /do:replan — <evidence>"`
 >   (glab: `glab issue note <n> -m "<evidence>"` then `glab issue close <n>`).
+> - **epic mapped to `confirmed-done`** (state `epic-done` — all children closed,
+>   no wrap-up tasks left) → **close** with a child-evidence comment that lists the
+>   closed children: `gh issue close <n> --comment "All children closed (#a, #b, …) and wrap-up complete — closing epic. (/do:replan)"`.
+>   An `epic-wrapup`/`epic-open` epic stays `still-pending` and is never closed here
+>   (when `epic-wrapup`, optionally comment that only the epic's own wrap-up remains).
 > - `stale` → close with a stale-reason comment (note the last-activity date).
 > - new suggestions **and every pending PLAN.md item being migrated** (questions
 >   resolved above) → **create** an issue:
