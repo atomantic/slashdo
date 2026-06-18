@@ -48,8 +48,11 @@ An issue that matches none of these is an ordinary issue — handle it normally.
    - **Union** both sets, dedupe by number; fetch state for any unknown
      (`gh issue view <m> --json state -q .state`).
 
-A child's state is `OPEN` or `CLOSED`. **All children closed** ⇔ at least one
-child was resolved **and** every resolved child is `CLOSED`.
+A child's state is `OPEN` or `CLOSED` — **compare case-insensitively**, since the
+sources disagree on casing: REST `sub_issues` returns lowercase `open`/`closed`,
+GraphQL returns uppercase (downcased above), and `gh issue view --json state`
+returns uppercase. **All children closed** ⇔ at least one child was resolved
+**and** every resolved child is closed.
 
 ## Epic-level wrap-up tasks
 
