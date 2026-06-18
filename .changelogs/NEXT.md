@@ -2,7 +2,11 @@
 
 ## Added
 
+- Epic (umbrella issue) lifecycle handling in issue mode, shared by `/do:next` and `/do:replan` via a new `lib/epic-children.md`. An epic is now judged by its **children** rather than code evidence — children are resolved natively (GitHub sub-issues) with a fallback to the `- [ ] #123` body checklist and `Part of #N` back-references. `/do:next --issues` skips an epic while any child is open, claims the epic's own remaining **wrap-up tasks** as work once all children are closed (merging that PR closes the epic), and closes a fully-done epic with no wrap-up outright; after shipping an ordinary child it re-checks the parent epic and closes it when that was the last open child. `/do:replan --issues` closes a complete epic during triage with a child-evidence comment and never closes one with open children or pending wrap-up.
+
 ## Changed
+
+- `/do:next --issues`: auto-pick is now **label-agnostic by default** — a bare `/do:next --issues` claims the oldest open issue regardless of label, instead of requiring the `plan` label. The guards against claiming the wrong thing are now the parking-label skip (`future`/`epic`/`blocked`/`needs-input`/`wontfix`/`discussion`/repo-specific) plus the existing in-flight/assigned checks. This lets a repo that files ordinary `enhancement`/`bug`/`area:*` issues work with `/do:next --issues` out of the box, without first running `/do:replan --issues` to stamp a `plan` label on every issue. Pass `--issues-label <name>` (or save it as a default) to opt back into a curated, label-scoped queue; an explicit `#<num>` still overrides every skip, including parking labels and an active filter. `epic` was added to the parking-label skip so umbrella issues aren't auto-claimed.
 
 ## Fixed
 
