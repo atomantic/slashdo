@@ -1,6 +1,6 @@
 {
   "name": "slash-do",
-  "version": "3.13.1",
+  "version": "3.14.0",
   "description": "Curated slash commands for AI coding assistants — Claude Code, OpenCode, Antigravity CLI, and Codex",
   "author": "Adam Eivy <adam@eivy.com>",
   "license": "MIT",
