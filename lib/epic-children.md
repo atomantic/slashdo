@@ -92,9 +92,23 @@ After a child issue closes, find its parent so the epic can be re-evaluated:
    gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){parent{number}}}}' \
      -F o="$OWNER" -F r="$REPO" -F n="$CHILD" --jq '.data.repository.issue.parent.number' 2>/dev/null
    ```
-2. **Convention fallback:** parse the just-closed child's body
-   (`gh issue view "$CHILD" --json body -q .body`) for `Part of #P` /
+2. **Convention fallback — child back-reference:** parse the just-closed child's
+   body (`gh issue view "$CHILD" --json body -q .body`) for `Part of #P` /
    `Parent: #P` / `Epic: #P`.
+3. **Convention fallback — parent checklist back-search.** A parent may link the
+   child *only* through its own body task-list (`- [ ] #$CHILD`) while the child
+   carries no back-reference — the forward resolver above accepts that format, so
+   the reverse path must too, or such an epic is never re-checked after its last
+   child ships. Search open issue bodies that mention the child, then keep only one
+   whose body actually task-lists it:
+   ```bash
+   for P in $(gh issue list --state open --search "in:body \"#$CHILD\"" --limit 100 --json number -q '.[].number'); do
+     [ "$P" = "$CHILD" ] && continue
+     gh issue view "$P" --json body -q .body | grep -Eq -- "- \[[ xX]\] #$CHILD\b" && { echo "$P"; break; }
+   done
+   ```
+   (The `in:body "#$CHILD"` search narrows the scan; the `grep` confirms it is a
+   real checklist entry, not an incidental mention.)
 
 If a parent epic `#P` is found, run the completeness check on `#P`: close it when
 `epic-done`; when `epic-wrapup`, comment that the children are complete and the
