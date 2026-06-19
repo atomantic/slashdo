@@ -246,9 +246,10 @@ Write the code, tests, and docs the item requires, following the **target repo's
 - **PLAN.md mode** — **remove the picked `- [ ]` line outright** (the changelog and git history are the audit trail; don't leave a checked `- [x]` behind unless the repo keeps items as a design log). If removing it empties a heading, leave the heading — section curation is `/do:replan`'s job.
 - **Issues mode** — **don't touch PLAN.md.** Close the issue via the PR: put `Closes #<num>` in the PR body (Phase 6) so merge auto-closes it.
 
-**Changelog (both modes).** Check for `.changelogs/` or `.changelog/` (whichever exists); if found, append a user-facing entry to its `NEXT.md`, creating `NEXT.md` from the standard template (`# Unreleased Changes` / `## Added` / `## Changed` / `## Fixed` / `## Removed`) if absent. Lead with the slug in brackets; write for a *user* of the app, not a coder inside it (no file paths, module/function names, test counts). If the change has no user-visible effect, keep it to one terse sentence under **Changed**. If no changelog directory exists, skip this step.
+**Changelog (both modes).** Check for `.changelogs/` or `.changelog/` (whichever exists); if found, append a user-facing entry to its `NEXT.md`, creating `NEXT.md` with just a `# Unreleased Changes` title if absent. **Group the entry under a `##` heading named for the feature or capability it touches** (e.g. `## PR review loop`) — reuse an existing feature heading if one fits; do NOT use generic `## Added` / `## Changed` / `## Fixed` / `## Removed` buckets. Lead the bullet with the slug in brackets; write for a *user* of the app, not a coder inside it (no file paths, module/function names, test counts). The one exception: purely internal code-administration/organization work with no user-visible effect goes under a `## Internal` heading and may be described in code terms. If no changelog directory exists, skip this step.
 
 ```markdown
+## <Feature or capability name>
 - **[<slug>] <Short, user-facing title>** — <one sentence on the user-visible effect>
 ```
 

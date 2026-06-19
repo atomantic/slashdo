@@ -21,16 +21,19 @@ Commit and push all work from this session, updating documentation as needed.
    - If `NEXT.md` doesn't exist yet, create it with this template:
      ```markdown
      # Unreleased Changes
-
-     ## Added
-
-     ## Changed
-
-     ## Fixed
-
-     ## Removed
      ```
-   - Add a concise entry describing the changes under the appropriate section (Added, Changed, Fixed, Removed)
+   - **Group entries by feature, not by change-type.** Each `##` heading is the name of a feature or capability the work touched (e.g. `## PR review loop`, `## Plan claiming`), and the bullets beneath it describe what changed for that feature. Do NOT create generic `## Added` / `## Changed` / `## Fixed` / `## Removed` buckets. If a relevant feature heading already exists in `NEXT.md`, add your bullet under it instead of starting a new one.
+   - **Write entries for a human reading release notes, not a coder reading the diff.** Describe the user-visible behavior or capability that changed — no file paths, module/function names, test counts, or internal symbols. The one exception: purely internal code-administration/organization work (refactors, build/tooling, dependency housekeeping) with no user-facing effect — group those under a `## Internal` (or similarly named) heading and describe them in code terms, since there's nothing user-facing to express.
+   - Example:
+     ```markdown
+     # Unreleased Changes
+
+     ## PR review loop
+     - Local reviewers now run before the PR is opened; Copilot runs after.
+
+     ## Internal
+     - Consolidated changelog-template logic shared by push and next.
+     ```
    - If no changelog directory exists, skip this step
 
 3. **Update PLAN.md** (if exists):
