@@ -75,7 +75,12 @@ Print: `PR flow: {current_branch} → {default_branch}`
 
 - Commit all changes to the current branch
 - Keep commit message concise and do not use co-author information
-- Push the branch to remote: `git pull --rebase --autostash && git push -u origin {current_branch}`
+- **Sync the branch onto the latest `origin/{default_branch}` first.** Reviewers below diff the branch against the **local** `{default_branch}` ref (`git diff {default_branch}...HEAD`), anchored on the merge-base. If `origin/{default_branch}` moved forward since this branch was cut and the branch was never rebased, reviewers evaluate against a stale base and flag unrelated changes that landed on the default branch outside this branch's work. Rebase to eliminate that noise:
+  - `git fetch origin {default_branch}:{default_branch}` to fast-forward the **local** `{default_branch}` ref (and its remote-tracking ref) to match origin. A plain `git fetch origin {default_branch}` only moves the remote-tracking ref — the reviewers diff against the *local* ref, so it must be the one advanced, or the merge-base stays stale and the noise remains. This works because the flow already moved you to a feature branch (Detect Branches step 3), so the default branch isn't checked out. If your local `{default_branch}` has diverged from origin and the fetch can't fast-forward it (unusual), surface that and stop rather than forcing it.
+  - `git rebase {default_branch}` to replay this branch's commits on top of the now-current default branch.
+  - If the rebase hits conflicts, **abort** (`git rebase --abort`) and stop — print the conflicting files and ask the user to resolve them, rather than guessing at a merge. Do not proceed to review against a half-rebased tree.
+  - After a clean rebase the branch's merge-base with the refreshed local `{default_branch}` is current, so `git diff {default_branch}...HEAD` shows only this branch's own changes.
+- Push the branch to remote: `git push -u origin {current_branch}` (use `--force-with-lease` if the rebase above rewrote already-pushed history; never a bare `--force`)
 
 ## Local Code Review (REQUIRED GATE)
 
