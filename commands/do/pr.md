@@ -92,7 +92,7 @@ This review catches bugs that Copilot misses — incomplete pattern copying is t
 4. After reviewing all files, verify: does the code actually deliver what the commits claim?
 5. Print a review summary table (see do:review for format)
 6. Fix any issues, run tests, and verify tests cover the changed code paths
-7. Only after printing the review summary may you proceed to "Open the PR"
+7. Only after printing the review summary may you proceed to "Pre-PR Local Reviews"
 
 If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.
 
@@ -108,6 +108,25 @@ Verification — confirm before proceeding:
 - [ ] Quoted specific code for each finding
 - [ ] Printed a review summary table with findings
 
+## Pre-PR Local Reviews
+
+Partition `REVIEW_AGENTS` into two ordered sublists, preserving their original relative order:
+
+- `LOCAL_AGENTS` — every entry that is **not** `copilot`: `codex`, `agy`, `claude`, `ollama[…]`
+- `COPILOT_AGENTS` — every `copilot` entry (at most one after dedup)
+
+**If `LOCAL_AGENTS` is non-empty**, run the multi-reviewer loop now, **before the PR is created**, using only `LOCAL_AGENTS`. Local reviewers work against the working tree / pushed branch and do not require a PR to exist — running them first means every local reviewer's fixes land before the PR is opened, instead of trickling in as new commits after reviewers report back. Pass the same flags: `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (no effect on local agents, but forward for consistency). Record the result as `LOCAL_OVERALL_STATUS`.
+
+- If `LOCAL_OVERALL_STATUS` is `dirty` (broken build / test failure / rejected), **abort before creating the PR** — print the proximate failure and stop. The branch is not in a state worth opening a PR against.
+- Any other status (`clean`, `partial`, `inconclusive`) allows proceeding — a non-clean local pass is a signal to the user, not a hard block on PR creation (the user may still want a Copilot review).
+
+**If `LOCAL_AGENTS` is empty**, skip this section.
+
+This phase drives the **multi-reviewer wrapper** (defined under "Reviewer loop bodies" below) over `LOCAL_AGENTS`. The local-agent reviewer types it dispatches:
+
+- `codex` | `agy` | `claude` → local-agent headless review loop (`lib/local-agent-review-loop.md`) — host-agnostic; the local CLI reviews the working tree directly and does not care whether the remote is GitHub or GitLab. The local CLI runs a self-contained single-agent review prompt against the branch (codex uses its built-in `codex review`) — deliberately **not** the `/do:review` multi-sub-agent skill, which hangs under a headless/print-mode invocation; this main thread then verifies its output, runs build + tests, and pushes the verified fixes
+- `ollama` → Ollama local-model review loop (`lib/ollama-review-loop.md`) — host-agnostic and fully offline. The orchestrator resolves the model (auto-select or the `ollama[<model>]` override), feeds the per-file diff to `ollama run`, parses the findings, applies the fixes itself (Ollama is non-agentic — always review-only), then verifies build + tests and pushes
+
 ## Open the PR
 
 - Create a PR / merge request from `{current_branch}` to `{default_branch}`:
@@ -116,35 +135,31 @@ Verification — confirm before proceeding:
 - Create a rich PR/MR description
 - Capture the resulting PR/MR URL to report at the end
 
-## Run the Review Loop
+## Run the Copilot Review
 
-**If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), skip this entire section — the Local Code Review gate above was the only review. Set `OVERALL_STATUS=clean` (the no-reviewer path: the Local Code Review gate plus CI is the merge gate, exactly as `/do:release` treats it) and continue to the Merge section; there is no multi-reviewer aggregate to report.
+**If `COPILOT_AGENTS` is empty** (no `copilot` in `--review-with`), skip this entire section. Set `COPILOT_OVERALL_STATUS=clean` (skipped — no Copilot pass requested) and continue to "Compute OVERALL_STATUS".
 
-Otherwise, hand off to the **multi-reviewer loop** with the parsed inputs:
+Otherwise, hand off to the **multi-reviewer loop** using only `COPILOT_AGENTS` (`[copilot]`) with the parsed inputs:
 
-- `{REVIEW_AGENTS}` — ordered list of the agents passed via `--review-with` (non-empty; the empty case was handled above)
-- `{REVIEW_STOP_MODE}` — `all` (default) | `on-findings` | `on-clean`
-- `{REVIEW_MODE}` — `series` (default) | `parallel`
-- `{REVIEWER_APPLIES}` — boolean
-- `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot iteration cap (`0` = loop until clean)
+- `{COPILOT_AGENTS}` — `[copilot]`
+- `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`
 
-The wrapper runs the reviewers per `{REVIEW_MODE}` (series by default — one reviewer at a time, each seeing the prior's fixes; the stop-mode applies only in series). Each individual pass uses the matching single-reviewer loop:
+Copilot needs the PR to exist (it reviews cloud-side), which is why it runs here, after "Open the PR", rather than in the pre-PR phase. This phase drives the same **multi-reviewer wrapper** (under "Reviewer loop bodies" below), this time over `COPILOT_AGENTS`. Note that `--review-stop-on-findings` / `--review-stop-on-clean` apply *within* each phase's wrapper invocation; a stop-mode short-circuit during the local phase does not skip the Copilot pass, since the two phases run as separate wrapper invocations:
 
-- `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`). **GitHub only** — Copilot cloud review has no GitLab equivalent. When `VCS_HOST=gitlab` and `REVIEW_AGENTS` contains `copilot`, print a warning (`copilot review is GitHub-only and was skipped on this GitLab MR; use a local-agent reviewer (codex/agy/claude) instead`) and skip the copilot pass — continue with the remaining (host-agnostic) reviewers in the list.
-- `codex` | `agy` | `claude` → local-agent headless review loop (`lib/local-agent-review-loop.md`) — host-agnostic; the local CLI reviews the working tree directly and does not care whether the remote is GitHub or GitLab. The local CLI runs a self-contained single-agent review prompt against the branch (codex uses its built-in `codex review`) — deliberately **not** the `/do:review` multi-sub-agent skill, which hangs under a headless/print-mode invocation; this main thread then verifies its output, runs build + tests, and pushes the verified fixes
-- `ollama` → Ollama local-model review loop (`lib/ollama-review-loop.md`) — host-agnostic and fully offline. The orchestrator resolves the model (auto-select or the `ollama[<model>]` override), feeds the per-file diff to `ollama run`, parses the findings, applies the fixes itself (Ollama is non-agentic — always review-only), then verifies build + tests and pushes
+- `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`). **GitHub only** — Copilot cloud review has no GitLab equivalent. When `VCS_HOST=gitlab` and `COPILOT_AGENTS` contains `copilot`, print a warning (`copilot review is GitHub-only and was skipped on this GitLab MR; use a local-agent reviewer (codex/agy/claude) instead`) and set `COPILOT_OVERALL_STATUS=inconclusive`.
 
-### Multi-reviewer wrapper
+Record the result as `COPILOT_OVERALL_STATUS`.
 
-!`cat ~/.claude/lib/multi-reviewer-loop.md`
+## Compute OVERALL_STATUS
 
-### Inner loop bodies (referenced by the wrapper)
+**If `REVIEW_AGENTS` was empty** (no `--review-with` was passed at all), skip the two review phases above and set `OVERALL_STATUS=clean` — the Local Code Review gate plus CI is the merge gate, exactly as `/do:release` treats it; there is no multi-reviewer aggregate to report.
 
-!`cat ~/.claude/lib/copilot-review-loop.md`
+Otherwise combine `LOCAL_OVERALL_STATUS` (from "Pre-PR Local Reviews", or `clean` when `LOCAL_AGENTS` was empty) and `COPILOT_OVERALL_STATUS` (from "Run the Copilot Review", or `clean` when `COPILOT_AGENTS` was empty) into a single `OVERALL_STATUS` using this precedence — first matching rule wins:
 
-!`cat ~/.claude/lib/local-agent-review-loop.md`
-
-!`cat ~/.claude/lib/ollama-review-loop.md`
+1. `dirty` — either phase is `dirty`
+2. `inconclusive` — either phase is `inconclusive`
+3. `partial` — either phase is `partial`
+4. `clean` — both phases are `clean`
 
 ## Merge the PR (only when merge mode is enabled)
 
@@ -167,3 +182,19 @@ When `MERGE_ENABLED=true`, gate the merge on **both** the review result and CI:
 Never merge on `dirty`/`inconclusive`, never merge before required checks pass, and never override branch protection — `--auto` respects it, and the in-session fallback waits on `gh pr checks`.
 
 **Report the final status** to the user including the PR/MR URL, the multi-reviewer aggregate report (per-pass status table plus overall status), and — when merge mode was enabled — whether the PR merged, is queued to auto-merge on green CI, or was left open (with why).
+
+## Reviewer loop bodies
+
+Both review phases above ("Pre-PR Local Reviews" and "Run the Copilot Review") drive the same multi-reviewer wrapper — the only difference is the agent list each passes in (`LOCAL_AGENTS` vs `COPILOT_AGENTS`). The wrapper and the single-reviewer loop bodies it dispatches to are defined once here:
+
+### Multi-reviewer wrapper
+
+!`cat ~/.claude/lib/multi-reviewer-loop.md`
+
+### Inner loop bodies (referenced by the wrapper)
+
+!`cat ~/.claude/lib/copilot-review-loop.md`
+
+!`cat ~/.claude/lib/local-agent-review-loop.md`
+
+!`cat ~/.claude/lib/ollama-review-loop.md`

@@ -1,0 +1,11 @@
+# Unreleased Changes
+
+## Added
+
+## Changed
+
+- **`do:pr` now runs all local reviewers *before* opening the PR, and only Copilot after.** Previously `--review-with claude,codex,agy,ollama,copilot` created the PR up front and ran every reviewer against it, so local reviewers' fixes trickled in as post-PR commits. The review loop is now split into two phases: a **Pre-PR Local Reviews** phase runs the multi-reviewer wrapper over the non-copilot agents (`codex`/`agy`/`claude`/`ollama`) against the working tree — their fixes land before the PR is opened — and a **Run the Copilot Review** phase runs the copilot pass after "Open the PR" (Copilot reviews cloud-side and needs the PR to exist). A new **Compute OVERALL_STATUS** step combines the two phases' statuses (`dirty` > `inconclusive` > `partial` > `clean`) for the merge gate. If the local phase returns `dirty` (broken build / test failure / rejected), `do:pr` aborts before creating the PR. `--review-stop-on-*` now applies within each phase rather than across the whole reviewer list. Affects `commands/do/pr.md`.
+
+## Fixed
+
+## Removed
