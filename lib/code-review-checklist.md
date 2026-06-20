@@ -15,6 +15,8 @@
 
 # How to review
 
+**Review logic, not lint.** A linter, type-checker, compiler, formatter, and test suite already run on this code separately and catch syntax errors, lint violations, formatting, import order, unused variables, and build breakage. A reviewer that re-finds those adds nothing and buries the findings that matter. Spend every bit of attention on what only a reader reasoning about behavior can catch — the items in this checklist. Do NOT raise pure-style/formatting nits, rename suggestions, or "extract a helper/constant" refactors unless they are the *root cause* of a behavior bug; every finding should name a concrete wrong outcome (a crash, a wrong value, a leak, a missing-coverage gap, a broken contract), not a preference.
+
 The most expensive misses are not pattern misses — they are *consequence-reasoning* misses. A test asserts a symptom (HTTP status) instead of the contract (status + code + body shape). A fallback path returns a different shape than the happy path. An encoder corrupts the downstream parser. An auto-assign ignores pre-existing state on re-run. These are findable only by reasoning from principles, not by matching against bullets.
 
 **Reason first, checklist second.** For each change, ask:
