@@ -50,7 +50,7 @@ REVIEW_TITLE=$(git log -1 --format=%s HEAD)   # subject of HEAD commit; falls ba
 
 # Shared review task. The "do NOT dispatch/spawn sub-agents" clause is load-bearing:
 # it is what keeps the review a single synchronous agent the print-mode CLI can wait on.
-REVIEW_TASK="Review the code changes on the current branch against the base branch '$BASE_BRANCH'. Do the review YOURSELF in this single session — do NOT dispatch, spawn, or delegate to sub-agents or background tasks (a fanned-out review never re-syncs into print/headless output and the run will time out with no findings). Run \`git diff $BASE_BRANCH...HEAD --stat\` then \`git diff $BASE_BRANCH...HEAD\`, read each changed file in full for context, and review for correctness bugs, security issues, broken producer/consumer contracts, resource leaks, and missing test coverage."
+REVIEW_TASK="Review the code changes on the current branch against the base branch '$BASE_BRANCH'. Do the review YOURSELF in this single session — do NOT dispatch, spawn, or delegate to sub-agents or background tasks (a fanned-out review never re-syncs into print/headless output and the run will time out with no findings). Run \`git diff $BASE_BRANCH...HEAD --stat\` then \`git diff $BASE_BRANCH...HEAD\`, read each changed file in full for context, and review for correctness bugs, security issues, broken producer/consumer contracts, resource leaks, and missing test coverage. The project's linter, type-checker, and test suite already run separately — do NOT spend effort on syntax, lint, formatting, import order, or build errors; they are covered. Report only logic issues found by reasoning about behavior, each tied to a concrete wrong outcome — not style preferences, renames, or 'extract a helper' suggestions."
 
 if [ "$REVIEWER_APPLIES" = "true" ]; then
   LOCAL_PROMPT="$REVIEW_TASK
@@ -73,7 +73,7 @@ fi
 
 # Codex-only prompt for REVIEWER_APPLIES=true (codex exec invocation —
 # codex doesn't have slashdo installed, so describe the task directly).
-CODEX_APPLY_PROMPT="Review the diff from $BASE_BRANCH to HEAD in this repo against software-engineering best practices (correctness, security, test coverage, contract drift). For each finding, apply the fix in the working tree, then run \`$BUILD_CMD\` (skip if empty) and \`$TEST_CMD\` to verify, and commit each fix with message 'address review (codex): <summary>'. Do not introduce changes beyond the scope of fixing the findings. Do not skip tests or weaken assertions."
+CODEX_APPLY_PROMPT="Review the diff from $BASE_BRANCH to HEAD in this repo for logic issues (correctness, security, test coverage, contract drift). The linter, type-checker, and test suite already run separately — do NOT spend effort on syntax, lint, formatting, or build errors, and do NOT raise style/rename/extract-a-helper suggestions; report only behavior bugs you can tie to a concrete wrong outcome. For each finding, apply the fix in the working tree, then run \`$BUILD_CMD\` (skip if empty) and \`$TEST_CMD\` to verify, and commit each fix with message 'address review (codex): <summary>'. Do not introduce changes beyond the scope of fixing the findings. Do not skip tests or weaken assertions."
 
 # Resolve the timeout wrapper used by the step-2 invocation (`$TIMEOUT_CMD {INVOCATION}`).
 # macOS ships no `timeout(1)` unless coreutils is installed, so probing is required:

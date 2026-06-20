@@ -11,6 +11,8 @@ When to use this:
 - You want a fully local, offline review with no API/cloud cost and no data leaving the machine
 - You have a capable coding model installed in Ollama (e.g. `qwen2.5-coder`, `deepseek-coder-v2`, `codestral`)
 
+**Logic-only focus (why the prompt is so emphatic).** A small local model reviewing one file's diff in isolation produces a flood of low-value findings if asked to "review against best practices" — style preferences, "extract a helper", eslint-disable nitpicks, and (worst) confident "you deleted X, this breaks Y" claims about code it cannot see was simply moved to another file. Meanwhile syntax, lint, formatting, type, and build errors are already caught by the project's own tooling, so any model effort spent re-finding them is pure waste. The per-file prompt below therefore tells the model, in strong terms, to report ONLY logic bugs it can tie to a concrete wrong runtime behavior and to treat zero findings as the normal outcome. This is the single biggest signal-to-noise lever for the local pass — keep it strong.
+
 ### Pre-flight
 
 1. Confirm the Ollama CLI is installed: `command -v ollama`. If missing:
@@ -96,16 +98,20 @@ For each file `F` in `$CHANGED`:
 2. If `${#FILE_DIFF}` exceeds `$PER_FILE_CAP`, truncate to the cap and append a line `[diff truncated — file exceeds per-file review budget]` so the model knows it saw a partial diff. A truncated file was **not** fully reviewed (its tail never reached the model), so increment `TRUNCATED` and note the file in the final report. This is a coverage gap that blocks a `clean` verdict (step 4) — but, unlike an invocation error, the file *was* partially reviewed, so it does not count toward the "every file errored" → `cli-error` check.
 3. Build the prompt and run the model via **stdin** (never as a positional arg — embedded diffs can exceed `ARG_MAX`). Wrap each file's JSON response with a delimiter line so the orchestrator can attribute and parse each section independently (back-to-back JSON objects are not themselves a single valid document):
    ```bash
-   PROMPT="You are a senior code reviewer. Review the following unified diff for the file '$F' against software-engineering best practices: correctness bugs, security issues, missing/incorrect error handling, broken contracts, and missing test coverage. Do not comment on pure style or formatting.
+   PROMPT="You are a senior code reviewer. A linter, type-checker, compiler, and test suite ALREADY run on this code separately — so syntax errors, lint violations, formatting, import order, unused vars, and build breakage are NOT your job and must NOT be reported. Review the unified diff for '$F' ONLY for logic issues a human finds by reasoning about behavior: correctness bugs, security / data-exposure holes, missing or wrong error handling, broken producer/consumer contracts, race conditions, and missing test coverage of real logic.
+
+Do NOT report any of these — they are noise that wastes the review: pure style or formatting; renaming or extracting to a helper/constant; 'this could be cleaner / more readable'; eslint-disable or other tooling comments; naming preferences; or a deletion whose replacement you cannot see — you are shown ONE file's diff in isolation, so code that looks removed was very likely moved elsewhere. Never flag a removal as breaking unless THIS diff itself proves the breakage.
+
+Raise a finding only when you can name the concrete wrong runtime behavior it causes, and say what that behavior is. When in doubt, omit it. Returning zero findings for a file is the correct, expected outcome for most files — do not invent issues to fill the list.
 
 Return a JSON object with a single key \"findings\": an array of finding objects. Each finding has:
 - file: the path under review ('$F')
 - line: integer line number in the NEW version of the file
 - severity: one of \"CRITICAL\", \"IMPROVEMENT\", \"NIT\"
-- description: one-sentence problem statement
-- fix: concrete code change — quote the exact replacement when possible
+- description: one-sentence statement of the WRONG BEHAVIOR (not a style opinion)
+- fix: concrete code change
 
-If the diff has no issues worth raising, return {\"findings\": []}.
+If the diff has no logic issues worth raising, return {\"findings\": []}.
 
 --- DIFF ---
 $FILE_DIFF"
