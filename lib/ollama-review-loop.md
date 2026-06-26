@@ -149,6 +149,7 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
    - If `NEW_COMMITS == 0` **and** `UNCOMMITTED == 0` (you rejected every finding as wrong/out-of-scope, leaving a clean tree), set `STATUS=clean` (or `STATUS=incomplete` if there was any coverage gap, `REVIEW_ERRORS + TRUNCATED > 0`) and exit.
 4. **Verify in the main thread** (mandatory, non-skippable — this is the only line of defense between the model's output and the remote branch):
    - Read the diff `git diff "$LOOP_START_SHA..HEAD"` and inspect each new commit for out-of-scope refactors, reverted behavior to pass tests, disabled tests/assertions, `// TODO` placeholders, or secrets.
+   - **Run the fix regression guard** on the same `$LOOP_START_SHA..HEAD` fix diff: scan the fix for unscoped state-clearing/restoring writes and for side effects added to a hot path, and add a focused regression test when the fix touches scoping or timestamp/side-effect logic — re-scope any failing fix in place before building. See `~/.claude/lib/fix-regression-guard.md`. (Local models over-broaden fixes more than cloud agents, so this guard earns its keep most here.)
    - Run `{BUILD_CMD}` (skip when empty). On failure: **default mode** revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=broken-build`, exit; **interactive mode** ask retry/revert/accept-and-fix.
    - Run `{TEST_CMD}` (skip when empty). Same handling on failure (`STATUS=test-failed`).
    - If any inspection red flag triggered: revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=rejected`, exit.

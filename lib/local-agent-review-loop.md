@@ -210,6 +210,7 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
      - Commits that revert legitimate behavior to make a flaky test pass
      - Disabled tests, skipped assertions, or `// TODO` placeholders introduced by the agent
      - Secrets, hardcoded credentials, or other content that must not land
+   - **Run the fix regression guard** on the same `$LOOP_START_SHA..HEAD` fix diff before building: scan the fix for unscoped state-clearing/restoring writes (a "restore"/"reset" keyed to a whole collection instead of the one record the finding named) and for side effects folded onto a hot path (an `updatedAt`/event/cache write on every tick), and add a focused regression test when the fix touches scoping or timestamp/side-effect logic. See `~/.claude/lib/fix-regression-guard.md`. A fix that fails the guard is itself a finding — re-scope it now rather than pushing it for the next round to catch (that is the round-N+1 spiral this guard exists to stop).
    - Run `{BUILD_CMD}` (skip when empty — projects without a build step skip this check). If it fails:
      - **Default mode**: revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=broken-build`, exit the loop, and report
      - **Interactive mode**: ask the user whether to retry (re-invoke CLI), revert, or accept-and-fix-manually
