@@ -183,6 +183,10 @@ Each pass uses the matching single-reviewer loop:
 
 !`cat ~/.claude/lib/ollama-review-loop.md`
 
+### CI flake handling (referenced by the merge gate)
+
+!`cat ~/.claude/lib/ci-flake-handling.md`
+
 ## Merge the PR (only after a CLEAN multi-reviewer result)
 
 The merge gate consumes the **wrapper's `{OVERALL_STATUS}`** plus, for any copilot pass that ran, the standard copilot post-pass checks.
@@ -216,6 +220,8 @@ For `dirty` or `inconclusive`:
 
 ### Merging (after all checks above pass)
 
+- **Gate on required CI first.** If the repo has required checks on the target branch, watch them in-session before merging: `gh pr checks <number> --required --watch --fail-fast`. (If `gh` reports no required checks, this gate is vacuously satisfied — merge directly.)
+  - On a required-check **failure**, apply the **CI flake handling** routine — one conservative re-run on the same commit (see `~/.claude/lib/ci-flake-handling.md` and the inlined copy below). If the same SHA passes on the single re-run, treat it as a flake and proceed (logging which check flaked); if it fails again, **abort the release merge** and report which check failed. A release must never merge over a real red.
 - Once confirmed clean, merge:
   ```bash
   gh pr merge <number> --merge

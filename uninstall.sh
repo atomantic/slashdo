@@ -32,7 +32,8 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
 # NOTE: keep in sync with install.sh LIBS — see comment there.
 LIBS=(
-  code-review-checklist copilot-review-loop epic-children finding-disposition
+  ci-flake-handling code-review-checklist copilot-review-loop epic-children
+  finding-disposition fix-regression-guard
   graphql-escaping
   local-agent-review-loop multi-reviewer-loop ollama-review-loop
   per-finding-root-cause plan-id-format plan-issue-mode
