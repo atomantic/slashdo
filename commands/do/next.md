@@ -34,7 +34,7 @@ Split `$ARGUMENTS` on whitespace — tokens starting with `--` are flags, the fi
 
 ## Swarm mode (`--swarm`) — drain several independent issues in parallel
 
-**When `SWARM` is true, this section replaces Phases 1–7 for the run.** It claims and ships up to `SWARM_N` independent open issues at once — each in its own worktree subagent running the normal single-issue flow — then serializes only the merge. When `--swarm` is absent, skip this section entirely and run Phases 1–7 below. Swarm reuses the single-issue phases wholesale: each agent *is* a `/do:next` run for one issue, so the claim/lease, worktree, implement, changelog, and review-gate semantics are exactly the same — the only new logic is partitioning the batch up front and serializing the merges at the end.
+**When `SWARM` is true, this section replaces Phases 1–7 for the run.** It claims and ships up to `SWARM_N` independent open issues at once — each in its own worktree subagent running the normal single-issue flow — then serializes only the merge. When `--swarm` is absent, skip this section entirely and run Phases 1–7 below. Swarm reuses the single-issue phases wholesale: each agent runs the single-issue **Phases 2–6** for one issue (claim → implement → changelog → review, **no merge, no Phase 7 cleanup** — the orchestrator owns those), so the claim/lease, worktree, implement, changelog, and review-gate semantics are exactly the single-issue ones. The only new logic is partitioning the batch up front (Phase A) and serializing the merges at the end (Phase C).
 
 **Preconditions — check first; abort cleanly if any fails (do not partially claim):**
 - **Issues mode only.** Swarm's claim/lease is the GitHub assignee marker, and partitioning by dependency needs the tracker. If the run resolves to PLAN.md mode, abort: ``--swarm works in issues mode only — pass --issues (or run in an issue-tracked repo). PLAN.md-mode swarm is a future enhancement.`` (The Phase 1 auto-redirect to issues counts as issues mode; resolve `ISSUE_MODE` first.)
@@ -62,22 +62,26 @@ Launch the agents **in parallel** (all Agent/Task calls in a single response) an
 > - **Phase 3 still applies:** if the issue is stale/superseded/awaiting-input, skip it (release the marker, clean up) and return `{ issue, status: "skipped", reason }`.
 > - Implement (Phase 4) and record completion + changelog (Phase 5) as normal.
 > - **Ship via `/do:pr --no-merge`** with the run's review flags (Phase 6) and **STOP before the merge** — open the PR, run the review gate, but DO NOT merge and DO NOT run Phase 7 cleanup. The orchestrator owns the merge and the cleanup.
-> - **Return a structured result:** `{ issue, pr_number, branch, worktree, review_status, notes }`, where `review_status` is `/do:pr`'s aggregate (`clean` / `partial` / `inconclusive` / `dirty`) or `opened-no-review` when no external reviewer ran and the Local Code Review gate passed.
+> - **Return a structured result**, one of two shapes Phase C dispatches on by whether `pr_number` is present:
+>   - **PR opened:** `{ issue, pr_number, branch, worktree, review_status, notes }`, where `review_status` is `/do:pr`'s aggregate (`clean` / `partial` / `inconclusive` / `dirty`) or `opened-no-review` when no external reviewer ran and the Local Code Review gate passed.
+>   - **No PR** (claim yielded to a race winner, or Phase 3 skipped it as stale): `{ issue, status: "yielded" | "skipped", reason }` — no `pr_number`.
 
-Pass each agent the review flags verbatim (`--review-with` / `--review-iterations` / `--review-mode` / stop-mode / `--reviewer-applies` / `--no-review`). The new **fix regression guard** and **CI flake handling** apply inside each agent automatically (they live in `/do:pr`'s loop and merge gate). Concurrent `git worktree add` against the shared repo can briefly contend on `.git` index locks — an agent that hits a transient lock retries once before failing.
+Pass each agent the review flags verbatim (`--review-with` / `--review-iterations` / `--review-mode` / stop-mode / `--reviewer-applies` / `--no-review`). The **fix regression guard** and **CI flake handling** apply inside each agent automatically (they live in `/do:pr`'s loop and merge gate). Concurrent `git worktree add` against the shared repo can briefly contend on `.git` index locks — an agent that hits a transient lock retries once before failing.
+
+**Harness without parallel subagents?** Per the precondition, run this same per-issue task **sequentially** in the current session — one issue at a time, identical task body — collecting each result, then proceed to Phase C unchanged. The merge queue is already serialized, so sequential fan-out only loses the concurrency, not any correctness.
 
 ### Swarm Phase C — Serialized merge queue (orchestrator)
 
 After the barrier, merge the returned PRs **one at a time, never concurrently** — each merge advances the default branch, so the next PR may need a re-sync. Walk the results in the same priority/oldest order. For each:
 
-1. **Skip non-mergeable results.** `yielded` / `skipped` / a died agent (Phase D) has no PR to merge — record it. A `dirty` (build/test broken) or `inconclusive` (a requested reviewer missing/timed-out/errored) status is **not mergeable** — leave that PR open and record why, exactly as single-issue Phase 6. Merge only `clean`, `opened-no-review` (Local gate passed, no external reviewer requested), or `partial` **with** an explicit `--review-stop-on-*` flag.
+1. **Skip non-mergeable results.** A result with `status: "yielded"`/`"skipped"` (no `pr_number`) has nothing to merge — record it. For the rest, apply **single-issue Phase 6's merge gate** to `review_status`: never merge `dirty` (build/test broken) or `inconclusive` (a requested reviewer missing/timed-out/errored) — leave that PR open and record why; merge only `clean`, `opened-no-review` (Local gate passed, no external reviewer requested), or `partial` **with** an explicit `--review-stop-on-*` flag. (Agents that never returned are reconciled in Phase D, not here.)
 2. **Re-sync onto the advanced default branch** from the PR's worktree — `git fetch origin <default>` then `git merge --no-edit origin/<default>` — resolving any PLAN.md/changelog conflict **deletions-win** (a line removed on either side stays removed; keep additions from both). If the merge **can't be resolved cleanly**, leave that PR open, record it for human follow-up, and move to the next — **never force it**.
 3. **Merge**, then on a required-check failure apply **CI flake handling** (one re-run on the same commit; flake → proceed, real → leave open — see `~/.claude/lib/ci-flake-handling.md`):
    ```bash
    git -C "<worktree>" push
    gh pr merge <pr_number> --merge --delete-branch
    ```
-4. **Confirm the issue closed** (`Closes #<num>` auto-closes on merge to the default branch); if still open, `gh issue close <num> --comment "Shipped in PR #<pr_number>."`. Drop the `in-progress` label.
+4. **Close out the issue** — single-issue Phase 7's closure step applied per merged PR: confirm `Closes #<num>` auto-closed it on merge to the default branch; if still open, `gh issue close <num> --comment "Shipped in PR #<pr_number>."`. Drop the `in-progress` label.
 
 ### Swarm Phase D — Reconcile, clean up, report
 
