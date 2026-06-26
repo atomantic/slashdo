@@ -228,6 +228,14 @@ Classify each item as:
 
 For every `drift-conflict` / `drift-unclear`, record: the item, the conflicting feature/commit(s), and a one-line description of the collision.
 
+**Agent 6: Dependency & Priority Graph (issue mode only)**
+Only runs when `ISSUE_MODE=true` (PLAN.md items don't carry issue-number dependencies). For every open issue under consideration:
+- Parse the body for `Depends on #<N>` / `Blocked by #<N>` lines (case-insensitive; a line may list several `#<N>`), and read GitHub's native blocked-by relationship where the API exposes it. Record each issue's blocker set.
+- Resolve each referenced #N's state (`gh issue view <N> --json state`): mark the issue **blocked** if any blocker is still OPEN, **clearable** if a referenced blocker is now CLOSED (a stale marker to strip), **broken** if a referenced number doesn't exist, and detect **cycles** across the collected edges.
+- Note each issue's `priority:<N>` label if present (for the summary only — priority is not triage evidence).
+
+Feed this graph to Phase 2: `blocked` issues are kept (`still-pending`, never `stale`), and `clearable`/`broken`/`cycle` findings drive the dependency-marker hygiene fixes in the Phase 2 issue-mode callout.
+
 ## Phase 2: Auto-Triage
 
 > **Issue mode (`--issues`):** Classify every open `PLAN_LABEL` issue using the
@@ -249,6 +257,33 @@ For every `drift-conflict` / `drift-unclear`, record: the item, the conflicting 
 > is outstanding work, whether the epic's own wrap-up tasks or unfinished children);
 > `epic-empty` → fall back to ordinary classification. **Never** close an
 > `epic-open`/`epic-wrapup` epic even if its title reads as done.
+>
+> **Blocked issues are not stale.** An issue that declares a hard dependency —
+> a `Depends on #<N>` / `Blocked by #<N>` line in its body (or GitHub's native
+> blocked-by relationship) where #N is still OPEN — is **legitimately waiting**, not
+> abandoned. Classify it `still-pending` (**keep open**) regardless of its
+> `updatedAt` age; the inactivity is expected. (`/do:next` skips it for the same
+> reason — see its Phase 1 step 4.) Do not let the >30-day `stale` rule close work
+> that is correctly parked behind an unshipped predecessor.
+>
+> **Dependency-marker hygiene (close the loop).** While triaging, reconcile each
+> issue's declared dependencies against reality and fold fixes into Phase 3:
+> - A `Depends on #N` whose **#N is now CLOSED** → the marker is satisfied; **strip
+>   that reference** from the body (the issue is no longer blocked, so it should
+>   re-enter the claimable walk). If a line listed several, drop only the closed ones.
+> - A `Depends on #N` referencing a **non-existent / wrong number** → flag it (in
+>   `--interactive`, surface for correction; autonomously, comment so a human fixes it
+>   rather than silently deleting a real intent).
+> - A **dependency cycle** (A↔B, or longer) → flag it as a planning error; both ends
+>   stay blocked until a human breaks it. Note the cycle, don't try to resolve it.
+>
+> **Priority labels are advisory, never a triage signal.** A `priority:<N>` label
+> only orders `/do:next`'s walk; it has no bearing on done/stale/pending
+> classification. Don't add, remove, or treat it as evidence here. When replan
+> *files* new work that has a clear ordering relationship, it MAY set `Depends on #N`
+> (for a hard predecessor) or `priority:<N>` (for soft sequencing) on the new
+> issue — keeping every filed issue immediately claimable per the actionable-issues
+> invariant.
 
 Using agent results, classify every PLAN.md item:
 
