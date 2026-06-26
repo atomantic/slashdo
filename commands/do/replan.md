@@ -53,15 +53,23 @@ mapping:
 | 5 | Move GOALS.md tactical items into PLAN.md | Create issues from GOALS.md tactical items |
 | 6 | Commit PLAN.md (+ GOALS.md/docs) | Commit only the PLAN.md stub / GOALS.md edits; issue ops are the audit trail |
 
-**Actionable-issues invariant.** Every issue replan files must be immediately
-claimable — a well-formed task, not a question. Before migrating an item, replan
-surfaces any **open question or pending decision** attached to it (see Phase 3) and
-asks the human to resolve it; the resolution is folded into the issue body. The
-expected outcome of a migration is that **all** items are resolved and filed, so
-PLAN.md ends empty. The one exception: if the human explicitly **defers** a
-decision, that single item cannot become a claimable issue, so it stays in PLAN.md
-(reported in the summary) until someone decides — it is the only thing that may
-remain. The tracker never accumulates un-actionable issues.
+**Actionable-issues invariant.** Every issue replan files must be **well-formed and
+decision-complete** — a fully-specified task, not an open question. Before migrating
+an item, replan surfaces any **open question or pending decision** attached to it
+(see Phase 3) and asks the human to resolve it; the resolution is folded into the
+issue body. The expected outcome of a migration is that **all** items are resolved
+and filed, so PLAN.md ends empty. The one exception: if the human explicitly
+**defers** a decision, that single item cannot become a claimable issue, so it stays
+in PLAN.md (reported in the summary) until someone decides — it is the only thing
+that may remain. The tracker never accumulates un-actionable issues.
+
+**A `Depends on #N` does NOT violate this invariant.** "Actionable" here means
+"carries no unresolved question/decision," **not** "pickable this very second." A
+filed issue with a hard dependency is fully specified and decision-complete — it is
+merely *sequenced*: `/do:next` defers claiming it until #N closes, then surfaces it
+automatically (self-clearing). That is intended ordering, categorically different
+from an un-actionable open-question issue. So replan may file a blocked-but-well-
+formed successor freely; only an *undecided* item is barred from the tracker.
 
 **Item IDs.** In PLAN.md mode the stable ID is the kebab-slug (see
 [lib/plan-id-format.md](../../lib/plan-id-format.md)); concurrent agents claim
@@ -228,6 +236,14 @@ Classify each item as:
 
 For every `drift-conflict` / `drift-unclear`, record: the item, the conflicting feature/commit(s), and a one-line description of the collision.
 
+**Agent 6: Dependency & Priority Graph (issue mode only)**
+Only runs when `ISSUE_MODE=true` (PLAN.md items don't carry issue-number dependencies). For every open issue under consideration:
+- Parse the body for `Depends on #<N>` / `Blocked by #<N>` lines (case-insensitive; a line may list several `#<N>`). The body convention is the **portable, cross-host default** and works on both GitHub and GitLab. Additionally read GitHub's **native** blocked-by relationship where the API exposes it — that native source is **GitHub-only** (there is no `glab` equivalent wired up here), so on GitLab rely on the body lines alone. Record each issue's blocker set.
+- Resolve each referenced #N's state with the **detected `CLI_TOOL`** (branch on the host as the rest of issue mode does — `gh issue view <N> --json state -q .state`; glab: `glab issue view <N> --output json` then read `.state`), and **normalize the value** before comparing: GitHub reports `OPEN`/`CLOSED`, GitLab `opened`/`closed`. Mark the issue **blocked** if any blocker is still open, **clearable** if a referenced blocker is now closed (a stale marker to strip), **broken** if a referenced number doesn't exist, and detect **cycles** across the collected edges.
+- Note each issue's `priority:<N>` label if present (for the summary only — priority is not triage evidence).
+
+Feed this graph to Phase 2: `blocked` issues are kept (`still-pending`, never `stale`); a `clearable` issue (a blocker just CLOSED) is **also** kept `still-pending` for this run — its `updatedAt` is stale only because it sat parked behind the dependency, so it must NOT be closed by the >30-day stale rule in the same run that unblocks it — and `clearable`/`broken`/`cycle` findings drive the dependency-marker hygiene fixes in the Phase 2 issue-mode callout.
+
 ## Phase 2: Auto-Triage
 
 > **Issue mode (`--issues`):** Classify every open `PLAN_LABEL` issue using the
@@ -249,6 +265,45 @@ For every `drift-conflict` / `drift-unclear`, record: the item, the conflicting 
 > is outstanding work, whether the epic's own wrap-up tasks or unfinished children);
 > `epic-empty` → fall back to ordinary classification. **Never** close an
 > `epic-open`/`epic-wrapup` epic even if its title reads as done.
+>
+> **Blocked issues are not stale.** An issue that declares a hard dependency —
+> a `Depends on #<N>` / `Blocked by #<N>` line in its body (or GitHub's native
+> blocked-by relationship) where #N is still OPEN — is **legitimately waiting**, not
+> abandoned. Classify it `still-pending` (**keep open**) regardless of its
+> `updatedAt` age; the inactivity is expected. (`/do:next` skips it for the same
+> reason — see its Phase 1 step 4.) Do not let the >30-day `stale` rule close work
+> that is correctly parked behind an unshipped predecessor.
+>
+> **Dependency-marker hygiene (close the loop).** While triaging, reconcile each
+> issue's declared dependencies against reality and fold fixes into Phase 3:
+> - A `Depends on #N` **or `Blocked by #N`** reference whose **#N is now CLOSED** → the
+>   marker is satisfied; **strip that reference** from the body (whichever of the two
+>   forms it used — both are supported equally, so clean up both). The issue is no
+>   longer blocked, so it should re-enter the claimable walk. If a line listed several,
+>   drop only the closed ones.
+>   **Classify this just-unblocked issue `still-pending` for this run — exempt from
+>   the >30-day `stale` rule even though its `updatedAt` is old.** It was parked
+>   behind the dependency, so its inactivity is expected, not abandonment; closing it
+>   as stale in the very run that unblocks it would delete work `/do:next` never got
+>   to claim and defeat the self-clearing behavior. (Same reasoning as the still-OPEN
+>   `blocked` exemption above — a freshly-cleared blocker just moves the issue from
+>   `blocked` to claimable, not to stale.)
+> - A `Depends on #N` referencing a **non-existent / wrong number** → flag it (in
+>   `--interactive`, surface for correction; autonomously, comment so a human fixes it
+>   rather than silently deleting a real intent).
+> - A **dependency cycle** (A↔B, or longer) → flag it as a planning error; both ends
+>   stay blocked until a human breaks it. Note the cycle, don't try to resolve it.
+>
+> **Priority labels are advisory, never a triage signal.** A `priority:<N>` label
+> only orders `/do:next`'s walk; it has no bearing on done/stale/pending
+> classification. Don't add, remove, or treat it as evidence here. When replan
+> *files* new work that has a clear ordering relationship, it MAY set `Depends on #N`
+> (for a hard predecessor) or `priority:<N>` (for soft sequencing) on the new issue.
+> This does **not** breach the actionable-issues invariant: that invariant bars issues
+> with unresolved *questions/decisions*, not well-formed issues that are merely
+> *sequenced*. A `Depends on #N` issue is fully specified and self-clearing (it becomes
+> claimable the instant #N closes), so it is **deferred, not un-actionable** — see the
+> invariant's "A `Depends on #N` does NOT violate this invariant" note above.
 
 Using agent results, classify every PLAN.md item:
 
