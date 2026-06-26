@@ -234,7 +234,7 @@ Only runs when `ISSUE_MODE=true` (PLAN.md items don't carry issue-number depende
 - Resolve each referenced #N's state (`gh issue view <N> --json state`): mark the issue **blocked** if any blocker is still OPEN, **clearable** if a referenced blocker is now CLOSED (a stale marker to strip), **broken** if a referenced number doesn't exist, and detect **cycles** across the collected edges.
 - Note each issue's `priority:<N>` label if present (for the summary only — priority is not triage evidence).
 
-Feed this graph to Phase 2: `blocked` issues are kept (`still-pending`, never `stale`), and `clearable`/`broken`/`cycle` findings drive the dependency-marker hygiene fixes in the Phase 2 issue-mode callout.
+Feed this graph to Phase 2: `blocked` issues are kept (`still-pending`, never `stale`); a `clearable` issue (a blocker just CLOSED) is **also** kept `still-pending` for this run — its `updatedAt` is stale only because it sat parked behind the dependency, so it must NOT be closed by the >30-day stale rule in the same run that unblocks it — and `clearable`/`broken`/`cycle` findings drive the dependency-marker hygiene fixes in the Phase 2 issue-mode callout.
 
 ## Phase 2: Auto-Triage
 
@@ -271,6 +271,13 @@ Feed this graph to Phase 2: `blocked` issues are kept (`still-pending`, never `s
 > - A `Depends on #N` whose **#N is now CLOSED** → the marker is satisfied; **strip
 >   that reference** from the body (the issue is no longer blocked, so it should
 >   re-enter the claimable walk). If a line listed several, drop only the closed ones.
+>   **Classify this just-unblocked issue `still-pending` for this run — exempt from
+>   the >30-day `stale` rule even though its `updatedAt` is old.** It was parked
+>   behind the dependency, so its inactivity is expected, not abandonment; closing it
+>   as stale in the very run that unblocks it would delete work `/do:next` never got
+>   to claim and defeat the self-clearing behavior. (Same reasoning as the still-OPEN
+>   `blocked` exemption above — a freshly-cleared blocker just moves the issue from
+>   `blocked` to claimable, not to stale.)
 > - A `Depends on #N` referencing a **non-existent / wrong number** → flag it (in
 >   `--interactive`, surface for correction; autonomously, comment so a human fixes it
 >   rather than silently deleting a real intent).
