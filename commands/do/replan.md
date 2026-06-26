@@ -53,15 +53,23 @@ mapping:
 | 5 | Move GOALS.md tactical items into PLAN.md | Create issues from GOALS.md tactical items |
 | 6 | Commit PLAN.md (+ GOALS.md/docs) | Commit only the PLAN.md stub / GOALS.md edits; issue ops are the audit trail |
 
-**Actionable-issues invariant.** Every issue replan files must be immediately
-claimable — a well-formed task, not a question. Before migrating an item, replan
-surfaces any **open question or pending decision** attached to it (see Phase 3) and
-asks the human to resolve it; the resolution is folded into the issue body. The
-expected outcome of a migration is that **all** items are resolved and filed, so
-PLAN.md ends empty. The one exception: if the human explicitly **defers** a
-decision, that single item cannot become a claimable issue, so it stays in PLAN.md
-(reported in the summary) until someone decides — it is the only thing that may
-remain. The tracker never accumulates un-actionable issues.
+**Actionable-issues invariant.** Every issue replan files must be **well-formed and
+decision-complete** — a fully-specified task, not an open question. Before migrating
+an item, replan surfaces any **open question or pending decision** attached to it
+(see Phase 3) and asks the human to resolve it; the resolution is folded into the
+issue body. The expected outcome of a migration is that **all** items are resolved
+and filed, so PLAN.md ends empty. The one exception: if the human explicitly
+**defers** a decision, that single item cannot become a claimable issue, so it stays
+in PLAN.md (reported in the summary) until someone decides — it is the only thing
+that may remain. The tracker never accumulates un-actionable issues.
+
+**A `Depends on #N` does NOT violate this invariant.** "Actionable" here means
+"carries no unresolved question/decision," **not** "pickable this very second." A
+filed issue with a hard dependency is fully specified and decision-complete — it is
+merely *sequenced*: `/do:next` defers claiming it until #N closes, then surfaces it
+automatically (self-clearing). That is intended ordering, categorically different
+from an un-actionable open-question issue. So replan may file a blocked-but-well-
+formed successor freely; only an *undecided* item is barred from the tracker.
 
 **Item IDs.** In PLAN.md mode the stable ID is the kebab-slug (see
 [lib/plan-id-format.md](../../lib/plan-id-format.md)); concurrent agents claim
@@ -268,9 +276,11 @@ Feed this graph to Phase 2: `blocked` issues are kept (`still-pending`, never `s
 >
 > **Dependency-marker hygiene (close the loop).** While triaging, reconcile each
 > issue's declared dependencies against reality and fold fixes into Phase 3:
-> - A `Depends on #N` whose **#N is now CLOSED** → the marker is satisfied; **strip
->   that reference** from the body (the issue is no longer blocked, so it should
->   re-enter the claimable walk). If a line listed several, drop only the closed ones.
+> - A `Depends on #N` **or `Blocked by #N`** reference whose **#N is now CLOSED** → the
+>   marker is satisfied; **strip that reference** from the body (whichever of the two
+>   forms it used — both are supported equally, so clean up both). The issue is no
+>   longer blocked, so it should re-enter the claimable walk. If a line listed several,
+>   drop only the closed ones.
 >   **Classify this just-unblocked issue `still-pending` for this run — exempt from
 >   the >30-day `stale` rule even though its `updatedAt` is old.** It was parked
 >   behind the dependency, so its inactivity is expected, not abandonment; closing it
@@ -288,9 +298,12 @@ Feed this graph to Phase 2: `blocked` issues are kept (`still-pending`, never `s
 > only orders `/do:next`'s walk; it has no bearing on done/stale/pending
 > classification. Don't add, remove, or treat it as evidence here. When replan
 > *files* new work that has a clear ordering relationship, it MAY set `Depends on #N`
-> (for a hard predecessor) or `priority:<N>` (for soft sequencing) on the new
-> issue — keeping every filed issue immediately claimable per the actionable-issues
-> invariant.
+> (for a hard predecessor) or `priority:<N>` (for soft sequencing) on the new issue.
+> This does **not** breach the actionable-issues invariant: that invariant bars issues
+> with unresolved *questions/decisions*, not well-formed issues that are merely
+> *sequenced*. A `Depends on #N` issue is fully specified and self-clearing (it becomes
+> claimable the instant #N closes), so it is **deferred, not un-actionable** — see the
+> invariant's "A `Depends on #N` does NOT violate this invariant" note above.
 
 Using agent results, classify every PLAN.md item:
 
