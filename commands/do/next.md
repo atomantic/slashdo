@@ -81,12 +81,14 @@ Then:
    # explicitly opted into a curated queue via --issues-label / a saved issues-label default.
    # Sort key is [priorityRank, createdAt]: a `priority:<N>` label (lower N = higher
    # priority, e.g. priority:0 before priority:1) sorts first; an issue with NO priority
-   # label gets rank 9999 so it falls after every prioritized one, and createdAt breaks
-   # ties. With no `priority:*` labels anywhere the order collapses to plain oldest-first
-   # — fully backward compatible. `body` is fetched here for the step-4 dependency parse.
+   # label gets rank +infinity (jq `infinite`) so it falls after EVERY prioritized one —
+   # a finite sentinel like 9999 would tie a real `priority:9999` label and let unlabeled
+   # work jump ahead of it — and createdAt breaks ties. With no `priority:*` labels
+   # anywhere the order collapses to plain oldest-first — fully backward compatible.
+   # `body` is fetched here for the step-4 dependency parse.
    gh issue list --state open ${LABEL_FILTER:+--label "$LABEL_FILTER"} --limit 500 \
      --json number,title,assignees,labels,createdAt,body \
-     -q 'sort_by([ (([.labels[].name | select(test("^priority:[0-9]+$")) | ltrimstr("priority:") | tonumber] | min) // 9999), .createdAt ]) | .[]'
+     -q 'sort_by([ (([.labels[].name | select(test("^priority:[0-9]+$")) | ltrimstr("priority:") | tonumber] | min) // infinite), .createdAt ]) | .[]'
    ```
    The high `--limit` (500) avoids silently truncating the queue before the client-side priority/oldest sort — `gh issue list` defaults to 30, which would hide older eligible work. If a repo ever has >500 open candidate issues the queue is pathologically large (run `/do:replan --issues` to prune, or pass `--issues-label` to scope it); note the cap rather than silently dropping the overflow. **Priority is advisory ordering, not a gate** — an unprioritized issue is still claimable; the `priority:<N>` label only moves it earlier or later in the walk.
 2. **Determine in-flight issues.** Issue `N` is in flight if EITHER `issue-N` appears in the raw in-flight set, OR the issue **already has an assignee** (someone took it via the Phase 2 marker, possibly on another machine). The assignee check is the cross-machine half of the claim — a local-only `next/issue-N` branch on a sibling machine is invisible here, but its assignee is not.
