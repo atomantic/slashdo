@@ -1,5 +1,8 @@
 # Unreleased Changes
 
+## Issue queue
+- **`/do:next --swarm` drains several independent issues in parallel.** Where `/do:next` ships one item per run, `--swarm` (issues mode) now claims and ships up to N independent open issues at once — each in its own worktree subagent running the normal single-issue flow — then serializes only the merge, re-syncing each PR onto the advancing default branch. `--swarm` runs 3 agents by default; `--swarm=N` sets the count (clamped 1–6). A PR whose review gate isn't clean or that can't cleanly re-sync is left open rather than force-merged, and a died agent's claim is released back to the queue (#93).
+
 ## PR review loop
 - Added a **fix regression guard** to the review loops: after applying a round's fixes and before re-review/push, the loop now scans the *fix diff itself* for the two classes that cause self-inflicted review spirals — unscoped state-clearing/restoring writes (a "restore" keyed to a whole collection instead of the one record the finding named) and side effects folded onto a hot path (an `updatedAt`/event/cache write on every tick) — and adds a focused regression test where the fix touches scoping or timestamp/side-effect logic. Wired into the local-agent, ollama, and multi-reviewer (parallel) loop bodies; it matters most in parallel mode, which does no automatic re-review (`lib/fix-regression-guard.md`).
 
