@@ -1,6 +1,6 @@
 ---
 description: View or set saved slashdo defaults (e.g. --review-with) so future commands can omit the flag
-argument-hint: "[--show] [--project] [--review-with <list>] [--review-iterations <n>] [--review-mode <series|parallel>] [--reviewer-applies|--no-reviewer-applies] [--review-stop-on-findings|--review-stop-on-clean|--review-stop-all] [--issues|--no-issues] [--issues-label <name>] [--merge|--no-merge|--merge=<method>] [--merge-method <method>] [--unset <key>] [--reset]"
+argument-hint: "[--show] [--project] [--review-with <list>] [--review-iterations <n>] [--review-mode <series|parallel>] [--reviewer-applies|--no-reviewer-applies] [--review-stop-on-findings|--review-stop-on-clean|--review-stop-all] [--issues|--no-issues] [--issues-label <name>] [--self|--no-self] [--merge|--no-merge|--merge=<method>] [--merge-method <method>] [--unset <key>] [--reset]"
 ---
 
 ## Purpose
@@ -14,6 +14,8 @@ argument-hint: "[--show] [--project] [--review-with <list>] [--review-iterations
 …and afterward `/do:pr`, `/do:release`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:depfree`, and `/do:rpr` behave as if you had passed `--review-with=claude,codex,ollama[qwen2.5-coder:32b]` — unless you pass an explicit flag on that run (which always wins) or `--review-with none` to skip reviewers for a single run.
 
 The same store also holds an **issue-mode default**: `/do:config --issues` makes every command that accepts `--issues` (`/do:next`, `/do:replan`, `/do:better`, `/do:better-swift`, `/do:depfree`, `/do:review`, `/do:rpr`) default to filing/working tracker issues instead of `PLAN.md`. Pass `--no-issues` on a single run to fall back to PLAN.md mode for that run, and `--issues-label <name>` to save the scoping label.
+
+It also holds a **self-only issue gate for `/do:next`**: `/do:config --self` makes `/do:next --issues` claim only issues filed by the authenticated account (`@me`) and never consider issues opened by anyone else — a security boundary for shared/multi-contributor trackers. Pass `--no-self` on a single run to fall back to claiming any open issue. Only `/do:next` reads this key.
 
 It also holds an **auto-merge default for `/do:pr`**: `/do:config --merge` makes `/do:pr` merge the PR automatically once reviews and CI are solid (instead of leaving it open). Save a preferred method with `--merge-method squash|rebase|merge` (or the shorthand `--merge=squash`); pass `--no-merge` on a single run to leave that PR open.
 
@@ -45,10 +47,11 @@ At read time, **per-project overrides global, key by key** (see `lib/review-conf
    - `--review-mode <series|parallel>` → key `review-mode`. Must be one of `series`/`parallel`; else abort with `--review-mode must be one of series, parallel (got: {value}).` Store the string verbatim. Selects how the multi-reviewer loop dispatches reviewers (`series` — one-at-a-time, each sees the prior's fixes, the built-in default; `parallel` — reviews run concurrently then the union is applied once). Read by `/do:pr`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:depfree`, and `/do:release` (`/do:rpr` ignores it).
    - `--issues` → key `issues`, value `true`. Its explicit opposite `--no-issues` → key `issues`, value `false` — store this (rather than `--unset`) when a **project** default needs to override an inherited global `issues=true` back to PLAN.md mode. (`--unset issues` removes the key entirely and falls back to the lower-precedence value.) `--issues` and `--no-issues` are mutually exclusive. A saved `issues=true` makes every command that accepts `--issues` (`/do:next`, `/do:replan`, `/do:better`, `/do:better-swift`, `/do:depfree`, `/do:review`, `/do:rpr`) default to issue mode; an explicit `--issues`/`--no-issues` on a run still wins.
    - `--issues-label <name>` → key `issues-label`. Store the string verbatim — the label that scopes plan-tracking issues (built-in default `plan`). Only meaningful once issue mode is on.
+   - `--self` → key `self`, value `true`. Its explicit opposite `--no-self` → key `self`, value `false` — store this (rather than `--unset`) when a **project** default needs to override an inherited global `self=true` back to claiming any open issue. (`--unset self` removes the key entirely and falls back to the lower-precedence value.) `--self` and `--no-self` are mutually exclusive. A saved `self=true` makes `/do:next --issues` claim only issues filed by the running account (`@me`) — auto-pick filters out others and an explicit `#<num>` for someone else's issue is refused — as a security boundary; an explicit `--self`/`--no-self` on a run still wins. Only `/do:next` reads this key, and only in issue mode (PLAN.md items have no author).
    - `--merge` → key `merge`, value `true`. Its explicit opposite `--no-merge` → key `merge`, value `false` — store this (rather than `--unset`) when a **project** default needs to override an inherited global `merge=true` back to leave-open. (`--unset merge` removes the key entirely and falls back to the lower-precedence value.) `--merge` and `--no-merge` are mutually exclusive. The shorthand `--merge=<method>` sets `merge=true` **and** `merge-method=<method>` in one token (the `<method>` is validated against `squash`/`rebase`/`merge` with the same abort as `--merge-method` below). If both `--merge=<method>` and `--merge-method <method>` are given with **different** methods, abort with `--merge=<method> and --merge-method specify conflicting methods ({first} vs {second})`; identical methods are accepted. A saved `merge=true` makes `/do:pr` auto-merge once reviews and CI are solid; an explicit `--merge`/`--no-merge` on a run still wins. Only `/do:pr` reads this key.
    - `--merge-method <method>` → key `merge-method`. Must be one of `squash`, `rebase`, `merge`; else abort with `--merge-method must be one of squash, rebase, merge (got: {value}).` The method `/do:pr` uses when auto-merging; when unset, `/do:pr` falls back to the repo's allowed method. Only meaningful alongside merge mode.
-   - Any other `--flag` that is not one of the above and not `--show`/`--project`/`--reset`/`--unset` → abort with: `Unknown /do:config option: {flag}. Supported: --review-with, --review-iterations, --review-mode, --reviewer-applies, --no-reviewer-applies, --review-stop-on-findings, --review-stop-on-clean, --review-stop-all, --issues, --no-issues, --issues-label, --merge, --no-merge, --merge-method, --unset <key>, --reset, --show, --project.`
-4. **`--unset <key>`**: `<key>` must be one of `review-with`, `review-iterations`, `review-mode`, `reviewer-applies`, `review-stop-mode`, `issues`, `issues-label`, `merge`, `merge-method`. Reject others with `Unknown --unset key: {key}. Valid keys: review-with, review-iterations, review-mode, reviewer-applies, review-stop-mode, issues, issues-label, merge, merge-method.`
+   - Any other `--flag` that is not one of the above and not `--show`/`--project`/`--reset`/`--unset` → abort with: `Unknown /do:config option: {flag}. Supported: --review-with, --review-iterations, --review-mode, --reviewer-applies, --no-reviewer-applies, --review-stop-on-findings, --review-stop-on-clean, --review-stop-all, --issues, --no-issues, --issues-label, --self, --no-self, --merge, --no-merge, --merge-method, --unset <key>, --reset, --show, --project.`
+4. **`--unset <key>`**: `<key>` must be one of `review-with`, `review-iterations`, `review-mode`, `reviewer-applies`, `review-stop-mode`, `issues`, `issues-label`, `self`, `merge`, `merge-method`. Reject others with `Unknown --unset key: {key}. Valid keys: review-with, review-iterations, review-mode, reviewer-applies, review-stop-mode, issues, issues-label, self, merge, merge-method.`
 
 ## Apply (read → modify → write)
 
@@ -73,6 +76,7 @@ Global (~/.claude/.slashdo-config.json):
   review-stop-mode   = {value or "(unset)"}
   issues             = {value or "(unset)"}
   issues-label       = {value or "(unset)"}
+  self               = {value or "(unset)"}
   merge              = {value or "(unset)"}
   merge-method       = {value or "(unset)"}
 
@@ -87,6 +91,7 @@ Effective (project overrides global):
   review-stop-mode   = {merged value or "all (built-in default)"}
   issues             = {merged value or "false (built-in default — PLAN.md mode)"}
   issues-label       = {merged value or "plan (built-in default)"}
+  self               = {merged value or "false (built-in default — any author)"}
   merge              = {merged value or "false (built-in default — leave PR open)"}
   merge-method       = {merged value or "(repo default)"}
 ```
