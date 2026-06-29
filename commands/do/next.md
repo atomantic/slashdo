@@ -146,9 +146,16 @@ Then:
    ```bash
    # LABEL_FILTER is empty by default → all open issues; non-empty only when the user
    # explicitly opted into a curated queue via --issues-label / a saved issues-label default.
-   # AUTHOR_FILTER is empty by default, or "@me" when SELF_MODE is on (--self / saved self
-   # default) → restricts the queue to issues authored by the running account. gh resolves
-   # "@me" to the authenticated login server-side, so other people's issues never load.
+   # The author filter is empty by default, or "@me" when SELF_MODE is on (--self / saved
+   # self default) → restricts the queue to issues authored by the running account. gh
+   # resolves "@me" to the authenticated login server-side, so other people's issues never
+   # load.
+   # Build the optional flags as a shell ARRAY, not via `${VAR:+--flag "$VAR"}`. zsh (a
+   # common host shell) does NOT word-split the result of a parameter expansion, so
+   # `${AUTHOR_FILTER:+--author "$AUTHOR_FILTER"}` expands to ONE argv word `--author @me`
+   # and `gh issue list` aborts with `unknown flag: --author @me` whenever --self is on
+   # (same trap for --label). An array element-appends each flag and its value as separate
+   # words in BOTH bash and zsh, and expands to zero words when the filter is unset.
    # Sort key is [priorityRank, createdAt]: a `priority:<N>` label (lower N = higher
    # priority, e.g. priority:0 before priority:1) sorts first; an issue with NO priority
    # label gets rank +infinity (jq `infinite`) so it falls after EVERY prioritized one —
@@ -156,8 +163,10 @@ Then:
    # work jump ahead of it — and createdAt breaks ties. With no `priority:*` labels
    # anywhere the order collapses to plain oldest-first — fully backward compatible.
    # `body` is fetched here for the step-4 dependency parse.
-   AUTHOR_FILTER=""; [ "$SELF_MODE" = "true" ] && AUTHOR_FILTER="@me"
-   gh issue list --state open ${LABEL_FILTER:+--label "$LABEL_FILTER"} ${AUTHOR_FILTER:+--author "$AUTHOR_FILTER"} --limit 500 \
+   LIST_ARGS=(--state open)
+   [ -n "$LABEL_FILTER" ] && LIST_ARGS+=(--label "$LABEL_FILTER")
+   [ "$SELF_MODE" = "true" ] && LIST_ARGS+=(--author "@me")
+   gh issue list "${LIST_ARGS[@]}" --limit 500 \
      --json number,title,assignees,labels,createdAt,body \
      -q 'sort_by([ (([.labels[].name | select(test("^priority:[0-9]+$")) | ltrimstr("priority:") | tonumber] | min) // infinite), .createdAt ]) | .[]'
    ```
