@@ -145,12 +145,18 @@ This phase drives the **multi-reviewer wrapper** (defined under "Reviewer loop b
 
 **If `PR_SIDE_AGENTS` is empty** (no `copilot` and no `@<login>` in `--review-with`), skip this entire section. Set `PR_SIDE_OVERALL_STATUS=clean` (skipped — no PR-side pass requested) and continue to "Compute OVERALL_STATUS".
 
-Otherwise, hand off to the **multi-reviewer loop** using only `PR_SIDE_AGENTS` with the parsed inputs:
+**Stop-mode honors the user's whole ordered `--review-with` list, not just within one phase.** Before invoking `PR_SIDE_AGENTS`, check whether the pre-PR local phase already satisfied `{REVIEW_STOP_MODE}` — if it did, the user's intent was to stop the *entire* list there, and running PR-side reviewers anyway (which can mean waiting on a slow human `@<login>` reviewer) defeats the point of opting into a stop-mode for a mixed local+PR-side list:
+
+- `REVIEW_STOP_MODE=on-clean`: if `LOCAL_OVERALL_STATUS` is `clean` or `partial` (a clean verdict was reached — `partial` means the local phase's own wrapper invocation already short-circuited on a clean pass; `clean` means its whole list ran and was clean, which also satisfies "stop after the first clean reviewer" when read across the full ordered list), skip `PR_SIDE_AGENTS` entirely: set `PR_SIDE_OVERALL_STATUS=clean` (skipped — already satisfied by the local phase) and continue to "Compute OVERALL_STATUS".
+- `REVIEW_STOP_MODE=on-findings`: if `LOCAL_OVERALL_STATUS` is `partial` (the local wrapper's own stop-mode already fired), OR the local phase added at least one fix commit (check the commit count between the pre-local-phase SHA and current HEAD), skip `PR_SIDE_AGENTS` the same way.
+- `REVIEW_STOP_MODE=all` (default, and the recommended setting for mixed local+PR-side lists): no cross-phase skip — always run `PR_SIDE_AGENTS` when non-empty, exactly as below.
+
+When the cross-phase skip above does not apply, hand off to the **multi-reviewer loop** using only `PR_SIDE_AGENTS` with the parsed inputs:
 
 - `{PR_SIDE_AGENTS}` — `copilot` and/or `@<login>` entries, in order
 - `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`
 
-These reviewers need the PR to exist (they review cloud-side), which is why they run here, after "Open the PR", rather than in the pre-PR phase. This phase drives the same **multi-reviewer wrapper** (under "Reviewer loop bodies" below), this time over `PR_SIDE_AGENTS`. Note that `--review-stop-on-findings` / `--review-stop-on-clean` apply *within* each phase's wrapper invocation; a stop-mode short-circuit during the local phase does not skip the PR-side pass, since the two phases run as separate wrapper invocations:
+These reviewers need the PR to exist (they review cloud-side), which is why they run here, after "Open the PR", rather than in the pre-PR phase. This phase drives the same **multi-reviewer wrapper** (under "Reviewer loop bodies" below), this time over `PR_SIDE_AGENTS`. `--review-stop-on-findings` / `--review-stop-on-clean` still also apply *within* this phase's own wrapper invocation (e.g. stopping after the first of several `@<login>` entries that comes back clean), exactly as in any other multi-reviewer-loop call — the cross-phase check above only handles the boundary between the two phases:
 
 - `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`)
 - `@<login>` → GitHub-reviewer loop (`lib/github-reviewer-loop.md`), forwarding `{REVIEWER_LOGIN}`
