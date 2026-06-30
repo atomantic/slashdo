@@ -93,6 +93,11 @@ the moment a review returns zero unresolved comments:
      "clean" and exit.
    - If the review is CHANGES_REQUESTED, or there are unresolved threads from
      {REVIEWER_LOGIN}: proceed to step 4.
+   - If the review is DISMISSED AND there are no unresolved threads from
+     {REVIEWER_LOGIN}: a dismissed review is not the reviewer's final word —
+     report status "error" and exit rather than re-requesting (re-requesting
+     a dismissed review risks looping if {REVIEWER_LOGIN} doesn't respond to
+     re-requests the same way the first time).
    - Filter review threads to those whose comments are authored by
      {REVIEWER_LOGIN} and isResolved:false (don't act on other reviewers' threads).
 
