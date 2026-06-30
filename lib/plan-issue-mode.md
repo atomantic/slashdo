@@ -32,6 +32,9 @@ while work happens on issues.
 2. **Label.** Ensure the scoping label exists:
    `gh label create <PLAN_LABEL> --description "Tracked by slashdo" 2>/dev/null || true`
    (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" 2>/dev/null || true` — glab requires a color).
+   Category and severity labels (see "Labels, not title brackets" below) are
+   created lazily, immediately before each issue is filed, so no upfront list of
+   them is needed here.
 3. **Fetch existing open issues.** In issue mode the tracker — not `PLAN.md` — is
    the source of truth for already-known work, so pull the open issues up front and
    keep them in context for dedup:
@@ -50,13 +53,54 @@ while work happens on issues.
   If it does, **skip creation** and reuse that issue's `#<number>` as the ID;
   optionally add a comment if the new finding adds detail. Only when no existing
   issue covers it, create one:
-  `gh issue create --title "<Title>" --body "<rationale + context: file paths, category, why it was deferred>" --label <PLAN_LABEL>`
-  (glab: `glab issue create --title "<Title>" --description "<body>" --label <PLAN_LABEL>`).
+  `gh issue create --title "<Title>" --body "<rationale + context: file paths, category, why it was deferred>" <label flags>`
+  (glab: `glab issue create --title "<Title>" --description "<body>" <label flags>`).
   The **issue number is the ID** — assign **no** slug, and write **nothing** to
   `PLAN.md`. Make the title a self-contained, claimable task and put enough context
   in the body that someone can pick it up cold. Capture the issue numbers (created
   **and** reused) for the command's final summary (report `#<number>` where it would
   have reported a `[slug]`), and note which were skipped as duplicates.
+
+## Labels, not title brackets
+
+The issue **title is a clean, human-readable task** — do **not** prefix it with
+`[category]` / `[SEVERITY]` brackets (e.g. ❌ `[dry][LOW] Consolidate the XML
+decoders`). That metadata belongs in GitHub/GitLab **labels**, which both hosts
+render as colored tags and let users filter on — the whole point of a tracker.
+Carry every label through the `<label flags>` placeholder in the create commands
+above as **repeated `--label <name>`** flags (one per label):
+
+- **Scope:** always `--label <PLAN_LABEL>`.
+- **Category** — when the finding carries one (audit findings always do): a label
+  named for the finding's category slug, lowercased (e.g. `security`, `dry`,
+  `architecture`, `deps`, `bugs-perf`, `code-quality`, `stack-specific`, `tests`,
+  `ux`, `structural`). This replaces the `[dry]`-style title prefix.
+- **Severity** — when the finding carries one: `severity:critical`, `severity:high`,
+  `severity:medium`, or `severity:low`. This replaces the `[LOW]`-style title prefix.
+
+**Create each label if missing, immediately before applying it** (idempotent —
+the `|| true` swallows "already exists"):
+
+```bash
+# gh — description optional, color optional
+gh label create <name> --color <hex> 2>/dev/null || true
+# glab — color required
+glab label create --name <name> --color "#<hex>" 2>/dev/null || true
+```
+
+Use these severity colors so the tags read at a glance; category labels share one
+neutral color:
+
+| Label             | Color hex |
+|-------------------|-----------|
+| `severity:critical` | `B60205` |
+| `severity:high`     | `D93F0B` |
+| `severity:medium`   | `FBCA04` |
+| `severity:low`      | `0E8A16` |
+| any category label  | `0366D6` |
+
+Reused (deduped) issues keep whatever labels they already have — don't re-label an
+existing issue unless the new finding genuinely changes its category or severity.
 
 Everything else about the command is unchanged: in issue mode it simply files
 labeled issues wherever it would have written `PLAN.md` lines.
