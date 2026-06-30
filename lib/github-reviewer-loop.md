@@ -68,9 +68,15 @@ the moment a review returns zero unresolved comments:
    - **On every pass through step 1** (including a re-loop back here after
      applying fixes — do NOT restrict this to the first pass): if a review
      from {REVIEWER_LOGIN} already exists at this point **AND its `commit.oid`
-     equals the current `headRefOid`**, set `EXISTING_REVIEW_FOUND=true` and
-     skip straight to step 3 using that review — do NOT request a new one and
-     do NOT wait in step 2. This covers a review App that auto-posted against
+     equals the current `headRefOid`**, set `EXISTING_REVIEW_FOUND=true`. The
+     query above only fetched `author`/`submittedAt`/`commit.oid` — not
+     `state`, `body`, or `reviewThreads`, which step 3 needs to make its
+     decision — so before jumping to step 3, run step 2's detail query
+     **once, without polling/waiting** (same query, same payload) to fetch the
+     full review (`state`, `body`) and its `reviewThreads`. Then proceed
+     straight to step 3 with that data — do NOT request a new review and do
+     NOT enter step 2's wait loop. This covers a review App that auto-posted
+     against
      the exact commit the PR is on right now (including one that auto-posted
      immediately after a fix-and-push from a *prior* iteration of this same
      loop, before this iteration's step 1 even ran) as well as a rerun of this
@@ -106,14 +112,27 @@ the moment a review returns zero unresolved comments:
 
 2. WAIT for a NEW review from {REVIEWER_LOGIN} to complete (BLOCKING — only
    reached when `EXISTING_REVIEW_FOUND` was not set in step 1):
-   - Poll using stdin JSON piping to avoid shell-escaping issues:
-     echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 20) { totalCount nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
-   - The review is complete when a review node from {REVIEWER_LOGIN} (login match,
-     case-insensitive) appears with a submittedAt after the timestamp from step 1.
+   - Poll using stdin JSON piping to avoid shell-escaping issues — this query
+     includes `headRefOid` and each review's `commit.oid`, not just state/body/
+     threads, because the PR's head can move *during* the wait (someone pushes
+     while you're polling):
+     echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { headRefOid reviews(last: 20) { totalCount nodes { state body author { login } submittedAt commit { oid } } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
+   - The review is complete when a review node from {REVIEWER_LOGIN} (login
+     match, case-insensitive) appears with a submittedAt after the timestamp
+     from step 1 **AND** its `commit.oid` equals this poll's `headRefOid`.
+     Without the `commit.oid` check, a review submitted for an older commit
+     (queued/delayed, or simply reviewing a head that has since been
+     superseded by a new push) could land with a `submittedAt` after your
+     baseline and be wrongly accepted as covering current HEAD — exactly the
+     stale-review risk the step-1 reuse check guards against, just hitting
+     from the opposite direction (during the wait instead of before it). A
+     review matching on `submittedAt` but NOT on `commit.oid` does not satisfy
+     this step — keep polling.
    - Use the WAIT BUDGET above (expected 5 min, max wait 3x / min 3 min / max 15
      min; poll intervals 10s,10s,20s,20s,30s…).
-   - If no review from {REVIEWER_LOGIN} appears within the max wait, report the
-     timeout (see status list) — do NOT keep the parent blocked indefinitely.
+   - If no qualifying review from {REVIEWER_LOGIN} appears within the max
+     wait, report the timeout (see status list) — do NOT keep the parent
+     blocked indefinitely.
 
 3. CHECK for unresolved comments from this review:
    - The review's `state` is one of APPROVED, COMMENTED, CHANGES_REQUESTED,
