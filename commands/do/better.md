@@ -779,6 +779,8 @@ For each PR, spawn a general-purpose sub-agent that runs the **multi-reviewer wr
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
+!`cat ~/.claude/lib/github-reviewer-loop.md`
+
 !`cat ~/.claude/lib/local-agent-review-loop.md`
 
 !`cat ~/.claude/lib/ollama-review-loop.md`

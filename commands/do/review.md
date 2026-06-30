@@ -384,6 +384,8 @@ Per-agent dispatch inside the wrapper:
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
+!`cat ~/.claude/lib/github-reviewer-loop.md`
+
 !`cat ~/.claude/lib/local-agent-review-loop.md`
 
 !`cat ~/.claude/lib/ollama-review-loop.md`

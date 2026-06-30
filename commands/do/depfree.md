@@ -682,6 +682,8 @@ Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with 
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
+!`cat ~/.claude/lib/github-reviewer-loop.md`
+
 !`cat ~/.claude/lib/local-agent-review-loop.md`
 
 !`cat ~/.claude/lib/ollama-review-loop.md`
