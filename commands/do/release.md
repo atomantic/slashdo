@@ -10,13 +10,14 @@ argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-i
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
-- Accepted values per slot: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `ollama`
+- Accepted values per slot: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `ollama`, or an arbitrary GitHub login `@<login>`
 - `ollama` reviews with a local Ollama model. Bare `ollama` auto-selects the most capable installed coding model; pin a specific installed model with the bracket form `ollama[<model>]`, e.g. `ollama[qwen2.5-coder:32b]`. Strip the bracket suffix into a per-entry `OLLAMA_MODEL` (empty for bare `ollama`) and keep the base slug `ollama`.
+- `@<login>` requests a review from an **arbitrary GitHub reviewer** — any user or App/bot login (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`). slashdo requests their review on the PR and waits for it, fixing what it surfaces (same flow as `copilot`). Strip the leading `@` into a per-entry `REVIEWER_LOGIN`; the login must match `^[A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?$`. GitHub only; never posts an approval itself.
 - **Reserved value `none`:** the token `none` (case-insensitive) is not a reviewer slug. `--review-with none` means *no external reviewer this run* — set `REVIEW_AGENTS=[]`, skip the slug validation below, and skip applying any saved `review-with` default. This is the explicit escape hatch over a default saved via `/do:config`.
 - The value may be a single agent or a **comma-separated, ordered list** (e.g. `--review-with codex,agy,copilot`). Split on `,`, trim whitespace around each slug. Normalize `gemini`/`antigravity` → `agy`.
 - Record the resulting list as `REVIEW_AGENTS`. **There is no built-in default reviewer.** If `--review-with` is omitted, leave `REVIEW_AGENTS` **unset for now** — the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** does the built-in default apply (`REVIEW_AGENTS=[]` — no external review pass; the Local Code Review gate below still runs unconditionally). Whatever ends up in the list is exactly what runs, in order: `--review-with codex` runs codex only; copilot is never added implicitly.
-- Dedupe preserving first-occurrence order (compare on the normalized slug — for `ollama` the bracket suffix is part of the identity, so `ollama[a]` and `ollama[b]` are distinct while two bare `ollama`s collapse); if duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
-- If any value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, ollama.`
+- Dedupe preserving first-occurrence order (compare on the normalized slug — for `ollama` the bracket suffix is part of the identity, so `ollama[a]` and `ollama[b]` are distinct while two bare `ollama`s collapse; for `@<login>` the login is the identity, compared lowercased); if duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
+- If any value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, ollama, @<login>.`
 
 Parse `$ARGUMENTS` for the stop-mode flags (mutually exclusive):
 - `--review-stop-on-findings` — stop the multi-reviewer loop after the first reviewer that fixed at least one finding.
@@ -168,6 +169,7 @@ Otherwise, hand off to the **multi-reviewer loop** with the parsed inputs:
 Each pass uses the matching single-reviewer loop:
 
 - `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`)
+- `@<login>` → GitHub-reviewer loop (`lib/github-reviewer-loop.md`), forwarding `{REVIEWER_LOGIN}`
 - `codex` | `agy` | `claude` → local-agent headless review loop (`lib/local-agent-review-loop.md`)
 - `ollama` → Ollama local-model review loop (`lib/ollama-review-loop.md`)
 
@@ -178,6 +180,8 @@ Each pass uses the matching single-reviewer loop:
 ### Inner loop bodies (referenced by the wrapper)
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
+
+!`cat ~/.claude/lib/github-reviewer-loop.md`
 
 !`cat ~/.claude/lib/local-agent-review-loop.md`
 
