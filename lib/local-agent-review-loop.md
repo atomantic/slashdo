@@ -107,7 +107,7 @@ Pick the invocation based on `{REVIEW_AGENT}` and `{REVIEWER_APPLIES}`:
 | Agent | Review-only (`REVIEWER_APPLIES=false`, default) | Reviewer-applies (`REVIEWER_APPLIES=true`) |
 |-------|-------------------------------------------------|---------------------------------------------|
 <!-- if:teams -->
-| `claude` | Dispatch an in-process sub-agent via the `Agent` tool with `$LOCAL_PROMPT` (see Step 2) — **not** `claude -p`, so it stays on plan billing | Same sub-agent dispatch; the sub-agent applies and commits fixes directly in the shared working tree |
+| `claude` | Dispatch an in-process sub-agent via the `Agent` tool with `subagent_type: "general-purpose"` and `$LOCAL_PROMPT` (see Step 2) — **not** `claude -p`, so it stays on plan billing | Same sub-agent dispatch; the sub-agent applies and commits fixes directly in the shared working tree |
 <!-- else -->
 | `claude` | `claude -p "$LOCAL_PROMPT" --dangerously-skip-permissions` | `claude -p "$LOCAL_PROMPT" --dangerously-skip-permissions` |
 <!-- /if:teams -->
@@ -141,7 +141,8 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
 2. **Invoke the chosen reviewer** (capture output to a log so context stays clean):
 
 <!-- if:teams -->
-   **When `REVIEW_AGENT=claude`: dispatch an in-process sub-agent — do NOT run the Bash invocation below.** A headless `claude -p` session bills against the Anthropic API; an in-process sub-agent runs under this session's plan, so it incurs no extra API billing. Dispatch a general-purpose sub-agent via the `Agent` tool, then resume the loop:
+   **When `REVIEW_AGENT=claude`: dispatch an in-process sub-agent — do NOT run the Bash invocation below.** A headless `claude -p` session bills against the Anthropic API; an in-process sub-agent runs under this session's plan, so it incurs no extra API billing. Dispatch the sub-agent via the `Agent` tool with `subagent_type: "general-purpose"`, then resume the loop:
+   - **Agent type**: use `subagent_type: "general-purpose"` (the catch-all agent type — on some hosts it is named `claude`). Do **not** invent or look for a specialized `code-reviewer` / `code-review` / `reviewer` agent type — no such type exists in this harness, and probing for one just wastes a turn on an "agent type not found" error before falling back. The review behavior comes entirely from `$LOCAL_PROMPT`, not from a specialized agent type.
    - **Sub-agent prompt**: pass `$LOCAL_PROMPT` (computed above) as the prompt. It is a self-contained single-agent review that carries the `git diff` instruction and the mode-specific output contract directly (it does **not** invoke the `/do:review` skill — a nested skill fan-out would not re-sync into this sub-agent's final message any more than it does under `agy -p`). So the sub-agent behaves identically to the `claude -p` path — in `REVIEWER_APPLIES=true` mode it applies and commits fixes directly in the shared working tree (as `address review (claude): <summary>`); in review-only mode it returns the structured `FINDING <N>:` blocks (or `NO FINDINGS`) as its final message.
    - **Capture the result into the log** so Step 3's parsing and the final report's `Log:` line work unchanged: `LOG_FILE="$(mktemp -t local-review-claude.XXXXXX.log)"`, write the sub-agent's returned message to `$LOG_FILE`, and set `EXIT_CODE=0` (use a non-zero `EXIT_CODE` only if the sub-agent reports it could not complete the review).
    - Skip the Bash invocation below and proceed to Step 3.
