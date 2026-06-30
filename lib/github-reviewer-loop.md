@@ -118,22 +118,29 @@ the moment a review returns zero unresolved comments:
      summary comments over inline threads) can leave the only actionable
      feedback in the review body with zero inline threads — do NOT report
      "clean" just because the inline-thread count is zero.
-   - If the review is APPROVED or COMMENTED AND there are no unresolved
-     threads from {REVIEWER_LOGIN} AND the body is empty or purely
-     complimentary/boilerplate (no actionable request) — read it and use
-     judgment, the same way you'd judge any other finding: the reviewer is
-     satisfied — report "clean" and exit.
-   - Otherwise — the review is CHANGES_REQUESTED, or there are unresolved
-     threads from {REVIEWER_LOGIN}, or the body contains actionable
-     feedback (this can happen under any non-DISMISSED state, including
-     APPROVED and COMMENTED): proceed to step 4 and treat the body text
-     itself as an additional finding to evaluate and address, exactly like
-     an inline thread.
-   - If the review is DISMISSED AND there are no unresolved threads from
-     {REVIEWER_LOGIN}: a dismissed review is not the reviewer's final word —
-     report status "error" and exit rather than re-requesting (re-requesting
-     a dismissed review risks looping if {REVIEWER_LOGIN} doesn't respond to
-     re-requests the same way the first time).
+   - **Unresolved threads always route to step 4, regardless of review
+     state** — including DISMISSED. Dismissing a review does not auto-resolve
+     its inline comment threads, so a DISMISSED review can still have
+     unresolved threads sitting there that genuinely need fixing; do not let
+     the DISMISSED-specific bullet below swallow that case.
+   - If there are unresolved threads from {REVIEWER_LOGIN}, OR the review is
+     CHANGES_REQUESTED, OR the review is non-DISMISSED (APPROVED/COMMENTED/
+     CHANGES_REQUESTED) AND its body contains actionable feedback: proceed to
+     step 4. When the body is what triggered this, treat the body text itself
+     as an additional finding to evaluate and address, exactly like an inline
+     thread (skip this for a DISMISSED review's body — see below).
+   - If the review is DISMISSED: ignore its body (a dismissed review's stated
+     opinion isn't the reviewer's final word, so don't treat it as a fresh
+     finding) but still check its unresolved threads per the bullet above. If
+     it has unresolved threads, proceed to step 4 to fix them. If it has NO
+     unresolved threads, report status "error" and exit rather than
+     re-requesting (re-requesting a dismissed review risks looping if
+     {REVIEWER_LOGIN} doesn't respond to re-requests the same way the first
+     time).
+   - Otherwise (APPROVED or COMMENTED, no unresolved threads, and the body is
+     empty or purely complimentary/boilerplate — read it and use judgment,
+     the same way you'd judge any other finding): the reviewer is satisfied —
+     report "clean" and exit.
 
 4. FIX all unresolved comments from {REVIEWER_LOGIN}, plus the review body if step 3
    flagged it as actionable:
