@@ -65,28 +65,35 @@ the moment a review returns zero unresolved comments:
    (compare case-insensitively — GitHub logins are case-insensitive), and record
    `headRefOid` (the PR's current head commit) alongside each candidate review's
    own `commit.oid`.
-   - **Only on this command's very first pass through step 1** (before this loop
-     has ever requested or processed a review of its own — not on a re-loop back
-     to step 1 after applying fixes): if a review from {REVIEWER_LOGIN} already
-     exists at this point **AND its `commit.oid` equals the current `headRefOid`**
-     (e.g. a review App that auto-posted against the exact commit the PR is on
-     right now, or this command rerun without any new push since the prior
-     review), set `EXISTING_REVIEW_FOUND=true` and skip straight to step 3 using
-     that review — do NOT request a new one and do NOT wait in step 2. Step 2's
-     wait condition is strictly "submittedAt *after* the timestamp captured
-     here," so if you captured an already-existing review's own timestamp as the
-     baseline, that same review can never satisfy "after itself" — waiting for
-     it would time out despite it being a perfectly valid review to process.
-     **The `commit.oid` check is load-bearing, not optional**: an existing
+   - **On every pass through step 1** (including a re-loop back here after
+     applying fixes — do NOT restrict this to the first pass): if a review
+     from {REVIEWER_LOGIN} already exists at this point **AND its `commit.oid`
+     equals the current `headRefOid`**, set `EXISTING_REVIEW_FOUND=true` and
+     skip straight to step 3 using that review — do NOT request a new one and
+     do NOT wait in step 2. This covers a review App that auto-posted against
+     the exact commit the PR is on right now (including one that auto-posted
+     immediately after a fix-and-push from a *prior* iteration of this same
+     loop, before this iteration's step 1 even ran) as well as a rerun of this
+     command with no new push since the prior review. Step 2's wait condition
+     is strictly "submittedAt *after* the timestamp captured here," so if you
+     captured an already-existing review's own timestamp as the baseline, that
+     same review can never satisfy "after itself" — waiting for it would time
+     out (or report `not-requestable`) despite it being a perfectly valid,
+     current review to process.
+     **The `commit.oid` check is load-bearing, not optional, and it is what
+     makes this safe to apply on every pass, not just the first**: an existing
      review whose `commit.oid` does NOT match `headRefOid` reviewed a stale
      commit (e.g. new commits landed after a self-fix pass, or after a manual
      push) — treat this exactly like "no existing review" and fall through to
      requesting a fresh one below, so `{REVIEWER_LOGIN}` actually reviews
-     current HEAD rather than letting `--merge` proceed on stale approval. On
-     any later iteration (after this loop already requested and processed a
-     review once), an "existing" review found here is the stale one from the
-     prior iteration regardless of commit match — always request and wait for a
-     genuinely new submission in that case, exactly as before this fix.
+     current HEAD rather than letting `--merge` proceed on stale approval.
+     Because `headRefOid` always advances between iterations of this loop
+     (step 6 only re-loops after step 4 has pushed a new commit), a review
+     left over from a *prior* iteration is automatically excluded by this same
+     check — there is no separate "only the first time" restriction needed,
+     and adding one would (as a prior revision of this loop did) incorrectly
+     ignore a fresh, current-head review posted between a fix push and this
+     iteration's step 1.
    - Otherwise (no existing review at current HEAD), request one:
    gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
      -f 'reviewers[]={REVIEWER_LOGIN}'
