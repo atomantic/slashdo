@@ -6,13 +6,14 @@ argument-hint: "[--review-with <agent>[,<agent>...]] [--review-iterations <n>] [
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
-- Accepted values per slot: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `ollama`
+- Accepted values per slot: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `ollama`, or an arbitrary GitHub login `@<login>`
 - `ollama` reviews with a local Ollama model. Bare `ollama` auto-selects the most capable installed coding model; pin a specific installed model with the bracket form `ollama[<model>]`, e.g. `ollama[qwen2.5-coder:32b]`. Strip the bracket suffix into a per-entry `OLLAMA_MODEL` (empty for bare `ollama`) and keep the base slug `ollama`.
+- `@<login>` requests a review from an **arbitrary GitHub reviewer** — any user or App/bot login (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`). slashdo requests their review on the PR and waits for it, fixing what it surfaces (same request → poll → fix → resolve flow as `copilot`). Strip the leading `@` into a per-entry `REVIEWER_LOGIN`; the login must match `^[A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?$` (reject otherwise with the unknown-value abort below). GitHub only (skipped on GitLab). slashdo never posts an approval itself — it only requests, waits, and fixes.
 - **Reserved value `none`:** the token `none` (case-insensitive) is not a reviewer slug. `--review-with none` means *no external reviewer this run* — set `REVIEW_AGENTS=[]`, skip the slug validation below, and skip applying any saved `review-with` default. This is the explicit escape hatch over a default saved via `/do:config`.
 - The value may be a single agent or a **comma-separated, ordered list** (e.g. `--review-with codex,agy,copilot`). Split on `,`, trim whitespace around each slug. Normalize `gemini`/`antigravity` → `agy`.
 - Record the resulting list as `REVIEW_AGENTS`. **There is no built-in default reviewer.** If `--review-with` is omitted, leave `REVIEW_AGENTS` **unset for now** — the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** does the built-in default apply (`REVIEW_AGENTS=[]` — no external review pass; the Local Code Review gate below still runs unconditionally). Whatever ends up in the list is exactly what runs, in order: `--review-with codex` runs codex only; copilot is never added implicitly.
-- Dedupe preserving first-occurrence order (compare on the normalized slug — for `ollama` the bracket suffix is part of the identity, so `ollama[a]` and `ollama[b]` are distinct while two bare `ollama`s collapse); if duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
-- If any value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, ollama.`
+- Dedupe preserving first-occurrence order (compare on the normalized slug — for `ollama` the bracket suffix is part of the identity, so `ollama[a]` and `ollama[b]` are distinct while two bare `ollama`s collapse; for `@<login>` the login is the identity, compared lowercased, so `@Octocat`/`@octocat` collapse while distinct logins stay separate); if duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
+- If any value is not in the accepted set, abort with a usage error: `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, ollama, @<login>.`
 
 Parse `$ARGUMENTS` for the stop-mode flags (mutually exclusive):
 - `--review-stop-on-findings` — stop the multi-reviewer loop after the first reviewer that fixed at least one finding (subsequent reviewers in the list are skipped).
@@ -29,7 +30,7 @@ Parse `$ARGUMENTS` for `--review-mode <series|parallel>` (how the multi-reviewer
 Parse `$ARGUMENTS` for `--reviewer-applies` (boolean, no value):
 - Record as `REVIEWER_APPLIES=true` if present, otherwise `REVIEWER_APPLIES=false` (default).
 - This flag picks who applies fixes the reviewer surfaces: by default the orchestrating thread (this session) reads the reviewer's findings and applies fixes itself; with `--reviewer-applies` the reviewing CLI applies fixes in the working tree directly. See `lib/local-agent-review-loop.md` "Editing mode" for the rationale and trade-offs.
-- The flag is **not supported on the copilot path** because Copilot reviews are read-only by design (cloud-side comments, no working-tree access). If `REVIEW_AGENTS` contains `copilot` and `REVIEWER_APPLIES=true`, print a warning (`--reviewer-applies has no effect on the copilot pass; fixes there are always applied by the orchestrator's sub-agent`) and continue — the flag still takes effect on the non-copilot passes in the list.
+- The flag is **not supported on the GitHub-side review paths** (`copilot` and `@<login>`) because those reviews are read-only by design (cloud-side comments, no working-tree access). If `REVIEW_AGENTS` contains `copilot` or an `@<login>` entry and `REVIEWER_APPLIES=true`, print a warning (`--reviewer-applies has no effect on the copilot/@<login> passes; fixes there are always applied by the orchestrator's sub-agent`) and continue — the flag still takes effect on the local passes in the list.
 - The flag is **also a no-op on the ollama path** because Ollama is non-agentic (`ollama run` returns text and cannot edit files), so the orchestrator always applies the fixes. If `REVIEW_AGENTS` contains an `ollama` entry and `REVIEWER_APPLIES=true`, print a warning (`--reviewer-applies has no effect on the ollama pass; Ollama is non-agentic, so the orchestrator always applies the fixes`) and continue — the flag still takes effect on the codex/agy/claude passes in the list.
 
 Parse `$ARGUMENTS` for `--review-iterations <n>` (affects the copilot pass only):
@@ -117,8 +118,8 @@ Verification — confirm before proceeding:
 
 Partition `REVIEW_AGENTS` into two ordered sublists, preserving their original relative order:
 
-- `LOCAL_AGENTS` — every entry that is **not** `copilot`: `codex`, `agy`, `claude`, `ollama[…]`
-- `COPILOT_AGENTS` — every `copilot` entry (at most one after dedup)
+- `LOCAL_AGENTS` — every entry that is neither `copilot` nor an `@<login>` GitHub reviewer: `codex`, `agy`, `claude`, `ollama[…]`. These review the working tree locally and do not need a PR to exist.
+- `PR_SIDE_AGENTS` — the GitHub-side reviewers that review the PR cloud-side and therefore need it to exist: `copilot` plus every `@<login>` entry (preserve their relative order)
 
 **If `LOCAL_AGENTS` is non-empty**, run the multi-reviewer loop now, **before the PR is created**, using only `LOCAL_AGENTS`. Local reviewers work against the working tree / pushed branch and do not require a PR to exist — running them first means every local reviewer's fixes land before the PR is opened, instead of trickling in as new commits after reviewers report back. Pass the same flags: `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (no effect on local agents, but forward for consistency). Record the result as `LOCAL_OVERALL_STATUS`.
 
@@ -140,26 +141,29 @@ This phase drives the **multi-reviewer wrapper** (defined under "Reviewer loop b
 - Create a rich PR/MR description
 - Capture the resulting PR/MR URL to report at the end
 
-## Run the Copilot Review
+## Run the PR-side Reviews
 
-**If `COPILOT_AGENTS` is empty** (no `copilot` in `--review-with`), skip this entire section. Set `COPILOT_OVERALL_STATUS=clean` (skipped — no Copilot pass requested) and continue to "Compute OVERALL_STATUS".
+**If `PR_SIDE_AGENTS` is empty** (no `copilot` and no `@<login>` in `--review-with`), skip this entire section. Set `PR_SIDE_OVERALL_STATUS=clean` (skipped — no PR-side pass requested) and continue to "Compute OVERALL_STATUS".
 
-Otherwise, hand off to the **multi-reviewer loop** using only `COPILOT_AGENTS` (`[copilot]`) with the parsed inputs:
+Otherwise, hand off to the **multi-reviewer loop** using only `PR_SIDE_AGENTS` with the parsed inputs:
 
-- `{COPILOT_AGENTS}` — `[copilot]`
+- `{PR_SIDE_AGENTS}` — `copilot` and/or `@<login>` entries, in order
 - `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`
 
-Copilot needs the PR to exist (it reviews cloud-side), which is why it runs here, after "Open the PR", rather than in the pre-PR phase. This phase drives the same **multi-reviewer wrapper** (under "Reviewer loop bodies" below), this time over `COPILOT_AGENTS`. Note that `--review-stop-on-findings` / `--review-stop-on-clean` apply *within* each phase's wrapper invocation; a stop-mode short-circuit during the local phase does not skip the Copilot pass, since the two phases run as separate wrapper invocations:
+These reviewers need the PR to exist (they review cloud-side), which is why they run here, after "Open the PR", rather than in the pre-PR phase. This phase drives the same **multi-reviewer wrapper** (under "Reviewer loop bodies" below), this time over `PR_SIDE_AGENTS`. Note that `--review-stop-on-findings` / `--review-stop-on-clean` apply *within* each phase's wrapper invocation; a stop-mode short-circuit during the local phase does not skip the PR-side pass, since the two phases run as separate wrapper invocations:
 
-- `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`). **GitHub only** — Copilot cloud review has no GitLab equivalent. When `VCS_HOST=gitlab` and `COPILOT_AGENTS` contains `copilot`, print a warning (`copilot review is GitHub-only and was skipped on this GitLab MR; use a local-agent reviewer (codex/agy/claude) instead`) and set `COPILOT_OVERALL_STATUS=inconclusive`.
+- `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`)
+- `@<login>` → GitHub-reviewer loop (`lib/github-reviewer-loop.md`), forwarding `{REVIEWER_LOGIN}`
 
-Record the result as `COPILOT_OVERALL_STATUS`.
+**GitHub only** — both PR-side reviewer types drive `gh`/GraphQL against a GitHub PR and have no GitLab equivalent. When `VCS_HOST=gitlab` and `PR_SIDE_AGENTS` is non-empty, print a warning (`copilot and @<login> reviewers are GitHub-only and were skipped on this GitLab MR; use a local-agent reviewer (codex/agy/claude) instead`) and set `PR_SIDE_OVERALL_STATUS=inconclusive`.
+
+Record the result as `PR_SIDE_OVERALL_STATUS`.
 
 ## Compute OVERALL_STATUS
 
 **If `REVIEW_AGENTS` was empty** (no `--review-with` was passed at all), skip the two review phases above and set `OVERALL_STATUS=clean` — the Local Code Review gate plus CI is the merge gate, exactly as `/do:release` treats it; there is no multi-reviewer aggregate to report.
 
-Otherwise combine `LOCAL_OVERALL_STATUS` (from "Pre-PR Local Reviews", or `clean` when `LOCAL_AGENTS` was empty) and `COPILOT_OVERALL_STATUS` (from "Run the Copilot Review", or `clean` when `COPILOT_AGENTS` was empty) into a single `OVERALL_STATUS` using this precedence — first matching rule wins:
+Otherwise combine `LOCAL_OVERALL_STATUS` (from "Pre-PR Local Reviews", or `clean` when `LOCAL_AGENTS` was empty) and `PR_SIDE_OVERALL_STATUS` (from "Run the PR-side Reviews", or `clean` when `PR_SIDE_AGENTS` was empty) into a single `OVERALL_STATUS` using this precedence — first matching rule wins:
 
 1. `dirty` — either phase is `dirty`
 2. `inconclusive` — either phase is `inconclusive`
@@ -190,7 +194,7 @@ Never merge on `dirty`/`inconclusive`, never merge before required checks pass, 
 
 ## Reviewer loop bodies
 
-Both review phases above ("Pre-PR Local Reviews" and "Run the Copilot Review") drive the same multi-reviewer wrapper — the only difference is the agent list each passes in (`LOCAL_AGENTS` vs `COPILOT_AGENTS`). The wrapper and the single-reviewer loop bodies it dispatches to are defined once here:
+Both review phases above ("Pre-PR Local Reviews" and "Run the PR-side Reviews") drive the same multi-reviewer wrapper — the only difference is the agent list each passes in (`LOCAL_AGENTS` vs `PR_SIDE_AGENTS`). The wrapper and the single-reviewer loop bodies it dispatches to are defined once here:
 
 ### Multi-reviewer wrapper
 
@@ -199,6 +203,8 @@ Both review phases above ("Pre-PR Local Reviews" and "Run the Copilot Review") d
 ### Inner loop bodies (referenced by the wrapper)
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
+
+!`cat ~/.claude/lib/github-reviewer-loop.md`
 
 !`cat ~/.claude/lib/local-agent-review-loop.md`
 
