@@ -63,7 +63,23 @@ the moment a review returns zero unresolved comments:
    echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 20) { nodes { author { login } submittedAt } } } } }"}' | gh api graphql --input -
    Record the most recent submittedAt whose author login equals {REVIEWER_LOGIN}
    (compare case-insensitively — GitHub logins are case-insensitive).
-   Then request the review:
+   - **Only on this command's very first pass through step 1** (before this loop
+     has ever requested or processed a review of its own — not on a re-loop back
+     to step 1 after applying fixes): if a review from
+     {REVIEWER_LOGIN} already exists at this point (e.g. a review App that
+     auto-posts as soon as the PR opens, or this command rerun after a human
+     already reviewed), set `EXISTING_REVIEW_FOUND=true` and skip straight to
+     step 3 using that review — do NOT request a new one and do NOT wait in
+     step 2. Step 2's wait condition is strictly "submittedAt *after* the
+     timestamp captured here," so if you captured an already-existing review's
+     own timestamp as the baseline, that same review can never satisfy "after
+     itself" — waiting for it would time out despite it being a perfectly valid
+     review to process. On any later iteration (after this loop already
+     requested and processed a review once), an "existing" review found here is
+     the stale one from the prior iteration, not a fresh one reflecting the
+     just-applied fixes — always request and wait for a genuinely new
+     submission in that case, exactly as before this fix.
+   - Otherwise (no existing review), request one:
    gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
      -f 'reviewers[]={REVIEWER_LOGIN}'
    - REQUEST FAILURE IS NON-FATAL. The endpoint returns 422 when the login is an
@@ -72,10 +88,9 @@ the moment a review returns zero unresolved comments:
      Apps post a review on their own without being explicitly requested, so a
      failed request does not mean no review will appear. Record that the request
      failed so you can distinguish "timeout" from "not-requestable" at the end.
-   - For public repos: if a review from {REVIEWER_LOGIN} already exists, you may
-     process it without re-requesting.
 
-2. WAIT for a review from {REVIEWER_LOGIN} to complete (BLOCKING):
+2. WAIT for a NEW review from {REVIEWER_LOGIN} to complete (BLOCKING — only
+   reached when `EXISTING_REVIEW_FOUND` was not set in step 1):
    - Poll using stdin JSON piping to avoid shell-escaping issues:
      echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 20) { totalCount nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
    - The review is complete when a review node from {REVIEWER_LOGIN} (login match,
