@@ -88,20 +88,38 @@ the moment a review returns zero unresolved comments:
 3. CHECK for unresolved comments from this review:
    - The review's `state` is one of APPROVED, COMMENTED, CHANGES_REQUESTED,
      DISMISSED.
-   - If the review is APPROVED or COMMENTED AND there are no unresolved review
-     threads authored by {REVIEWER_LOGIN}: the reviewer is satisfied — report
-     "clean" and exit.
-   - If the review is CHANGES_REQUESTED, or there are unresolved threads from
-     {REVIEWER_LOGIN}: proceed to step 4.
+   - Filter review threads to those whose comments are authored by
+     {REVIEWER_LOGIN} and isResolved:false (don't act on other reviewers' threads).
+   - **The review's top-level `body` is feedback too, not just its inline
+     threads.** A reviewer (especially a human or a bot that prefers
+     summary comments over inline threads) can leave the only actionable
+     feedback in the review body with zero inline threads — do NOT report
+     "clean" just because the inline-thread count is zero.
+   - If the review is APPROVED or COMMENTED AND there are no unresolved
+     threads from {REVIEWER_LOGIN} AND the body is empty or purely
+     complimentary/boilerplate (no actionable request) — read it and use
+     judgment, the same way you'd judge any other finding: the reviewer is
+     satisfied — report "clean" and exit.
+   - Otherwise — the review is CHANGES_REQUESTED, or there are unresolved
+     threads from {REVIEWER_LOGIN}, or the body contains actionable
+     feedback (this can happen under any non-DISMISSED state, including
+     APPROVED and COMMENTED): proceed to step 4 and treat the body text
+     itself as an additional finding to evaluate and address, exactly like
+     an inline thread.
    - If the review is DISMISSED AND there are no unresolved threads from
      {REVIEWER_LOGIN}: a dismissed review is not the reviewer's final word —
      report status "error" and exit rather than re-requesting (re-requesting
      a dismissed review risks looping if {REVIEWER_LOGIN} doesn't respond to
      re-requests the same way the first time).
-   - Filter review threads to those whose comments are authored by
-     {REVIEWER_LOGIN} and isResolved:false (don't act on other reviewers' threads).
 
-4. FIX all unresolved comments from {REVIEWER_LOGIN}:
+4. FIX all unresolved comments from {REVIEWER_LOGIN}, plus the review body if step 3
+   flagged it as actionable:
+   - **The review body has no `threadId`** — it isn't an inline comment, so there is
+     nothing to resolve via the GraphQL mutation below. Address it like any other
+     finding (read, evaluate, fix, commit), but skip the "resolve the thread" sub-step
+     for it specifically; the only way to silence the same body content on the next
+     poll is for the next review you request to come back without it (e.g. a fix
+     commit followed by a fresh review).
    For each unresolved thread:
    - Read the referenced file and understand the feedback.
    - Evaluate if the finding is a real issue — if it is, fix it regardless of
@@ -137,8 +155,9 @@ the moment a review returns zero unresolved comments:
 
 When done, report back:
 - Final status: clean / capped / timeout / not-requestable / error / guardrail
-  - `clean` — a review came back APPROVED/COMMENTED with no unresolved comments
-    (or all surfaced comments were fixed and the thread is resolved)
+  - `clean` — a review came back APPROVED or COMMENTED with no unresolved
+    threads and no actionable body feedback (or all surfaced inline
+    comments and body feedback were fixed)
   - `capped` — reached the configured {REVIEW_ITERATIONS} cap after applying every
     fix (the default 1-iteration path); clean-equivalent for merge purposes
   - `timeout` — the review was requested but {REVIEWER_LOGIN} did not submit one
