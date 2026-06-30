@@ -60,26 +60,34 @@ the moment a review returns zero unresolved comments:
 
 1. CAPTURE the latest review submittedAt for {REVIEWER_LOGIN} (so you can detect
    when a NEW review arrives), then REQUEST a review from that login:
-   echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 20) { nodes { author { login } submittedAt } } } } }"}' | gh api graphql --input -
+   echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { headRefOid reviews(last: 20) { nodes { author { login } submittedAt commit { oid } } } } } }"}' | gh api graphql --input -
    Record the most recent submittedAt whose author login equals {REVIEWER_LOGIN}
-   (compare case-insensitively — GitHub logins are case-insensitive).
+   (compare case-insensitively — GitHub logins are case-insensitive), and record
+   `headRefOid` (the PR's current head commit) alongside each candidate review's
+   own `commit.oid`.
    - **Only on this command's very first pass through step 1** (before this loop
      has ever requested or processed a review of its own — not on a re-loop back
-     to step 1 after applying fixes): if a review from
-     {REVIEWER_LOGIN} already exists at this point (e.g. a review App that
-     auto-posts as soon as the PR opens, or this command rerun after a human
-     already reviewed), set `EXISTING_REVIEW_FOUND=true` and skip straight to
-     step 3 using that review — do NOT request a new one and do NOT wait in
-     step 2. Step 2's wait condition is strictly "submittedAt *after* the
-     timestamp captured here," so if you captured an already-existing review's
-     own timestamp as the baseline, that same review can never satisfy "after
-     itself" — waiting for it would time out despite it being a perfectly valid
-     review to process. On any later iteration (after this loop already
-     requested and processed a review once), an "existing" review found here is
-     the stale one from the prior iteration, not a fresh one reflecting the
-     just-applied fixes — always request and wait for a genuinely new
-     submission in that case, exactly as before this fix.
-   - Otherwise (no existing review), request one:
+     to step 1 after applying fixes): if a review from {REVIEWER_LOGIN} already
+     exists at this point **AND its `commit.oid` equals the current `headRefOid`**
+     (e.g. a review App that auto-posted against the exact commit the PR is on
+     right now, or this command rerun without any new push since the prior
+     review), set `EXISTING_REVIEW_FOUND=true` and skip straight to step 3 using
+     that review — do NOT request a new one and do NOT wait in step 2. Step 2's
+     wait condition is strictly "submittedAt *after* the timestamp captured
+     here," so if you captured an already-existing review's own timestamp as the
+     baseline, that same review can never satisfy "after itself" — waiting for
+     it would time out despite it being a perfectly valid review to process.
+     **The `commit.oid` check is load-bearing, not optional**: an existing
+     review whose `commit.oid` does NOT match `headRefOid` reviewed a stale
+     commit (e.g. new commits landed after a self-fix pass, or after a manual
+     push) — treat this exactly like "no existing review" and fall through to
+     requesting a fresh one below, so `{REVIEWER_LOGIN}` actually reviews
+     current HEAD rather than letting `--merge` proceed on stale approval. On
+     any later iteration (after this loop already requested and processed a
+     review once), an "existing" review found here is the stale one from the
+     prior iteration regardless of commit match — always request and wait for a
+     genuinely new submission in that case, exactly as before this fix.
+   - Otherwise (no existing review at current HEAD), request one:
    gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
      -f 'reviewers[]={REVIEWER_LOGIN}'
    - REQUEST FAILURE IS NON-FATAL. The endpoint returns 422 when the login is an
