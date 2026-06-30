@@ -169,6 +169,7 @@ Otherwise, hand off to the **multi-reviewer loop** with the parsed inputs:
 Each pass uses the matching single-reviewer loop:
 
 - `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`)
+- `@<login>` → GitHub-reviewer loop (`lib/github-reviewer-loop.md`), forwarding `{REVIEWER_LOGIN}`
 - `codex` | `agy` | `claude` → local-agent headless review loop (`lib/local-agent-review-loop.md`)
 - `ollama` → Ollama local-model review loop (`lib/ollama-review-loop.md`)
 
