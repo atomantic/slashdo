@@ -32,6 +32,8 @@ Extract owner, repo, and PR number from `$ARGUMENTS`. Accept formats:
 - `owner/repo#123`
 - `#123` (uses current repo via `gh repo view --json owner,name`)
 
+Also capture the GitHub API host as `{GH_HOST}` — from the PR URL's host when a full URL is given, otherwise from the `origin` remote (`git remote get-url origin | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##'`; default `github.com`). `gh api` ignores the repo remote and defaults to github.com, so on a GitHub Enterprise repo the query below must be passed `--hostname {GH_HOST}` (see `~/.claude/lib/gh-host.md`).
+
 ```bash
 # Example extraction from URL:
 echo "$URL" | sed -E 's|.*/([^/]+)/([^/]+)/pull/([0-9]+).*|\1 \2 \3|'
@@ -43,7 +45,7 @@ If no argument is provided, ask the user for a PR URL.
 
 Use GraphQL to fetch review threads with resolution state, inline comments, and review bodies in a single query:
 ```bash
-gh api graphql --paginate -f query='{ repository(owner: "{OWNER}", name: "{REPO}") { pullRequest(number: {PR_NUM}) { reviewThreads(first: 100) { nodes { isResolved comments(first: 10) { nodes { body path line author { login } } } } } reviews(first: 50) { nodes { body state author { login } submittedAt } } } } }'
+gh api --hostname {GH_HOST} graphql --paginate -f query='{ repository(owner: "{OWNER}", name: "{REPO}") { pullRequest(number: {PR_NUM}) { reviewThreads(first: 100) { nodes { isResolved comments(first: 10) { nodes { body path line author { login } } } } } reviews(first: 50) { nodes { body state author { login } submittedAt } } } } }'
 ```
 
 Save the result to `/tmp/improve-review-data.json`.

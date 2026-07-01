@@ -79,7 +79,7 @@ When compacting during this workflow, always preserve:
 - The current phase number and what phases remain
 - All PR numbers and URLs created so far
 - `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR`, `REPO_DIR` values
-- `VCS_HOST`, `CLI_TOOL`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
+- `VCS_HOST`, `CLI_TOOL`, `GH_HOST`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
 - `PLATFORMS` (list of supported platforms: iOS, macOS, etc.)
 - `DEPLOYMENT_TARGETS` (minimum OS versions per platform)
 - `BUILD_SYSTEM` (xcodebuild / swift build / xcodegen / tuist)
@@ -99,6 +99,7 @@ Run `gh auth status --active` to check GitHub CLI (`--active` scopes the check t
 - Set `VCS_HOST` to `github` or `gitlab`
 - Set `CLI_TOOL` to `gh` or `glab`
 - If neither is authenticated, warn the user and halt
+- **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state: `GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"; [ -n "$GH_HOST" ] || GH_HOST=github.com`. The Phase 6 GitHub-side reviewer loops use `gh api`, which ignores the repo remote and defaults to github.com — so on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out (see `~/.claude/lib/gh-host.md`).
 
 ### 0b: Swift Project Type Detection
 Check for Swift project manifests and determine the build system:
@@ -1081,7 +1082,7 @@ For each PR, spawn a general-purpose sub-agent that runs the **multi-reviewer wr
 
 !`cat ~/.claude/lib/ollama-review-loop.md`
 
-Pass each sub-agent the PR-specific variables: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `better-swift/{CATEGORY_SLUG}` (the branch the local-agent loop checks out and reviews), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the copilot/`@<login>` iteration cap; default 1).
+Pass each sub-agent the PR-specific variables: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the GitHub-side loops' `gh api` calls hit the right host on GitHub Enterprise), `better-swift/{CATEGORY_SLUG}` (the branch the local-agent loop checks out and reviews), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the copilot/`@<login>` iteration cap; default 1).
 
 **Additional Swift-specific instruction for review loop agents:** After each fix, verify the code compiles on ALL platforms: `{BUILD_CMD}`. If a reviewer's suggestion would break another platform, add a platform-conditional implementation instead.
 

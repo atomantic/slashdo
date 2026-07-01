@@ -51,7 +51,7 @@ Then apply any **saved defaults** (set via `/do:config`) to the flags above that
 
 Before doing anything, determine the project's source and target branches for releases. Do NOT hardcode branch names. Instead, discover them:
 
-1. **Source branch** — run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` to get the repo's default branch (typically `main`)
+1. **Source branch** — run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` to get the repo's default branch (typically `main`). While here, **derive the GitHub API host `{GH_HOST}` from the `origin` remote** and forward it to the review loop below — `gh api` (used by the GitHub-side reviewer loops) defaults to github.com and does **not** read the repo remote, so on a GitHub Enterprise repo those loops would silently poll the wrong host and time out. Derive it and run the per-host auth precheck per `~/.claude/lib/gh-host.md`: `GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"; [ -n "$GH_HOST" ] || GH_HOST=github.com` — and if `gh auth token --hostname "$GH_HOST"` fails, stop and tell the user to run `gh auth login --hostname $GH_HOST` rather than proceeding into a loop that will time out.
 2. **Target branch** — determine by reading (in priority order):
    - **GitHub Actions workflows** — check `.github/workflows/release.yml` (or similar) for `on: push: branches:` to find the branch that triggers the release pipeline
    - **Project conventions** (already in context) — look for git workflow sections, branch descriptions, or release instructions
@@ -165,6 +165,7 @@ Otherwise, hand off to the **multi-reviewer loop** with the parsed inputs:
 - `{REVIEW_MODE}` — `series` (default) | `parallel`
 - `{REVIEWER_APPLIES}` — boolean
 - `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot iteration cap (`0` = loop until clean)
+- `{GH_HOST}` — the GitHub API host derived in "Detect Release Workflow" above; forwarded to the GitHub-side loops so their `gh api` calls target the right host on GitHub Enterprise
 
 Each pass uses the matching single-reviewer loop:
 

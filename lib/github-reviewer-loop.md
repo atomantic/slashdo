@@ -35,6 +35,10 @@ PR: {PR_NUMBER} in {OWNER}/{REPO}
 Branch: {BRANCH_NAME}
 Reviewer login: {REVIEWER_LOGIN}   (a GitHub user or App; an App login ends in [bot])
 Build command: {BUILD_CMD}
+GitHub API host: {GH_HOST}   (pass `--hostname {GH_HOST}` on EVERY `gh api` call
+  below — `gh api` defaults to github.com and does NOT read the repo remote, so on a
+  GitHub Enterprise repo an unqualified call polls the wrong host and this loop times
+  out. See `~/.claude/lib/gh-host.md`. If {GH_HOST} is empty/unset, omit the flag.)
 Max iterations: {REVIEW_ITERATIONS} (default 1). Run at most this many
   review-and-fix cycles. The loop still exits early the moment a review
   comes back with zero unresolved comments. The default of 1 means: request
@@ -60,7 +64,7 @@ the moment a review returns zero unresolved comments:
 
 1. CAPTURE the latest review submittedAt for {REVIEWER_LOGIN} (so you can detect
    when a NEW review arrives), then REQUEST a review from that login:
-   echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { headRefOid reviews(last: 20) { nodes { author { login } submittedAt commit { oid } } } } } }"}' | gh api graphql --input -
+   echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { headRefOid reviews(last: 20) { nodes { author { login } submittedAt commit { oid } } } } } }"}' | gh api --hostname {GH_HOST} graphql --input -
    Record the most recent submittedAt whose author login equals {REVIEWER_LOGIN}
    (compare case-insensitively — GitHub logins are case-insensitive), and record
    `headRefOid` (the PR's current head commit) alongside each candidate review's
@@ -101,7 +105,7 @@ the moment a review returns zero unresolved comments:
      ignore a fresh, current-head review posted between a fix push and this
      iteration's step 1.
    - Otherwise (no existing review at current HEAD), request one:
-   gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
+   gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
      -f 'reviewers[]={REVIEWER_LOGIN}'
    - REQUEST FAILURE IS NON-FATAL. The endpoint returns 422 when the login is an
      App that can't be requested via REST, lacks repo access, or is the PR author.
@@ -116,7 +120,7 @@ the moment a review returns zero unresolved comments:
      includes `headRefOid` and each review's `commit.oid`, not just state/body/
      threads, because the PR's head can move *during* the wait (someone pushes
      while you're polling):
-     echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { headRefOid reviews(last: 20) { totalCount nodes { state body author { login } submittedAt commit { oid } } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
+     echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { headRefOid reviews(last: 20) { totalCount nodes { state body author { login } submittedAt commit { oid } } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api --hostname {GH_HOST} graphql --input -
    - The review is complete when a review node from {REVIEWER_LOGIN} (login
      match, case-insensitive) appears with a submittedAt after the timestamp
      from step 1 **AND** its `commit.oid` equals this poll's `headRefOid`.
@@ -196,7 +200,7 @@ the moment a review returns zero unresolved comments:
      The parenthesized reviewer login records which reviewer surfaced the finding —
      useful when scanning a release log that ran multiple reviewers.
    - Resolve the thread via GraphQL mutation using stdin JSON piping:
-     echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
+     echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api --hostname {GH_HOST} graphql --input -
    - After all threads resolved, push all commits to remote.
    - Increment iteration counter.
    - If {REVIEW_ITERATIONS} > 0 and the counter reaches {REVIEW_ITERATIONS}: stop

@@ -57,6 +57,9 @@ Determine whether this repo lives on GitHub or GitLab so the right CLI is used f
 1. Read the remote host: `git remote get-url origin`. If the host is a GitLab instance (e.g. `gitlab.com`, or a self-hosted GitLab), set `VCS_HOST=gitlab` and `CLI_TOOL=glab`; otherwise (GitHub or ambiguous) set `VCS_HOST=github` and `CLI_TOOL=gh`.
 2. Confirm the matching CLI is authenticated: `gh auth status --active` for GitHub, `glab auth status` for GitLab. (`--active` scopes the check to the active account — a bare `gh auth status` exits non-zero if any *other* configured account has a stale token, falsely reporting you as unauthenticated.) If it is not, abort with: "`/do:pr` detected a {VCS_HOST} repo but `{CLI_TOOL}` is not authenticated. Run `{CLI_TOOL} auth login`."
 3. If there is no `origin` remote at all, fall back to whichever CLI is authenticated (`gh` first, then `glab`); if neither is authenticated, abort with: "`/do:pr` needs an authenticated `gh` (GitHub) or `glab` (GitLab). Run `gh auth login` or `glab auth login`."
+4. **When `VCS_HOST=github`, derive the API host `{GH_HOST}` from the remote and confirm auth to it.** `gh api` (used by the PR-side reviewer loops below) does **not** infer its host from the remote — it defaults to `github.com` — so on a GitHub Enterprise repo the reviewer loops would silently poll github.com and time out. Derive `{GH_HOST}` once here and forward it to the reviewer loops (and pass it to any `gh api` call). Follow the derivation and per-host auth precheck in the shared snippet below; if the precheck fails, abort with its message rather than proceeding into a loop that will time out against the wrong host. (GitLab: skip — `glab` resolves the host from the remote.)
+
+!`cat ~/.claude/lib/gh-host.md`
 
 Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`.
 
@@ -160,6 +163,7 @@ When the cross-phase skip above does not apply, hand off to the **multi-reviewer
 
 - `{PR_SIDE_AGENTS}` — `copilot` and/or `@<login>` entries, in order
 - `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`
+- `{GH_HOST}` — the API host derived in "Detect VCS Host" (so the copilot / `@<login>` loops target the right GitHub host instead of defaulting to github.com)
 
 These reviewers need the PR to exist (they review cloud-side), which is why they run here, after "Open the PR", rather than in the pre-PR phase. This phase drives the same **multi-reviewer wrapper** (under "Reviewer loop bodies" below), this time over `PR_SIDE_AGENTS`. `--review-stop-on-findings` / `--review-stop-on-clean` still also apply *within* this phase's own wrapper invocation (e.g. stopping after the first of several `@<login>` entries that comes back clean), exactly as in any other multi-reviewer-loop call — the cross-phase check above only handles the boundary between the two phases:
 
