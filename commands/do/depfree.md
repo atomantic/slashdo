@@ -18,11 +18,11 @@ Parse `$ARGUMENTS` for:
 - **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation
 - **`--no-merge`**: run through PR creation, skip the review loop and merge
 - **`--heavy`**: aggressive mode — only keep foundational frameworks and language runtimes; replace everything else that is feasibly replaceable (see Heavy Mode below)
-- **`--review-with <agent[,agent,...]>`**: which reviewer(s) run the Phase 5c review loop on the PR. Accepted slugs: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`) (comma-separated, ordered list; split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, dedupe preserving first-occurrence order, with the `ollama` bracket suffix part of the dedup identity). Record as `REVIEW_AGENTS`. **There is no built-in default** — if omitted, leave `REVIEW_AGENTS` **unset for now**; the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (Phase 5c skipped, PR left open without merging — see Phase 5c/5d). `copilot` is never added implicitly. Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, ollama.` The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no reviewer (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default.
+- **`--review-with <agent[,agent,...]>`**: which reviewer(s) run the Phase 5c review loop on the PR. Accepted slugs: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`), or an arbitrary GitHub login `@<login>` — any GitHub user or App/bot (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`); slashdo requests its review on the PR and waits for it (GitHub only, never posts an approval itself) (comma-separated, ordered list; split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, dedupe preserving first-occurrence order, with the `ollama` bracket suffix part of the dedup identity). Record as `REVIEW_AGENTS`. **There is no built-in default** — if omitted, leave `REVIEW_AGENTS` **unset for now**; the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (Phase 5c skipped, PR left open without merging — see Phase 5c/5d). `copilot` is never added implicitly. Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, ollama, @<login>.` The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no reviewer (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default.
 - **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to the multi-reviewer loop; control when the reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
 - **`--review-mode <series|parallel>`**: forwarded to the multi-reviewer loop. `series` (default) runs the reviewers one-at-a-time so each sees the prior's committed fixes; `parallel` runs their reviews concurrently against one baseline and applies the deduped union once (`--reviewer-applies` and the stop-modes are ignored in parallel). Set `REVIEW_MODE`; if omitted, leave it **unset for now** (saved-defaults fills it from `review-mode`; built-in default `series`). Abort with `--review-mode must be one of series, parallel (got: {value}).` on any other value.
-- **`--reviewer-applies`**: forwarded to the review loop — the reviewing CLI applies fixes directly instead of the orchestrator (no effect on copilot passes). Record `REVIEWER_APPLIES=true`/`false`.
-- **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** pass runs (Phase 5c); no effect on `codex`/`agy`/`claude` passes (fixed 3-iteration cap). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass, exiting early on 0 comments). `0` = loop until Copilot returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).`
+- **`--reviewer-applies`**: forwarded to the review loop — the reviewing CLI applies fixes directly instead of the orchestrator (no effect on copilot or `@<login>` passes, which are read-only cloud-side reviews). Record `REVIEWER_APPLIES=true`/`false`.
+- **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** or **`@<login>`** pass runs (Phase 5c); no effect on `codex`/`agy`/`claude`/`ollama` passes (their own fixed iteration caps). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass, exiting early on 0 comments). `0` = loop until that reviewer returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).`
 
 After parsing the review flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the review flags **and** `--issues` / `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
 
@@ -83,7 +83,7 @@ When compacting during this workflow, always preserve:
 - The current phase number and what phases remain
 - All PR numbers and URLs created so far
 - `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR`, `REPO_DIR` values
-- `VCS_HOST`, `CLI_TOOL`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
+- `VCS_HOST`, `CLI_TOOL`, `GH_HOST`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
 - `HEAVY_MODE` flag
 
 
@@ -94,6 +94,7 @@ Run `gh auth status --active` to check GitHub CLI (`--active` scopes the check t
 - Set `VCS_HOST` to `github` or `gitlab`
 - Set `CLI_TOOL` to `gh` or `glab`
 - If neither is authenticated, warn the user and halt
+- **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state: `GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"; [ -n "$GH_HOST" ] || GH_HOST=github.com`. The Phase 6 GitHub-side reviewer loops use `gh api`, which ignores the repo remote and defaults to github.com — so on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out (see `~/.claude/lib/gh-host.md`).
 
 ### 0b: Project Type Detection
 Check for project manifests to determine the tech stack:
@@ -676,17 +677,19 @@ Record `PR_NUMBER` and `PR_URL`.
 
 **GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this phase AND the Phase 5d merge.** There is no default reviewer. Leave the PR open for manual review, print its URL and summary, then proceed to Phase 6 cleanup.
 
-Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (series default — reviewers run one-at-a-time so each sees the prior's fixes; `parallel` collects reviews concurrently then applies the union once), `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot passes only; local-agent passes use their own fixed 3-iteration cap). The wrapper `!cat`s the inner loop bodies it dispatches to:
+Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (series default — reviewers run one-at-a-time so each sees the prior's fixes; `parallel` collects reviews concurrently then applies the union once), `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot and `@<login>` passes only; local-agent and ollama passes use their own fixed iteration caps). The wrapper `!cat`s the inner loop bodies it dispatches to:
 
 !`cat ~/.claude/lib/multi-reviewer-loop.md`
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
 
+!`cat ~/.claude/lib/github-reviewer-loop.md`
+
 !`cat ~/.claude/lib/local-agent-review-loop.md`
 
 !`cat ~/.claude/lib/ollama-review-loop.md`
 
-Pass: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `depfree/{DATE}` (the branch the local-agent loop checks out and reviews), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the copilot iteration cap; default 1 — one review pass, returning `capped`, which counts as clean for the merge gate below). When `{REVIEW_ITERATIONS}` is 0, a copilot pass runs until 0 comments (bounded by the 10-iteration guardrail).
+Pass: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the GitHub-side loops' `gh api` calls hit the right host on GitHub Enterprise), `depfree/{DATE}` (the branch the local-agent loop checks out and reviews), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the copilot/`@<login>` iteration cap; default 1 — one review pass, returning `capped`, which counts as clean for the merge gate below). When `{REVIEW_ITERATIONS}` is 0, a copilot or `@<login>` pass runs until 0 comments (bounded by the 10-iteration guardrail).
 
 ### 5d: Merge
 

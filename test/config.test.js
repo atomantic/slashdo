@@ -77,7 +77,7 @@ describe('writeConfig', () => {
     const cfg = {
       autoUpdate: true,
       defaults: {
-        'review-with': 'claude,codex,ollama[gemma4:26b-mlx]',
+        'review-with': 'claude,codex,ollama[gemma4:26b-mlx],@org-review-bot,@some-app[bot]',
         'review-iterations': 2,
         'reviewer-applies': true,
         'review-stop-mode': 'on-findings',
@@ -85,6 +85,18 @@ describe('writeConfig', () => {
     };
     writeConfig(file, cfg);
     assert.deepEqual(readConfig(file), cfg);
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  it('round-trips an arbitrary GitHub reviewer (@<login>) in review-with unchanged', () => {
+    const { dir, file } = tmpFile();
+    // The `@<login>` form (user or App/bot, the latter carrying a [bot] suffix)
+    // must survive the JSON read/write verbatim — brackets and all.
+    const cfg = {
+      defaults: { 'review-with': '@octocat,@some-app[bot]' },
+    };
+    writeConfig(file, cfg);
+    assert.equal(readConfig(file).defaults['review-with'], '@octocat,@some-app[bot]');
     fs.rmSync(dir, { recursive: true });
   });
 });

@@ -8,11 +8,11 @@ argument-hint: "[--strict|--nuclear] [--draft] [--review-with <agent>[,<agent>..
 Parse `$ARGUMENTS` for:
 - **`--strict`** (alias: **`--nuclear`**): enable the Structural Ambition agent (6th agent) and promote structural findings to blocker tier. Use for branches you want to land cleanly — flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications.
 - **`--draft`** (PR mode only): write the review payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the `gh api` command to publish it manually, instead of posting the review immediately. Ignored when `PR_MODE=false`.
-- **`--review-with <agent[,agent,...]>`** (optional): after the host CLI's self-review completes (the multi-agent flow defined below), delegate **additional** review passes to the named external CLIs in order. Accepted slugs per slot: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`). Split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, dedupe preserving first-occurrence order (for `ollama` the bracket suffix is part of the dedup identity). Abort with `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, ollama.` on any unknown slug. The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no delegated reviewers (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default. If omitted, leave `REVIEW_AGENTS` **unset for now** — the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (no delegated passes — behavior matches the historical `/do:review` self-review only). **The host CLI is not implied in this list** — whichever CLI is hosting the review command (claude, codex, or agy) runs the self-review first regardless. The list names *additional* reviewers; an explicit `claude` entry while running under claude means "start a fresh claude headless session for a second-pass perspective," which is allowed.
+- **`--review-with <agent[,agent,...]>`** (optional): after the host CLI's self-review completes (the multi-agent flow defined below), delegate **additional** review passes to the named external CLIs in order. Accepted slugs per slot: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`), or an arbitrary GitHub login `@<login>` — any GitHub user or App/bot (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`); slashdo requests its review on the PR and waits for it (GitHub only, never posts an approval itself). Split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, dedupe preserving first-occurrence order (for `ollama` the bracket suffix is part of the dedup identity). Abort with `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, ollama, @<login>.` on any unknown slug. The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no delegated reviewers (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default. If omitted, leave `REVIEW_AGENTS` **unset for now** — the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (no delegated passes — behavior matches the historical `/do:review` self-review only). **The host CLI is not implied in this list** — whichever CLI is hosting the review command (claude, codex, or agy) runs the self-review first regardless. The list names *additional* reviewers; an explicit `claude` entry while running under claude means "start a fresh claude headless session for a second-pass perspective," which is allowed.
 - **`--review-stop-on-findings` / `--review-stop-on-clean`** (mutually exclusive, optional): stop-mode for the delegated passes. Default `REVIEW_STOP_MODE=all` (run every listed agent). `on-findings` stops after the first delegated reviewer that surfaces a non-empty change set; `on-clean` stops after the first delegated reviewer that reports zero findings. Abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined` if both appear.
 - **`--review-mode <series|parallel>`** (optional): how the delegated passes are dispatched. `series` (default) runs the listed reviewers one-at-a-time so each sees the prior reviewer's committed fixes; `parallel` runs their reviews concurrently against one frozen baseline and then applies the deduped union of findings once (faster, but no reviewer sees another's fixes — `--reviewer-applies` and the stop-modes are ignored in this mode). Record as `REVIEW_MODE`; if omitted, leave it **unset for now** (the saved-defaults step fills it from the `review-mode` default; built-in default `series`). Abort with `--review-mode must be one of series, parallel (got: {value}).` on any other value.
-- **`--reviewer-applies`** (optional, boolean): forwarded to each delegated local-agent pass to route fixes through the reviewing CLI instead of the orchestrator. See `lib/local-agent-review-loop.md` "Editing mode" for the trade-offs. No effect on the copilot path, the ollama path (Ollama is non-agentic — always review-only), or the host's self-review.
-- **`--review-iterations <n>`** (optional): caps how many review-and-fix cycles a delegated **copilot** pass runs. Record as `REVIEW_ITERATIONS`; default `1` (one Copilot review-and-fix pass, exiting early on 0 comments). Must be a non-negative integer — abort with `--review-iterations must be a non-negative integer (got: {value}).` otherwise. `0` means "loop until Copilot returns 0 comments" (legacy behavior, bounded by the copilot loop's 10-iteration safety guardrail). No effect on local-agent passes (fixed 3-iteration cap) or on the host's self-review.
+- **`--reviewer-applies`** (optional, boolean): forwarded to each delegated local-agent pass to route fixes through the reviewing CLI instead of the orchestrator. See `lib/local-agent-review-loop.md` "Editing mode" for the trade-offs. No effect on the copilot path, the `@<login>` path, the ollama path (Ollama is non-agentic — always review-only), or the host's self-review.
+- **`--review-iterations <n>`** (optional): caps how many review-and-fix cycles a delegated **copilot** or **`@<login>`** pass runs. Record as `REVIEW_ITERATIONS`; default `1` (one review-and-fix pass, exiting early on 0 comments). Must be a non-negative integer — abort with `--review-iterations must be a non-negative integer (got: {value}).` otherwise. `0` means "loop until that reviewer returns 0 comments" (legacy behavior, bounded by each loop's own 10-iteration safety guardrail). No effect on local-agent passes or ollama (their own fixed iteration caps) or on the host's self-review.
 
 After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the delegated-review flags **and** `--issues` / `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
 
@@ -24,7 +24,7 @@ After parsing the flags above, apply any **saved defaults** (set via `/do:config
   - SSH-style URL with `github.com` host
   - Any URL containing the substring `github` AND a `/pull/{number}` segment — covers GHES hosts like `github.example.com`
   - Shorthand: the argument matches `^[^/]+/[^/]+#[0-9]+$` AND `gh repo view {owner}/{repo}` confirms it resolves (the shorthand form does NOT require the `github` substring — `gh` is the source of truth for whether it's a real repo)
-  - Extract `OWNER`, `REPO`, and `PR_NUM`. Set `PR_MODE=true` and `PR_URL` to the canonical URL.
+  - Extract `OWNER`, `REPO`, and `PR_NUM`. Set `PR_MODE=true` and `PR_URL` to the canonical URL. Also capture the URL's **host** as `{GH_HOST}` (e.g. `github.com`, or a GHES host like `github.example.com`) — the `gh api` calls below need it explicitly, because `gh api` ignores the repo remote and defaults to github.com (see `~/.claude/lib/gh-host.md`). Note the host comes from the **PR URL** here, not the local `origin` remote — a PR being reviewed by URL can live on a different host than the current checkout.
 - Any other non-flag token: treat as the base branch override (only when `PR_MODE=false`).
 
 Set `STRICT_MODE=true` if either strict flag is present.
@@ -35,7 +35,7 @@ If both a PR URL and a base-branch token are provided, the PR URL wins — ignor
 
 ### Local branch mode (`PR_MODE=false`)
 
-1. **Detect the base branch** — use the positional argument if provided, otherwise run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`
+1. **Detect the base branch** — use the positional argument if provided, otherwise run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`. Also **derive `{GH_HOST}` from the `origin` remote** (local mode reviews the current checkout, so its host is the remote's): `GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"; [ -n "$GH_HOST" ] || GH_HOST=github.com` — the `gh api` calls below need it explicitly (see `~/.claude/lib/gh-host.md`).
 2. **Detect the current branch** — `git branch --show-current`
 3. **Get the diff stat** — `git diff {base}...HEAD --stat` to see all changed files and line counts
 4. **Get the full diff** — `git diff {base}...HEAD` to see actual changes
@@ -49,16 +49,16 @@ When a PR URL was parsed, do NOT use the local working tree as the source of tru
 
 1. **Fetch PR metadata**:
    ```bash
-   gh pr view {PR_NUM} --repo {OWNER}/{REPO} --json number,title,author,baseRefName,headRefName,headRefOid,baseRefOid,url,isCrossRepository,headRepositoryOwner,headRepository
+   gh pr view {PR_NUM} --repo {GH_HOST}/{OWNER}/{REPO} --json number,title,author,baseRefName,headRefName,headRefOid,baseRefOid,url,isCrossRepository,headRepositoryOwner,headRepository
    ```
    Capture `HEAD_SHA` (`headRefOid`), `BASE_SHA` (`baseRefOid`), `HEAD_REF`, `BASE_REF`, `AUTHOR_LOGIN`, and `IS_FORK` (`isCrossRepository`).
 2. **Fetch the changed-files list**:
    ```bash
-   gh pr diff {PR_NUM} --repo {OWNER}/{REPO} --name-only
+   gh pr diff {PR_NUM} --repo {GH_HOST}/{OWNER}/{REPO} --name-only
    ```
 3. **Fetch the full unified diff** (used by agents to scope to changed hunks AND used later to filter inline comments to lines that exist in the diff):
    ```bash
-   gh pr diff {PR_NUM} --repo {OWNER}/{REPO} > /tmp/do-review-pr-{PR_NUM}.diff
+   gh pr diff {PR_NUM} --repo {GH_HOST}/{OWNER}/{REPO} > /tmp/do-review-pr-{PR_NUM}.diff
    ```
 4. **Parse the diff to build a "commentable lines" map** — `{file_path: set of line numbers on the RIGHT (new) side of the diff}`. GitHub's review API only accepts inline comments on lines that appear in the patch; comments on lines outside the diff will be rejected. Walk the unified diff line by line:
    - Track the current file from `diff --git a/<path> b/<path>` headers (authoritative for both adds and renames). Prefer this over `+++ b/<path>` because deletions emit `+++ /dev/null` and renames may not round-trip the new path through `+++` alone.
@@ -68,7 +68,7 @@ When a PR URL was parsed, do NOT use the local working tree as the source of tru
    - (Do NOT use `git apply --numstat` — it reports per-file add/delete totals, not hunk line ranges.) Save to `/tmp/do-review-pr-{PR_NUM}-lines.json`.
 5. **Fetch each changed file at HEAD_SHA** so agents can read full file content (not just the hunk). Skip deleted files — `repos/{OWNER}/{REPO}/contents/{path}?ref={HEAD_SHA}` returns 404 for any path removed in the PR, and a strict failure would derail PR-mode for delete-only or mixed-deletion PRs:
    ```bash
-   gh api repos/{OWNER}/{REPO}/contents/{path}?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}/{path} || echo "skipped (deleted or unreadable): {path}"
+   gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/contents/{path}?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}/{path} || echo "skipped (deleted or unreadable): {path}"
    ```
    (Create parent dirs as needed; URL-encode the path. Use the `diff --git` header from step 4 to identify deletions up front and skip the fetch entirely for those.)
 6. Print: `Reviewing PR #{PR_NUM}: {title} — {N} files changed{strict_suffix}` plus a one-line note: `Author: {AUTHOR_LOGIN}{fork_suffix}` where `{fork_suffix}` is ` (cross-repo fork)` when `IS_FORK=true`.
@@ -81,8 +81,8 @@ CLAUDE.md is already loaded into your context. Use its rules (code style, error 
 
 In `PR_MODE`, the local CLAUDE.md may not apply to the PR being reviewed (it could be from a fork or a different repo). Also attempt to fetch the target repo's CLAUDE.md and AGENTS.md if they exist:
 ```bash
-gh api repos/{OWNER}/{REPO}/contents/CLAUDE.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}-CLAUDE.md || true
-gh api repos/{OWNER}/{REPO}/contents/AGENTS.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}-AGENTS.md || true
+gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/contents/CLAUDE.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}-CLAUDE.md || true
+gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/contents/AGENTS.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}-AGENTS.md || true
 ```
 Pass whichever exists to the agents instead of (or in addition to) the local one.
 
@@ -266,7 +266,7 @@ Assemble a top-level review body (markdown) with:
 
 ### Pick the review event
 
-- **`REQUEST_CHANGES`** if any finding is CRITICAL **and** the current user is not the PR author. If the current user IS the PR author (check via `gh api user -q '.login'` vs `AUTHOR_LOGIN`), downgrade to `COMMENT` — GitHub forbids requesting changes on your own PR.
+- **`REQUEST_CHANGES`** if any finding is CRITICAL **and** the current user is not the PR author. If the current user IS the PR author (check via `gh api --hostname {GH_HOST} user -q '.login'` vs `AUTHOR_LOGIN`), downgrade to `COMMENT` — GitHub forbids requesting changes on your own PR.
 - **`COMMENT`** otherwise (improvements/nits only, or self-PR).
 - **Never `APPROVE` automatically** — approval is a human judgment call.
 
@@ -285,7 +285,7 @@ Write the payload to `/tmp/do-review-pr-{PR_NUM}-payload.json`:
 
 Post it:
 ```bash
-gh api repos/{OWNER}/{REPO}/pulls/{PR_NUM}/reviews \
+gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/pulls/{PR_NUM}/reviews \
   --method POST \
   --input /tmp/do-review-pr-{PR_NUM}-payload.json
 ```
@@ -299,7 +299,7 @@ Print the review URL returned by the API (`html_url`) so the user can open it.
 
 ### Drafts mode (optional)
 
-If the user wants to inspect comments before publishing, support a `--draft` flag: instead of `POST .../reviews`, write the payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the path plus the `gh api` command needed to publish it manually. (Default behavior remains: publish immediately.)
+If the user wants to inspect comments before publishing, support a `--draft` flag: instead of `POST .../reviews`, write the payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the path plus the `gh api` command needed to publish it manually — include the `--hostname {GH_HOST}` flag in that printed command so it targets the right host on GitHub Enterprise. (Default behavior remains: publish immediately.)
 
 ## Report
 
@@ -348,7 +348,7 @@ After the report is printed and fixes are committed (local branch mode), run the
 For local branch mode, after the review and any fixes, determine whether to post review comments on the PR/MR:
 
 1. **Check for an open PR** on the current branch: `gh pr view --json number,author --jq '{number, author: .author.login}' 2>/dev/null`. If the command fails (no PR exists), skip posting.
-2. **Get the current user**: `gh api user -q '.login'`
+2. **Get the current user**: `gh api --hostname {GH_HOST} user -q '.login'`
 3. **Compare**: If the PR author login **matches** the current user, do NOT post comments to the PR — the local fixes and summary are sufficient.
 4. **If the PR was opened by someone else**, post a review comment on the PR summarizing the findings using `gh pr review {number} --comment --body "..."`. Include the issues found, fixes applied, and any remaining items that need the author's attention.
 
@@ -366,11 +366,13 @@ Inputs to the wrapper:
 - `{REVIEW_STOP_MODE}` — `all` (default) | `on-findings` | `on-clean`
 - `{REVIEW_MODE}` — `series` (default) | `parallel`
 - `{REVIEWER_APPLIES}` — boolean, forwarded to each local-agent pass
-- `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot iteration cap (`0` = loop until clean)
+- `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot/`@<login>` iteration cap (`0` = loop until clean)
+- `{GH_HOST}` — the GitHub API host established in "Determine Scope" (the PR URL's host in PR mode, the `origin` remote's host in local mode); forwarded to the GitHub-side loops so their `gh api` calls target the right host on GitHub Enterprise
 
 Per-agent dispatch inside the wrapper:
 
 - `copilot` — only meaningful when a PR exists for the current branch (local mode) or when `PR_MODE=true`. Requests a Copilot review on the PR via the Copilot review loop. If no PR is associated with the current branch in local mode, print `Skipping copilot pass: no open PR on {branch}.` and continue to the next agent.
+- `@<login>` — like `copilot`, GitHub-side and PR-bound: requests a review from the arbitrary login `{REVIEWER_LOGIN}` via the GitHub-reviewer loop (`lib/github-reviewer-loop.md`). Only meaningful when a PR exists for the current branch (local mode) or `PR_MODE=true`; if no PR is associated with the current branch in local mode, print `Skipping @{REVIEWER_LOGIN} pass: no open PR on {branch}.` and continue to the next agent.
 - `codex` | `agy` | `claude` — invoke the local-agent review loop. The CLI runs a self-contained single-agent review prompt headless (codex uses its built-in `codex review`) — not the `/do:review` multi-sub-agent skill, which hangs under a print-mode/headless invocation — against the same scope this invocation reviewed:
   - In **local branch mode**, the headless CLI reviews `{base}...HEAD` on the current working tree (it will see the host's just-committed fixes as part of HEAD). Set the wrapper's `BASE_BRANCH=$BASE_BRANCH` so the inner loop's `git diff $BASE_BRANCH...HEAD` reviews against the same base this self-review used.
   - In **PR mode**, the local-agent loop reviews a local `git diff $BASE_BRANCH...HEAD`, so it needs the PR branch checked out locally with `$BASE_BRANCH` set to a resolvable ref — a PR URL won't work as the diff target. Either check out the PR branch first and dispatch with a local base ref, or skip the delegated local-agent passes in PR mode (the `copilot` path is the host-agnostic PR-by-URL reviewer). The delegated local-agent loop publishes nothing to the PR itself; in review-only mode it emits findings to stdout and the orchestrator owns posting any PR comment.
@@ -383,6 +385,8 @@ Per-agent dispatch inside the wrapper:
 ### Inner loop bodies (referenced by the wrapper)
 
 !`cat ~/.claude/lib/copilot-review-loop.md`
+
+!`cat ~/.claude/lib/github-reviewer-loop.md`
 
 !`cat ~/.claude/lib/local-agent-review-loop.md`
 

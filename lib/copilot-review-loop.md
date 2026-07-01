@@ -14,6 +14,10 @@ You are a Copilot review loop agent.
 PR: {PR_NUMBER} in {OWNER}/{REPO}
 Branch: {BRANCH_NAME}
 Build command: {BUILD_CMD}
+GitHub API host: {GH_HOST}   (pass `--hostname {GH_HOST}` on EVERY `gh api` call
+  below — `gh api` defaults to github.com and does NOT read the repo remote, so on a
+  GitHub Enterprise repo an unqualified call polls the wrong host and this loop times
+  out. See `~/.claude/lib/gh-host.md`. If {GH_HOST} is empty/unset, omit the flag.)
 Max iterations: {REVIEW_ITERATIONS} (default 1). Run at most this many
   review-and-fix cycles. The loop still exits early the moment a review
   returns 0 comments. The default of 1 means: request one review, fix
@@ -53,10 +57,10 @@ comments. When {REVIEW_ITERATIONS} is 0, loop until zero new comments
 
 1. CAPTURE the latest Copilot review submittedAt timestamp (so you can
    detect when a NEW review arrives):
-   echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { nodes { author { login } submittedAt } } } } }"}' | gh api graphql --input -
+   echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { nodes { author { login } submittedAt } } } } }"}' | gh api --hostname {GH_HOST} graphql --input -
    Record the most recent submittedAt from copilot-pull-request-reviewer[bot].
    Then REQUEST a Copilot review:
-   gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
+   gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
      -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
    CRITICAL: The reviewer name MUST include the [bot] suffix.
    - For public repos: check if a review already exists before requesting
@@ -64,7 +68,7 @@ comments. When {REVIEW_ITERATIONS} is 0, loop until zero new comments
 
 2. WAIT for the review to complete (BLOCKING):
    - Poll using stdin JSON piping to avoid shell-escaping issues:
-     echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { totalCount nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
+     echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { totalCount nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api --hostname {GH_HOST} graphql --input -
    - The review is complete when a new Copilot review node appears with a
      submittedAt after the timestamp captured in step 1
    - For parallel PR reviews (do:better): use the DECREASING TIMEOUT for
@@ -103,7 +107,7 @@ comments. When {REVIEW_ITERATIONS} is 0, loop until zero new comments
    - If build passes, commit: address review (copilot): <summary>
      The parenthesized agent name records which reviewer surfaced the finding — useful when scanning the log of a release that ran multiple reviewers.
    - Resolve the thread via GraphQL mutation using stdin JSON piping:
-     echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
+     echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api --hostname {GH_HOST} graphql --input -
    - After all threads resolved, push all commits to remote
    - Increment iteration counter
    - If {REVIEW_ITERATIONS} > 0 and the iteration counter reaches

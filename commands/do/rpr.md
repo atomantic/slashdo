@@ -14,8 +14,10 @@ Address the latest code review feedback on the current branch's pull request usi
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
-- Accepted slugs: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`) (comma-separated, ordered list; split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, dedupe preserving first-occurrence order, with the `ollama` bracket suffix part of the dedup identity). Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, ollama.` The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no reviewer (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default (and rpr's conditional `copilot` default).
+- Accepted slugs: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`), or an arbitrary GitHub login `@<login>` (comma-separated, ordered list; split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, dedupe preserving first-occurrence order, with the `ollama` bracket suffix part of the dedup identity). Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, ollama, @<login>.` The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no reviewer (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default (and rpr's conditional `copilot` default).
+- **`@<login>` entries are accepted by the parser but never requested**: rpr runs a bespoke Copilot-only request/monitor flow rather than the multi-reviewer loop, so there is no dispatch path for an arbitrary GitHub reviewer here yet (tracked as a follow-up). Drop any `@<login>` entry from `REVIEW_AGENTS` after parsing/dedup and print a one-line notice: `Note: @<login> is not yet supported by /do:rpr (it requests Copilot directly) — dropped from --review-with.` This applies whether the entry was typed directly or inherited from a saved `review-with` default — a global default saved for `/do:pr`/`/do:release`/etc. that happens to include `@<login>` must not make every `/do:rpr` invocation abort.
 - Record as `REVIEW_AGENTS`. **rpr's default is `copilot`** (its established identity is driving a Copilot review to clean) — but the default is *conditional*: see step 2 and step 8. If `--review-with` is omitted, leave `REVIEW_AGENTS` unset for now — the saved-defaults step below fills it from config if a default exists; **only if it is still unset after that** does rpr's conditional `copilot` default apply (`REVIEW_AGENTS=[copilot]`). This ordering is what lets a saved `review-with` default take precedence over the built-in copilot default.
+- **`@<login>`-only fallback, scoped by precedence**: if dropping `@<login>` entries per the bullet above leaves `REVIEW_AGENTS` empty, where that emptiness comes from matters — it must not silently override the "explicit flag wins" precedence in the saved-defaults step below. If the user **did not type `--review-with` this run** and the emptied value came from an *inherited saved default*, treat `REVIEW_AGENTS` as still unset so the saved-defaults step runs as normal and, failing that, rpr's conditional `copilot` default applies. If the user **explicitly typed `--review-with`** this run with an `@<login>`-only value, do **not** fall through to the saved-defaults step (an explicit flag already wins over a saved default, per the precedence rule below) — go straight to rpr's conditional `copilot` default instead of leaving `REVIEW_AGENTS=[]` (no reviewer at all).
 - If `REVIEW_AGENTS` names a **local CLI** (`codex`/`agy`/`claude`, in any combination, with or without `copilot`), rpr requests each non-copilot reviewer via the **local-agent review loop** (`lib/local-agent-review-loop.md`) against the PR branch instead of requesting a Copilot cloud review for that slug. An `ollama` entry instead goes through the **Ollama review loop** (`lib/ollama-review-loop.md`) — it requires the PR branch checked out locally, since the loop reviews a local `git diff`. `copilot` entries still go through the Copilot request/poll path below.
 
 Parse `$ARGUMENTS` for `--reviewer-applies` (boolean): record `REVIEWER_APPLIES=true`/`false` (default `false`). Forwarded to any local-agent review loop; no effect on the Copilot path (a warning is printed if combined with a copilot-only list) or the ollama path (Ollama is non-agentic — always review-only).
@@ -28,11 +30,11 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 
 ## Steps
 
-1. **Get the current PR and determine repo ownership**: Use `gh pr view --json number,url,reviewDecision,reviews,headRefName,baseRefName` to find the PR for this branch. Parse owner/name from `gh repo view --json owner,name`. Also check the PR's base repository owner — if the PR targets an upstream repo you don't own (i.e., a fork-to-upstream PR), note this as `is_fork_pr=true`. You can detect this by comparing the PR URL's owner against your authenticated user (`gh api user --jq .login`).
+1. **Get the current PR and determine repo ownership**: Use `gh pr view --json number,url,reviewDecision,reviews,headRefName,baseRefName` to find the PR for this branch. Parse owner/name from `gh repo view --json owner,name`. Also **derive the GitHub API host once and record it as `HOST`** — `gh api` defaults to github.com and does **not** read the repo remote, so on a GitHub Enterprise repo every `gh api` call below must carry `--hostname HOST` or it silently hits github.com (see `~/.claude/lib/gh-host.md`): `HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"; [ -n "$HOST" ] || HOST=github.com`. The `gh pr`/`gh repo` calls resolve the host from the remote on their own and need no flag. Also check the PR's base repository owner — if the PR targets an upstream repo you don't own (i.e., a fork-to-upstream PR), note this as `is_fork_pr=true`. You can detect this by comparing the PR URL's owner against your authenticated user (`gh api --hostname HOST user --jq .login`).
 
 2. **Check for existing code review and decide which reviewer (if any) to request** (only if `is_fork_pr=false`): Query the PR's review requests and recent reviews:
    ```bash
-   gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviewRequests(first: 10) { nodes { requestedReviewer { ... on Bot { login } } } } reviews(last: 50) { nodes { state body author { login } submittedAt } } } } }'
+   gh api --hostname HOST graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviewRequests(first: 10) { nodes { requestedReviewer { ... on Bot { login } } } } reviews(last: 50) { nodes { state body author { login } submittedAt } } } } }'
    ```
    Note whether **any** completed review exists (from a copilot bot, a human, or another bot) — call this `HAS_EXISTING_REVIEW` — and specifically whether a **completed** `copilot-pull-request-reviewer` review exists (a node in `reviews.nodes`, NOT merely a pending review request) — call this `HAS_COPILOT_REVIEW`. Track a Copilot review that is only **pending** (Copilot present in `reviewRequests.nodes[].requestedReviewer` with no completed Copilot review yet) separately as `COPILOT_REVIEW_PENDING` — a pending-only review must NOT set `HAS_COPILOT_REVIEW`, or the "completed review exists" branch below would fire and resolve threads before Copilot has posted anything. Then dispatch on `REVIEW_AGENTS`:
 
@@ -49,7 +51,7 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 
 3. **Fetch review comments**: Use `gh api graphql` with stdin JSON to get all unresolved review threads. **CRITICAL: Do NOT use `$variables` in GraphQL queries — shell expansion consumes `$` signs.** Always inline values and pipe JSON via stdin:
    ```bash
-   echo '{"query":"{ repository(owner: \"OWNER\", name: \"REPO\") { pullRequest(number: PR_NUM) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }"}' | gh api graphql --input -
+   echo '{"query":"{ repository(owner: \"OWNER\", name: \"REPO\") { pullRequest(number: PR_NUM) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }"}' | gh api --hostname HOST graphql --input -
    ```
    Save results to `/tmp/pr_threads.json` for parsing.
 
@@ -82,7 +84,7 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 
 7. **Resolve conversations**: For each addressed thread, resolve it via GraphQL mutation using stdin JSON. Track resolution count against the total from step 3. **Never use `$variables` in the query — inline the thread ID directly**:
    ```bash
-   echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"THREAD_ID_HERE\"}) { thread { id isResolved } } }"}' | gh api graphql --input -
+   echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"THREAD_ID_HERE\"}) { thread { id isResolved } } }"}' | gh api --hostname HOST graphql --input -
    ```
 
 8. **Decide whether to loop** (only if `is_fork_pr=false`): After pushing fixes, evaluate whether another review round is worth running. **Skip for fork-to-upstream PRs.**
@@ -137,7 +139,7 @@ When `REVIEW_AGENTS` names `ollama`, step 2 (and the step-8 re-request) runs the
 
 ### Request via API
 ```bash
-gh api repos/OWNER/REPO/pulls/PR_NUM/requested_reviewers -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
+gh api --hostname HOST repos/OWNER/REPO/pulls/PR_NUM/requested_reviewers -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
 ```
 
 **CRITICAL**: The reviewer name MUST include the `[bot]` suffix. Without it (e.g., `copilot-pull-request-reviewer`), the API returns a 422 "not a collaborator" error.
@@ -151,7 +153,9 @@ Verify the request was accepted by checking that `Copilot` appears in the respon
 Start the monitor *once* (right after the first review request, or at session entry if a review is already pending). It tracks the most-recent Copilot review timestamp it has observed and emits exactly one event per *new* review that lands. In the same loop, transition-detect CI checks so you also get one event per CI bucket flip — no separate CI poll needed.
 
 ```bash
-# Replace OWNER/REPO/PR_NUM with literals — no shell variables inside the GraphQL query string.
+# Replace OWNER/REPO/PR_NUM/HOST with literals — no shell variables inside the GraphQL query
+# string. HOST is the API host from step 1 (needed because `gh api` ignores the repo remote and
+# defaults to github.com); it goes in `--hostname HOST`, outside the query string.
 # The monitor uses `gh pr checks` with `--json name,bucket` throughout. The `bucket` field
 # groups checks into a small fixed vocabulary: `pass`, `fail`, `cancel`, `skipping`, `pending`
 # — see `gh pr checks --help`. The emitted `ci: <name>: <bucket>` events embed that vocabulary
@@ -173,7 +177,7 @@ Monitor:
     latest_seeded=""
     while [ -z "$latest_seeded" ]; do
       raw=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 50) { nodes { author { login } submittedAt } } } } }\"}" \
-        | gh api graphql --input - 2>/dev/null)
+        | gh api --hostname HOST graphql --input - 2>/dev/null)
       if [ -z "$raw" ]; then
         sleep 5
         continue
@@ -226,7 +230,7 @@ Monitor:
       # workflow ever pushes against that limit, raise the cap further; the response is
       # tiny so 100 or 200 is also viable.
       new_list=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 50) { nodes { author { login } submittedAt } } } } }\"}" \
-        | gh api graphql --input - 2>/dev/null \
+        | gh api --hostname HOST graphql --input - 2>/dev/null \
         | jq -r --arg t "$latest" '[.data.repository.pullRequest.reviews.nodes[]? | select(.author.login=="copilot-pull-request-reviewer") | select(.submittedAt > $t) | .submittedAt] | sort | .[]')
       if [ -n "$new_list" ]; then
         while IFS= read -r ts; do
