@@ -35,7 +35,7 @@ If both a PR URL and a base-branch token are provided, the PR URL wins — ignor
 
 ### Local branch mode (`PR_MODE=false`)
 
-1. **Detect the base branch** — use the positional argument if provided, otherwise run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`. Also **derive `{GH_HOST}` from the `origin` remote** (local mode reviews the current checkout, so its host is the remote's): `GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^(https?://|ssh://git@|git@)([^/:]+).*#\2#')"; [ -n "$GH_HOST" ] || GH_HOST=github.com` — the `gh api` calls below need it explicitly (see `~/.claude/lib/gh-host.md`).
+1. **Detect the base branch** — use the positional argument if provided, otherwise run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`. Also **derive `{GH_HOST}` from the `origin` remote** (local mode reviews the current checkout, so its host is the remote's): `GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"; [ -n "$GH_HOST" ] || GH_HOST=github.com` — the `gh api` calls below need it explicitly (see `~/.claude/lib/gh-host.md`).
 2. **Detect the current branch** — `git branch --show-current`
 3. **Get the diff stat** — `git diff {base}...HEAD --stat` to see all changed files and line counts
 4. **Get the full diff** — `git diff {base}...HEAD` to see actual changes

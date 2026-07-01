@@ -23,7 +23,7 @@ Parse the `origin` remote host (handles both SSH — `git@host:org/repo.git`,
 
 ```bash
 GH_HOST=$(git remote get-url origin 2>/dev/null \
-  | sed -E 's#^(https?://|ssh://git@|git@)([^/:]+).*#\2#')
+  | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')
 # Fallbacks if there is no origin or the parse came back empty:
 [ -n "$GH_HOST" ] || GH_HOST=$(gh repo view --json url --jq '.url' 2>/dev/null | awk -F/ '{print $3}')
 [ -n "$GH_HOST" ] || GH_HOST=github.com

@@ -32,7 +32,7 @@ Extract owner, repo, and PR number from `$ARGUMENTS`. Accept formats:
 - `owner/repo#123`
 - `#123` (uses current repo via `gh repo view --json owner,name`)
 
-Also capture the GitHub API host as `{GH_HOST}` — from the PR URL's host when a full URL is given, otherwise from the `origin` remote (`git remote get-url origin | sed -E 's#^(https?://|ssh://git@|git@)([^/:]+).*#\2#'`; default `github.com`). `gh api` ignores the repo remote and defaults to github.com, so on a GitHub Enterprise repo the query below must be passed `--hostname {GH_HOST}` (see `~/.claude/lib/gh-host.md`).
+Also capture the GitHub API host as `{GH_HOST}` — from the PR URL's host when a full URL is given, otherwise from the `origin` remote (`git remote get-url origin | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##'`; default `github.com`). `gh api` ignores the repo remote and defaults to github.com, so on a GitHub Enterprise repo the query below must be passed `--hostname {GH_HOST}` (see `~/.claude/lib/gh-host.md`).
 
 ```bash
 # Example extraction from URL:

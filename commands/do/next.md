@@ -112,7 +112,7 @@ After the barrier, merge the returned PRs **one at a time, never concurrently** 
 > # Derive the API host for the `gh api` calls below. `gh api` ignores the repo remote
 > # and defaults to github.com, so on a GHES repo it must be passed --hostname "$GH_HOST"
 > # (see ~/.claude/lib/gh-host.md). `gh issue`/`gh pr` calls resolve the host on their own.
-> GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^(https?://|ssh://git@|git@)([^/:]+).*#\2#')"; [ -n "$GH_HOST" ] || GH_HOST=github.com
+> GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"; [ -n "$GH_HOST" ] || GH_HOST=github.com
 > ```
 
 Build the in-flight set (identical in both modes):
