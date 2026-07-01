@@ -103,8 +103,16 @@ After the barrier, merge the returned PRs **one at a time, never concurrently** 
 > # `--active` scopes the check to the active account. A bare `gh auth status` exits
 > # non-zero if ANY configured account has a stale/invalid token — even when the active
 > # account is authenticated fine — which would fail this pre-flight on every run.
-> gh auth status --active >/dev/null 2>&1 && git remote get-url origin 2>/dev/null | grep -qi github.com || {
+> # Use `gh repo view` (not a literal `grep github.com`) to confirm this is a GitHub
+> # repo: it resolves the host from `origin`, so it ACCEPTS GitHub Enterprise hosts
+> # (e.g. github.example.com) — which a `github.com` substring match would wrongly reject —
+> # while still failing on GitLab (gh doesn't recognize a GitLab remote as a GitHub host).
+> gh auth status --active >/dev/null 2>&1 && gh repo view >/dev/null 2>&1 || {
 >   echo "/do:next requires a GitHub repo with an authenticated gh CLI (it ships via /do:pr). Run 'gh auth login', or use a different workflow for non-GitHub hosts."; exit 1; }
+> # Derive the API host for the `gh api` calls below. `gh api` ignores the repo remote
+> # and defaults to github.com, so on a GHES repo it must be passed --hostname "$GH_HOST"
+> # (see ~/.claude/lib/gh-host.md). `gh issue`/`gh pr` calls resolve the host on their own.
+> GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^(https?://|ssh://git@|git@)([^/:]+).*#\2#')"; [ -n "$GH_HOST" ] || GH_HOST=github.com
 > ```
 
 Build the in-flight set (identical in both modes):
@@ -186,7 +194,7 @@ Then:
    - Also honor GitHub's **native** blocked-by relationship when the API surfaces it; the body convention is the portable default and the two are OR'd (blocked by *either* source ⇒ skip).
    - **Cycle / unresolvable chain** (A depends on B, B depends on A) → both stay skipped; note the cycle so a human can break it. Never loop trying to resolve one.
 5. **Pick the target issue:**
-   - **With argument** — the issue number (strip `#`); **set `ISSUE_NUM` to that stripped number now** (pulling step 6's assignment earlier so the checks below can reference `$ISSUE_NUM` — on a fresh run it isn't set yet). Verify open and NOT in flight. **`--self` first, as a hard gate:** when `SELF_MODE` is on, confirm the issue's author is the running account before anything else — `gh issue view "$ISSUE_NUM" --json author -q .author.login` must equal `gh api user -q .login`; if it does not, **refuse and stop** with `Issue #<num> was filed by <author>, not you — /do:next --self only works on issues you filed. Drop --self to claim it.` This is the **one skip an explicit number does NOT override** — `--self` is a security boundary, not a curation preference, so a deliberate cherry-pick cannot cross it (unlike a parking label or label filter). If it's an epic, resolve its state (step 3) first and act on that state — claim an `epic-wrapup`, close an `epic-done`, or warn that children are still open on an `epic-open` (the explicit request still overrides — state that you're doing so). Otherwise a named number is an **explicit override**: it claims even an issue auto-pick would skip — a parking-labelled one, one with an **open declared blocker** (step 4), or (when `LABEL_FILTER` is active) one outside the curated label (but **never** an issue another user filed while `--self` is on). State plainly when you're overriding a skip (e.g. "claiming `future`-labelled #123 by explicit request", or "claiming #123 despite open blocker #120 by explicit request"). If any other check fails (closed, in flight), print why and stop.
+   - **With argument** — the issue number (strip `#`); **set `ISSUE_NUM` to that stripped number now** (pulling step 6's assignment earlier so the checks below can reference `$ISSUE_NUM` — on a fresh run it isn't set yet). Verify open and NOT in flight. **`--self` first, as a hard gate:** when `SELF_MODE` is on, confirm the issue's author is the running account before anything else — `gh issue view "$ISSUE_NUM" --json author -q .author.login` must equal `gh api --hostname "$GH_HOST" user -q .login`; if it does not, **refuse and stop** with `Issue #<num> was filed by <author>, not you — /do:next --self only works on issues you filed. Drop --self to claim it.` This is the **one skip an explicit number does NOT override** — `--self` is a security boundary, not a curation preference, so a deliberate cherry-pick cannot cross it (unlike a parking label or label filter). If it's an epic, resolve its state (step 3) first and act on that state — claim an `epic-wrapup`, close an `epic-done`, or warn that children are still open on an `epic-open` (the explicit request still overrides — state that you're doing so). Otherwise a named number is an **explicit override**: it claims even an issue auto-pick would skip — a parking-labelled one, one with an **open declared blocker** (step 4), or (when `LABEL_FILTER` is active) one outside the curated label (but **never** an issue another user filed while `--self` is on). State plainly when you're overriding a skip (e.g. "claiming `future`-labelled #123 by explicit request", or "claiming #123 despite open blocker #120 by explicit request"). If any other check fails (closed, in flight), print why and stop.
    - **Without argument** — pick the FIRST candidate in the priority/oldest walk (step 1) that is NOT in flight, NOT already assigned, NOT carrying a parking label (`blocked`, `needs-input`, `wontfix`, `discussion`, `future`, or any repo-specific parking label — skip and note it), NOT blocked by an open declared dependency (step 4 — skip and note it), and NOT an `epic-open`/`epic-done` epic per step 3 (an `epic-wrapup` epic **is** eligible). Because auto-pick is label-agnostic by default, the parking-label skip, the dependency skip, and the epic resolution are the primary guards against claiming parked, blocked, or umbrella work. An explicit `#num` can still claim a skipped issue; auto-pick never surfaces one.
 6. **Set `ISSUE_NUM=<num>` and `SLUG="issue-${ISSUE_NUM}"`** — later phases use `SLUG` for worktree/branch/commit/PR and `ISSUE_NUM` for `gh issue` calls.
 7. **If no eligible issue exists**, print why and stop. Do NOT open new issues here — that only happens for work *discovered while implementing* (Phase 4/6).
@@ -258,7 +266,7 @@ gh issue edit "$ISSUE_NUM" --add-assignee @me || {
 # OTHER than you is now assigned, a sibling won the race — yield: release your marker
 # and stop (re-run Phase 1 to pick the next issue).
 ASSIGNEES="$(gh issue view "$ISSUE_NUM" --json assignees -q '[.assignees[].login] | join(",")')"
-ME="$(gh api user -q .login)"
+ME="$(gh api --hostname "$GH_HOST" user -q .login)"
 if printf '%s' "$ASSIGNEES" | tr ',' '\n' | grep -qvxF "$ME" ; then
   # A sibling won the race. Release the marker and STOP — do NOT add the label,
   # do NOT continue to Phase 3+. Run Phase 7 cleanup (remove the worktree + branch)

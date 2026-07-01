@@ -24,7 +24,7 @@ After parsing the flags above, apply any **saved defaults** (set via `/do:config
   - SSH-style URL with `github.com` host
   - Any URL containing the substring `github` AND a `/pull/{number}` segment — covers GHES hosts like `github.example.com`
   - Shorthand: the argument matches `^[^/]+/[^/]+#[0-9]+$` AND `gh repo view {owner}/{repo}` confirms it resolves (the shorthand form does NOT require the `github` substring — `gh` is the source of truth for whether it's a real repo)
-  - Extract `OWNER`, `REPO`, and `PR_NUM`. Set `PR_MODE=true` and `PR_URL` to the canonical URL.
+  - Extract `OWNER`, `REPO`, and `PR_NUM`. Set `PR_MODE=true` and `PR_URL` to the canonical URL. Also capture the URL's **host** as `{GH_HOST}` (e.g. `github.com`, or a GHES host like `github.example.com`) — the `gh api` calls below need it explicitly, because `gh api` ignores the repo remote and defaults to github.com (see `~/.claude/lib/gh-host.md`). Note the host comes from the **PR URL** here, not the local `origin` remote — a PR being reviewed by URL can live on a different host than the current checkout.
 - Any other non-flag token: treat as the base branch override (only when `PR_MODE=false`).
 
 Set `STRICT_MODE=true` if either strict flag is present.
@@ -35,7 +35,7 @@ If both a PR URL and a base-branch token are provided, the PR URL wins — ignor
 
 ### Local branch mode (`PR_MODE=false`)
 
-1. **Detect the base branch** — use the positional argument if provided, otherwise run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`
+1. **Detect the base branch** — use the positional argument if provided, otherwise run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`. Also **derive `{GH_HOST}` from the `origin` remote** (local mode reviews the current checkout, so its host is the remote's): `GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^(https?://|ssh://git@|git@)([^/:]+).*#\2#')"; [ -n "$GH_HOST" ] || GH_HOST=github.com` — the `gh api` calls below need it explicitly (see `~/.claude/lib/gh-host.md`).
 2. **Detect the current branch** — `git branch --show-current`
 3. **Get the diff stat** — `git diff {base}...HEAD --stat` to see all changed files and line counts
 4. **Get the full diff** — `git diff {base}...HEAD` to see actual changes
@@ -49,16 +49,16 @@ When a PR URL was parsed, do NOT use the local working tree as the source of tru
 
 1. **Fetch PR metadata**:
    ```bash
-   gh pr view {PR_NUM} --repo {OWNER}/{REPO} --json number,title,author,baseRefName,headRefName,headRefOid,baseRefOid,url,isCrossRepository,headRepositoryOwner,headRepository
+   gh pr view {PR_NUM} --repo {GH_HOST}/{OWNER}/{REPO} --json number,title,author,baseRefName,headRefName,headRefOid,baseRefOid,url,isCrossRepository,headRepositoryOwner,headRepository
    ```
    Capture `HEAD_SHA` (`headRefOid`), `BASE_SHA` (`baseRefOid`), `HEAD_REF`, `BASE_REF`, `AUTHOR_LOGIN`, and `IS_FORK` (`isCrossRepository`).
 2. **Fetch the changed-files list**:
    ```bash
-   gh pr diff {PR_NUM} --repo {OWNER}/{REPO} --name-only
+   gh pr diff {PR_NUM} --repo {GH_HOST}/{OWNER}/{REPO} --name-only
    ```
 3. **Fetch the full unified diff** (used by agents to scope to changed hunks AND used later to filter inline comments to lines that exist in the diff):
    ```bash
-   gh pr diff {PR_NUM} --repo {OWNER}/{REPO} > /tmp/do-review-pr-{PR_NUM}.diff
+   gh pr diff {PR_NUM} --repo {GH_HOST}/{OWNER}/{REPO} > /tmp/do-review-pr-{PR_NUM}.diff
    ```
 4. **Parse the diff to build a "commentable lines" map** — `{file_path: set of line numbers on the RIGHT (new) side of the diff}`. GitHub's review API only accepts inline comments on lines that appear in the patch; comments on lines outside the diff will be rejected. Walk the unified diff line by line:
    - Track the current file from `diff --git a/<path> b/<path>` headers (authoritative for both adds and renames). Prefer this over `+++ b/<path>` because deletions emit `+++ /dev/null` and renames may not round-trip the new path through `+++` alone.
@@ -68,7 +68,7 @@ When a PR URL was parsed, do NOT use the local working tree as the source of tru
    - (Do NOT use `git apply --numstat` — it reports per-file add/delete totals, not hunk line ranges.) Save to `/tmp/do-review-pr-{PR_NUM}-lines.json`.
 5. **Fetch each changed file at HEAD_SHA** so agents can read full file content (not just the hunk). Skip deleted files — `repos/{OWNER}/{REPO}/contents/{path}?ref={HEAD_SHA}` returns 404 for any path removed in the PR, and a strict failure would derail PR-mode for delete-only or mixed-deletion PRs:
    ```bash
-   gh api repos/{OWNER}/{REPO}/contents/{path}?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}/{path} || echo "skipped (deleted or unreadable): {path}"
+   gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/contents/{path}?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}/{path} || echo "skipped (deleted or unreadable): {path}"
    ```
    (Create parent dirs as needed; URL-encode the path. Use the `diff --git` header from step 4 to identify deletions up front and skip the fetch entirely for those.)
 6. Print: `Reviewing PR #{PR_NUM}: {title} — {N} files changed{strict_suffix}` plus a one-line note: `Author: {AUTHOR_LOGIN}{fork_suffix}` where `{fork_suffix}` is ` (cross-repo fork)` when `IS_FORK=true`.
@@ -81,8 +81,8 @@ CLAUDE.md is already loaded into your context. Use its rules (code style, error 
 
 In `PR_MODE`, the local CLAUDE.md may not apply to the PR being reviewed (it could be from a fork or a different repo). Also attempt to fetch the target repo's CLAUDE.md and AGENTS.md if they exist:
 ```bash
-gh api repos/{OWNER}/{REPO}/contents/CLAUDE.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}-CLAUDE.md || true
-gh api repos/{OWNER}/{REPO}/contents/AGENTS.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}-AGENTS.md || true
+gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/contents/CLAUDE.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}-CLAUDE.md || true
+gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/contents/AGENTS.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}-AGENTS.md || true
 ```
 Pass whichever exists to the agents instead of (or in addition to) the local one.
 
@@ -266,7 +266,7 @@ Assemble a top-level review body (markdown) with:
 
 ### Pick the review event
 
-- **`REQUEST_CHANGES`** if any finding is CRITICAL **and** the current user is not the PR author. If the current user IS the PR author (check via `gh api user -q '.login'` vs `AUTHOR_LOGIN`), downgrade to `COMMENT` — GitHub forbids requesting changes on your own PR.
+- **`REQUEST_CHANGES`** if any finding is CRITICAL **and** the current user is not the PR author. If the current user IS the PR author (check via `gh api --hostname {GH_HOST} user -q '.login'` vs `AUTHOR_LOGIN`), downgrade to `COMMENT` — GitHub forbids requesting changes on your own PR.
 - **`COMMENT`** otherwise (improvements/nits only, or self-PR).
 - **Never `APPROVE` automatically** — approval is a human judgment call.
 
@@ -285,7 +285,7 @@ Write the payload to `/tmp/do-review-pr-{PR_NUM}-payload.json`:
 
 Post it:
 ```bash
-gh api repos/{OWNER}/{REPO}/pulls/{PR_NUM}/reviews \
+gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/pulls/{PR_NUM}/reviews \
   --method POST \
   --input /tmp/do-review-pr-{PR_NUM}-payload.json
 ```
@@ -299,7 +299,7 @@ Print the review URL returned by the API (`html_url`) so the user can open it.
 
 ### Drafts mode (optional)
 
-If the user wants to inspect comments before publishing, support a `--draft` flag: instead of `POST .../reviews`, write the payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the path plus the `gh api` command needed to publish it manually. (Default behavior remains: publish immediately.)
+If the user wants to inspect comments before publishing, support a `--draft` flag: instead of `POST .../reviews`, write the payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the path plus the `gh api` command needed to publish it manually — include the `--hostname {GH_HOST}` flag in that printed command so it targets the right host on GitHub Enterprise. (Default behavior remains: publish immediately.)
 
 ## Report
 
@@ -348,7 +348,7 @@ After the report is printed and fixes are committed (local branch mode), run the
 For local branch mode, after the review and any fixes, determine whether to post review comments on the PR/MR:
 
 1. **Check for an open PR** on the current branch: `gh pr view --json number,author --jq '{number, author: .author.login}' 2>/dev/null`. If the command fails (no PR exists), skip posting.
-2. **Get the current user**: `gh api user -q '.login'`
+2. **Get the current user**: `gh api --hostname {GH_HOST} user -q '.login'`
 3. **Compare**: If the PR author login **matches** the current user, do NOT post comments to the PR — the local fixes and summary are sufficient.
 4. **If the PR was opened by someone else**, post a review comment on the PR summarizing the findings using `gh pr review {number} --comment --body "..."`. Include the issues found, fixes applied, and any remaining items that need the author's attention.
 
@@ -367,6 +367,7 @@ Inputs to the wrapper:
 - `{REVIEW_MODE}` — `series` (default) | `parallel`
 - `{REVIEWER_APPLIES}` — boolean, forwarded to each local-agent pass
 - `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot/`@<login>` iteration cap (`0` = loop until clean)
+- `{GH_HOST}` — the GitHub API host established in "Determine Scope" (the PR URL's host in PR mode, the `origin` remote's host in local mode); forwarded to the GitHub-side loops so their `gh api` calls target the right host on GitHub Enterprise
 
 Per-agent dispatch inside the wrapper:
 

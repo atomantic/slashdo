@@ -10,6 +10,12 @@ fallback is host-agnostic but the commands that inline this file already gate
 on `gh`. Set `OWNER`/`REPO` once per run:
 `OWNER_REPO="$(gh repo view --json owner,name -q '.owner.login + "/" + .name')"`
 then `OWNER="${OWNER_REPO%/*}"; REPO="${OWNER_REPO#*/}"`.
+Also set `GH_HOST` once — `gh api` (used below) defaults to github.com and does **not**
+read the repo remote, so on a GitHub Enterprise repo it must be told the host
+explicitly (see `~/.claude/lib/gh-host.md`):
+`GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^(https?://|ssh://git@|git@)([^/:]+).*#\2#')"; [ -n "$GH_HOST" ] || GH_HOST=github.com`
+Pass `--hostname "$GH_HOST"` on every `gh api` call below (the `gh issue`/`gh pr`
+calls resolve the host from the remote on their own and need no flag).
 
 ## When does an issue count as an epic?
 
@@ -24,12 +30,12 @@ An issue that matches none of these is an ordinary issue — handle it normally.
 
 1. **Native sub-issues (preferred).**
    ```bash
-   gh api "repos/$OWNER/$REPO/issues/$N/sub_issues" --paginate \
+   gh api --hostname "$GH_HOST" "repos/$OWNER/$REPO/issues/$N/sub_issues" --paginate \
      --jq '.[] | "\(.number)\t\(.state)"' 2>/dev/null
    ```
    GraphQL equivalent when REST is unavailable:
    ```bash
-   gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){subIssues(first:100){nodes{number state}}}}}' \
+   gh api --hostname "$GH_HOST" graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){subIssues(first:100){nodes{number state}}}}}' \
      -F o="$OWNER" -F r="$REPO" -F n="$N" --jq '.data.repository.issue.subIssues.nodes[] | "\(.number)\t\(.state|ascii_downcase)"' 2>/dev/null
    ```
    If either returns rows, **those are the children** — use them and skip the
@@ -89,7 +95,7 @@ After a child issue closes, find its parent so the epic can be re-evaluated:
 
 1. **Native:**
    ```bash
-   gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){parent{number}}}}' \
+   gh api --hostname "$GH_HOST" graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){parent{number}}}}' \
      -F o="$OWNER" -F r="$REPO" -F n="$CHILD" --jq '.data.repository.issue.parent.number' 2>/dev/null
    ```
 2. **Convention fallback — child back-reference:** parse the just-closed child's

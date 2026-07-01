@@ -34,7 +34,7 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 LIBS=(
   ci-flake-handling code-review-checklist copilot-review-loop epic-children
   finding-disposition fix-regression-guard
-  github-reviewer-loop graphql-escaping
+  gh-host github-reviewer-loop graphql-escaping
   local-agent-review-loop multi-reviewer-loop ollama-review-loop
   per-finding-root-cause plan-id-format plan-issue-mode
   post-review-doc-recommendations remediation-agent-template review-config-defaults
