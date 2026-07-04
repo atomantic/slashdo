@@ -152,7 +152,7 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
 
    **Run the invocation in the BACKGROUND, not as a blocking foreground Bash call.** This is the single most important detail in this step. A real multi-file review by `agy`/`codex`/`claude -p` routinely runs longer than ten minutes, and **the host CLI's Bash tool caps a single foreground command at ~10 minutes** (Claude Code's Bash tool `timeout` parameter maxes out at 600000 ms; other hosts impose a similar foreground ceiling). A blocking foreground call is therefore killed at the 10-minute mark *by the host*, before the reviewer prints its findings — regardless of `$TIMEOUT_CMD` (`timeout 1800`) or agy's `--print-timeout 30m`, which are both 30-minute bounds the host never lets the foreground call reach. The 10-minute cap is **not** in this loop's shell logic; it is the host tool ceiling, so the only way around it is to not block on a foreground call. Launch the reviewer detached and poll its log instead:
 
-   - **Claude Code / hosts with a backgroundable Bash tool**: invoke the command below with the host's background mode (Claude Code: set `run_in_background: true` on the Bash tool call). The host returns immediately with a task/shell id and re-notifies you when the process exits — there is no foreground timeout to hit. Capture the command to the log exactly as shown; the trailing `; echo $? > "$DONE_FILE"` records the real exit code where the poll loop can read it:
+   - **Claude Code / hosts with a backgroundable Bash tool**: invoke the command below with the host's background mode (Claude Code: set `run_in_background: true` on the Bash tool call). The host returns immediately with a task/shell id — there is no foreground timeout to hit. Capture the command to the log exactly as shown; the trailing `; echo $? > "$DONE_FILE"` records the real exit code where the wait loop can read it:
 
      ```bash
      LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
@@ -160,7 +160,15 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
      $TIMEOUT_CMD {INVOCATION} > "$LOG_FILE" 2>&1; echo $? > "$DONE_FILE"
      ```
 
-     Then poll until the reviewer finishes: in separate short Bash calls (each well under the foreground cap), check `[ -f "$DONE_FILE" ]`; once it exists, read `EXIT_CODE=$(cat "$DONE_FILE")`. Tail `$LOG_FILE` between polls only if you need a progress signal — do not re-block on the reviewer. Keep polling until `$DONE_FILE` appears (bounded by `$TIMEOUT_CMD`/`--print-timeout 30m`, which now actually govern the run because nothing is foreground-capping it first).
+     Then wait for the reviewer with **bounded blocking-chunk foreground calls** — do NOT end your turn and wait to be notified. Repeat this foreground call (each iteration blocks ~9 minutes, safely under the host's ~10-minute foreground cap) until `$DONE_FILE` exists, then read `EXIT_CODE=$(cat "$DONE_FILE")`:
+
+     ```bash
+     for i in $(seq 1 55); do [ -f "$DONE_FILE" ] && break; sleep 10; done; [ -f "$DONE_FILE" ] && cat "$DONE_FILE" || echo "STILL_RUNNING"
+     ```
+
+     On `STILL_RUNNING`, immediately issue the same call again (tail the last few lines of `$LOG_FILE` between chunks only if you need a progress signal — never re-block on the reviewer process itself). Keep chaining chunks until `$DONE_FILE` appears (the run is bounded by `$TIMEOUT_CMD`/`--print-timeout 30m`, which now actually govern it because nothing is foreground-capping it first).
+
+     **NEVER end your turn while a reviewer is in flight.** "The host will re-notify me when the background task exits" is only true for a top-level interactive session. When this loop runs inside a **subagent** (a `/do:next --swarm` worker, a CoS/background agent, anything spawned via an Agent/Task tool), ending the turn *terminates the run* — completion notifications are not guaranteed to reach a stopped subagent, and there is no wake-up mechanism it can schedule. A stopped subagent is dead, not waiting: the orchestrator sees a premature "final" result while the reviewer is still running, and the review's findings are lost. The blocking-chunk loop above is the correct wait in BOTH contexts (it costs nothing in a top-level session), so use it unconditionally rather than deciding whether you are a subagent.
 
    - **Hosts with no background Bash mechanism** (the loop is running under a CLI whose shell tool cannot detach): fall back to the foreground call below, but set the host tool's timeout parameter to its maximum and be aware the run will still be cut at that maximum (~10 min on Claude Code). On such a host a long review is expected to be reported as `cli-error` (timed out) rather than silently truncated to zero findings:
 
