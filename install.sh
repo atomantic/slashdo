@@ -64,7 +64,8 @@ LIBS=(
   gh-host github-reviewer-loop graphql-escaping
   local-agent-review-loop multi-reviewer-loop ollama-review-loop
   per-finding-root-cause plan-id-format plan-issue-mode
-  post-review-doc-recommendations remediation-agent-template review-config-defaults
+  post-review-doc-recommendations remediation-agent-template
+  review-config-defaults review-convergence-gate
   swift-review-checklist swift-gotchas
   review-surface-scan review-surface-quality review-security-audit
   review-cross-file-tracing review-cross-file-contract

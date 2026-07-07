@@ -234,8 +234,9 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
 
 6. **Re-loop or stop**:
    - `ITERATION=$((ITERATION + 1))`
-   - If `ITERATION < MAX_ITERATIONS`: go back to step 1 to confirm the latest commits don't themselves need further review (catches recursive findings — common when a fix introduces a new shape).
-   - Otherwise: `STATUS=guardrail`, exit the loop.
+   - **Apply the convergence gate** (`~/.claude/lib/review-convergence-gate.md`) before starting another round: judge whether the round that just completed is worth following with another review. If it made zero commits, or landed only *marginal* findings (edge-case guards, refinements of already-correct behavior, hypotheticals with no concrete wrong outcome), **converge — set `STATUS=clean` and exit**, noting in the report that the loop converged on diminishing returns. Only a round that landed at least one *substantive* finding earns another pass.
+   - If the gate says continue AND `ITERATION < MAX_ITERATIONS`: go back to step 1 to confirm the latest commits don't themselves need further review (catches recursive findings — common when a fix introduces a new shape).
+   - Otherwise (gate converged, or `ITERATION >= MAX_ITERATIONS`): exit the loop. `MAX_ITERATIONS` is the mechanical backstop; the convergence gate should normally stop the loop before it. Set `STATUS=guardrail` only when the mechanical cap was the thing that stopped a still-productive loop; a gate-driven convergence sets `STATUS=clean`.
 
 ### Final report
 

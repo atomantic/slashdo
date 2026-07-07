@@ -211,6 +211,13 @@ the moment a review returns zero unresolved comments:
      report status "guardrail".
      Default mode: auto-stop, mark best-effort. Interactive mode: ask whether to
      continue or stop.
+   - CONVERGENCE GATE (unlimited mode, {REVIEW_ITERATIONS}=0, before the
+     10-iteration guardrail): apply ~/.claude/lib/review-convergence-gate.md.
+     If the round just completed resolved only *marginal* feedback (edge-case
+     guards, refinements of already-correct behavior, hypotheticals with no
+     concrete wrong outcome), converge — stop and report "clean", noting the
+     diminishing-returns convergence, rather than re-requesting to mine more.
+     Only a round with at least one *substantive* fix earns another request.
    - Otherwise, go back to step 1 (re-request to confirm the fixes are accepted).
 
 When done, report back:
