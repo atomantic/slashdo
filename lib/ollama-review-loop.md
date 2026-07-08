@@ -160,9 +160,9 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
    If the push fails (non-fast-forward), run `git pull --rebase --autostash && git push origin {BRANCH_NAME}` once before reporting failure.
 6. **Re-loop or stop**:
    - `ITERATION=$((ITERATION + 1))`
-   - **Apply the convergence gate** (`~/.claude/lib/review-convergence-gate.md`) before another round: if the round just completed made zero commits or landed only *marginal* findings (edge-case guards, hypotheticals with no concrete wrong outcome), **converge — set `STATUS=clean` and exit**, noting the diminishing-returns convergence in the report. Only a round with at least one *substantive* finding earns another pass.
+   - **Apply the convergence gate** (`~/.claude/lib/review-convergence-gate.md`) before another round: if the round just completed made zero commits or landed only *marginal* findings (edge-case guards, hypotheticals with no concrete wrong outcome), **converge — set `STATUS=clean` (or `STATUS=incomplete` if the round had any coverage gap, `REVIEW_ERRORS + TRUNCATED > 0`) and exit**, noting the diminishing-returns convergence in the report. The coverage-gap exception is the same invariant step 3 enforces: a partially-reviewed diff is never `clean`, even when the gate converges. Only a round with at least one *substantive* finding earns another pass.
    - If the gate says continue AND `ITERATION < MAX_ITERATIONS`: go back to step 1 to re-review the latest commits (catches recursive findings introduced by a fix).
-   - Otherwise (gate converged, or `ITERATION >= MAX_ITERATIONS`): exit the loop. `MAX_ITERATIONS` is the mechanical backstop; the gate should normally stop first. Set `STATUS=guardrail` only when the mechanical cap stopped a still-productive loop; a gate-driven convergence sets `STATUS=clean`.
+   - Otherwise (gate converged, or `ITERATION >= MAX_ITERATIONS`): exit the loop. `MAX_ITERATIONS` is the mechanical backstop; the gate should normally stop first. Set `STATUS=guardrail` only when the mechanical cap stopped a still-productive loop; a gate-driven convergence sets `STATUS=clean` (or `STATUS=incomplete` when a coverage gap remains, per the exception above).
 
 ### Final report
 
