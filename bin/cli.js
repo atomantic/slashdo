@@ -46,6 +46,7 @@ Environments:
   opencode     OpenCode         (~/.config/opencode/commands/)
   antigravity  Antigravity CLI  (~/.gemini/antigravity-cli/skills/)  [aliases: gemini, agy]
   codex        Codex            (~/.codex/skills/)
+  grok         Grok Build       (~/.grok/skills/)
 `);
 }
 

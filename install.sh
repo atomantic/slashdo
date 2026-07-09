@@ -82,6 +82,7 @@ detect_envs() {
   [ -d "$HOME/.config/opencode" ] && envs+=(opencode)
   [ -d "$HOME/.gemini/antigravity-cli" ] && envs+=(antigravity)
   [ -d "$HOME/.codex" ] && envs+=(codex)
+  [ -d "$HOME/.grok" ] && envs+=(grok)
   [ ${#envs[@]} -gt 0 ] && printf '%s\n' "${envs[@]}"
 }
 
@@ -280,7 +281,7 @@ envs=($(detect_envs)) || true
 
 if [ ${#envs[@]} -eq 0 ]; then
   printf "  No supported AI coding environments detected.\n"
-  printf "  Supported: Claude Code, OpenCode, Antigravity CLI, Codex\n\n"
+  printf "  Supported: Claude Code, OpenCode, Antigravity CLI, Codex, Grok Build\n\n"
   printf "  Create ~/.claude/ to enable Claude Code support, then re-run.\n"
   exit 1
 fi
@@ -300,6 +301,7 @@ for env in "${envs[@]}"; do
     opencode)    install_opencode; curl_installed=true ;;
     antigravity) printf "  ${DIM}Antigravity CLI: use 'npx slash-do@latest --env antigravity' (Agent Skills require Node.js for content inlining)${RESET}\n"; npx_needed=true ;;
     codex)       printf "  ${DIM}Codex: use 'npx slash-do@latest --env codex' (requires Node.js for content inlining)${RESET}\n"; npx_needed=true ;;
+    grok)        printf "  ${DIM}Grok Build: use 'npx slash-do@latest --env grok' (requires Node.js for content inlining)${RESET}\n"; npx_needed=true ;;
   esac
   printf "\n"
 done
@@ -308,6 +310,6 @@ if [ "$curl_installed" = true ]; then
   printf "  ${GREEN}Done!${RESET} Commands are available as /do:<name> in your AI coding assistant.\n"
 fi
 if [ "$npx_needed" = true ]; then
-  printf "  ${DIM}(Antigravity / Codex users: run the npx command above to complete installation.)${RESET}\n"
+  printf "  ${DIM}(Antigravity / Codex / Grok Build users: run the npx command above to complete installation.)${RESET}\n"
 fi
 printf "\n"

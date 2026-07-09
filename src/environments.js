@@ -81,6 +81,26 @@ const ENVIRONMENTS = {
     supportsCatInclusion: false,
     supportsTeams: false,
   },
+  grok: {
+    name: 'Grok Build',
+    // Grok Build (xAI's `grok` CLI) auto-loads skills from ~/.grok/skills/,
+    // one SKILL.md per skill directory — the Agent Skills standard, identical
+    // in shape to Codex. It also reads Claude Code's skills, but we install a
+    // dedicated ~/.grok tree so a grok-only user gets slashdo without ~/.claude.
+    commandsDir: path.join(HOME, '.grok', 'skills'),
+    libDir: null,
+    hooksDir: null,
+    versionFile: path.join(HOME, '.grok', '.slashdo-version'),
+    configFile: path.join(HOME, '.grok', '.slashdo-config.json'),
+    configPath: '~/.grok/.slashdo-config.json',
+    format: 'yaml-frontmatter',
+    ext: null,
+    namespacing: 'directory',
+    libPathPrefix: null,
+    supportsHooks: false,
+    supportsCatInclusion: false,
+    supportsTeams: false,
+  },
 };
 
 // Legacy environments from prior slashdo versions — detected for migration/uninstall
