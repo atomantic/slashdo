@@ -1,7 +1,7 @@
 {
   "name": "slash-do",
   "version": "3.21.1",
-  "description": "Curated slash commands for AI coding assistants — Claude Code, OpenCode, Antigravity CLI, and Codex",
+  "description": "Curated slash commands for AI coding assistants — Claude Code, OpenCode, Antigravity CLI, Codex, and Grok Build",
   "author": "Adam Eivy <adam@eivy.com>",
   "license": "MIT",
   "repository": {
@@ -19,6 +19,8 @@
     "antigravity-cli",
     "agy",
     "codex",
+    "grok",
+    "grok-build",
     "devops",
     "devsecops",
     "code-review",

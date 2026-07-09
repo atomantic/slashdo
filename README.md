@@ -23,7 +23,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/npm/v/slash-do?style=flat-square&color=blue" alt="npm version" />
-  <img src="https://img.shields.io/badge/environments-4-green?style=flat-square" alt="environments" />
+  <img src="https://img.shields.io/badge/environments-5-green?style=flat-square" alt="environments" />
   <img src="https://img.shields.io/badge/commands-15-orange?style=flat-square" alt="commands" />
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="license" />
 </p>
@@ -162,6 +162,7 @@ And you can save **`/do:pr`'s auto-merge** default so a bare `/do:pr` merges onc
   OpenCode         ~/.config/opencode/commands/       YAML frontmatter + flat naming
   Antigravity CLI  ~/.gemini/antigravity-cli/skills/  Agent Skills (SKILL.md) — aliases: gemini, agy
   Codex            ~/.codex/skills/                   SKILL.md per-command directories
+  Grok Build       ~/.grok/skills/                    SKILL.md per-command directories
 ```
 
 slashdo auto-detects which environments you have installed. Or specify manually:
@@ -192,7 +193,7 @@ npx slash-do@latest push pr release           # install specific commands only
   +------------------+
   |   Transformer    |  Converts format per environment:
   |                  |  - YAML frontmatter (Claude, OpenCode)
-  +------------------+  - Agent Skills / SKILL.md with inlined libs (Antigravity, Codex)
+  +------------------+  - Agent Skills / SKILL.md with inlined libs (Antigravity, Codex, Grok Build)
        |
        v
   +------------------+
@@ -205,6 +206,7 @@ npx slash-do@latest push pr release           # install specific commands only
   ~/.config/opencode/commands/do-push.md
   ~/.gemini/antigravity-cli/skills/do-push/SKILL.md
   ~/.codex/skills/do-push/SKILL.md
+  ~/.grok/skills/do-push/SKILL.md
 ```
 
 ## Updating
