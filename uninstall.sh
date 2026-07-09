@@ -253,6 +253,45 @@ uninstall_antigravity() {
   fi
 }
 
+# Shared cleanup for directory-namespaced Agent Skills environments (Codex, Grok
+# Build): each command is installed as ~/.<env>/skills/do-<cmd>/SKILL.md, so
+# removal is a directory delete — the same shape as Antigravity, just a different
+# parent tree. Args: <display name> <env parent dir> (skills live under it).
+uninstall_agent_skills() {
+  local label="$1"
+  local parent="$2"
+  local target_skills="$parent/skills"
+  local count=0
+
+  printf "  Uninstalling from ${GREEN}%s${RESET}...\n" "$label"
+
+  for cmd in "${COMMANDS[@]}" "${OLD_COMMANDS[@]}"; do
+    if [ -d "$target_skills/do-$cmd" ]; then
+      rm -rf "$target_skills/do-$cmd"
+      printf "    removed: /do-%-18s${GREEN}ok${RESET}\n" "$cmd"
+      count=$((count + 1))
+    fi
+  done
+
+  if [ -f "$parent/.slashdo-version" ]; then
+    rm -f "$parent/.slashdo-version"
+    printf "    removed: .slashdo-version        ${GREEN}ok${RESET}\n"
+    count=$((count + 1))
+  fi
+
+  if [ -f "$parent/.slashdo-config.json" ]; then
+    rm -f "$parent/.slashdo-config.json"
+    printf "    removed: .slashdo-config.json    ${GREEN}ok${RESET}\n"
+    count=$((count + 1))
+  fi
+
+  if [ $count -eq 0 ]; then
+    printf "    ${DIM}nothing to remove${RESET}\n"
+  else
+    printf "    ${GREEN}$count items removed${RESET}\n"
+  fi
+}
+
 uninstall_gemini_legacy() {
   # Cleans up files installed by slashdo < 3.3 under the legacy Gemini CLI path.
   local target_cmd="$HOME/.gemini/commands/do"
@@ -295,6 +334,8 @@ detect_envs() {
   [ -d "$HOME/.claude" ] && envs+=(claude)
   [ -d "$HOME/.config/opencode" ] && envs+=(opencode)
   [ -d "$HOME/.gemini/antigravity-cli" ] && envs+=(antigravity)
+  [ -d "$HOME/.codex" ] && envs+=(codex)
+  [ -d "$HOME/.grok" ] && envs+=(grok)
   # Detect legacy Gemini CLI install (slashdo < 3.3) for migration cleanup.
   [ -d "$HOME/.gemini/commands/do" ] && envs+=(gemini-legacy)
   [ ${#envs[@]} -gt 0 ] && printf '%s\n' "${envs[@]}"
@@ -316,6 +357,8 @@ for env in "${envs[@]}"; do
     claude)        uninstall_claude ;;
     opencode)      uninstall_opencode ;;
     antigravity)   uninstall_antigravity ;;
+    codex)         uninstall_agent_skills "Codex" "$HOME/.codex" ;;
+    grok)          uninstall_agent_skills "Grok Build" "$HOME/.grok" ;;
     gemini-legacy) uninstall_gemini_legacy ;;
   esac
   printf "\n"
