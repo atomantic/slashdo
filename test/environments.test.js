@@ -41,6 +41,13 @@ describe('getEnv', () => {
     assert.equal(env.namespacing, 'directory');
   });
 
+  it('returns grok env config', () => {
+    const env = getEnv('grok');
+    assert.equal(env.name, 'Grok Build');
+    assert.equal(env.format, 'yaml-frontmatter');
+    assert.equal(env.namespacing, 'directory');
+  });
+
   it('returns null for unknown env name', () => {
     assert.equal(getEnv('unknown'), null);
     assert.equal(getEnv(''), null);
@@ -73,13 +80,14 @@ describe('canonicalEnvName', () => {
 // ── allEnvNames ─────────────────────────────────────────────────────
 
 describe('allEnvNames', () => {
-  it('returns all four environment names', () => {
+  it('returns all five environment names', () => {
     const names = allEnvNames();
-    assert.equal(names.length, 4);
+    assert.equal(names.length, 5);
     assert.ok(names.includes('claude'));
     assert.ok(names.includes('opencode'));
     assert.ok(names.includes('antigravity'));
     assert.ok(names.includes('codex'));
+    assert.ok(names.includes('grok'));
   });
 
   it('does not list aliases as canonical names', () => {
@@ -135,6 +143,7 @@ describe('environment shape', () => {
     assert.equal(ENVIRONMENTS.opencode.supportsHooks, false);
     assert.equal(ENVIRONMENTS.antigravity.supportsHooks, false);
     assert.equal(ENVIRONMENTS.codex.supportsHooks, false);
+    assert.equal(ENVIRONMENTS.grok.supportsHooks, false);
   });
 
   it('only claude supports teams', () => {
@@ -142,6 +151,7 @@ describe('environment shape', () => {
     assert.equal(ENVIRONMENTS.opencode.supportsTeams, false);
     assert.equal(ENVIRONMENTS.antigravity.supportsTeams, false);
     assert.equal(ENVIRONMENTS.codex.supportsTeams, false);
+    assert.equal(ENVIRONMENTS.grok.supportsTeams, false);
   });
 
   it('all envs have supportsTeams boolean', () => {

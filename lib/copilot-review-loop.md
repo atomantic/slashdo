@@ -121,6 +121,15 @@ comments. When {REVIEW_ITERATIONS} is 0, loop until zero new comments
      reaches 10: stop the loop and report back with status "guardrail".
      **Default mode**: auto-stop and mark as best-effort.
      **Interactive mode (`--interactive`)**: ask the user whether to continue or stop
+   - CONVERGENCE GATE (unlimited mode, {REVIEW_ITERATIONS}=0, before the
+     10-iteration guardrail): apply ~/.claude/lib/review-convergence-gate.md.
+     If the round just completed resolved only *marginal* comments (edge-case
+     guards, refinements of already-correct behavior, hypotheticals with no
+     concrete wrong outcome), converge — stop and report "clean", noting the
+     diminishing-returns convergence, rather than re-requesting to mine more.
+     Only a round that resolved at least one *substantive* comment earns
+     another request. (No effect when {REVIEW_ITERATIONS} is a fixed positive
+     cap — that path already stops at the cap.)
    - Otherwise, go back to step 1
 
 When done, report back:
