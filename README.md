@@ -180,6 +180,7 @@ All commands live under the `do:` namespace:
 | `codex` | The Codex CLI in headless mode, reviewing locally | yes |
 | `claude` | The Claude Code CLI in headless mode | yes |
 | `agy` | The Antigravity CLI (`agy` binary; aliases: `gemini`, `antigravity`) | yes |
+| `grok` | The Grok CLI in headless mode, reviewing locally | yes |
 | `ollama` | A local Ollama model — review-only (non-agentic). Bare `ollama` auto-selects your most capable installed coding model | yes |
 | `@<login>` | Any GitHub user or App/bot (e.g. `@octocat`, `@some-app[bot]`): slashdo requests their review on the PR, waits for it, and fixes what it surfaces. GitHub only; slashdo never posts an approval itself | no |
 
@@ -204,11 +205,11 @@ Reviewers run **in the order listed**, and whatever you list is exactly what run
 | Flag | Default | What it does |
 |:---|:---|:---|
 | `--review-with <list>` | none — no external reviewer | Comma-list of reviewers, run in order (see above) |
-| `--review-iterations <n>` | `1` | Cap review-and-fix cycles for a `copilot` or `@<login>` pass: request one review, apply every fix, stop (exiting early on 0 comments). `0` restores loop-until-clean, bounded by a 10-iteration guardrail. No effect on `codex`/`agy`/`claude` (fixed 3-iteration cap) or `ollama` (own fixed cap) |
+| `--review-iterations <n>` | `1` | Cap review-and-fix cycles for a `copilot` or `@<login>` pass: request one review, apply every fix, stop (exiting early on 0 comments). `0` restores loop-until-clean, bounded by a 10-iteration guardrail. No effect on `codex`/`agy`/`claude`/`grok` (fixed 3-iteration cap) or `ollama` (own fixed cap) |
 | `--review-mode <series\|parallel>` | `series` | `series` runs each reviewer to completion before the next starts, so later reviewers see earlier reviewers' committed fixes (list order matters). `parallel` runs every review concurrently against one frozen baseline and applies the deduped union of findings in a single pass — faster, but no reviewer sees another's fixes, and `--reviewer-applies` and the stop-mode flags are ignored. `/do:rpr` ignores this flag |
 | `--review-stop-on-findings` | off | Stop the loop after the first reviewer that fixes at least one finding; skip the rest. Mutually exclusive with `--review-stop-on-clean` |
 | `--review-stop-on-clean` | off | Stop after the first reviewer that reports zero findings |
-| `--reviewer-applies` | off | Let the reviewing CLI edit the working tree directly, instead of the orchestrator applying its findings. Applies to `codex`/`agy`/`claude` passes; no effect on `copilot`, `@<login>` (both review read-only cloud-side), or `ollama` (always review-only) |
+| `--reviewer-applies` | off | Let the reviewing CLI edit the working tree directly, instead of the orchestrator applying its findings. Applies to `codex`/`agy`/`claude`/`grok` passes; no effect on `copilot`, `@<login>` (both review read-only cloud-side), or `ollama` (always review-only) |
 
 By default the orchestrator that opened the PR applies every reviewer's fixes itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking Antigravity to both find and patch its own concerns).
 
