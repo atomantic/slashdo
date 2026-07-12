@@ -155,17 +155,20 @@ as a positional argument (never via stdin) and prints the improved draft to stdo
 <!-- /if:teams -->
 | `codex` | `codex "${MODEL_FLAG[@]}" --sandbox read-only -a never exec "$ENHANCE_PROMPT"` — `exec` (free-form prompt) is the right subcommand here, not `codex review`; `-m`/`--model`, `--sandbox`, and `-a` are all top-level flags that MUST precede `exec`. `--sandbox read-only` (NOT the review loop's `danger-full-access`) enforces the read-only contract at the sandbox level while still allowing tree reads and git queries. |
 | `agy` | `agy --dangerously-skip-permissions --model "$AGY_ENH_MODEL" --print-timeout 30m -p "$ENHANCE_PROMPT"` |
-| `grok` | `grok --permission-mode dontAsk "${MODEL_FLAG[@]}" -p "$ENHANCE_PROMPT"` |
+| `grok` | `grok --permission-mode bypassPermissions "${MODEL_FLAG[@]}" -p "$ENHANCE_PROMPT"` |
 
 **Grok flag rationale.** `grok -p`/`--single <PROMPT>` runs a single-turn headless
 prompt, prints the response to stdout, and exits — the grok analog of `claude -p` /
-`agy -p`. `--permission-mode dontAsk` auto-approves tool executions without the full
-`bypassPermissions` posture the review loop uses — the enhancement prompt only ever
-reads the tree, so the lighter mode is the right fit here (least privilege; see the
-intro above). `-m`/`--model` pins the model for the `grok[<model>]` bracket (empty →
-grok's own default). Output is grok's default `plain` format — the improved draft on
-stdout. Like the other `-p` CLIs, grok takes the prompt as the positional argument,
-**not** from stdin — do not pipe into it.
+`agy -p`. `--permission-mode bypassPermissions` is what reliably auto-approves grok's
+tool executions for an unattended run; the nominally lighter `dontAsk` mode is NOT a
+safe substitute here — it does not dependably auto-approve headless tool calls, so a
+background pass can sit waiting on an approval that never comes and degrade to a
+timeout/no-op. Grok therefore keeps the full-bypass posture even though enhancement
+is contractually read-only (unlike codex, it has no read-only sandbox mode); the
+step-4 git contract check is the enforcement backstop. `-m`/`--model` pins the model
+for the `grok[<model>]` bracket (empty → grok's own default). Output is grok's
+default `plain` format — the improved draft on stdout. Like the other `-p` CLIs, grok
+takes the prompt as the positional argument, **not** from stdin — do not pipe into it.
 
 ### Loop
 
@@ -217,8 +220,13 @@ one's output):
 <!-- /if:teams -->
    - **`codex` / `agy` / `grok`<!-- if:teams --><!-- else --> / `claude`<!-- /if:teams -->:**
      run in the **background**, not as a blocking foreground call — a large-draft pass
-     on a heavy model can exceed the host's ~10-minute foreground cap. Launch detached
-     and poll the log (the same pattern as the review loop):
+     on a heavy model can exceed the host's ~10-minute foreground cap. **The snippet
+     below is not self-detaching — launch it with the host's background mode** (Claude
+     Code: `run_in_background: true` on the Bash tool call; hosts without a background
+     mechanism: append `&` after the `echo $? > "$DONE_FILE"` and rely on the poll
+     loop). Run synchronously in the foreground, it is killed at the host's cap before
+     the poll loop ever starts and the pass is wrongly recorded as a no-op. Same
+     pattern as the review loop:
      ```bash
      LOG_FILE="$(mktemp -t enhance-${AGENT}.XXXXXX.log)"
      ERR_FILE="${LOG_FILE}.err"
