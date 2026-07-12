@@ -193,7 +193,15 @@ one's output):
    TREE_BASELINE=$(git status --porcelain)
    HEAD_BASELINE=$(git rev-parse HEAD)
    DIFF_BASELINE=$(git diff HEAD | git hash-object --stdin)   # detects edits to files that were ALREADY dirty
-   SNAPSHOT=$(git stash create)   # content snapshot of the dirty state; empty string on a clean tree
+   SNAPSHOT=$(git stash create)   # content snapshot of the dirty TRACKED state; empty string on a clean tree
+   # Pre-existing UNTRACKED files are invisible to both git diff HEAD and git stash
+   # create, so they need their own detection hash AND content snapshot — without
+   # these, an enhancer that edits or deletes the caller's untracked work-in-progress
+   # file goes undetected (its ?? porcelain line is unchanged) and unrestorable:
+   UNTRACKED_TAR="$(mktemp -t enhance-untracked.XXXXXX.tar)"
+   git ls-files --others --exclude-standard -z | tar --null -T - -cf "$UNTRACKED_TAR" 2>/dev/null
+   UNTRACKED_BASELINE=$(git ls-files --others --exclude-standard -z | sort -z \
+     | xargs -0 -I{} sh -c 'printf "%s %s\n" "$(git hash-object "{}")" "{}"' | git hash-object --stdin)
    ```
 
 3. **Invoke** per the table above.
@@ -232,9 +240,11 @@ one's output):
 4. **Verify the read-only contract, then parse the output.** Not every CLI can be
    sandboxed read-only (`claude`/`agy` have no such mode), so the "must not modify
    files" contract needs teeth: recompute `git status --porcelain`, `git rev-parse
-   HEAD`, and `git diff HEAD | git hash-object --stdin` and compare all three against
-   the step-2 baselines (the diff hash is what catches an edit to a file that was
-   *already* dirty at baseline — its porcelain line is identical either way). **If any
+   HEAD`, `git diff HEAD | git hash-object --stdin`, and the untracked-files hash
+   (same pipeline as `UNTRACKED_BASELINE`) and compare all four against the step-2
+   baselines (the diff hash catches an edit to a *tracked* file that was already
+   dirty at baseline; the untracked hash catches an edit to — or deletion of — a
+   pre-existing *untracked* file, which neither of the other checks can see). **If any
    changed**, the enhancer implemented instead of enhancing — restore ONLY what this
    pass touched (the caller's tree may have been legitimately dirty before the
    pipeline started):
@@ -255,6 +265,10 @@ one's output):
      (the `DIFF_BASELINE` hash mismatch): restore it from the step-2 snapshot —
      `git restore --source="$SNAPSHOT" --worktree -- <path>` (`$SNAPSHOT` is non-empty
      whenever the baseline tree was dirty).
+   - For a pre-existing untracked file the pass edited or deleted (the
+     `UNTRACKED_BASELINE` hash mismatch): re-extract it from the step-2 tarball —
+     `tar -xf "$UNTRACKED_TAR" -- <path>` (paths inside the tar are repo-relative, so
+     run from the repo root).
 
    Record the agent as `no-op (modified the working tree — contract violation)`, keep
    the previous draft unchanged, and continue to the next agent. Never let a
