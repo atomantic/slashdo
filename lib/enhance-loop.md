@@ -56,14 +56,19 @@ re-scanned for substitutions when later expanded:
 ```bash
 DRAFT_TITLE_FILE="$(mktemp -t enhance-title.XXXXXX)"
 DRAFT_BODY_FILE="$(mktemp -t enhance-body.XXXXXX)"
+REPO_CONTEXT_FILE="$(mktemp -t enhance-context.XXXXXX)"
 cat > "$DRAFT_TITLE_FILE" <<'DRAFT_EOF'
 <the current draft title, pasted verbatim>
 DRAFT_EOF
 cat > "$DRAFT_BODY_FILE" <<'DRAFT_EOF'
 <the current draft body, pasted verbatim>
 DRAFT_EOF
+cat > "$REPO_CONTEXT_FILE" <<'DRAFT_EOF'
+<the task description / repo context, pasted verbatim — free-form user text with the same backtick hazard>
+DRAFT_EOF
 DRAFT_TITLE=$(cat "$DRAFT_TITLE_FILE")
 DRAFT_BODY=$(cat "$DRAFT_BODY_FILE")
+REPO_CONTEXT=$(cat "$REPO_CONTEXT_FILE")
 ```
 
 ```bash
@@ -238,8 +243,14 @@ one's output):
      misbehaving agent typically ran `git add -A && git commit`, sweeping the caller's
      pre-existing uncommitted work into its commit, and a hard reset would destroy
      that work permanently. Then recompute `git status --porcelain` and continue below.
-   - `git checkout --` each path that appears in the new porcelain output but not in
-     `$TREE_BASELINE`; delete untracked files it created.
+   - For each path that appears in the new porcelain output but not in
+     `$TREE_BASELINE`: `git restore --source="$HEAD_BASELINE" --staged --worktree --
+     <path>` — NOT `git checkout -- <path>`, which restores from the *index* and is a
+     silent no-op when the enhancer staged its edits without committing (e.g. killed
+     by the timeout between `git add -A` and `git commit`); the staged content would
+     survive and be swept into the caller's next commit. For files the enhancer
+     *created*: `git rm --cached -- <path>` when staged (`A ` in porcelain), then
+     delete the file.
    - For a path that was already dirty at baseline but whose content the pass changed
      (the `DIFF_BASELINE` hash mismatch): restore it from the step-2 snapshot —
      `git restore --source="$SNAPSHOT" --worktree -- <path>` (`$SNAPSHOT` is non-empty
