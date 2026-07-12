@@ -39,7 +39,7 @@ Parse `$ARGUMENTS` for `--review-iterations <n>` (affects the GitHub-side passes
 - Record as `REVIEW_ITERATIONS`. If `--review-iterations` is omitted, default to `1` — a single review-and-fix pass per GitHub-side reviewer (request one review, fix everything it surfaces, stop).
 - Must be a non-negative integer. Any positive `n` runs at most `n` review-and-fix cycles per GitHub-side reviewer, still exiting early if a review returns 0 comments. `0` means "loop until that reviewer returns 0 comments" (the legacy behavior, bounded by each loop's own 10-iteration safety guardrail).
 - If the value is missing or not a non-negative integer, abort with: `--review-iterations must be a non-negative integer (got: {value}).`
-- This flag has no effect on local-agent reviewers (`codex`/`gemini`/`claude`) or `ollama`; they keep their own fixed iteration caps.
+- This flag has no effect on local-agent reviewers (`codex`/`agy`/`claude`/`grok`) or `ollama`; they keep their own fixed iteration caps.
 
 Parse `$ARGUMENTS` for the merge flags (control whether the PR is auto-merged after review — opt-in; the historical default is to open the PR and stop):
 - `--merge` — once the review loop returns a mergeable status **and** CI is green, auto-merge the PR. Record `MERGE_ENABLED=true`.

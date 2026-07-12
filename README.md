@@ -288,7 +288,7 @@ Rather than passing flags every time, save them once and let future commands pic
 |:---|:---|
 | `/do:config` (or `--show`) | Print the current global + per-project defaults and the effective merged values |
 | `/do:config --review-with=… [--review-iterations=N] [--review-mode=series\|parallel] [--reviewer-applies\|--no-reviewer-applies] [--review-stop-on-findings\|--review-stop-on-clean\|--review-stop-all]` | Save review-loop defaults (validated with the same rules the review commands use) |
-| `/do:config --review-models <agent>=<model>,…` | Save the default model per reviewer (`codex`/`claude`/`agy`/`ollama`). Merges key-by-key — setting one agent leaves the others intact; an empty value (`codex=`) clears one agent |
+| `/do:config --review-models <agent>=<model>,…` | Save the default model per reviewer (`codex`/`claude`/`agy`/`grok`/`ollama`). Merges key-by-key — setting one agent leaves the others intact; an empty value (`codex=`) clears one agent |
 | `/do:config --issues\|--no-issues [--issues-label=<name>]` | Save the issue-mode default (and its scoping label) for every command that accepts `--issues` |
 | `/do:config --self\|--no-self` | Save the self-only issue gate for `/do:next` — claim only issues you filed |
 | `/do:config --merge\|--no-merge [--merge-method=squash\|rebase\|merge]` | Save `/do:pr`'s auto-merge default (and method); the shorthand `--merge=squash` sets both |

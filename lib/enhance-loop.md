@@ -73,23 +73,34 @@ Output ONLY the improved issue, in EXACTLY this format and nothing else (no prea
 
 ### Pre-flight (shared, run once)
 
-Resolve the timeout wrapper and the model-flag machinery exactly as the review loop
-does — this is settled logic; run it, don't narrate it:
+Resolve the timeout wrapper — the only genuinely run-once piece; this is settled
+logic; run it, don't narrate it:
 
 ```bash
-# macOS ships no timeout(1) unless coreutils is installed; probe for it. Empty = no
-# wrapper (rely on each CLI's own limits). Enhancement is lighter than a full review
-# (no build/test), but a large draft on a heavy model can still exceed the ~10-min
-# host foreground cap, so the same background+poll launch below is used.
-TIMEOUT_CMD="$(command -v timeout >/dev/null 2>&1 && echo 'timeout 1800' \
-  || { command -v gtimeout >/dev/null 2>&1 && echo 'gtimeout 1800' || echo ''; })"
+# macOS ships no timeout(1) unless coreutils is installed; probe for it. Empty array =
+# no wrapper (rely on each CLI's own limits). An ARRAY, not a string: zsh (a common
+# host shell) does not word-split an unquoted expansion, so a two-word string like
+# 'timeout 1800' would be executed as one bogus command name; the array expands to
+# separate words in bash and zsh alike, and to zero words when empty. Enhancement is
+# lighter than a full review (no build/test), but a large draft on a heavy model can
+# still exceed the ~10-min host foreground cap, so the same background+poll launch
+# below is used.
+TIMEOUT_CMD=()
+if command -v timeout >/dev/null 2>&1; then TIMEOUT_CMD=(timeout 1800)
+elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_CMD=(gtimeout 1800); fi
 ```
 
-Per-agent `{ENH_MODEL}` becomes a shell **array** (never a bare string — model names
-may contain spaces/parens and zsh does not word-split an unquoted expansion, so a
-string would pass `--model X Y` as one bogus argv word; an array keeps them separate
-in bash and zsh and expands to zero words when empty). `codex`, `claude`, and `grok`
-all accept the long `--model` form, so one array serves all three:
+### Per-entry model flags (recompute for EVERY agent)
+
+`{ENH_MODEL}` is **per-entry** — `--enhance-with codex[o3],grok` gives codex `o3` and
+grok an empty model — so these assignments run inside the loop, once per agent, never
+shared across entries (a stale `MODEL_FLAG` from a prior entry would pin the next
+agent to a model it doesn't have). The flag becomes a shell **array** (never a bare
+string — model names may contain spaces/parens and zsh does not word-split an
+unquoted expansion, so a string would pass `--model X Y` as one bogus argv word; an
+array keeps them separate in bash and zsh and expands to zero words when empty).
+`codex`, `claude`, and `grok` all accept the long `--model` form, so one array serves
+all three:
 
 ```bash
 MODEL_FLAG=()
@@ -145,14 +156,22 @@ one's output):
    subprocess, so it needs no binary probe.<!-- /if:teams -->
 
 2. **Rebuild `$ENHANCE_PROMPT`** with the *current* `{DRAFT_TITLE}`/`{DRAFT_BODY}` so
-   this agent sees the prior agent's improvements.
+   this agent sees the prior agent's improvements, and **recompute `MODEL_FLAG` /
+   `AGY_ENH_MODEL` from THIS entry's `{ENH_MODEL}`** (see "Per-entry model flags"
+   above — a prior entry's bracket must not leak into this agent's invocation).
+   Also snapshot the working-tree baseline for the contract check in step 4:
+   `TREE_BASELINE=$(git status --porcelain)` and `HEAD_BASELINE=$(git rev-parse HEAD)`.
 
 3. **Invoke** per the table above.
 <!-- if:teams -->
    - **`claude` (under Claude Code):** dispatch the in-process sub-agent; capture its
-     returned message as `$OUTPUT`, then skip the background path below — it is only
-     for the subprocess CLIs, and an in-process sub-agent runs on the host session's
-     plan (no API billing) rather than as a `claude` subprocess.
+     returned message as `$OUTPUT` and set `EXIT_CODE=0` (use a non-zero `EXIT_CODE`
+     only if the sub-agent reports it could not complete the enhancement) — without
+     this explicit assignment, a stale `EXIT_CODE` from a prior subprocess entry (e.g.
+     a timed-out codex pass) would wrongly fail this pass's parse in step 4. Then skip
+     the background path below — it is only for the subprocess CLIs, and an in-process
+     sub-agent runs on the host session's plan (no API billing) rather than as a
+     `claude` subprocess.
 <!-- /if:teams -->
    - **`codex` / `agy` / `grok`<!-- if:teams --><!-- else --> / `claude`<!-- /if:teams -->:**
      run in the **background**, not as a blocking foreground call — a large-draft pass
@@ -161,7 +180,7 @@ one's output):
      ```bash
      LOG_FILE="$(mktemp -t enhance-${AGENT}.XXXXXX.log)"
      DONE_FILE="${LOG_FILE}.exit"
-     $TIMEOUT_CMD {INVOCATION} > "$LOG_FILE" 2>&1; echo $? > "$DONE_FILE"
+     "${TIMEOUT_CMD[@]}" {INVOCATION} > "$LOG_FILE" 2>&1; echo $? > "$DONE_FILE"
      ```
      Then wait with **bounded blocking-chunk foreground calls** — do NOT end your turn
      to wait for a notification (a stopped subagent is dead, not waiting):
@@ -171,7 +190,20 @@ one's output):
      On `STILL_RUNNING`, immediately reissue the same call until `$DONE_FILE` appears,
      then read `EXIT_CODE=$(cat "$DONE_FILE")` and `$OUTPUT=$(cat "$LOG_FILE")`.
 
-4. **Parse the output.** Extract the title as the single line after
+4. **Verify the read-only contract, then parse the output.** The CLIs run with full
+   write access (`danger-full-access` / `bypassPermissions`), so the "must not modify
+   files" contract needs teeth: compare `git status --porcelain` and `git rev-parse
+   HEAD` against the step-2 baselines. **If either changed**, the enhancer implemented
+   instead of enhancing — restore ONLY what this pass touched (the caller's tree may
+   have been legitimately dirty before the pipeline started): `git checkout --` each
+   path that appears in the new `git status --porcelain` but not in `$TREE_BASELINE`,
+   delete untracked files it created, and `git reset --hard "$HEAD_BASELINE"` only if
+   it committed. Record the agent as `no-op (modified the working tree — contract
+   violation)`, keep
+   the previous draft unchanged, and continue to the next agent. Never let a
+   contract-violating pass leave a dirtied tree behind for the caller.
+
+   Then parse: extract the title as the single line after
    `<<<ENHANCED_TITLE>>>` and the body as everything between `<<<ENHANCED_BODY>>>` and
    end-of-output; trim surrounding whitespace.
    - **Well-formed output** (both markers present, non-empty title and body):

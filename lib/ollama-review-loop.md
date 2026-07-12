@@ -22,10 +22,11 @@ When to use this:
 3. **Resolve `{OLLAMA_MODEL}`** (see "Model resolution" below). If resolution yields no usable model, set `STATUS=skipped` and return.
 4. Force review-only: set `REVIEWER_APPLIES=false` regardless of what the caller passed. If the caller passed `--reviewer-applies`, print: `--reviewer-applies has no effect on the ollama pass; Ollama is non-agentic, so the orchestrator always applies the fixes.`
 5. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
-6. **Resolve the timeout wrapper.** macOS ships no `timeout(1)` unless coreutils is installed, so probing is required; empty = no wrapper (rely on Ollama's own limits). Settled logic — run it verbatim, do NOT narrate the probe or the fallback:
+6. **Resolve the timeout wrapper.** macOS ships no `timeout(1)` unless coreutils is installed, so probing is required; an empty array = no wrapper (rely on Ollama's own limits). An ARRAY, not a string, for the same zsh reason as `OLLAMA_FLAGS` below: zsh does not word-split an unquoted expansion, so a two-word string (`timeout 600`) would be executed as one bogus command name and fail every invocation precisely on machines that HAVE coreutils installed. Settled logic — run it verbatim, do NOT narrate the probe or the fallback:
    ```bash
-   TIMEOUT_CMD="$(command -v timeout >/dev/null 2>&1 && echo 'timeout 600' \
-     || { command -v gtimeout >/dev/null 2>&1 && echo 'gtimeout 600' || echo ''; })"
+   TIMEOUT_CMD=()
+   if command -v timeout >/dev/null 2>&1; then TIMEOUT_CMD=(timeout 600)
+   elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_CMD=(gtimeout 600); fi
    ```
 7. **Select the structured-output format.** The review asks the model for JSON so the orchestrator parses a data structure instead of scraping a free-text format. Define the schema once and pick the strongest mode the installed Ollama supports — schema-constrained outputs require Ollama ≥ 0.5.0:
    ```bash
@@ -115,7 +116,7 @@ If the diff has no logic issues worth raising, return {\"findings\": []}.
 
 --- DIFF ---
 $FILE_DIFF"
-   RESP=$(printf '%s' "$PROMPT" | $TIMEOUT_CMD ollama run "${OLLAMA_FLAGS[@]}" "$OLLAMA_MODEL" 2>> "$ERR_FILE")
+   RESP=$(printf '%s' "$PROMPT" | "${TIMEOUT_CMD[@]}" ollama run "${OLLAMA_FLAGS[@]}" "$OLLAMA_MODEL" 2>> "$ERR_FILE")
    RC=$?
    printf '\n===== FILE: %s =====\n%s\n' "$F" "$RESP" >> "$LOG_FILE"
    ```
