@@ -17,6 +17,9 @@ const cacheDir = path.join(homeDir, '.claude', 'cache');
 const cacheFile = path.join(cacheDir, 'slashdo-update-check.json');
 const versionFile = path.join(homeDir, '.claude', '.slashdo-version');
 const configFile = path.join(homeDir, '.claude', '.slashdo-config.json');
+// Serializes the auto-update across concurrent Claude sessions — only the session
+// that atomically creates this file runs `npx slash-do@latest`; the rest defer.
+const lockFile = path.join(cacheDir, 'slashdo-update.lock');
 
 // Best-effort: silently exit on any setup failure (permissions, read-only FS, etc.)
 try {
@@ -32,6 +35,11 @@ try {
     const cacheFile = ${JSON.stringify(cacheFile)};
     const versionFile = ${JSON.stringify(versionFile)};
     const configFile = ${JSON.stringify(configFile)};
+    const lockFile = ${JSON.stringify(lockFile)};
+    // A lock older than this is treated as abandoned (crashed/killed mid-update)
+    // and reclaimed. Kept well above the 120s install timeout below so a slow-but-
+    // live install is never stolen out from under itself.
+    const LOCK_STALE_MS = 10 * 60 * 1000;
 
     let installed = '0.0.0';
     try {
@@ -69,18 +77,49 @@ try {
     }
 
     // Auto-update: apply the update instead of surfacing the statusline hint.
+    // Guard it with an exclusive lock file so that when several Claude sessions
+    // start at once, only one spawns "npx slash-do@latest" against the shared
+    // ~/.claude/ — the installer's writes are idempotent today, but serializing
+    // keeps that assumption from being load-bearing if the install logic ever
+    // stops being safe to run concurrently.
     if (updateAvailable && autoUpdate) {
+      // wx = create-exclusive: succeeds for exactly one racer, throws EEXIST for
+      // the rest. A pre-existing lock older than LOCK_STALE_MS is a crashed run —
+      // reclaim it (the unlink+re-create is itself a wx race, so at most one
+      // reclaimer wins and the others stay deferred).
+      let haveLock = false;
+      const acquire = () => { const fd = fs.openSync(lockFile, 'wx'); fs.writeSync(fd, String(process.pid)); fs.closeSync(fd); haveLock = true; };
       try {
-        // --env claude keeps this scoped to the environment running the hook,
-        // and avoids the interactive multi-env prompt (stdin is not a TTY here).
-        execSync('npx -y slash-do@latest --env claude', { stdio: 'ignore', timeout: 120000, windowsHide: true });
-        // Installer already refreshed the cache to update_available:false and
-        // bumped the version file, so nothing left to flag.
-        updateAvailable = false;
-        latest = installed = fs.readFileSync(versionFile, 'utf8').trim();
+        acquire();
       } catch (e) {
-        // Auto-update failed — fall through and surface the hint so the user
-        // can update manually.
+        if (e.code === 'EEXIST') {
+          try {
+            if (Date.now() - fs.statSync(lockFile).mtimeMs > LOCK_STALE_MS) {
+              fs.unlinkSync(lockFile);
+              acquire();
+            }
+          } catch (e2) {}
+        }
+      }
+
+      // Only the lock holder updates. A deferring session leaves updateAvailable
+      // true and writes the hint below — harmless and self-clearing once the
+      // holder bumps the version file, which the next session reads.
+      if (haveLock) {
+        try {
+          // --env claude keeps this scoped to the environment running the hook,
+          // and avoids the interactive multi-env prompt (stdin is not a TTY here).
+          execSync('npx -y slash-do@latest --env claude', { stdio: 'ignore', timeout: 120000, windowsHide: true });
+          // Installer already refreshed the cache to update_available:false and
+          // bumped the version file, so nothing left to flag.
+          updateAvailable = false;
+          latest = installed = fs.readFileSync(versionFile, 'utf8').trim();
+        } catch (e) {
+          // Auto-update failed — fall through and surface the hint so the user
+          // can update manually.
+        } finally {
+          try { fs.unlinkSync(lockFile); } catch (e) {}
+        }
       }
     }
 
