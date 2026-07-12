@@ -2,7 +2,7 @@
 
 Run a **local Ollama model** to review the PR branch, then read its findings back into the orchestrating thread, which applies the fixes and verifies before pushing. Selected via `--review-with ollama` (auto-select the most capable installed coding model) or `--review-with ollama[<model>]` (pin a specific installed model, e.g. `ollama[qwen2.5-coder:32b]`).
 
-Unlike the `codex` / `agy` / `claude` reviewers, **Ollama is not an agentic CLI** — `ollama run` takes a single prompt and returns text. It cannot read the working tree, run git, or edit files. So this loop differs from the local-agent loop in two ways:
+Unlike the `codex` / `agy` / `claude` / `grok` reviewers, **Ollama is not an agentic CLI** — `ollama run` takes a single prompt and returns text. It cannot read the working tree, run git, or edit files. So this loop differs from the local-agent loop in two ways:
 
 1. **The diff is embedded in the prompt.** The orchestrator feeds the model the actual `git diff` (chunked per file to stay within local-model context limits) instead of pointing a tool-using agent at the repo.
 2. **It is always review-only.** The model emits findings; the *orchestrator* applies the fixes (the same flow as the local-agent loop's `REVIEWER_APPLIES=false` path). `--reviewer-applies` is a no-op here — there is no reviewer-side edit path to enable. If the calling command saw `--reviewer-applies` alongside an `ollama` reviewer, it should have already printed a warning and continued; this loop forces review-only regardless.
