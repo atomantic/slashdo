@@ -68,7 +68,7 @@ All commands live under the `do:` namespace:
 | `/do:goals` | Generate GOALS.md from codebase analysis |
 | `/do:replan` | Review and clean up PLAN.md — or, with `--issues`, your GitHub/GitLab issue tracker (see [Issue mode](#replan-issue-mode-doreplan---issues)) |
 | `/do:next` | Claim the next unclaimed PLAN.md item (or tracker issue with `--issues`), implement it in an isolated worktree, ship a reviewed PR, and clean up — the consumer counterpart to `/do:replan`. Add `--swarm[=N]` (issues mode) to claim and ship several independent issues in parallel |
-| `/do:plan-task` | Plan one task — investigate the codebase, draft a robust, decision-complete issue, show it for approval, and file it in the repo's tracker (GitHub `gh` / GitLab `glab`, auto-detected from the remote incl. Enterprise/self-managed). `--yes` skips the gate; `/do:next --issues #N` then ships it |
+| `/do:plan-task` | Plan one task — investigate the codebase, draft a robust, decision-complete issue, show it for approval, and file it in the repo's tracker (GitHub `gh` / GitLab `glab`, auto-detected from the remote incl. Enterprise/self-managed). `--yes` skips the gate; on GitHub, `/do:next --issues #N` then ships it (that consumer is GitHub-only) |
 | `/do:omd` | Audit and optimize markdown files |
 | `/do:config` | View or set saved defaults (e.g. `--review-with`) so future commands can omit the flag (see [Saved defaults](#saved-defaults-doconfig)) |
 | `/do:update` | Update slashdo to latest version |

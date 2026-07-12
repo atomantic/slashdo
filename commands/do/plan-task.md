@@ -19,8 +19,9 @@ explicit host, and this command makes none).
 
 This is the **single-issue authoring** counterpart to `/do:replan` (which triages a
 whole backlog) — you have one specific piece of work in mind and want it captured as
-a first-class issue the rest of the slashdo ecosystem can consume: `/do:next
---issues` can then claim and ship it.
+a first-class issue the rest of the slashdo ecosystem can consume: on a GitHub repo,
+`/do:next --issues` can then claim and ship it (that consumer is GitHub-only — see
+Phase 6).
 
 **The bar: decision-complete.** The issue this command files must be a *fully
 specified task, not an open question* — the same **actionable-issues invariant**
@@ -100,7 +101,8 @@ paraphrase of the request. Proportional to the task's size:
   task should follow (e.g. "mirror the `--yes` flag grammar used in every other
   command"), CI/build implications, and anything that scopes the work.
 - **Surface open questions** — genuine decisions the task can't proceed without.
-  These are resolved in the gate (Phase 3) or, under `--yes`, asked before filing.
+  These are resolved in the approval gate (Phase 5) or, under `--yes`, asked before
+  filing.
 - **For a large or cross-cutting task**, spawn a read-only investigation subagent
   (the `Explore` or `general-purpose` agent) to sweep the affected area in parallel
   and report the map back, rather than reading dozens of files inline. Keep it
@@ -201,8 +203,12 @@ Print the outcome plainly:
 - **Deduped:** the existing `#<number>` you pointed at instead (Phase 2).
 - **Dry run:** a note that nothing was filed, plus the draft that *would* have been.
 
-Then, when it fits the work, suggest the natural next step: `/do:next --issues
-#<number>` to claim and ship it immediately, or leave it in the backlog for later.
+Then, when it fits the work, suggest the natural next step. **On GitHub**, that's
+`/do:next --issues #<number>` to claim and ship it immediately. **On GitLab**, `/do:next`
+is not available (it is GitHub-only in every mode — it ships through `gh pr merge` and
+its issue-claim relies on the GitHub assignee model), so leave the issue in the backlog
+for a human or a GitLab-native flow to pick up. Either way, leaving it in the backlog
+is always a valid stopping point.
 
 ## Notes
 
