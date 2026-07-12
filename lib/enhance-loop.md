@@ -43,7 +43,28 @@ enhancer that bolts on unrequested features has failed the contract. It must **n
 implement anything, modify files, or file the issue — it only returns a better draft.
 
 Build the shared prompt once, re-substituting the running `{DRAFT_TITLE}`/`{DRAFT_BODY}`
-for each agent (so agent N sees agent N-1's output, not the original):
+for each agent (so agent N sees agent N-1's output, not the original).
+
+**Load the draft through files, never by inlining it into the assignment.** The body
+is free-form markdown that routinely contains backticks and `$(...)` inside code
+fences; materializing the assignment below with the draft text pasted literally into
+the double-quoted string makes the shell execute those substitutions, corrupting the
+draft (or running its contents). Write the running draft to temp files via quoted
+heredocs and load the variables from them — a value loaded into a variable is never
+re-scanned for substitutions when later expanded:
+
+```bash
+DRAFT_TITLE_FILE="$(mktemp -t enhance-title.XXXXXX)"
+DRAFT_BODY_FILE="$(mktemp -t enhance-body.XXXXXX)"
+cat > "$DRAFT_TITLE_FILE" <<'DRAFT_EOF'
+<the current draft title, pasted verbatim>
+DRAFT_EOF
+cat > "$DRAFT_BODY_FILE" <<'DRAFT_EOF'
+<the current draft body, pasted verbatim>
+DRAFT_EOF
+DRAFT_TITLE=$(cat "$DRAFT_TITLE_FILE")
+DRAFT_BODY=$(cat "$DRAFT_BODY_FILE")
+```
 
 ```bash
 # The delimiter markers make the output machine-parseable even though the body is
@@ -112,9 +133,13 @@ AGY_ENH_MODEL="${ENH_MODEL:-${AGY_REVIEW_MODEL:-Gemini 3.5 Flash (High)}}"
 
 ### Per-agent invocation
 
-The CLIs run in **reckless / non-interactive mode** — unattended, never stopping to
-ask for permission. Each takes the enhancement prompt as a positional argument (never
-via stdin) and prints the improved draft to stdout:
+The CLIs run **non-interactively** — unattended, never stopping to ask for
+permission — but at the **least privilege the task needs**: enhancement is
+contractually read-only, so where a CLI offers a read-only/limited mode, use it
+instead of the review loops' full-access flags (a misbehaving or prompt-injected
+pass should be *unable* to write, not merely told not to; the step-4 git check is
+the backstop for the CLIs that lack such a mode). Each takes the enhancement prompt
+as a positional argument (never via stdin) and prints the improved draft to stdout:
 
 | Agent | Invocation |
 |-------|------------|
@@ -123,17 +148,16 @@ via stdin) and prints the improved draft to stdout:
 <!-- else -->
 | `claude` | `claude -p "$ENHANCE_PROMPT" "${MODEL_FLAG[@]}" --dangerously-skip-permissions` |
 <!-- /if:teams -->
-| `codex` | `codex "${MODEL_FLAG[@]}" --sandbox danger-full-access -a never exec "$ENHANCE_PROMPT"` — `exec` (free-form prompt) is the right subcommand here, not `codex review`; `-m`/`--model`, `--sandbox`, and `-a` are all top-level flags that MUST precede `exec`. |
+| `codex` | `codex "${MODEL_FLAG[@]}" --sandbox read-only -a never exec "$ENHANCE_PROMPT"` — `exec` (free-form prompt) is the right subcommand here, not `codex review`; `-m`/`--model`, `--sandbox`, and `-a` are all top-level flags that MUST precede `exec`. `--sandbox read-only` (NOT the review loop's `danger-full-access`) enforces the read-only contract at the sandbox level while still allowing tree reads and git queries. |
 | `agy` | `agy --dangerously-skip-permissions --model "$AGY_ENH_MODEL" --print-timeout 30m -p "$ENHANCE_PROMPT"` |
-| `grok` | `grok --permission-mode bypassPermissions "${MODEL_FLAG[@]}" -p "$ENHANCE_PROMPT"` |
+| `grok` | `grok --permission-mode dontAsk "${MODEL_FLAG[@]}" -p "$ENHANCE_PROMPT"` |
 
 **Grok flag rationale.** `grok -p`/`--single <PROMPT>` runs a single-turn headless
 prompt, prints the response to stdout, and exits — the grok analog of `claude -p` /
-`agy -p`. `--permission-mode bypassPermissions` auto-approves all tool executions so
-grok runs unattended (matching `--dangerously-skip-permissions` on the others);
-`--permission-mode dontAsk` is a lighter alternative if you want reads without full
-bypass, but the enhancement prompt only ever reads the tree, so bypass is safe and
-consistent. `-m`/`--model` pins the model for the `grok[<model>]` bracket (empty →
+`agy -p`. `--permission-mode dontAsk` auto-approves tool executions without the full
+`bypassPermissions` posture the review loop uses — the enhancement prompt only ever
+reads the tree, so the lighter mode is the right fit here (least privilege; see the
+intro above). `-m`/`--model` pins the model for the `grok[<model>]` bracket (empty →
 grok's own default). Output is grok's default `plain` format — the improved draft on
 stdout. Like the other `-p` CLIs, grok takes the prompt as the positional argument,
 **not** from stdin — do not pipe into it.
@@ -160,7 +184,12 @@ one's output):
    `AGY_ENH_MODEL` from THIS entry's `{ENH_MODEL}`** (see "Per-entry model flags"
    above — a prior entry's bracket must not leak into this agent's invocation).
    Also snapshot the working-tree baseline for the contract check in step 4:
-   `TREE_BASELINE=$(git status --porcelain)` and `HEAD_BASELINE=$(git rev-parse HEAD)`.
+   ```bash
+   TREE_BASELINE=$(git status --porcelain)
+   HEAD_BASELINE=$(git rev-parse HEAD)
+   DIFF_BASELINE=$(git diff HEAD | git hash-object --stdin)   # detects edits to files that were ALREADY dirty
+   SNAPSHOT=$(git stash create)   # content snapshot of the dirty state; empty string on a clean tree
+   ```
 
 3. **Invoke** per the table above.
 <!-- if:teams -->
@@ -179,8 +208,13 @@ one's output):
      and poll the log (the same pattern as the review loop):
      ```bash
      LOG_FILE="$(mktemp -t enhance-${AGENT}.XXXXXX.log)"
+     ERR_FILE="${LOG_FILE}.err"
      DONE_FILE="${LOG_FILE}.exit"
-     "${TIMEOUT_CMD[@]}" {INVOCATION} > "$LOG_FILE" 2>&1; echo $? > "$DONE_FILE"
+     # stderr goes to its own file, NOT 2>&1: step 4 parses the body as "everything
+     # after <<<ENHANCED_BODY>>> to end-of-output", so any stderr the CLI emits after
+     # the answer (telemetry warnings, timing/shutdown lines, update nags) would be
+     # pasted verbatim into the enhanced draft and end up in the filed issue.
+     "${TIMEOUT_CMD[@]}" {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"; echo $? > "$DONE_FILE"
      ```
      Then wait with **bounded blocking-chunk foreground calls** — do NOT end your turn
      to wait for a notification (a stopped subagent is dead, not waiting):
@@ -190,16 +224,28 @@ one's output):
      On `STILL_RUNNING`, immediately reissue the same call until `$DONE_FILE` appears,
      then read `EXIT_CODE=$(cat "$DONE_FILE")` and `$OUTPUT=$(cat "$LOG_FILE")`.
 
-4. **Verify the read-only contract, then parse the output.** The CLIs run with full
-   write access (`danger-full-access` / `bypassPermissions`), so the "must not modify
-   files" contract needs teeth: compare `git status --porcelain` and `git rev-parse
-   HEAD` against the step-2 baselines. **If either changed**, the enhancer implemented
-   instead of enhancing — restore ONLY what this pass touched (the caller's tree may
-   have been legitimately dirty before the pipeline started): `git checkout --` each
-   path that appears in the new `git status --porcelain` but not in `$TREE_BASELINE`,
-   delete untracked files it created, and `git reset --hard "$HEAD_BASELINE"` only if
-   it committed. Record the agent as `no-op (modified the working tree — contract
-   violation)`, keep
+4. **Verify the read-only contract, then parse the output.** Not every CLI can be
+   sandboxed read-only (`claude`/`agy` have no such mode), so the "must not modify
+   files" contract needs teeth: recompute `git status --porcelain`, `git rev-parse
+   HEAD`, and `git diff HEAD | git hash-object --stdin` and compare all three against
+   the step-2 baselines (the diff hash is what catches an edit to a file that was
+   *already* dirty at baseline — its porcelain line is identical either way). **If any
+   changed**, the enhancer implemented instead of enhancing — restore ONLY what this
+   pass touched (the caller's tree may have been legitimately dirty before the
+   pipeline started):
+   - If it committed (`HEAD` moved): first `git reset --mixed "$HEAD_BASELINE"` —
+     moves HEAD back while keeping the working tree intact. NEVER `--hard`: a
+     misbehaving agent typically ran `git add -A && git commit`, sweeping the caller's
+     pre-existing uncommitted work into its commit, and a hard reset would destroy
+     that work permanently. Then recompute `git status --porcelain` and continue below.
+   - `git checkout --` each path that appears in the new porcelain output but not in
+     `$TREE_BASELINE`; delete untracked files it created.
+   - For a path that was already dirty at baseline but whose content the pass changed
+     (the `DIFF_BASELINE` hash mismatch): restore it from the step-2 snapshot —
+     `git restore --source="$SNAPSHOT" --worktree -- <path>` (`$SNAPSHOT` is non-empty
+     whenever the baseline tree was dirty).
+
+   Record the agent as `no-op (modified the working tree — contract violation)`, keep
    the previous draft unchanged, and continue to the next agent. Never let a
    contract-violating pass leave a dirtied tree behind for the caller.
 
@@ -212,7 +258,8 @@ one's output):
    - **Malformed or empty output** (`EXIT_CODE != 0`, missing markers, or an empty
      body — e.g. the CLI errored, timed out, or emitted commentary instead of the
      contract): **keep the previous `{DRAFT_TITLE}`/`{DRAFT_BODY}` unchanged**, record
-     the agent as `no-op` with a one-line reason (surface the log path), and continue.
+     the agent as `no-op` with a one-line reason (surface the log path, and
+     `$ERR_FILE` when the failure detail lives on stderr), and continue.
      A broken enhancer must never corrupt or blank the draft — the pipeline degrades
      to the last good version, exactly as a missing binary degrades to a skip.
 
