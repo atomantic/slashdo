@@ -217,6 +217,16 @@ under `--dry-run` it enhances, then prints the enhanced draft without filing.
 Enhancement never bypasses the approval gate — a human still approves the final text
 (Phase 5).
 
+**The decision-complete invariant re-applies to the enhanced draft.** An enhancer may
+*surface* a blocking open question the original draft didn't (that is part of its job —
+"flag under-specification"). So after the pipeline, re-check the enhanced draft's
+`Open questions` exactly as Phase 1/Phase 5 would the original: under the interactive
+gate, resolve them with the user and fold the answers in; **under `--yes`, a blocking
+open question the enhancement surfaced still stops to ask rather than filing a vague
+issue** — the same invariant stated at the top of this command, applied to the
+enhanced text, not just the Phase 3 draft. Enhancement can only raise the
+specification bar, never lower it below that gate.
+
 ## Phase 4 — Infer labels
 
 Suggest labels so the issue is filterable in the tracker (labels, not title
