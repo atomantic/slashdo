@@ -195,8 +195,9 @@ one's output):
    ```bash
    TREE_BASELINE=$(git status --porcelain)
    HEAD_BASELINE=$(git rev-parse HEAD)
+   INDEX_TREE=$(git write-tree)   # exact snapshot of the caller's index (staged state)
    DIFF_BASELINE=$(git diff HEAD | git hash-object --stdin)   # detects edits to files that were ALREADY dirty
-   SNAPSHOT=$(git stash create)   # content snapshot of the dirty TRACKED state; empty string on a clean tree
+   SNAPSHOT=$(git stash create)   # content snapshot of the dirty TRACKED worktree; empty string on a clean tree
    # Pre-existing UNTRACKED files are invisible to both git diff HEAD and git stash
    # create, so they need their own detection hash AND content snapshot — without
    # these, an enhancer that edits or deletes the caller's untracked work-in-progress
@@ -206,6 +207,10 @@ one's output):
    UNTRACKED_BASELINE=$(git ls-files --others --exclude-standard -z | sort -z \
      | xargs -0 -I{} sh -c 'printf "%s %s\n" "$(git hash-object "{}")" "{}"' | git hash-object --stdin)
    ```
+   Together these four artifacts capture the caller's ENTIRE pre-pass state — HEAD
+   (`HEAD_BASELINE`), index (`INDEX_TREE`), tracked worktree content (`SNAPSHOT`),
+   and untracked content (`UNTRACKED_TAR`) — which is what lets step 4 restore
+   wholesale instead of surgically enumerating what a misbehaving agent touched.
 
 3. **Invoke** per the table above.
 <!-- if:teams -->
@@ -253,30 +258,29 @@ one's output):
    baselines (the diff hash catches an edit to a *tracked* file that was already
    dirty at baseline; the untracked hash catches an edit to — or deletion of — a
    pre-existing *untracked* file, which neither of the other checks can see). **If any
-   changed**, the enhancer implemented instead of enhancing — restore ONLY what this
-   pass touched (the caller's tree may have been legitimately dirty before the
-   pipeline started):
-   - If it committed (`HEAD` moved): first `git reset --mixed "$HEAD_BASELINE"` —
-     moves HEAD back while keeping the working tree intact. NEVER `--hard`: a
-     misbehaving agent typically ran `git add -A && git commit`, sweeping the caller's
-     pre-existing uncommitted work into its commit, and a hard reset would destroy
-     that work permanently. Then recompute `git status --porcelain` and continue below.
-   - For each path that appears in the new porcelain output but not in
-     `$TREE_BASELINE`: `git restore --source="$HEAD_BASELINE" --staged --worktree --
-     <path>` — NOT `git checkout -- <path>`, which restores from the *index* and is a
-     silent no-op when the enhancer staged its edits without committing (e.g. killed
-     by the timeout between `git add -A` and `git commit`); the staged content would
-     survive and be swept into the caller's next commit. For files the enhancer
-     *created*: `git rm --cached -- <path>` when staged (`A ` in porcelain), then
-     delete the file.
-   - For a path that was already dirty at baseline but whose content the pass changed
-     (the `DIFF_BASELINE` hash mismatch): restore it from the step-2 snapshot —
-     `git restore --source="$SNAPSHOT" --worktree -- <path>` (`$SNAPSHOT` is non-empty
-     whenever the baseline tree was dirty).
-   - For a pre-existing untracked file the pass edited or deleted (the
-     `UNTRACKED_BASELINE` hash mismatch): re-extract it from the step-2 tarball —
-     `tar -xf "$UNTRACKED_TAR" -- <path>` (paths inside the tar are repo-relative, so
-     run from the repo root).
+   changed**, the enhancer implemented instead of enhancing — restore the ENTIRE
+   pre-pass state wholesale from the step-2 artifacts. Do NOT try to surgically
+   enumerate what the agent touched (per-path choreography here has repeatedly proven
+   to have destructive edge cases: a mixed reset unstages the caller's staged work
+   and then porcelain-line comparison misclassifies `M ` as ` M`; `git checkout --`
+   no-ops on staged-but-uncommitted content; stash misses untracked files). The
+   wholesale sequence, run from the repo root, restores every layer exactly:
+   1. **HEAD** — if it moved: `git reset --soft "$HEAD_BASELINE"` (`--soft` touches
+      neither index nor worktree; never `--mixed`, which would wipe the caller's
+      staged state, and never `--hard`, which would destroy uncommitted work swept
+      into the agent's commit).
+   2. **Index** — `git read-tree "$INDEX_TREE"` restores the caller's staged state
+      exactly, whatever the agent did to it (`git add -A`, partial stages, resets).
+   3. **Tracked worktree** — `git restore --source="${SNAPSHOT:-$HEAD_BASELINE}"
+      --worktree -- .` rewrites every tracked file to its baseline worktree content
+      (`$SNAPSHOT` — the stash commit — records exactly that; when the baseline tree
+      was clean, `$SNAPSHOT` is empty and `$HEAD_BASELINE` is the same content).
+   4. **Untracked files** — delete every currently-untracked path (`git ls-files
+      --others --exclude-standard`) that is NOT listed in `$UNTRACKED_TAR` (files
+      the agent created), then `tar -xf "$UNTRACKED_TAR"` to restore baseline
+      untracked content (files the agent edited or deleted).
+   Re-run the four comparisons afterward to confirm the tree is back at baseline;
+   surface a loud warning if not (never silently continue on a still-dirty tree).
 
    Record the agent as `no-op (modified the working tree — contract violation)`, keep
    the previous draft unchanged, and continue to the next agent. Never let a
