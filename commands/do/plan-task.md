@@ -1,6 +1,6 @@
 ---
 description: Plan a task by investigating the codebase, then file a robust, decision-complete issue in the repo's tracker — GitHub (gh) or GitLab (glab), auto-detected from the git remote (custom/Enterprise hosts included). Drafts the issue and shows it for approval before creating; pass --yes to skip the gate.
-argument-hint: "[<task description>] [--yes|-y] [--label <name>] [--no-dedup] [--dry-run]"
+argument-hint: "[<task description>] [--yes|-y] [--label <name>] [--enhance-with <list>] [--no-dedup] [--dry-run]"
 ---
 
 # Plan Task — investigate, draft a robust issue, and file it in the tracker
@@ -54,6 +54,24 @@ free.
   be a comma-list (`--label bug,area:cli`). These are **added to** any label the
   planning step infers (see Phase 4), deduped. Labels are created if missing
   (idempotent) exactly as in [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md).
+- **`--enhance-with <list>`** — after the draft is written, route it through an
+  **ordered pipeline of enhancement agents** that sharpen it before the approval gate
+  (Phase 3.5), each refining the previous agent's output. A cheap second (and third)
+  opinion folded into the draft. Uses the **same `agent[model]` list grammar** as
+  `--review-with` (see `/do:pr`): a comma-separated, order-preserving list, each entry
+  a slug with an optional `[<model>]` bracket. **Accepted slugs: `codex`, `claude`,
+  `agy` (aliases `gemini`/`antigravity`), and `grok`** — the agentic CLIs that take a
+  free-form enhancement prompt; `ollama` and `copilot` are review-oriented (findings
+  emitters, not draft rewriters) and are rejected here. Examples: `--enhance-with=grok`
+  (hand the draft to Grok for a second pass); `--enhance-with=codex[o3],grok` (Codex on
+  model `o3` enhances first, then Grok enhances Codex's result — sequential, left to
+  right). Parse it exactly as `--review-with`: split on `,`, trim, strip each
+  `[<model>]` bracket into a per-entry `{ENH_MODEL}`, normalize `gemini`/`antigravity`
+  → `agy`, dedupe preserving first-occurrence order (the `[<model>]` bracket is part of
+  the identity, so `codex[o3]` and `codex[o4]` are distinct). Reject an unknown slug
+  with `Unknown --enhance-with value: {value}. Use one of: codex, claude, agy, grok.`
+  **`--enhance-with=none`** (case-insensitive) explicitly skips the pipeline (mirrors
+  `--review-with none`). Absent → no enhancement pass runs.
 - **`--no-dedup`** — skip the Phase 2 duplicate check against existing open issues and
   file unconditionally. By default plan-task refuses to create a near-duplicate of an
   already-open issue and points you at it instead.
@@ -173,6 +191,31 @@ actionable, not so prescriptive it forecloses a better idea found during the wor
 
 Ground every claim in what you actually found in Phase 1. Reference files as
 `path:line` where it helps a future implementer land on the spot.
+
+## Phase 3.5 — Enhance the draft (only when `--enhance-with` was passed)
+
+Skip this phase entirely when `--enhance-with` is absent or resolved to `none` — the
+Phase 3 draft goes straight to labeling and the gate. When an agent list was parsed,
+route the draft through the **sequential enhancement pipeline** before labels are
+inferred (so labels reflect the *enhanced* body) and before the gate (so the human
+approves the sharpened draft). The shared loop is inlined here at install time so it's
+available in every environment — not a dead link:
+
+!`cat ~/.claude/lib/enhance-loop.md`
+
+Drive that loop with `{ENHANCE_AGENTS}` = the parsed list, `{DRAFT_TITLE}` /
+`{DRAFT_BODY}` = the Phase 3 draft, and `{REPO_CONTEXT}` = the task description and
+target repo. It returns an enhanced `{DRAFT_TITLE}`/`{DRAFT_BODY}` — **replace the
+Phase 3 draft with the returned values** for everything downstream (Phase 4 labels,
+the Phase 5 gate, and the Phase 6 report). Print the loop's compact per-agent status
+line so it's clear which agents ran, skipped (missing binary), or no-op'd (errored /
+timed out / off-contract) — a degraded pass falls back to the last good draft and
+never blocks filing.
+
+The pipeline runs in **all** modes: under `--yes` it still enhances, then files;
+under `--dry-run` it enhances, then prints the enhanced draft without filing.
+Enhancement never bypasses the approval gate — a human still approves the final text
+(Phase 5).
 
 ## Phase 4 — Infer labels
 
