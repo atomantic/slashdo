@@ -59,6 +59,84 @@ function inlineLibContent(body, libDir) {
   });
 }
 
+// Matches a top-level `!cat ~/.claude/lib/<name>.md` runtime include.
+const LIB_CAT_RE = /!`cat ~\/\.claude\/lib\/(.+?)`/g;
+// Matches an in-PROSE citation of a lib doc, e.g. `~/.claude/lib/gh-host.md` —
+// the "see also, full detail here" pointers many lib files carry. Requires a
+// `<name>.md` filename so bare directory mentions (`~/.claude/lib/`) are left
+// alone; those are explanatory, not dangling file references.
+const LIB_PROSE_RE = /~\/\.claude\/lib\/([A-Za-z0-9._-]+\.md)/g;
+
+// For Agent Skills environments (Codex/Antigravity/Grok — `libDir: null`, no
+// runtime `!cat`, and no `~/.claude/lib/` on disk for a host-only user), make
+// every referenced lib doc resolvable in the generated SKILL.md instead of citing
+// a path the user cannot open. Three steps:
+//   1. Inline top-level `!cat ~/.claude/lib/<name>.md` includes (recording which
+//      libs became present so their in-prose citations turn into in-skill names).
+//   2. Rewrite the remaining PROSE citations `~/.claude/lib/<name>.md` to a
+//      host-neutral bare doc name, dropping the un-resolvable path.
+//   3. For any cited lib whose content is NOT already inlined (its detail is
+//      otherwise absent), append it once under a "Referenced libraries" section —
+//      recursively resolving that lib's own citations too (nested refs), deduped
+//      and cycle-safe — so the load-bearing detail is available host-side.
+// Claude/OpenCode never reach this path (they keep runtime `~/.claude/lib/` via
+// cat inclusion), so their output is unchanged.
+function inlineLibReferences(body, libDir) {
+  const inlined = new Set();   // libs whose full content is present in the document
+  const queued = new Set();    // libs already appended or scheduled for the appendix
+  const appendQueue = [];      // ordered absent-but-cited libs to inline as appendix
+
+  const readLib = (filename) => {
+    const libFile = path.join(libDir, filename);
+    return fs.existsSync(libFile) ? fs.readFileSync(libFile, 'utf8').trim() : null;
+  };
+
+  // Inline `!cat` includes in a chunk, recording each resolved lib as present.
+  const inlineCatIncludes = (text) => text.replace(LIB_CAT_RE, (match, filename) => {
+    const content = readLib(filename);
+    if (content === null) return match;
+    inlined.add(filename);
+    return content;
+  });
+
+  // Rewrite prose citations to a bare doc name; queue any cited-but-absent lib
+  // (one never `!cat`-inlined) for the appendix so its content is available.
+  const resolveProseRefs = (text) => text.replace(LIB_PROSE_RE, (match, filename) => {
+    if (!inlined.has(filename) && !queued.has(filename) && readLib(filename) !== null) {
+      queued.add(filename);
+      appendQueue.push(filename);
+    }
+    return filename.replace(/\.md$/, '');
+  });
+
+  // Main body: inline includes first, then resolve the prose refs left behind
+  // (including those that arrived inside inlined lib content).
+  const out = resolveProseRefs(inlineCatIncludes(body));
+
+  // Drain the appendix queue. Each appended lib may cite further libs — inline any
+  // `!cat` it carries and resolve its prose refs, which can enqueue more (BFS).
+  // `queued` guarantees each lib is appended at most once, so any cite cycle
+  // terminates.
+  const sections = [];
+  for (let i = 0; i < appendQueue.length; i++) {
+    const filename = appendQueue[i];
+    const raw = readLib(filename);
+    if (raw === null) continue; // only real files are queued; defensive
+    const content = resolveProseRefs(inlineCatIncludes(raw));
+    sections.push(`### ${filename.replace(/\.md$/, '')}\n\n${content}`);
+  }
+
+  if (sections.length === 0) return out;
+
+  const appendix =
+    '\n---\n\n## Referenced libraries\n\n' +
+    'These slashdo library docs are cited above. This environment has no ' +
+    '`~/.claude/lib/` directory, so their content is inlined here.\n\n' +
+    sections.join('\n\n');
+
+  return out + '\n' + appendix;
+}
+
 // Resolves `<!-- if:<cap> -->…<!-- else -->…<!-- /if:<cap> -->` blocks against
 // the target environment's capability flags, keeping the matching branch and
 // stripping the markers. The `else` branch is optional. Blocks do not nest.
@@ -120,7 +198,7 @@ function transformCommand(content, env, sourceLibDir, relPath) {
   if (env.supportsCatInclusion && env.libPathPrefix) {
     transformedBody = rewriteLibPaths(transformedBody, env.libPathPrefix);
   } else if (!env.supportsCatInclusion && sourceLibDir) {
-    transformedBody = inlineLibContent(transformedBody, sourceLibDir);
+    transformedBody = inlineLibReferences(transformedBody, sourceLibDir);
   }
 
   // Run on the full body (after inlining) so config-path tokens that arrived via
@@ -163,6 +241,7 @@ module.exports = {
   rewriteLibPaths,
   rewriteConfigPath,
   inlineLibContent,
+  inlineLibReferences,
   applyConditionalBlocks,
   getSkillName,
   getTargetFilename,
