@@ -121,7 +121,7 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 
 !`cat ~/.claude/lib/graphql-escaping.md`
 
-## Local-Agent Review Loop (for `--review-with codex|agy|claude`)
+## Local-Agent Review Loop (for `--review-with codex|agy|claude|grok`)
 
 When `REVIEW_AGENTS` names a local CLI, step 2 (and the step-8 re-request) runs that agent's review against the PR branch via the shared local-agent loop instead of requesting a Copilot cloud review. Pass `{REVIEW_AGENT}`, `{REVIEWER_APPLIES}`, that entry's resolved `{REVIEW_MODEL}` (the `<agent>[<model>]` bracket if the token carried one, else the saved `review-models[slug]` default resolved above — project over global, else empty → the reviewer's built-in default), the PR branch (`headRefName`), the base branch (`baseRefName`), and the project `{BUILD_CMD}`. Forwarding `{REVIEW_MODEL}` is what makes `--review-with=codex[o3]` and a saved `review-models` default actually pin the model on rpr's local passes — without it those passes would silently run the CLI's default model. The loop verifies build + tests in the main thread before pushing; afterward, continue to step 3 to resolve any pre-existing threads.
 

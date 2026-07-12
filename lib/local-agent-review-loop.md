@@ -217,7 +217,7 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
    - Otherwise, the orchestrator applies each fix in this session:
      - For each finding, read the cited file at the cited line, apply the proposed fix (using the structured `fix:` field as a starting point; if the proposal is wrong or imprecise, the orchestrator's judgment overrides — this is *your* commit, not the CLI's).
      - After each cohesive set of fixes, run `{BUILD_CMD}` (skip when empty) and `{TEST_CMD}`. If either fails, fix forward (don't push a broken state) — if the failure stems from a bad finding, drop that finding and continue.
-     - Commit each fix (or coherent group of fixes) as `address review (<agent>): <summary>` where `<agent>` is `$REVIEW_AGENT` (the reviewing CLI's slug — `codex` / `agy` / `claude`). The parenthesized agent name records which reviewer surfaced the finding. Do not include co-author or "Generated with" lines.
+     - Commit each fix (or coherent group of fixes) as `address review (<agent>): <summary>` where `<agent>` is `$REVIEW_AGENT` (the reviewing CLI's slug — `codex` / `agy` / `claude` / `grok`). The parenthesized agent name records which reviewer surfaced the finding. Do not include co-author or "Generated with" lines.
    - After the apply pass, **recompute** the change counts — the orchestrator's commits since `$LOOP_START_SHA` are what step 4 must verify and step 5 must push. Reusing the pre-apply values here would falsely report `clean` while leaving the orchestrator's fixes unverified and unpushed:
      ```bash
      NEW_COMMITS=$(git rev-list "$LOOP_START_SHA..HEAD" --count)
