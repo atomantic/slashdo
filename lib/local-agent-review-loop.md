@@ -22,6 +22,7 @@ When to use this instead of Copilot:
    - **Interactive mode (`--interactive`)**: ask the user whether to install or skip. If install succeeds, proceed normally; if skip, record `STATUS=skipped` per the default-mode rule. Do not offer a Copilot fallback — substituting a reviewer the user didn't request is exactly what the no-default-reviewer policy forbids.
 4. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
 5. Record `{REVIEWER_APPLIES}` — boolean, defaults to `false`. Set to `true` when the orchestrating command was invoked with `--reviewer-applies`. This flag selects which side of the loop holds the editor: when `false` (default), the orchestrator applies fixes from the CLI's findings log; when `true`, the headless CLI applies fixes directly in the working tree and the orchestrator only verifies.
+6. Record `{REVIEW_MODEL}` — the model to run this reviewer on, resolved by the caller (the multi-reviewer loop: explicit `<agent>[<model>]` bracket → saved `review-models[slug]` default → empty). **May be empty**, which means "use the reviewer's built-in default" — for `codex`/`claude` that is the CLI's own default model (no `--model` flag passed); for `agy` it is the pinned `AGY_REVIEW_MODEL` default resolved below. When set, it is passed through to the reviewer's invocation (`codex --model`, `claude --model` / the in-process `Agent` tool's `model`, or `agy --model`) so a run/config can pin which model reviews. The value is free-form (model names churn and may contain spaces/parens, e.g. `Gemini 3.5 Flash (High)`) — do not validate it against an allowlist; pass it verbatim.
 
 ### Editing mode
 
@@ -82,7 +83,20 @@ CODEX_APPLY_PROMPT="Review the diff from $BASE_BRANCH to HEAD in this repo for l
 TIMEOUT_CMD="$(command -v timeout >/dev/null 2>&1 && echo 'timeout 1800' \
   || { command -v gtimeout >/dev/null 2>&1 && echo 'gtimeout 1800' || echo ''; })"
 
-# agy only: pin the review model. agy's DEFAULT can be a heavy "Thinking" model
+# codex / claude: build the optional --model flag from the resolved {REVIEW_MODEL}.
+# Use a shell ARRAY, not a string: the model name may contain spaces/parens
+# (e.g. "Gemini 3.5 Flash (High)"), and zsh does not word-split an unquoted
+# expansion — a string would pass the whole "--model X Y" as one bogus argv word.
+# An array keeps `--model` and the value as separate words in bash and zsh alike,
+# and expands to ZERO words when {REVIEW_MODEL} is empty (so codex/claude fall back
+# to the CLI's own default model — no flag passed). agy is handled separately below
+# because it always pins a model (built-in default), so its flag is never empty.
+MODEL_FLAG=()
+[ -n "$REVIEW_MODEL" ] && MODEL_FLAG=(--model "$REVIEW_MODEL")
+
+# agy only: pin the review model. A per-run/config model wins via {REVIEW_MODEL}
+# (the `agy[<model>]` bracket or a saved `review-models` default), then the
+# AGY_REVIEW_MODEL env var, then the built-in default below. agy's DEFAULT can be a heavy "Thinking" model
 # (e.g. a Claude/Gemini *Thinking* tier) that spends many minutes in hidden
 # reasoning plus multi-round tool calls. How much progress is VISIBLE meanwhile
 # is model-dependent: lighter models (e.g. "Gemini 3.5 Flash (High)") narrate
@@ -97,7 +111,8 @@ TIMEOUT_CMD="$(command -v timeout >/dev/null 2>&1 && echo 'timeout 1800' \
 # an unknown model name makes agy exit non-zero. Empty = agy's own default (not
 # recommended). NOTE: avoid prompts that make agy shell out to `agy` itself
 # (e.g. `agy models`) — a nested agy invocation inside a print session can stall.
-AGY_REVIEW_MODEL="${AGY_REVIEW_MODEL:-Gemini 3.5 Flash (High)}"
+# Precedence: bracket/config-resolved {REVIEW_MODEL} > AGY_REVIEW_MODEL env > built-in default.
+AGY_REVIEW_MODEL="${REVIEW_MODEL:-${AGY_REVIEW_MODEL:-Gemini 3.5 Flash (High)}}"
 ```
 
 Run the pre-flight block above verbatim. The `TIMEOUT_CMD` resolution is deterministic — do NOT think out loud about whether `timeout`/`gtimeout` is installed or about falling back; just execute it and move on.
@@ -109,14 +124,16 @@ Pick the invocation based on `{REVIEW_AGENT}` and `{REVIEWER_APPLIES}`:
 <!-- if:teams -->
 | `claude` | Dispatch an in-process sub-agent via the `Agent` tool with `subagent_type: "general-purpose"` and `$LOCAL_PROMPT` (see Step 2) — **not** `claude -p`, so it stays on plan billing | Same sub-agent dispatch; the sub-agent applies and commits fixes directly in the shared working tree |
 <!-- else -->
-| `claude` | `claude -p "$LOCAL_PROMPT" --dangerously-skip-permissions` | `claude -p "$LOCAL_PROMPT" --dangerously-skip-permissions` |
+| `claude` | `claude -p "$LOCAL_PROMPT" "${MODEL_FLAG[@]}" --dangerously-skip-permissions` | `claude -p "$LOCAL_PROMPT" "${MODEL_FLAG[@]}" --dangerously-skip-permissions` |
 <!-- /if:teams -->
-| `codex` | `codex --sandbox danger-full-access review --base "$BASE_BRANCH" --title "$REVIEW_TITLE"` | `codex --sandbox danger-full-access -a never exec "$CODEX_APPLY_PROMPT"` |
+| `codex` | `codex "${MODEL_FLAG[@]}" --sandbox danger-full-access review --base "$BASE_BRANCH" --title "$REVIEW_TITLE"` | `codex "${MODEL_FLAG[@]}" --sandbox danger-full-access -a never exec "$CODEX_APPLY_PROMPT"` |
 | `agy` | `agy --dangerously-skip-permissions --model "$AGY_REVIEW_MODEL" --print-timeout 30m -p "$LOCAL_PROMPT"` | `agy --dangerously-skip-permissions --model "$AGY_REVIEW_MODEL" --print-timeout 30m -p "$LOCAL_PROMPT"` |
 
 For `claude` and `agy`, the same `$LOCAL_PROMPT` drives both modes — it already encodes the mode (review-only vs reviewer-applies) directly, branching on `$REVIEWER_APPLIES` above. For `codex`, the invocation itself swaps because `codex review` (review-only) and `codex exec` (apply-fixes) are different subcommands with incompatible flag sets. `--print-timeout 30m` raises agy's print-mode wait above its 5-minute default so a real review of a multi-file diff isn't cut off mid-stream; on stock macOS (no `timeout`/`gtimeout`, so `$TIMEOUT_CMD` is empty) it is also the only *shell-level* bound on the invocation. **But these bounds only take effect when the invocation runs in the background (Step 2).** Run as a blocking foreground Bash call, the run is killed first by the host tool's ~10-minute foreground cap — earlier than either `timeout 1800` or `--print-timeout 30m` — which is the timeout consumers were hitting. `--print-timeout 30m` does NOT cut off an actively-streaming agent — it bounds the wait for the *next* response chunk — which is why it's safe to set generously, and why it never masked the old skill hang (that hang was the orchestrator sitting idle waiting on background sub-agents, not a slow stream). `--model "$AGY_REVIEW_MODEL"` pins the reviewing model (resolved in pre-flight): agy's *default* may be a heavy "Thinking" tier that spends many minutes in hidden reasoning plus multi-round tool calls. How much output is visible meanwhile is **model-dependent** — lighter models narrate their actions incrementally, heavy thinking tiers can emit nothing until the final answer — so on a slow model a routine review shows little or no output for 20-30 minutes and is easily mistaken for a hang. A quiet log during Step 2's poll is therefore NOT evidence the reviewer is stuck; only a `$DONE_FILE` with a non-zero code, or a 30-minute overrun, is. Pinning a fast-but-capable model keeps reviews prompt; bump `AGY_REVIEW_MODEL` to a heavier tier when you want more depth and accept the longer wait (the background launch + 30-minute bound cover it).
 
 > **Pass the prompt as a positional argument — never via stdin.** Both `claude -p` and `agy -p` (`--print`) take the prompt as the argument directly after the flag: `agy --dangerously-skip-permissions -p "$LOCAL_PROMPT"`. They do **not** read the prompt from stdin. Do NOT write `echo "$LOCAL_PROMPT" | agy --dangerously-skip-permissions -p`, `agy -p < prompt.txt`, or `printf … | agy -p` — agy ignores piped stdin and exits with `agy --print takes the prompt as an argument, not stdin`, forcing a wasted second invocation. The `> "$LOG_FILE" 2>&1` redirect in Step 2 captures the reviewer's *output*; it is unrelated to how the prompt goes in. Keep `"$LOCAL_PROMPT"` as the quoted argument to `-p` exactly as shown in the invocation table.
+
+**Pinning the reviewer's model (`"${MODEL_FLAG[@]}"` / `--model`).** When `{REVIEW_MODEL}` is set (from an `<agent>[<model>]` bracket or a saved `review-models` default — resolved by the caller), the reviewer runs on that model; when empty, `MODEL_FLAG` is an empty array so `codex`/`claude` fall back to the CLI's own default. For **codex**, `-m`/`--model` is a **top-level** Codex option (like `--sandbox` and `-a`), so it MUST precede the `review`/`exec` subcommand — that is why `"${MODEL_FLAG[@]}"` sits before `--sandbox danger-full-access` in both codex invocations; passing it after the subcommand would exit 2 with an unexpected-argument error, exactly as `-a` does. For **claude**, `--model` is a session flag valid alongside `-p`. For **agy**, the model is always pinned via `--model "$AGY_REVIEW_MODEL"` (resolved above with `{REVIEW_MODEL}` taking precedence over the `AGY_REVIEW_MODEL` env and the built-in default) — agy's own default may be a slow "Thinking" tier, so it is never left unpinned. Because the model string may contain spaces/parens, `MODEL_FLAG` is a shell array (see the pre-flight block) — never a bare string.
 
 Notes on each invocation:
 - **claude / agy** run the self-contained `$LOCAL_PROMPT` (a single-agent inline review), **not** slashdo's `/do-review` skill — the skill's sub-agent fan-out never re-syncs into a print-mode/headless response, so it would hang and emit zero findings (see the `$LOCAL_PROMPT` rationale above).<!-- if:teams --> Under Claude Code the `claude` reviewer is an in-process sub-agent (via the `Agent` tool) that runs `$LOCAL_PROMPT` directly, rather than a `claude -p` subprocess — and because the prompt is a single-agent inline review, it does not recursively spawn the skill's own sub-agents.<!-- /if:teams --> In `REVIEWER_APPLIES=true` mode, `$LOCAL_PROMPT` tells the CLI to apply each fix, verify with build+tests, commit as `address review (<agent>): <summary>` (`<agent>` = the reviewing CLI's slug, `claude` or `agy`), and NOT push (the orchestrating agent verifies and pushes). The parenthesized agent name records which reviewer surfaced the finding, useful when scanning the log of a release that ran multiple reviewers. In `REVIEWER_APPLIES=false` mode, `$LOCAL_PROMPT` tells the CLI to emit `FINDING <N>:` blocks (or `NO FINDINGS`) to stdout for the orchestrator to parse — the orchestrator then commits the fixes using the same `address review (<agent>): <summary>` form to preserve attribution.
@@ -143,6 +160,7 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
 <!-- if:teams -->
    **When `REVIEW_AGENT=claude`: dispatch an in-process sub-agent — do NOT run the Bash invocation below.** A headless `claude -p` session bills against the Anthropic API; an in-process sub-agent runs under this session's plan, so it incurs no extra API billing. Dispatch the sub-agent via the `Agent` tool with `subagent_type: "general-purpose"`, then resume the loop:
    - **Agent type**: use `subagent_type: "general-purpose"` (the catch-all agent type — on some hosts it is named `claude`). Do **not** invent or look for a specialized `code-reviewer` / `code-review` / `reviewer` agent type — no such type exists in this harness, and probing for one just wastes a turn on an "agent type not found" error before falling back. The review behavior comes entirely from `$LOCAL_PROMPT`, not from a specialized agent type.
+   - **Model**: when `{REVIEW_MODEL}` is set (from a `claude[<model>]` bracket or a saved `review-models` default), pass it as the `Agent` tool's `model` parameter so the review sub-agent runs on the pinned model; when empty, omit `model` and the sub-agent inherits the host session's model. This is the in-process analog of the `claude -p --model` flag on the subprocess path.
    - **Sub-agent prompt**: pass `$LOCAL_PROMPT` (computed above) as the prompt. It is a self-contained single-agent review that carries the `git diff` instruction and the mode-specific output contract directly (it does **not** invoke the `/do:review` skill — a nested skill fan-out would not re-sync into this sub-agent's final message any more than it does under `agy -p`). So the sub-agent behaves identically to the `claude -p` path — in `REVIEWER_APPLIES=true` mode it applies and commits fixes directly in the shared working tree (as `address review (claude): <summary>`); in review-only mode it returns the structured `FINDING <N>:` blocks (or `NO FINDINGS`) as its final message.
    - **Capture the result into the log** so Step 3's parsing and the final report's `Log:` line work unchanged: `LOG_FILE="$(mktemp -t local-review-claude.XXXXXX.log)"`, write the sub-agent's returned message to `$LOG_FILE`, and set `EXIT_CODE=0` (use a non-zero `EXIT_CODE` only if the sub-agent reports it could not complete the review).
    - Skip the Bash invocation below and proceed to Step 3.
