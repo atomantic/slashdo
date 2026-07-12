@@ -10,12 +10,13 @@ investigates the codebase to ground the task in reality (affected files, current
 behavior, constraints), drafts an issue with a clean title and a structured body
 (problem, context, approach, acceptance criteria), shows it to you for approval,
 then creates it in the repo's issue tracker — **GitHub via `gh` or GitLab via
-`glab`**, auto-detected from the git remote exactly the way `/do:next --issues` and
-`/do:replan --issues` detect it. A **custom GitHub Enterprise or self-managed GitLab
-host works with no extra configuration**: this command only uses `gh issue` /
-`glab issue` subcommands, which resolve the host from the `origin` remote (see the
-note in [lib/gh-host.md](../../lib/gh-host.md) — only raw `gh api` calls need an
-explicit host, and this command makes none).
+`glab`**, auto-detected from the `origin` remote the same way `/do:pr` detects its
+host (the remote decides where the repo lives; auth only confirms the CLI is usable).
+A **custom GitHub Enterprise or self-managed GitLab host works with no extra
+configuration**: this command only uses `gh issue` / `glab issue` subcommands, which
+resolve the host from the `origin` remote (see the note in
+[lib/gh-host.md](../../lib/gh-host.md) — only raw `gh api` calls need an explicit
+host, and this command makes none).
 
 This is the **single-issue authoring** counterpart to `/do:replan` (which triages a
 whole backlog) — you have one specific piece of work in mind and want it captured as
@@ -63,25 +64,41 @@ free.
 
 ## Phase 0 — Detect the tracker
 
-Resolve the issue host **exactly as [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md)
-"Setup" does** — this is the same detection `/do:next --issues` and `/do:replan
---issues` use, so a repo that works with those works here identically:
+1. **VCS host / `CLI_TOOL` — detect from the `origin` remote first, then confirm the
+   matching CLI is authenticated** (the same order `/do:pr`'s "Detect VCS Host" uses,
+   and for the same reason). **The `origin` remote is the authoritative signal of where
+   the repo lives** — `auth status` only tells you which CLI is *usable*, not where the
+   repo is, so a developer with **both** `gh` and `glab` authenticated must not have the
+   host decided by whichever `auth status` happens to pass first. Detecting from auth
+   alone would file a GitLab repo's issue through `gh` (wrong host) whenever `gh` is also
+   logged in. So:
+   - Read the remote host: `git remote get-url origin`. If the host is a GitLab instance
+     (`gitlab.com` or a self-hosted GitLab), set `VCS_HOST=gitlab` and `CLI_TOOL=glab`;
+     otherwise (GitHub, GitHub Enterprise, or ambiguous) set `VCS_HOST=github` and
+     `CLI_TOOL=gh`. Both `gh` and `glab` resolve the concrete host from that remote, so a
+     **GitHub Enterprise** or **self-managed GitLab** instance is handled with no extra
+     flags — this command only ever uses `gh issue` / `glab issue` subcommands, which
+     infer the host from the remote (it never calls raw `gh api`, so no `GH_HOST`
+     derivation is needed — see [lib/gh-host.md](../../lib/gh-host.md)).
+   - Confirm the matching CLI is authenticated: `gh auth status --active` for GitHub (the
+     `--active` flag scopes the check to the active account so a stale token on another
+     account doesn't falsely fail it), `glab auth status` for GitLab. If it is **not**,
+     abort — do not silently fall back to the other CLI (that would target the wrong
+     host) or to PLAN.md (this command's whole job is to file a tracker issue):
 
-1. **VCS host / `CLI_TOOL`.** Run `gh auth status --active` (the `--active` flag
-   scopes the check to the active account so a stale token on another account doesn't
-   falsely pass), else `glab auth status`, and set `CLI_TOOL` to `gh` or `glab`
-   accordingly. Both tools resolve the target host from the `origin` remote, so a
-   **GitHub Enterprise** or **self-managed GitLab** instance is handled with no extra
-   flags. If **neither** is authenticated, abort with:
+     > `/do:plan-task detected a {VCS_HOST} repo but `{CLI_TOOL}` is not authenticated.
+     > Run `{CLI_TOOL} auth login` for this repo's host first.`
 
-   > `/do:plan-task files a tracker issue and needs an authenticated `gh` or `glab`.
-   > Run `gh auth login` (or `glab auth login`) for this repo's host first.`
+   - If there is **no `origin` remote at all**, fall back to whichever CLI is
+     authenticated (`gh` first, then `glab`); if neither is, abort with:
+     `/do:plan-task needs an authenticated `gh` (GitHub) or `glab` (GitLab). Run `gh auth login` or `glab auth login`.`
 
-   Do not fall back to writing PLAN.md — this command's whole job is to file an issue.
-2. **Fetch existing open issues** for the dedup check (Phase 2) and keep them in
-   context: `gh issue list --state open --limit 500 --json number,title,labels,body
-   --jq '.'` (glab: `glab issue list --state opened --per-page 100 -F json`). Record
-   as `EXISTING_ISSUES`. Skip this step under `--no-dedup`.
+   Print: `Tracker: {VCS_HOST} (via {CLI_TOOL})`.
+2. **Fetch existing open issues** for the dedup check (Phase 2), unless `--no-dedup` is
+   set. Use the **same fetch [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md)
+   "Setup" step 3 defines** (rather than re-inlining the `gh`/`glab` flags here, so the
+   two never drift) — it lists all open issues for the resolved `CLI_TOOL` and records
+   them as `EXISTING_ISSUES`, which is exactly what Phase 2 dedups against.
 
 (Label creation is done lazily in Phase 5, immediately before each label is applied —
 no upfront label list is needed.)
