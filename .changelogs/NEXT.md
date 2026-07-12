@@ -11,3 +11,6 @@
 ## Changed
 - **`{OVERALL_STATUS}` computation** now excludes optional passes from the `inconclusive` determination: a `clean` aggregate requires every *non-optional* pass to be clean, while an optional pass may be clean or an excluded-inconclusive. The `dirty` (hard-error) rule is unchanged and applies regardless of optionality.
 - The `Unknown --review-with value` abort message now notes each slug may be suffixed `~opt`.
+
+## Agent Skills installs (Codex, Antigravity, Grok)
+- **[issue-109] No more dangling `~/.claude/lib/…` pointers in installed skills.** On CLIs that get self-contained skill files instead of a shared library folder (Codex, Antigravity, Grok), slashdo now resolves every cross-reference between library docs when it builds each skill: a referenced doc's content is inlined into the skill, and any leftover citation is rewritten to a plain name rather than a file path the user has no way to open. A Grok-only or Codex-only install therefore no longer references guidance it can't reach. Claude Code and OpenCode installs are unchanged (they still load the library at runtime).
