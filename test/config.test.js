@@ -99,4 +99,21 @@ describe('writeConfig', () => {
     assert.equal(readConfig(file).defaults['review-with'], '@octocat,@some-app[bot]');
     fs.rmSync(dir, { recursive: true });
   });
+
+  it('round-trips a review-with with optional (~opt) markers unchanged', () => {
+    const { dir, file } = tmpFile();
+    // The `~opt` non-blocking marker rides through the saved value verbatim
+    // (no separate key), so a saved default can pin a non-blocking reviewer.
+    // The storage layer is marker-agnostic — it must survive read/write intact,
+    // on a bare slug, a bracketed ollama model, and an @<login> alike.
+    const cfg = {
+      defaults: { 'review-with': 'claude,ollama[qwen2.5-coder:32b]~opt,@flaky-bot~opt,codex' },
+    };
+    writeConfig(file, cfg);
+    assert.equal(
+      readConfig(file).defaults['review-with'],
+      'claude,ollama[qwen2.5-coder:32b]~opt,@flaky-bot~opt,codex',
+    );
+    fs.rmSync(dir, { recursive: true });
+  });
 });
