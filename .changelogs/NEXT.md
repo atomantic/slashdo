@@ -14,3 +14,6 @@
 
 ## Agent Skills installs (Codex, Antigravity, Grok)
 - **[issue-109] No more dangling `~/.claude/lib/…` pointers in installed skills.** On CLIs that get self-contained skill files instead of a shared library folder (Codex, Antigravity, Grok), slashdo now resolves every cross-reference between library docs when it builds each skill: a referenced doc's content is inlined into the skill, and any leftover citation is rewritten to a plain name rather than a file path the user has no way to open. A Grok-only or Codex-only install therefore no longer references guidance it can't reach. Claude Code and OpenCode installs are unchanged (they still load the library at runtime).
+
+## Auto-update
+- **[autoupdate-concurrency] One self-update at a time across concurrent sessions** — when several Claude sessions start at once with auto-update enabled, only one runs the slashdo installer; the others detect an in-progress update and defer, so concurrent sessions can no longer race the same install. A crashed update leaves a stale lock that the next session automatically reclaims.
