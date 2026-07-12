@@ -258,6 +258,44 @@ describe('inlineLibReferences', () => {
       assert.ok(!result.includes('## Referenced libraries'), 'missing file is not appended');
     });
   });
+
+  // A relative Markdown link like `[lib/gh-host.md](../../lib/gh-host.md)` is the
+  // GitHub-clickable form command files use; its `../../lib/…` target doesn't
+  // exist in an Agent Skills install and must be resolved like a prose citation.
+  const DANGLING_REL_LINK = /\((?:\.\.\/)+lib\/[A-Za-z0-9._-]+\.md\)/;
+
+  it('resolves a relative Markdown lib link and inlines its content as an appendix', () => {
+    withLibs({ 'gh-host.md': 'Host detection specifics.' }, (dir) => {
+      const body = 'Derive the host — see [lib/gh-host.md](../../lib/gh-host.md).';
+      const result = inlineLibReferences(body, dir);
+      assert.ok(!DANGLING_REL_LINK.test(result), 'no dangling relative link target remains');
+      assert.ok(result.includes('see gh-host.'), 'link collapsed to bare doc name');
+      assert.ok(result.includes('## Referenced libraries'), 'appendix section added');
+      assert.ok(result.includes('### gh-host'), 'referenced lib appears under its name');
+      assert.ok(result.includes('Host detection specifics.'), 'referenced lib content inlined');
+    });
+  });
+
+  it('resolves a relative link with a single `../` segment', () => {
+    withLibs({ 'gate.md': 'Gate rules.' }, (dir) => {
+      const body = 'Apply [lib/gate.md](../lib/gate.md) first.';
+      const result = inlineLibReferences(body, dir);
+      assert.ok(!DANGLING_REL_LINK.test(result), 'single-segment relative link resolved');
+      assert.ok(result.includes('Apply gate first.'), 'link collapsed to bare doc name');
+      assert.ok(result.includes('Gate rules.'), 'content inlined as appendix');
+    });
+  });
+
+  it('does not duplicate a relative-linked lib already `!cat`-inlined', () => {
+    withLibs({ 'b.md': 'B content.' }, (dir) => {
+      const body = '!`cat ~/.claude/lib/b.md`\nMore in [lib/b.md](../../lib/b.md).';
+      const result = inlineLibReferences(body, dir);
+      assert.equal(result.match(/B content\./g).length, 1, 'B content appears exactly once');
+      assert.ok(!result.includes('## Referenced libraries'), 'no appendix — content already inlined');
+      assert.ok(result.includes('More in b.'), 'relative link still de-pathed to bare name');
+      assert.ok(!DANGLING_REL_LINK.test(result), 'no dangling relative link target remains');
+    });
+  });
 });
 
 // ── getTargetFilename ───────────────────────────────────────────────

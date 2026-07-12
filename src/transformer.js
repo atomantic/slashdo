@@ -66,6 +66,13 @@ const LIB_CAT_RE = /!`cat ~\/\.claude\/lib\/(.+?)`/g;
 // `<name>.md` filename so bare directory mentions (`~/.claude/lib/`) are left
 // alone; those are explanatory, not dangling file references.
 const LIB_PROSE_RE = /~\/\.claude\/lib\/([A-Za-z0-9._-]+\.md)/g;
+// Matches a relative Markdown link to a lib doc, e.g. `[lib/gh-host.md](../../lib/gh-host.md)` —
+// the GitHub-clickable form command files use to cite a lib. The link target is
+// relative to the source tree and does NOT exist in an installed skill dir, so it
+// must be resolved for Agent Skills environments exactly like a prose citation.
+// One or more `../` segments precede `lib/<name>.md`; the whole `[text](url)` is
+// consumed and replaced by the bare doc name (link text is always the lib path).
+const LIB_MD_LINK_RE = /\[[^\]]*\]\((?:\.\.\/)+lib\/([A-Za-z0-9._-]+\.md)\)/g;
 
 // For Agent Skills environments (Codex/Antigravity/Grok — `libDir: null`, no
 // runtime `!cat`, and no `~/.claude/lib/` on disk for a host-only user), make
@@ -73,7 +80,8 @@ const LIB_PROSE_RE = /~\/\.claude\/lib\/([A-Za-z0-9._-]+\.md)/g;
 // a path the user cannot open. Three steps:
 //   1. Inline top-level `!cat ~/.claude/lib/<name>.md` includes (recording which
 //      libs became present so their in-prose citations turn into in-skill names).
-//   2. Rewrite the remaining PROSE citations `~/.claude/lib/<name>.md` to a
+//   2. Rewrite the remaining citations — both PROSE `~/.claude/lib/<name>.md` and
+//      relative Markdown links `[lib/<name>.md](../../lib/<name>.md)` — to a
 //      host-neutral bare doc name, dropping the un-resolvable path.
 //   3. For any cited lib whose content is NOT already inlined (its detail is
 //      otherwise absent), append it once under a "Referenced libraries" section —
@@ -99,15 +107,23 @@ function inlineLibReferences(body, libDir) {
     return content;
   });
 
-  // Rewrite prose citations to a bare doc name; queue any cited-but-absent lib
+  // Rewrite a cited lib to its bare doc name, queueing any cited-but-absent lib
   // (one never `!cat`-inlined) for the appendix so its content is available.
-  const resolveProseRefs = (text) => text.replace(LIB_PROSE_RE, (match, filename) => {
+  const queueAndName = (filename) => {
     if (!inlined.has(filename) && !queued.has(filename) && readLib(filename) !== null) {
       queued.add(filename);
       appendQueue.push(filename);
     }
     return filename.replace(/\.md$/, '');
-  });
+  };
+
+  // Resolve both citation forms — relative Markdown links and `~/.claude/lib/`
+  // prose refs — to bare doc names. Links are handled first so their `lib/<name>.md`
+  // link text isn't matched by the prose regex mid-rewrite.
+  const resolveProseRefs = (text) =>
+    text
+      .replace(LIB_MD_LINK_RE, (match, filename) => queueAndName(filename))
+      .replace(LIB_PROSE_RE, (match, filename) => queueAndName(filename));
 
   // Main body: inline includes first, then resolve the prose refs left behind
   // (including those that arrived inside inlined lib content).
