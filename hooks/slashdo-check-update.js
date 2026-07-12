@@ -84,9 +84,18 @@ try {
     // stops being safe to run concurrently.
     if (updateAvailable && autoUpdate) {
       // wx = create-exclusive: succeeds for exactly one racer, throws EEXIST for
-      // the rest. A pre-existing lock older than LOCK_STALE_MS is a crashed run —
-      // reclaim it (the unlink+re-create is itself a wx race, so at most one
-      // reclaimer wins and the others stay deferred).
+      // the rest. In the common case (no lock yet, several sessions starting at
+      // once) this gives EXACT mutual exclusion — exactly one installs.
+      //
+      // A pre-existing lock older than LOCK_STALE_MS is a crashed run; reclaim it.
+      // Rename-then-recreate (rather than unlink-then-recreate) avoids the gross
+      // race where two reclaimers both unlink and both then win wx. It is still
+      // only BEST-EFFORT, not perfectly exclusive: the staleness is checked before
+      // the rename, so a fresh lock created by another session in that window can
+      // be reclaimed too, letting two sessions install at once. That residual race
+      // is acceptable here precisely because this guard is defense-in-depth — the
+      // installer's writes are idempotent, so a rare double-install during crash
+      // recovery is harmless; the lock just keeps it from being load-bearing.
       let haveLock = false;
       const acquire = () => { const fd = fs.openSync(lockFile, 'wx'); fs.writeSync(fd, String(process.pid)); fs.closeSync(fd); haveLock = true; };
       try {
@@ -95,7 +104,9 @@ try {
         if (e.code === 'EEXIST') {
           try {
             if (Date.now() - fs.statSync(lockFile).mtimeMs > LOCK_STALE_MS) {
-              fs.unlinkSync(lockFile);
+              const staleName = lockFile + '.stale.' + process.pid;
+              fs.renameSync(lockFile, staleName); // atomic: one winner, losers throw ENOENT
+              fs.unlinkSync(staleName);
               acquire();
             }
           } catch (e2) {}
