@@ -82,6 +82,11 @@ try {
     // ~/.claude/ — the installer's writes are idempotent today, but serializing
     // keeps that assumption from being load-bearing if the install logic ever
     // stops being safe to run concurrently.
+    // Set when this session sees an available auto-update but yields the lock to
+    // another session: the lock holder owns the cache write for this cycle, so a
+    // deferring session must NOT write its own (stale update_available:true) result
+    // and clobber the holder's update_available:false once the install completes.
+    let deferred = false;
     if (updateAvailable && autoUpdate) {
       // wx = create-exclusive: succeeds for exactly one racer, throws EEXIST for
       // the rest. In the common case (no lock yet, several sessions starting at
@@ -113,9 +118,7 @@ try {
         }
       }
 
-      // Only the lock holder updates. A deferring session leaves updateAvailable
-      // true and writes the hint below — harmless and self-clearing once the
-      // holder bumps the version file, which the next session reads.
+      // Only the lock holder updates.
       if (haveLock) {
         try {
           // --env claude keeps this scoped to the environment running the hook,
@@ -131,6 +134,12 @@ try {
         } finally {
           try { fs.unlinkSync(lockFile); } catch (e) {}
         }
+      } else {
+        // Another session holds the lock and will install + write the authoritative
+        // cache. Defer the cache write so we don't overwrite its result with our own
+        // now-stale update_available:true (which would show a phantom /do:update
+        // badge until the next session ran).
+        deferred = true;
       }
     }
 
@@ -142,7 +151,9 @@ try {
       checked: Math.floor(Date.now() / 1000)
     };
 
-    fs.writeFileSync(cacheFile, JSON.stringify(result));
+    if (!deferred) {
+      fs.writeFileSync(cacheFile, JSON.stringify(result));
+    }
   `], {
     stdio: 'ignore',
     windowsHide: true,
