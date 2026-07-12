@@ -85,10 +85,18 @@ Turn a rough idea into a well-formed tracker issue, then hand it to an agent:
 `/do:plan-task` investigates the codebase (real file paths, current behavior, constraints), drafts a decision-complete issue — problem, context, approach, acceptance criteria — shows it to you for approval, and files it in the repo's tracker (GitHub or GitLab, including Enterprise/self-managed hosts). Useful variants:
 
 ```
-/do:plan-task <idea> --yes          # skip the approval gate (still stops on a blocking open question)
-/do:plan-task <idea> --dry-run      # print the issue that would be filed, don't create it
-/do:plan-task <idea> --label bug    # add labels on top of what planning infers
+/do:plan-task <idea> --yes                    # skip the approval gate (still stops on a blocking open question)
+/do:plan-task <idea> --dry-run                # print the issue that would be filed, don't create it
+/do:plan-task <idea> --label bug              # add labels on top of what planning infers
+/do:plan-task <idea> --enhance-with codex,grok  # sharpen the draft through a second/third agent before the gate
 ```
+
+`--enhance-with <list>` routes the drafted issue through a sequential pipeline of
+enhancement agents (`codex`, `claude`, `agy`, `grok` — same `agent[model]` grammar as
+`--review-with`, e.g. `--enhance-with codex[o3],grok`), each refining the previous
+one's output, before the approval gate — a cheap second/third opinion folded into the
+draft. A missing or misbehaving agent degrades to the last good draft; the human still
+approves the final text.
 
 Suppose it files issue `#123`. On GitHub, ship it immediately:
 
