@@ -11,6 +11,7 @@ const {
   rewriteLibPaths,
   rewriteConfigPath,
   inlineLibContent,
+  inlineLibReferences,
   applyConditionalBlocks,
   getSkillName,
   getTargetFilename,
@@ -149,6 +150,151 @@ describe('inlineLibContent', () => {
     const result = inlineLibContent(body, tmpDir);
     assert.equal(result, 'Content A and Content B');
     fs.rmSync(tmpDir, { recursive: true });
+  });
+});
+
+// ── inlineLibReferences ─────────────────────────────────────────────
+
+describe('inlineLibReferences', () => {
+  // A dangling `~/.claude/lib/<name>.md` file reference is what an Agent Skills
+  // (libDir: null) install must never emit — this is the acceptance predicate.
+  const DANGLING_LIB_REF = /~\/\.claude\/lib\/[A-Za-z0-9._-]+\.md/;
+
+  function withLibs(libs, fn) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-libref-'));
+    for (const [name, content] of Object.entries(libs)) {
+      fs.writeFileSync(path.join(tmpDir, name), content, 'utf8');
+    }
+    try {
+      return fn(tmpDir);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true });
+    }
+  }
+
+  it('inlines a `!cat` include and rewrites its prose refs to bare names', () => {
+    withLibs({ 'outer.md': 'Outer body.' }, (dir) => {
+      const body = 'Intro.\n!`cat ~/.claude/lib/outer.md`\nSee `~/.claude/lib/outer.md` again.';
+      const result = inlineLibReferences(body, dir);
+      assert.ok(result.includes('Outer body.'), 'cat content inlined');
+      assert.ok(!result.includes('!`cat'), 'no runtime cat literal remains');
+      // The prose citation of the now-inlined lib becomes a bare doc name, not a path.
+      assert.ok(result.includes('See `outer` again.'), 'prose ref rewritten to bare name');
+      assert.ok(!DANGLING_LIB_REF.test(result), 'no dangling lib file reference');
+    });
+  });
+
+  it('inlines the content of a cited-but-not-included lib as an appendix', () => {
+    withLibs({ 'gate.md': 'Gate decision rules.' }, (dir) => {
+      // gate.md is referenced only in prose (never `!cat`-included) — its detail
+      // would otherwise be absent from the skill.
+      const body = 'Body text. Apply `~/.claude/lib/gate.md` before continuing.';
+      const result = inlineLibReferences(body, dir);
+      assert.ok(!DANGLING_LIB_REF.test(result), 'no dangling lib file reference');
+      assert.ok(result.includes('## Referenced libraries'), 'appendix section added');
+      assert.ok(result.includes('### gate'), 'referenced lib appears under its name');
+      assert.ok(result.includes('Gate decision rules.'), 'referenced lib content inlined');
+      assert.ok(result.includes('Apply `gate` before'), 'prose ref rewritten to bare name');
+    });
+  });
+
+  it('resolves NESTED prose refs transitively (a cited lib citing another lib)', () => {
+    withLibs({
+      'outer.md': 'Outer rules. See `~/.claude/lib/gate.md`.',
+      'gate.md': 'Gate rules. Details in `~/.claude/lib/host.md`.',
+      'host.md': 'Host detection specifics.',
+    }, (dir) => {
+      const body = 'Intro.\n!`cat ~/.claude/lib/outer.md`';
+      const result = inlineLibReferences(body, dir);
+      assert.ok(result.includes('Gate rules.'), 'first-level nested ref inlined');
+      assert.ok(result.includes('Host detection specifics.'), 'second-level nested ref inlined');
+      assert.ok(result.includes('### gate') && result.includes('### host'), 'both appended once');
+      assert.ok(!DANGLING_LIB_REF.test(result), 'no dangling lib file reference at any depth');
+    });
+  });
+
+  it('does not duplicate a prose-cited lib that was already `!cat`-inlined', () => {
+    withLibs({
+      'a.md': 'A content. Cross-ref `~/.claude/lib/b.md`.',
+      'b.md': 'B content.',
+    }, (dir) => {
+      const body = '!`cat ~/.claude/lib/a.md`\n!`cat ~/.claude/lib/b.md`';
+      const result = inlineLibReferences(body, dir);
+      // b.md is present via its own `!cat`; a.md's prose ref to it must NOT append it again.
+      assert.equal(result.match(/B content\./g).length, 1, 'B content appears exactly once');
+      assert.ok(!result.includes('## Referenced libraries'), 'no appendix — all content already inlined');
+      assert.ok(result.includes('Cross-ref `b`.'), 'prose ref still de-pathed to bare name');
+      assert.ok(!DANGLING_LIB_REF.test(result), 'no dangling lib file reference');
+    });
+  });
+
+  it('terminates on a citation cycle (a -> b -> a), appending each once', () => {
+    withLibs({
+      'a.md': 'A body. See `~/.claude/lib/b.md`.',
+      'b.md': 'B body. See `~/.claude/lib/a.md`.',
+    }, (dir) => {
+      const body = 'Start. See `~/.claude/lib/a.md`.';
+      const result = inlineLibReferences(body, dir);
+      assert.equal(result.match(/### a\b/g).length, 1, 'a appended exactly once');
+      assert.equal(result.match(/### b\b/g).length, 1, 'b appended exactly once');
+      assert.ok(!DANGLING_LIB_REF.test(result), 'no dangling lib file reference');
+    });
+  });
+
+  it('leaves a bare `~/.claude/lib/` directory mention (no filename) untouched', () => {
+    withLibs({}, (dir) => {
+      const body = 'Loop bodies live under `~/.claude/lib/` for Claude.';
+      const result = inlineLibReferences(body, dir);
+      assert.equal(result, body, 'directory-only mention is explanatory, not a file ref');
+    });
+  });
+
+  it('de-paths a reference even when the target lib is missing on disk', () => {
+    withLibs({}, (dir) => {
+      const body = 'See `~/.claude/lib/ghost.md` for details.';
+      const result = inlineLibReferences(body, dir);
+      assert.ok(!DANGLING_LIB_REF.test(result), 'no dangling path even for a missing target');
+      assert.ok(result.includes('`ghost`'), 'rewritten to bare name');
+      assert.ok(!result.includes('## Referenced libraries'), 'missing file is not appended');
+    });
+  });
+
+  // A relative Markdown link like `[lib/gh-host.md](../../lib/gh-host.md)` is the
+  // GitHub-clickable form command files use; its `../../lib/…` target doesn't
+  // exist in an Agent Skills install and must be resolved like a prose citation.
+  const DANGLING_REL_LINK = /\((?:\.\.\/)+lib\/[A-Za-z0-9._-]+\.md\)/;
+
+  it('resolves a relative Markdown lib link and inlines its content as an appendix', () => {
+    withLibs({ 'gh-host.md': 'Host detection specifics.' }, (dir) => {
+      const body = 'Derive the host — see [lib/gh-host.md](../../lib/gh-host.md).';
+      const result = inlineLibReferences(body, dir);
+      assert.ok(!DANGLING_REL_LINK.test(result), 'no dangling relative link target remains');
+      assert.ok(result.includes('see gh-host.'), 'link collapsed to bare doc name');
+      assert.ok(result.includes('## Referenced libraries'), 'appendix section added');
+      assert.ok(result.includes('### gh-host'), 'referenced lib appears under its name');
+      assert.ok(result.includes('Host detection specifics.'), 'referenced lib content inlined');
+    });
+  });
+
+  it('resolves a relative link with a single `../` segment', () => {
+    withLibs({ 'gate.md': 'Gate rules.' }, (dir) => {
+      const body = 'Apply [lib/gate.md](../lib/gate.md) first.';
+      const result = inlineLibReferences(body, dir);
+      assert.ok(!DANGLING_REL_LINK.test(result), 'single-segment relative link resolved');
+      assert.ok(result.includes('Apply gate first.'), 'link collapsed to bare doc name');
+      assert.ok(result.includes('Gate rules.'), 'content inlined as appendix');
+    });
+  });
+
+  it('does not duplicate a relative-linked lib already `!cat`-inlined', () => {
+    withLibs({ 'b.md': 'B content.' }, (dir) => {
+      const body = '!`cat ~/.claude/lib/b.md`\nMore in [lib/b.md](../../lib/b.md).';
+      const result = inlineLibReferences(body, dir);
+      assert.equal(result.match(/B content\./g).length, 1, 'B content appears exactly once');
+      assert.ok(!result.includes('## Referenced libraries'), 'no appendix — content already inlined');
+      assert.ok(result.includes('More in b.'), 'relative link still de-pathed to bare name');
+      assert.ok(!DANGLING_REL_LINK.test(result), 'no dangling relative link target remains');
+    });
   });
 });
 
@@ -299,6 +445,33 @@ describe('transformCommand', () => {
     assert.ok(result.includes('Inlined content'));
     assert.ok(!result.includes('!`cat'));
     fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  it('de-paths cross-lib prose refs for Agent Skills envs (no dangling ~/.claude/lib/*.md)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-test-'));
+    fs.writeFileSync(path.join(tmpDir, 'loop.md'), 'Loop body. Apply `~/.claude/lib/gate.md`.\n', 'utf8');
+    fs.writeFileSync(path.join(tmpDir, 'gate.md'), 'Convergence gate rules.\n', 'utf8');
+
+    const content = '---\ndescription: Test\n---\nRun it:\n!`cat ~/.claude/lib/loop.md`';
+    const result = transformCommand(content, skillEnv, tmpDir, 'do/pr');
+    assert.ok(result.includes('Loop body.'), 'the !cat lib is inlined');
+    assert.ok(result.includes('Convergence gate rules.'), 'the prose-cited lib is inlined as appendix');
+    assert.ok(!/~\/\.claude\/lib\/[A-Za-z0-9._-]+\.md/.test(result), 'no dangling lib file reference remains');
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  it('leaves cross-lib prose refs as runtime paths for cat-inclusion envs (no appendix)', () => {
+    // Claude keeps ~/.claude/lib/ at runtime; OpenCode rewrites the prefix. Neither
+    // should inline or annotate a prose ref — this locks "no change to Claude/OpenCode".
+    const content = '---\ndescription: Test\n---\nSee `~/.claude/lib/gate.md` for the rules.';
+
+    const claudeResult = transformCommand(content, claudeEnv);
+    assert.ok(claudeResult.includes('~/.claude/lib/gate.md'), 'claude keeps the runtime lib path');
+    assert.ok(!claudeResult.includes('Referenced libraries'), 'claude gets no appendix');
+
+    const openCodeResult = transformCommand(content, catInclusionEnv);
+    assert.ok(openCodeResult.includes('~/.config/opencode/lib/gate.md'), 'opencode rewrites the prefix');
+    assert.ok(!openCodeResult.includes('Referenced libraries'), 'opencode gets no appendix');
   });
 
   it('rewrites the config-path token, including tokens from inlined lib content', () => {

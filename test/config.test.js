@@ -88,6 +88,28 @@ describe('writeConfig', () => {
     fs.rmSync(dir, { recursive: true });
   });
 
+  it('round-trips a per-agent review-models object (do:config schema)', () => {
+    const { dir, file } = tmpFile();
+    // review-models is a nested object keyed by agent slug; model strings are
+    // free-form and may contain spaces/parens (e.g. agy's "Gemini 3.5 Flash (High)").
+    // The storage layer must round-trip the whole object verbatim.
+    const cfg = {
+      defaults: {
+        'review-with': 'codex,claude,agy',
+        'review-models': {
+          codex: 'o3',
+          claude: 'claude-opus-4-8',
+          agy: 'Gemini 3.5 Flash (High)',
+          ollama: 'qwen2.5-coder:32b',
+        },
+      },
+    };
+    writeConfig(file, cfg);
+    assert.deepEqual(readConfig(file), cfg);
+    assert.equal(readConfig(file).defaults['review-models'].agy, 'Gemini 3.5 Flash (High)');
+    fs.rmSync(dir, { recursive: true });
+  });
+
   it('round-trips an arbitrary GitHub reviewer (@<login>) in review-with unchanged', () => {
     const { dir, file } = tmpFile();
     // The `@<login>` form (user or App/bot, the latter carrying a [bot] suffix)
@@ -97,6 +119,23 @@ describe('writeConfig', () => {
     };
     writeConfig(file, cfg);
     assert.equal(readConfig(file).defaults['review-with'], '@octocat,@some-app[bot]');
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  it('round-trips a review-with with optional (~opt) markers unchanged', () => {
+    const { dir, file } = tmpFile();
+    // The `~opt` non-blocking marker rides through the saved value verbatim
+    // (no separate key), so a saved default can pin a non-blocking reviewer.
+    // The storage layer is marker-agnostic — it must survive read/write intact,
+    // on a bare slug, a bracketed ollama model, and an @<login> alike.
+    const cfg = {
+      defaults: { 'review-with': 'claude,ollama[qwen2.5-coder:32b]~opt,@flaky-bot~opt,codex' },
+    };
+    writeConfig(file, cfg);
+    assert.equal(
+      readConfig(file).defaults['review-with'],
+      'claude,ollama[qwen2.5-coder:32b]~opt,@flaky-bot~opt,codex',
+    );
     fs.rmSync(dir, { recursive: true });
   });
 });
