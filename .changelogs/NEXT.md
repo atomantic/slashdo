@@ -11,3 +11,6 @@
 ## Changed
 - **`{OVERALL_STATUS}` computation** now excludes optional passes from the `inconclusive` determination: a `clean` aggregate requires every *non-optional* pass to be clean, while an optional pass may be clean or an excluded-inconclusive. The `dirty` (hard-error) rule is unchanged and applies regardless of optionality.
 - The `Unknown --review-with value` abort message now notes each slug may be suffixed `~opt`.
+
+## Auto-update
+- **[autoupdate-concurrency] One self-update at a time across concurrent sessions** — when several Claude sessions start at once with auto-update enabled, only one runs the slashdo installer; the others detect an in-progress update and defer, so concurrent sessions can no longer race the same install. A crashed update leaves a stale lock that the next session automatically reclaims.
