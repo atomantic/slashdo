@@ -21,6 +21,7 @@ List all available `/do:*` commands with their descriptions.
 | `/do:help` | List all available slashdo commands |
 | `/do:next` | Claim the next unclaimed PLAN.md item (or tracker issue with `--issues`), implement it in an isolated worktree, ship a reviewed PR, and clean up |
 | `/do:omd` | Audit and optimize markdown files (CLAUDE.md, README.md, etc.) against best practices |
+| `/do:plan-task` | Plan a task by investigating the codebase, then file a robust, decision-complete issue in the repo's tracker (GitHub `gh` / GitLab `glab`, auto-detected) — with an approval gate you can skip with `--yes` |
 | `/do:pr` | Commit, push, and open a PR against the repo's default branch |
 | `/do:pr-better` | Run a full do:better audit on the current branch, commit fixes directly, then open a single PR |
 | `/do:push` | Commit and push all work with changelog |
