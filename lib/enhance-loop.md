@@ -204,8 +204,15 @@ one's output):
    # file goes undetected (its ?? porcelain line is unchanged) and unrestorable:
    UNTRACKED_TAR="$(mktemp -t enhance-untracked.XXXXXX.tar)"
    git ls-files --others --exclude-standard -z | tar --null -T - -cf "$UNTRACKED_TAR" 2>/dev/null
-   UNTRACKED_BASELINE=$(git ls-files --others --exclude-standard -z | sort -z \
-     | xargs -0 -I{} sh -c 'printf "%s %s\n" "$(git hash-object "{}")" "{}"' | git hash-object --stdin)
+   # Fingerprint = sorted name list + per-file content hashes, combined. Uses
+   # git hash-object --stdin-paths so filenames NEVER pass through a shell — an
+   # xargs -I{} … sh -c '… "{}" …' pipeline here would textually substitute the
+   # filename into the shell program, and an untracked file named '$(cmd).txt'
+   # in the repo would execute cmd just by being snapshotted.
+   UNTRACKED_BASELINE=$({ git ls-files --others --exclude-standard | sort
+                          git ls-files --others --exclude-standard | sort | git hash-object --stdin-paths
+                        } | git hash-object --stdin)
+   MTIME_STAMP="$(mktemp -t enhance-stamp.XXXXXX)"   # for the cheap gitignored-file check in step 4
    ```
    Together these four artifacts capture the caller's ENTIRE pre-pass state — HEAD
    (`HEAD_BASELINE`), index (`INDEX_TREE`), tracked worktree content (`SNAPSHOT`),
@@ -281,6 +288,17 @@ one's output):
       untracked content (files the agent edited or deleted).
    Re-run the four comparisons afterward to confirm the tree is back at baseline;
    surface a loud warning if not (never silently continue on a still-dirty tree).
+
+   **Gitignored files are outside the snapshot/restore guarantee** — hashing or
+   tarring them is unbounded (`node_modules/`, build output), so the baselines above
+   deliberately exclude them. They still get cheap *detection*: after each pass,
+   `find . -path ./.git -prune -o -type f -newer "$MTIME_STAMP" -print` lists files
+   modified during the pass window; any hit that is ignored by git
+   (`git check-ignore`) — e.g. `.env`, a local generated config — cannot be
+   auto-restored, so print a loud warning naming the file (`enhancer modified
+   gitignored file {path} — not auto-restorable; inspect before committing/running`)
+   rather than staying silent. (The step-2 baseline block runs per pass, so its
+   `mktemp` stamps `$MTIME_STAMP` fresh each time — no separate touch needed.)
 
    Record the agent as `no-op (modified the working tree — contract violation)`, keep
    the previous draft unchanged, and continue to the next agent. Never let a
