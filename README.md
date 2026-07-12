@@ -85,10 +85,18 @@ Turn a rough idea into a well-formed tracker issue, then hand it to an agent:
 `/do:plan-task` investigates the codebase (real file paths, current behavior, constraints), drafts a decision-complete issue — problem, context, approach, acceptance criteria — shows it to you for approval, and files it in the repo's tracker (GitHub or GitLab, including Enterprise/self-managed hosts). Useful variants:
 
 ```
-/do:plan-task <idea> --yes          # skip the approval gate (still stops on a blocking open question)
-/do:plan-task <idea> --dry-run      # print the issue that would be filed, don't create it
-/do:plan-task <idea> --label bug    # add labels on top of what planning infers
+/do:plan-task <idea> --yes                    # skip the approval gate (still stops on a blocking open question)
+/do:plan-task <idea> --dry-run                # print the issue that would be filed, don't create it
+/do:plan-task <idea> --label bug              # add labels on top of what planning infers
+/do:plan-task <idea> --enhance-with codex,grok  # sharpen the draft through a second/third agent before the gate
 ```
+
+`--enhance-with <list>` routes the drafted issue through a sequential pipeline of
+enhancement agents (`codex`, `claude`, `agy`, `grok` — same `agent[model]` grammar as
+`--review-with`, e.g. `--enhance-with codex[o3],grok`), each refining the previous
+one's output, before the approval gate — a cheap second/third opinion folded into the
+draft. A missing or misbehaving agent degrades to the last good draft; the human still
+approves the final text.
 
 Suppose it files issue `#123`. On GitHub, ship it immediately:
 
@@ -172,6 +180,7 @@ All commands live under the `do:` namespace:
 | `codex` | The Codex CLI in headless mode, reviewing locally | yes |
 | `claude` | The Claude Code CLI in headless mode | yes |
 | `agy` | The Antigravity CLI (`agy` binary; aliases: `gemini`, `antigravity`) | yes |
+| `grok` | The Grok CLI in headless mode, reviewing locally | yes |
 | `ollama` | A local Ollama model — review-only (non-agentic). Bare `ollama` auto-selects your most capable installed coding model | yes |
 | `@<login>` | Any GitHub user or App/bot (e.g. `@octocat`, `@some-app[bot]`): slashdo requests their review on the PR, waits for it, and fixes what it surfaces. GitHub only; slashdo never posts an approval itself | no |
 
@@ -196,11 +205,11 @@ Reviewers run **in the order listed**, and whatever you list is exactly what run
 | Flag | Default | What it does |
 |:---|:---|:---|
 | `--review-with <list>` | none — no external reviewer | Comma-list of reviewers, run in order (see above) |
-| `--review-iterations <n>` | `1` | Cap review-and-fix cycles for a `copilot` or `@<login>` pass: request one review, apply every fix, stop (exiting early on 0 comments). `0` restores loop-until-clean, bounded by a 10-iteration guardrail. No effect on `codex`/`agy`/`claude` (fixed 3-iteration cap) or `ollama` (own fixed cap) |
+| `--review-iterations <n>` | `1` | Cap review-and-fix cycles for a `copilot` or `@<login>` pass: request one review, apply every fix, stop (exiting early on 0 comments). `0` restores loop-until-clean, bounded by a 10-iteration guardrail. No effect on `codex`/`agy`/`claude`/`grok` (fixed 3-iteration cap) or `ollama` (own fixed cap) |
 | `--review-mode <series\|parallel>` | `series` | `series` runs each reviewer to completion before the next starts, so later reviewers see earlier reviewers' committed fixes (list order matters). `parallel` runs every review concurrently against one frozen baseline and applies the deduped union of findings in a single pass — faster, but no reviewer sees another's fixes, and `--reviewer-applies` and the stop-mode flags are ignored. `/do:rpr` ignores this flag |
 | `--review-stop-on-findings` | off | Stop the loop after the first reviewer that fixes at least one finding; skip the rest. Mutually exclusive with `--review-stop-on-clean` |
 | `--review-stop-on-clean` | off | Stop after the first reviewer that reports zero findings |
-| `--reviewer-applies` | off | Let the reviewing CLI edit the working tree directly, instead of the orchestrator applying its findings. Applies to `codex`/`agy`/`claude` passes; no effect on `copilot`, `@<login>` (both review read-only cloud-side), or `ollama` (always review-only) |
+| `--reviewer-applies` | off | Let the reviewing CLI edit the working tree directly, instead of the orchestrator applying its findings. Applies to `codex`/`agy`/`claude`/`grok` passes; no effect on `copilot`, `@<login>` (both review read-only cloud-side), or `ollama` (always review-only) |
 
 By default the orchestrator that opened the PR applies every reviewer's fixes itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking Antigravity to both find and patch its own concerns).
 
@@ -279,7 +288,7 @@ Rather than passing flags every time, save them once and let future commands pic
 |:---|:---|
 | `/do:config` (or `--show`) | Print the current global + per-project defaults and the effective merged values |
 | `/do:config --review-with=… [--review-iterations=N] [--review-mode=series\|parallel] [--reviewer-applies\|--no-reviewer-applies] [--review-stop-on-findings\|--review-stop-on-clean\|--review-stop-all]` | Save review-loop defaults (validated with the same rules the review commands use) |
-| `/do:config --review-models <agent>=<model>,…` | Save the default model per reviewer (`codex`/`claude`/`agy`/`ollama`). Merges key-by-key — setting one agent leaves the others intact; an empty value (`codex=`) clears one agent |
+| `/do:config --review-models <agent>=<model>,…` | Save the default model per reviewer (`codex`/`claude`/`agy`/`grok`/`ollama`). Merges key-by-key — setting one agent leaves the others intact; an empty value (`codex=`) clears one agent |
 | `/do:config --issues\|--no-issues [--issues-label=<name>]` | Save the issue-mode default (and its scoping label) for every command that accepts `--issues` |
 | `/do:config --self\|--no-self` | Save the self-only issue gate for `/do:next` — claim only issues you filed |
 | `/do:config --merge\|--no-merge [--merge-method=squash\|rebase\|merge]` | Save `/do:pr`'s auto-merge default (and method); the shorthand `--merge=squash` sets both |
