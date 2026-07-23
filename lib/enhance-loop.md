@@ -153,7 +153,7 @@ as a positional argument (never via stdin) and prints the improved draft to stdo
 <!-- else -->
 | `claude` | `claude -p "$ENHANCE_PROMPT" "${MODEL_FLAG[@]}" --dangerously-skip-permissions` |
 <!-- /if:teams -->
-| `codex` | `codex "${MODEL_FLAG[@]}" --sandbox read-only -a never exec "$ENHANCE_PROMPT"` — `exec` (free-form prompt) is the right subcommand here, not `codex review`; `-m`/`--model`, `--sandbox`, and `-a` are all top-level flags that MUST precede `exec`. `--sandbox read-only` (NOT the review loop's `danger-full-access`) enforces the read-only contract at the sandbox level while still allowing tree reads and git queries. |
+| `codex` | `codex "${MODEL_FLAG[@]}" --sandbox read-only -a never exec "$ENHANCE_PROMPT"` — `exec` (free-form prompt) is the right subcommand here, not `codex review`; `-m`/`--model`, `--sandbox`, and `-a` are all top-level flags that MUST precede `exec`. `--sandbox read-only` enforces the read-only contract at the sandbox level while still allowing tree reads and git queries — the same posture `lib/local-agent-review-loop.md` uses for its review-only codex pass (only its *reviewer-applies* path needs `danger-full-access`). |
 | `agy` | `agy --dangerously-skip-permissions --model "$AGY_ENH_MODEL" --print-timeout 30m -p "$ENHANCE_PROMPT"` |
 | `grok` | `grok --permission-mode bypassPermissions "${MODEL_FLAG[@]}" -p "$ENHANCE_PROMPT"` |
 
