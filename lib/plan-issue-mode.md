@@ -61,6 +61,20 @@ while work happens on issues.
   **and** reused) for the command's final summary (report `#<number>` where it would
   have reported a `[slug]`), and note which were skipped as duplicates.
 
+  **Capturing the created number — parse the printed URL, do NOT use `-q`/`--jq`.**
+  `gh issue create` (and `glab issue create`) prints the new issue's **URL** on
+  stdout — it is not a `--json` command, so appending `-q .number` / `--jq` errors
+  out and, worse, can abort the create in a `$(…)` capture (`gh` exits non-zero,
+  taking any `|| fallback` with it). Grab the number by stripping the URL's last
+  path segment:
+  ```bash
+  URL="$(gh issue create --title "<Title>" --body-file "$BODY" <label flags>)"
+  NUM="${URL##*/}"   # e.g. https://github.com/o/r/issues/123 -> 123
+  ```
+  (`glab` prints an MR/issue URL the same way — `${URL##*/}` works for both.) Prefer
+  `--body-file "$BODY"` over an inline `--body "…"` when the body is multi-line or
+  contains backticks/`$(…)`, so the shell doesn't mangle or execute it.
+
 ## Labels, not title brackets
 
 The issue **title is a clean, human-readable task** — do **not** prefix it with
