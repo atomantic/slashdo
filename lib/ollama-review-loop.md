@@ -21,7 +21,7 @@ When to use this:
 2. Confirm the Ollama server is reachable: `ollama list` must succeed (it errors if the daemon isn't running). If it fails, in **default mode** set `STATUS=skipped` and print `ollama server not reachable — start it with \`ollama serve\` (recording as skipped)`; in **interactive mode** offer to start it.
 3. **Resolve `{OLLAMA_MODEL}`** (see "Model resolution" below). If resolution yields no usable model, set `STATUS=skipped` and return.
 4. Force review-only: set `REVIEWER_APPLIES=false` regardless of what the caller passed. If the caller passed `--reviewer-applies`, print: `--reviewer-applies has no effect on the ollama pass; Ollama is non-agentic, so the orchestrator always applies the fixes.`
-5. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
+5. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`. Also record `{MAX_ITERATIONS}` — how many review → fix → re-review cycles this reviewer may run, resolved by the caller (the multi-reviewer loop: a per-entry `~max=<n>` suffix on the `--review-with` token → this loop's built-in default of `3`). **Defaults to `3`**; `0` means **unlimited**, bounded by the 10-iteration safety guardrail in the Loop's step 6. Local models are the most common reason to want a small cap — `ollama~max=1` buys one review-and-fix pass without paying for re-review rounds on slow hardware. Record `{MAX_EXPLICIT}` alongside it — `true` only when the cap came from a `~max=<n>` the user typed or saved — which step 6 uses to distinguish `capped` (a budget the user chose, clean-equivalent for the merge gate) from `guardrail` (a built-in ceiling, inconclusive). The `--review-iterations` flag never reaches this loop; `~max` is the only way to move this cap.
 6. **Resolve the timeout wrapper.** macOS ships no `timeout(1)` unless coreutils is installed, so probing is required; an empty array = no wrapper (rely on Ollama's own limits). An ARRAY, not a string, for the same zsh reason as `OLLAMA_FLAGS` below: zsh does not word-split an unquoted expansion, so a two-word string (`timeout 600`) would be executed as one bogus command name and fail every invocation precisely on machines that HAVE coreutils installed. Settled logic — run it verbatim, do NOT narrate the probe or the fallback:
    ```bash
    TIMEOUT_CMD=()
@@ -134,7 +134,7 @@ $FILE_DIFF"
 
 ### Loop
 
-Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
+Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` from Pre-flight step 5 (`MAX_ITERATIONS=3`, `MAX_EXPLICIT=false` when the caller passed nothing). When `MAX_ITERATIONS=0` (unlimited), the effective ceiling below is the 10-iteration safety guardrail.
 
 1. **Capture baseline**: `LOOP_START_SHA=$(git rev-parse HEAD)`.
 2. **Run the per-file chunked review** (above), aggregating findings into `$LOG_FILE`. Re-run the Invocation block *in full* on every iteration — re-derive `CHANGED`/`TOTAL_FILES` for the current HEAD and re-initialize `REVIEW_ERRORS=0`, `PARSE_ERRORS=0`, `TRUNCATED=0`, `SKIPPED_EMPTY=0`, and fresh `$LOG_FILE`/`$ERR_FILE` (both truncated — `$ERR_FILE` is append-written with `2>>`, so a stale spinner/error tail from an earlier iteration would otherwise dominate the "last 80 lines of `$ERR_FILE`" printed on a later-iteration `cli-error`) — so a coverage gap from an earlier iteration cannot pin `STATUS=incomplete` after a clean re-review of the new commits.
@@ -164,8 +164,12 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
 6. **Re-loop or stop**:
    - `ITERATION=$((ITERATION + 1))`
    - **Apply the convergence gate** (`~/.claude/lib/review-convergence-gate.md`) before another round: if the round just completed made zero commits or landed only *marginal* findings (edge-case guards, hypotheticals with no concrete wrong outcome), **converge — set `STATUS=clean` (or `STATUS=incomplete` if the round had any coverage gap, `REVIEW_ERRORS + PARSE_ERRORS + TRUNCATED > 0`) and exit**, noting the diminishing-returns convergence in the report. The coverage-gap exception is the same invariant step 3 enforces: a partially-reviewed diff is never `clean`, even when the gate converges. Only a round with at least one *substantive* finding earns another pass.
-   - If the gate says continue AND `ITERATION < MAX_ITERATIONS`: go back to step 1 to re-review the latest commits (catches recursive findings introduced by a fix).
-   - Otherwise (gate converged, or `ITERATION >= MAX_ITERATIONS`): exit the loop. `MAX_ITERATIONS` is the mechanical backstop; the gate should normally stop first. Set `STATUS=guardrail` only when the mechanical cap stopped a still-productive loop; a gate-driven convergence sets `STATUS=clean` (or `STATUS=incomplete` when a coverage gap remains, per the exception above).
+   - Let `CEILING` be `MAX_ITERATIONS` when it is ≥ 1, or `10` when `MAX_ITERATIONS=0` (unlimited mode's safety guardrail).
+   - If the gate says continue AND `ITERATION < CEILING`: go back to step 1 to re-review the latest commits (catches recursive findings introduced by a fix).
+   - Otherwise exit the loop, with the status determined by *what stopped it*:
+     - **Gate converged**: `STATUS=clean` — or `STATUS=incomplete` when a coverage gap remains (`REVIEW_ERRORS + PARSE_ERRORS + TRUNCATED > 0`), per the exception above. This is the normal exit.
+     - **Ceiling stopped a still-productive loop** and the cap was **user-configured** (`MAX_EXPLICIT=true`, a `~max=<n>` with n ≥ 1): `STATUS=capped` — the budget the user set was spent, which is clean-equivalent for the caller's merge gate. The coverage-gap exception still overrides it: if `REVIEW_ERRORS + PARSE_ERRORS + TRUNCATED > 0`, set `STATUS=incomplete` instead. A partially-reviewed diff is never merge-eligible, no matter why the loop stopped — a `~max` budget can never launder an unreviewed or unparseable diff into a merge-eligible pass.
+     - **Ceiling stopped a still-productive loop** and the cap was **built-in** (`MAX_EXPLICIT=false` — the default `3` — or the 10-iteration guardrail in unlimited mode): `STATUS=guardrail`.
 
 ### Final report
 
@@ -176,13 +180,13 @@ Print:
 
 Model: {OLLAMA_MODEL}
 Branch: {BRANCH_NAME}
-Status: {STATUS}    # clean / incomplete / guardrail / cli-error / broken-build / test-failed / rejected / skipped
+Status: {STATUS}    # clean / capped / incomplete / guardrail / cli-error / broken-build / test-failed / rejected / skipped
 Coverage: {REVIEWABLE - REVIEW_ERRORS - PARSE_ERRORS - TRUNCATED}/{REVIEWABLE} reviewable files fully reviewed ({REVIEW_ERRORS} invocation errors, {PARSE_ERRORS} parse errors, {TRUNCATED} truncated, {SKIPPED_EMPTY} skipped as empty-diff)    # any coverage gap → status `incomplete` (not eligible to merge)
-Iterations: {ITERATION}
+Iterations: {ITERATION}/{MAX_ITERATIONS}    # denominator renders as ∞ when MAX_ITERATIONS=0; `capped` means this budget was spent, `guardrail` means a built-in ceiling cut the loop off
 Commits added: {N}
 Files modified: {file list}
 Truncated files: {any files whose diff exceeded the per-file budget, or "none"}
 Log: {LOG_FILE path}    # findings (stdout); spinner/error output is in {ERR_FILE path}
 ```
 
-If `STATUS=clean` after the first iteration, the PR is ready for the merge gate (release flow) or hand-off back to the user (PR flow). For any other status (including `skipped`), the calling command must decide whether to proceed, re-run, or stop — never auto-merge on a non-clean ollama status, and never silently substitute another reviewer for one the user requested.
+If `STATUS=clean` after the first iteration, the PR is ready for the merge gate (release flow) or hand-off back to the user (PR flow). `capped` is likewise merge-eligible — it means the reviewer spent the iteration budget the user set for it. For any other status (including `guardrail` and `skipped`), the calling command must decide whether to proceed, re-run, or stop — never auto-merge on a non-clean ollama status, and never silently substitute another reviewer for one the user requested.

@@ -24,6 +24,11 @@ Max iterations: {REVIEW_ITERATIONS} (default 1). Run at most this many
   everything it surfaced, and stop — without spending another cycle to
   re-confirm. A value of 0 means "loop until Copilot returns 0 comments"
   (the legacy behavior), bounded by the safety guardrail below.
+  The caller resolves this value: a per-entry `~max=<n>` suffix on the
+  `--review-with` token (e.g. `copilot~max=3`) wins over the run's
+  `--review-iterations`, which wins over the default of 1. Either source
+  is user-configured, so reaching the cap here is "capped", never
+  "guardrail". See `~/.claude/lib/multi-reviewer-loop.md`.
 Safety guardrail: this applies only in unlimited mode ({REVIEW_ITERATIONS}
   is 0). After 10 iterations, report back and — in interactive mode — ask
   the user whether to continue or stop; never loop indefinitely without

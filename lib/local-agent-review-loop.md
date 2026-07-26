@@ -24,6 +24,7 @@ When to use this instead of Copilot:
 4. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
 5. Record `{REVIEWER_APPLIES}` — boolean, defaults to `false`. Set to `true` when the orchestrating command was invoked with `--reviewer-applies`. This flag selects which side of the loop holds the editor: when `false` (default), the orchestrator applies fixes from the CLI's findings log; when `true`, the headless CLI applies fixes directly in the working tree and the orchestrator only verifies.
 6. Record `{REVIEW_MODEL}` — the model to run this reviewer on, resolved by the caller (the multi-reviewer loop: explicit `<agent>[<model>]` bracket → saved `review-models[slug]` default → empty). **May be empty**, which means "use the reviewer's built-in default" — for `codex`/`claude`/`grok` that is the CLI's own default model (no `--model` flag passed); for `agy` it is the pinned `AGY_REVIEW_MODEL` default resolved below. When set, it is passed through to the reviewer's invocation (`codex --model`, `claude --model` / the in-process `Agent` tool's `model`, `agy --model`, or `grok --model`) so a run/config can pin which model reviews. The value is free-form (model names churn and may contain spaces/parens, e.g. `Gemini 3.5 Flash (High)`) — do not validate it against an allowlist; pass it verbatim.
+7. Record `{MAX_ITERATIONS}` — how many review → fix → re-review cycles this reviewer may run, resolved by the caller (the multi-reviewer loop: a per-entry `~max=<n>` suffix on the `--review-with` token → this loop's built-in default of `3`). **Defaults to `3`** when the caller passes nothing, which is the historical behavior. `0` means **unlimited** — loop until the reviewer is clean or the convergence gate converges, bounded by the 10-iteration safety guardrail in Step 6. Also record `{MAX_EXPLICIT}` — boolean, `true` only when the cap came from a `~max=<n>` the user typed (or saved), `false` when it is this loop's built-in `3`. Step 6 uses it to decide whether exhausting the cap is `capped` (a budget the user chose — clean-equivalent for the merge gate) or `guardrail` (a built-in ceiling nobody vouched for — inconclusive). Note the `--review-iterations` flag never reaches this loop; `~max` is the only way to move this cap.
 
 ### Editing mode
 
@@ -163,7 +164,7 @@ Because these flags grant the headless CLI full unattended write access to the w
 
 ### Loop
 
-Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
+Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` from Pre-flight step 7 (`MAX_ITERATIONS=3`, `MAX_EXPLICIT=false` when the caller passed nothing). When `MAX_ITERATIONS=0` (unlimited), the effective ceiling for the loop below is the 10-iteration safety guardrail.
 
 1. **Capture baseline**: `LOOP_START_SHA=$(git rev-parse HEAD)`
 
@@ -304,8 +305,12 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
 6. **Re-loop or stop**:
    - `ITERATION=$((ITERATION + 1))`
    - **Apply the convergence gate** (`~/.claude/lib/review-convergence-gate.md`) before starting another round: judge whether the round that just completed is worth following with another review. If it made zero commits, or landed only *marginal* findings (edge-case guards, refinements of already-correct behavior, hypotheticals with no concrete wrong outcome), **converge — set `STATUS=clean` and exit**, noting in the report that the loop converged on diminishing returns. Only a round that landed at least one *substantive* finding earns another pass.
-   - If the gate says continue AND `ITERATION < MAX_ITERATIONS`: go back to step 1 to confirm the latest commits don't themselves need further review (catches recursive findings — common when a fix introduces a new shape).
-   - Otherwise (gate converged, or `ITERATION >= MAX_ITERATIONS`): exit the loop. `MAX_ITERATIONS` is the mechanical backstop; the convergence gate should normally stop the loop before it. Set `STATUS=guardrail` only when the mechanical cap was the thing that stopped a still-productive loop; a gate-driven convergence sets `STATUS=clean`.
+   - Let `CEILING` be `MAX_ITERATIONS` when it is ≥ 1, or `10` when `MAX_ITERATIONS=0` (unlimited mode's safety guardrail).
+   - If the gate says continue AND `ITERATION < CEILING`: go back to step 1 to confirm the latest commits don't themselves need further review (catches recursive findings — common when a fix introduces a new shape).
+   - Otherwise exit the loop, with the status determined by *what stopped it*:
+     - **Gate converged** (the round landed nothing substantive): `STATUS=clean`. This is the normal exit; the convergence gate should stop the loop before any ceiling does.
+     - **Ceiling stopped a still-productive loop** and the cap was **user-configured** (`MAX_EXPLICIT=true`, i.e. a `~max=<n>` with n ≥ 1): `STATUS=capped`. The user asked for exactly `n` rounds and got `n` rounds, so this is clean-equivalent for the caller's merge gate — not a failure.
+     - **Ceiling stopped a still-productive loop** and the cap was **built-in** (`MAX_EXPLICIT=false` — the default `3` — or the 10-iteration guardrail in unlimited mode): `STATUS=guardrail`. Nobody chose that ceiling, so the caller must treat the pass as inconclusive.
 
 ### Final report
 
@@ -316,11 +321,11 @@ Print:
 
 Agent: {REVIEW_AGENT}
 Branch: {BRANCH_NAME}
-Status: {STATUS}    # clean / guardrail / cli-error / broken-build / test-failed / rejected / skipped
-Iterations: {ITERATION}
+Status: {STATUS}    # clean / capped / guardrail / cli-error / broken-build / test-failed / rejected / skipped
+Iterations: {ITERATION}/{MAX_ITERATIONS}    # denominator renders as ∞ when MAX_ITERATIONS=0; `capped` means this budget was spent, `guardrail` means a built-in ceiling cut the loop off
 Commits added: {N}
 Files modified: {file list}
 Log: {LOG_FILE path}
 ```
 
-If `STATUS=clean` after the first iteration, the PR is ready for the merge gate (release flow) or hand-off back to the user (PR flow). For any other status (including `skipped`), the calling command must decide whether to proceed, re-run the reviewer, or stop — never auto-merge on a non-clean local-agent status, and never silently substitute `copilot` for a reviewer the user requested.
+If `STATUS=clean` after the first iteration, the PR is ready for the merge gate (release flow) or hand-off back to the user (PR flow). `capped` is likewise merge-eligible — it means the reviewer spent the iteration budget the user set for it. For any other status (including `guardrail` and `skipped`), the calling command must decide whether to proceed, re-run the reviewer, or stop — never auto-merge on a non-clean local-agent status, and never silently substitute `copilot` for a reviewer the user requested.
