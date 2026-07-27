@@ -44,6 +44,11 @@ Max iterations: {REVIEW_ITERATIONS} (default 1). Run at most this many
   comes back with zero unresolved comments. The default of 1 means: request
   one review, fix everything it surfaced, and stop. A value of 0 means "loop
   until the reviewer returns 0 comments", bounded by the safety guardrail below.
+  The caller resolves this value: a per-entry `~max=<n>` suffix on the
+  `--review-with` token (e.g. `@org-review-bot~max=3`) wins over the run's
+  `--review-iterations`, which wins over the default of 1. Either source is
+  user-configured, so reaching the cap here is "capped", never "guardrail".
+  See `~/.claude/lib/multi-reviewer-loop.md`.
 Safety guardrail: in unlimited mode ({REVIEW_ITERATIONS}=0), after 10 iterations
   report back and — in interactive mode — ask whether to continue; never loop
   indefinitely. When {REVIEW_ITERATIONS} is positive, that count IS the cap: the

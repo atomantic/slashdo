@@ -159,4 +159,30 @@ describe('writeConfig', () => {
     );
     fs.rmSync(dir, { recursive: true });
   });
+
+  it('round-trips a review-with with per-reviewer iteration caps (~max=<n>) unchanged', () => {
+    const { dir, file } = tmpFile();
+    // `~max=<n>` caps one reviewer's review->fix->re-review cycles, so a saved
+    // default can budget each reviewer separately. Like `~opt` it rides through
+    // the stored value verbatim (no separate key) — the storage layer is
+    // suffix-agnostic and must not mangle the `=` or the digits, on a bare slug,
+    // a bracketed model, an @<login>, or chained after `~opt`.
+    const cfg = {
+      defaults: {
+        'review-with':
+          'claude~max=2,ollama[qwen2.5-coder:32b]~opt~max=1,@slow-bot~max=0,codex~max=3',
+        'review-iterations': 1,
+      },
+    };
+    writeConfig(file, cfg);
+    assert.deepEqual(readConfig(file), cfg);
+    assert.equal(
+      readConfig(file).defaults['review-with'],
+      'claude~max=2,ollama[qwen2.5-coder:32b]~opt~max=1,@slow-bot~max=0,codex~max=3',
+    );
+    // The per-entry cap coexists with the global review-iterations key; the
+    // review commands resolve the precedence (per-entry ~max wins), not storage.
+    assert.equal(readConfig(file).defaults['review-iterations'], 1);
+    fs.rmSync(dir, { recursive: true });
+  });
 });

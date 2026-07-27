@@ -24,6 +24,7 @@ When to use this instead of Copilot:
 4. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
 5. Record `{REVIEWER_APPLIES}` — boolean, defaults to `false`. Set to `true` when the orchestrating command was invoked with `--reviewer-applies`. This flag selects which side of the loop holds the editor: when `false` (default), the orchestrator applies fixes from the CLI's findings log; when `true`, the headless CLI applies fixes directly in the working tree and the orchestrator only verifies.
 6. Record `{REVIEW_MODEL}` — the model to run this reviewer on, resolved by the caller (the multi-reviewer loop: explicit `<agent>[<model>]` bracket → saved `review-models[slug]` default → empty). **May be empty**, which means "use the reviewer's built-in default" — for `codex`/`claude`/`grok` that is the CLI's own default model (no `--model` flag passed); for `agy` it is the pinned `AGY_REVIEW_MODEL` default resolved below. When set, it is passed through to the reviewer's invocation (`codex --model`, `claude --model` / the in-process `Agent` tool's `model`, `agy --model`, or `grok --model`) so a run/config can pin which model reviews. The value is free-form (model names churn and may contain spaces/parens, e.g. `Gemini 3.5 Flash (High)`) — do not validate it against an allowlist; pass it verbatim.
+7. Record `{MAX_ITERATIONS}` — how many review → fix → re-review cycles this reviewer may run, resolved by the caller (the multi-reviewer loop: a per-entry `~max=<n>` suffix on the `--review-with` token → this loop's built-in default of `3`). **Defaults to `3`** when the caller passes nothing, which is the historical behavior. `0` means **unlimited** — loop until the reviewer is clean or the convergence gate converges, bounded by the 10-iteration safety guardrail in Step 6. Also record `{MAX_EXPLICIT}` — boolean, `true` only when the cap came from a `~max=<n>` the user typed (or saved), `false` when it is this loop's built-in `3`. Step 6 uses it to decide whether exhausting the cap is `capped` (a budget the user chose — clean-equivalent for the merge gate) or `guardrail` (a built-in ceiling nobody vouched for — inconclusive). Note the `--review-iterations` flag never reaches this loop; `~max` is the only way to move this cap.
 
 ### Editing mode
 
@@ -139,7 +140,7 @@ Pick the invocation based on `{REVIEW_AGENT}` and `{REVIEWER_APPLIES}`:
 
 For `claude`, `agy`, and `grok`, the same `$LOCAL_PROMPT` drives both modes — it already encodes the mode (review-only vs reviewer-applies) directly, branching on `$REVIEWER_APPLIES` above. For `codex`, the invocation itself swaps because `codex review` (review-only) and `codex exec` (apply-fixes) are different subcommands with incompatible flag sets. `--print-timeout 30m` raises agy's print-mode wait above its 5-minute default so a real review of a multi-file diff isn't cut off mid-stream; on stock macOS (no `timeout`/`gtimeout`, so `TIMEOUT_CMD` is empty) it is also the only *shell-level* bound on the invocation. **But these bounds only take effect when the invocation runs in the background (Step 2).** Run as a blocking foreground Bash call, the run is killed first by the host tool's ~10-minute foreground cap — earlier than either `timeout 1800` or `--print-timeout 30m` — which is the timeout consumers were hitting. `--print-timeout 30m` does NOT cut off an actively-streaming agent — it bounds the wait for the *next* response chunk — which is why it's safe to set generously, and why it never masked the old skill hang (that hang was the orchestrator sitting idle waiting on background sub-agents, not a slow stream). `--model "$AGY_REVIEW_MODEL"` pins the reviewing model (resolved in pre-flight): agy's *default* may be a heavy "Thinking" tier that spends many minutes in hidden reasoning plus multi-round tool calls. How much output is visible meanwhile is **model-dependent** — lighter models narrate their actions incrementally, heavy thinking tiers can emit nothing until the final answer — so on a slow model a routine review shows little or no output for 20-30 minutes and is easily mistaken for a hang. A quiet log during Step 2's poll is therefore NOT evidence the reviewer is stuck; only a `$DONE_FILE` with a non-zero code, or a 30-minute overrun, is. Pinning a fast-but-capable model keeps reviews prompt; bump `AGY_REVIEW_MODEL` to a heavier tier when you want more depth and accept the longer wait (the background launch + 30-minute bound cover it).
 
-> **Pass the prompt as a positional argument — never via stdin.** `claude -p`, `agy -p` (`--print`), and `grok -p` (`--single`) all take the prompt as the argument directly after the flag: `agy --dangerously-skip-permissions -p "$LOCAL_PROMPT"`, `grok --permission-mode bypassPermissions -p "$LOCAL_PROMPT"`. They do **not** read the prompt from stdin. Do NOT write `echo "$LOCAL_PROMPT" | agy --dangerously-skip-permissions -p`, `agy -p < prompt.txt`, or `printf … | agy -p` — agy ignores piped stdin and exits with `agy --print takes the prompt as an argument, not stdin`, forcing a wasted second invocation. The `> "$LOG_FILE" 2>&1` redirect in Step 2 captures the reviewer's *output*; it is unrelated to how the prompt goes in. Keep `"$LOCAL_PROMPT"` as the quoted argument to `-p` exactly as shown in the invocation table.
+> **Pass the prompt as a positional argument — never via stdin.** `claude -p`, `agy -p` (`--print`), and `grok -p` (`--single`) all take the prompt as the argument directly after the flag: `agy --dangerously-skip-permissions -p "$LOCAL_PROMPT"`, `grok --permission-mode bypassPermissions -p "$LOCAL_PROMPT"`. They do **not** read the prompt from stdin. Do NOT write `echo "$LOCAL_PROMPT" | agy --dangerously-skip-permissions -p`, `agy -p < prompt.txt`, or `printf … | agy -p` — agy ignores piped stdin and exits with `agy --print takes the prompt as an argument, not stdin`, forcing a wasted second invocation. The `> "$LOG_FILE" 2> "$ERR_FILE"` redirect in Step 2 captures the reviewer's *output*; it is unrelated to how the prompt goes in. Keep `"$LOCAL_PROMPT"` as the quoted argument to `-p` exactly as shown in the invocation table.
 
 **Pinning the reviewer's model (`"${MODEL_FLAG[@]}"` / `--model`).** When `{REVIEW_MODEL}` is set (from an `<agent>[<model>]` bracket or a saved `review-models` default — resolved by the caller), the reviewer runs on that model; when empty, `MODEL_FLAG` is an empty array so `codex`/`claude`/`grok` fall back to the CLI's own default. For **codex**, `-m`/`--model` is a **top-level** Codex option (like `--sandbox` and `-a`), so it MUST precede the `review`/`exec` subcommand — that is why `"${MODEL_FLAG[@]}"` sits before `--sandbox` in both codex invocations; passing it after the subcommand would exit 2 with an unexpected-argument error, exactly as `-a` does. (The two paths pass *different* sandbox policies — `read-only` for review-only, `danger-full-access` for reviewer-applies — see below.) For **claude**, `--model` is a session flag valid alongside `-p`. For **grok**, `-m`/`--model` is a session flag valid alongside `-p`, so `"${MODEL_FLAG[@]}"` sits inline in the invocation (empty array → grok's own default). For **agy**, the model is always pinned via `--model "$AGY_REVIEW_MODEL"` (resolved above with `{REVIEW_MODEL}` taking precedence over the `AGY_REVIEW_MODEL` env and the built-in default) — agy's own default may be a slow "Thinking" tier, so it is never left unpinned. Because the model string may contain spaces/parens, `MODEL_FLAG` is a shell array (see the pre-flight block) — never a bare string.
 
@@ -163,7 +164,7 @@ Because these flags grant the headless CLI full unattended write access to the w
 
 ### Loop
 
-Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
+Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` from Pre-flight step 7 (`MAX_ITERATIONS=3`, `MAX_EXPLICIT=false` when the caller passed nothing). When `MAX_ITERATIONS=0` (unlimited), the effective ceiling for the loop below is the 10-iteration safety guardrail.
 
 1. **Capture baseline**: `LOOP_START_SHA=$(git rev-parse HEAD)`
 
@@ -204,9 +205,12 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
 
      ```bash
      LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
+     ERR_FILE="${LOG_FILE}.err"
      DONE_FILE="${LOG_FILE}.exit"
-     "${TIMEOUT_CMD[@]}" {INVOCATION} > "$LOG_FILE" 2>&1; echo $? > "$DONE_FILE"
+     "${TIMEOUT_CMD[@]}" {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"; echo $? > "$DONE_FILE"
      ```
+
+     **Keep stderr OUT of `$LOG_FILE` (`2> "$ERR_FILE"`, never `2>&1`).** Step 3 validates `$LOG_FILE` as a *strict* verdict document — it must hold nothing but `NO FINDINGS` or complete `FINDING <N>:` blocks, and anything else is a parse failure. Every CLI writes non-verdict chatter to stderr (startup and deprecation banners, auth notices, agy/grok progress narration, a `timeout` kill message), so merging the streams would let one stray banner turn a perfectly clean review into a parse failure that blocks the merge. Same split, same reason, as `lib/ollama-review-loop.md`.
 
      Then wait for the reviewer with **bounded blocking-chunk foreground calls** — do NOT end your turn and wait to be notified. Repeat this foreground call (each iteration blocks ~9 minutes, safely under the host's ~10-minute foreground cap) until `$DONE_FILE` exists, then read `EXIT_CODE=$(cat "$DONE_FILE")`:
 
@@ -222,12 +226,13 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
 
      ```bash
      LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
-     "${TIMEOUT_CMD[@]}" {INVOCATION} > "$LOG_FILE" 2>&1
+     ERR_FILE="${LOG_FILE}.err"
+     "${TIMEOUT_CMD[@]}" {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"
      EXIT_CODE=$?
      ```
 
    - `TIMEOUT_CMD` was already resolved during pre-flight (the array `(timeout 1800)`, `(gtimeout 1800)`, or empty). Just expand it as `"${TIMEOUT_CMD[@]}"` — an empty array expands to zero words in bash and zsh alike, becoming a direct invocation. No re-checking or commentary needed.
-   - If `EXIT_CODE != 0` and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of the log, and exit the loop. Surface the log path so the user can inspect. A `124` exit (from `timeout`/`gtimeout`) or an empty log after the poll loop gave up means the review genuinely ran past 30 minutes — report it as `cli-error` with the log path, do not record `clean`.
+   - If `EXIT_CODE != 0` and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of **`$ERR_FILE`** (that is where a failing CLI writes its diagnostics now that the streams are split — fall back to `$LOG_FILE` if `$ERR_FILE` is empty), and exit the loop. Surface both paths so the user can inspect. A `124` exit (from `timeout`/`gtimeout`) or an empty log after the poll loop gave up means the review genuinely ran past 30 minutes — report it as `cli-error` with the log paths, do not record `clean`.
 
 3. **Detect changes and apply fixes** (logic depends on `{REVIEWER_APPLIES}`):
 
@@ -258,8 +263,11 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
      Then print a warning naming the agent (`{REVIEW_AGENT} modified the working tree during a review-only pass — reverted; findings kept`) and **continue with the findings**. This is a deliberate divergence from `enhance-loop.md`, which discards a contract-violating pass's output: an enhancer's *product* is the text it returns, so a violating enhancer is untrustworthy end-to-end, whereas a reviewer's product is its findings list, which stays useful even if it also (wrongly) tried to apply the fixes itself. The orchestrator re-derives and re-applies every fix in this session regardless, so nothing the reviewer wrote is needed.
 
      Gitignored files stay outside this guarantee (hashing `node_modules/` is unbounded), exactly as in `enhance-loop.md`.
-   - Read `$LOG_FILE` and extract the findings (look for the structured `FINDING <N>:` blocks emitted by claude/agy review-only mode, or codex's native severity-tagged findings list for `codex review`).
-   - If the log contains `NO FINDINGS` (or no actionable findings — e.g., only nits the user opted out of, or a codex log that ends with "no issues"): set `STATUS=clean` and exit the loop.
+   - Read `$LOG_FILE` and extract the findings. **For `claude`, `agy`, and `grok` in review-only mode, parse a verdict before considering the findings:** after stripping blank lines, the result must be either exactly `NO FINDINGS`, or only one or more complete `FINDING <N>:` blocks. Every block must contain non-empty `file`, numeric `line`, `severity` (`CRITICAL`, `IMPROVEMENT`, or `NIT`), `description`, and `fix` fields. Treat a missing, malformed, or contradictory result (for example, a prose response, an incomplete block, or both `NO FINDINGS` and a finding) as `STATUS=no-verdict`, print the log path, and exit the loop. **Never infer a clean result from prose or an empty log.**
+
+     `no-verdict` is **inconclusive, not a hard error** — the reviewer ran, the tree is fine, it just didn't answer in the contract's format. That distinction is load-bearing in two places. It must not be `cli-error`, because a hard error fires the wrapper's short-circuit whose stated rationale is "the branch is in a state subsequent reviewers shouldn't run against" — false here, and it would skip every remaining reviewer in the list over one chatty CLI. And `~opt` explicitly promises to excuse a "no-verdict" result from the merge gate while never excusing a hard error, so classifying this as `cli-error` would break that promise outright. A required reviewer's `no-verdict` still blocks the merge (the caller's aggregate treats it as inconclusive); an `~opt` one doesn't.
+   - For `claude`, `agy`, and `grok`, set `STATUS=clean` only for the exact `NO FINDINGS` sentinel described above. Otherwise hand the validated finding blocks to the orchestrator.
+   - For `codex`, retain its native severity-tagged output handling: a native clean verdict (`NO FINDINGS` or `no issues`) is `STATUS=clean`; otherwise hand its actionable findings to the orchestrator. This Codex-specific fallback must not be used for the structured reviewers above.
    - Otherwise, the orchestrator applies each fix in this session:
      - For each finding, read the cited file at the cited line, apply the proposed fix (using the structured `fix:` field as a starting point; if the proposal is wrong or imprecise, the orchestrator's judgment overrides — this is *your* commit, not the CLI's).
      - After each cohesive set of fixes, run `{BUILD_CMD}` (skip when empty) and `{TEST_CMD}`. If either fails, fix forward (don't push a broken state) — if the failure stems from a bad finding, drop that finding and continue.
@@ -303,8 +311,12 @@ Initialize `ITERATION=0`, `MAX_ITERATIONS=3`, `STATUS=""`.
 6. **Re-loop or stop**:
    - `ITERATION=$((ITERATION + 1))`
    - **Apply the convergence gate** (`~/.claude/lib/review-convergence-gate.md`) before starting another round: judge whether the round that just completed is worth following with another review. If it made zero commits, or landed only *marginal* findings (edge-case guards, refinements of already-correct behavior, hypotheticals with no concrete wrong outcome), **converge — set `STATUS=clean` and exit**, noting in the report that the loop converged on diminishing returns. Only a round that landed at least one *substantive* finding earns another pass.
-   - If the gate says continue AND `ITERATION < MAX_ITERATIONS`: go back to step 1 to confirm the latest commits don't themselves need further review (catches recursive findings — common when a fix introduces a new shape).
-   - Otherwise (gate converged, or `ITERATION >= MAX_ITERATIONS`): exit the loop. `MAX_ITERATIONS` is the mechanical backstop; the convergence gate should normally stop the loop before it. Set `STATUS=guardrail` only when the mechanical cap was the thing that stopped a still-productive loop; a gate-driven convergence sets `STATUS=clean`.
+   - Let `CEILING` be `MAX_ITERATIONS` when it is ≥ 1, or `10` when `MAX_ITERATIONS=0` (unlimited mode's safety guardrail).
+   - If the gate says continue AND `ITERATION < CEILING`: go back to step 1 to confirm the latest commits don't themselves need further review (catches recursive findings — common when a fix introduces a new shape).
+   - Otherwise exit the loop, with the status determined by *what stopped it*:
+     - **Gate converged** (the round landed nothing substantive): `STATUS=clean`. This is the normal exit; the convergence gate should stop the loop before any ceiling does.
+     - **Ceiling stopped a still-productive loop** and the cap was **user-configured** (`MAX_EXPLICIT=true`, i.e. a `~max=<n>` with n ≥ 1): `STATUS=capped`. The user asked for exactly `n` rounds and got `n` rounds, so this is clean-equivalent for the caller's merge gate — not a failure.
+     - **Ceiling stopped a still-productive loop** and the cap was **built-in** (`MAX_EXPLICIT=false` — the default `3` — or the 10-iteration guardrail in unlimited mode): `STATUS=guardrail`. Nobody chose that ceiling, so the caller must treat the pass as inconclusive.
 
 ### Final report
 
@@ -315,11 +327,11 @@ Print:
 
 Agent: {REVIEW_AGENT}
 Branch: {BRANCH_NAME}
-Status: {STATUS}    # clean / guardrail / cli-error / broken-build / test-failed / rejected / skipped
-Iterations: {ITERATION}
+Status: {STATUS}    # clean / capped / no-verdict / guardrail / cli-error / broken-build / test-failed / rejected / skipped
+Iterations: {ITERATION}/{MAX_ITERATIONS}    # denominator renders as ∞ when MAX_ITERATIONS=0; `capped` means this budget was spent, `guardrail` means a built-in ceiling cut the loop off
 Commits added: {N}
 Files modified: {file list}
 Log: {LOG_FILE path}
 ```
 
-If `STATUS=clean` after the first iteration, the PR is ready for the merge gate (release flow) or hand-off back to the user (PR flow). For any other status (including `skipped`), the calling command must decide whether to proceed, re-run the reviewer, or stop — never auto-merge on a non-clean local-agent status, and never silently substitute `copilot` for a reviewer the user requested.
+If `STATUS=clean` after the first iteration, the PR is ready for the merge gate (release flow) or hand-off back to the user (PR flow). `capped` is likewise merge-eligible — it means the reviewer spent the iteration budget the user set for it. For any other status (including `guardrail` and `skipped`), the calling command must decide whether to proceed, re-run the reviewer, or stop — never auto-merge on a non-clean local-agent status, and never silently substitute `copilot` for a reviewer the user requested.

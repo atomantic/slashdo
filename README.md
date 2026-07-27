@@ -193,6 +193,7 @@ Reviewers run **in the order listed**, and whatever you list is exactly what run
 /do:pr --review-with ollama[qwen2.5-coder:32b]      # pin a specific installed Ollama model
 /do:pr --review-with codex,@org-review-bot          # codex, then request a review from a GitHub bot
 /do:pr --review-with codex,ollama~opt               # ollama is optional — it runs, but can't block the merge
+/do:pr --review-with claude~max=2,ollama~max=1,codex~max=3   # a different iteration budget per reviewer
 /do:pr --review-with none                           # skip external review for this run (overrides a saved default)
 ```
 
@@ -200,13 +201,19 @@ Reviewers run **in the order listed**, and whatever you list is exactly what run
 
 **Optional reviewers** (`~opt` suffix): the reviewer runs and its findings get fixed, but an *inconclusive* result (timeout / skipped / no verdict) is excluded from the merge gate, so it never blocks `--merge`. A hard error from it (broken build / failed tests) still blocks. Use it for a second-opinion reviewer that doesn't reliably return a verdict, such as a local Ollama model.
 
+**Per-reviewer iteration caps** (`~max=<n>` suffix): caps how many **review → fix → re-review cycles** that one reviewer runs. It is the per-entry form of `--review-iterations`, and unlike that flag it reaches every reviewer type — including `codex`/`agy`/`claude`/`grok` and `ollama`, whose caps are otherwise fixed at 3 — so a single run can budget each reviewer differently: `--review-with claude~max=2,ollama~max=1,codex~max=3`. `<n>` is a non-negative integer; `0` means "loop until clean", bounded by a 10-iteration safety guardrail. A reviewer that stops because it spent a cap *you* set reports `capped`, which counts as clean for the merge gate — as opposed to `guardrail`, which is what a *built-in* cap reports when it cuts off a reviewer that was still finding real problems, and which blocks the merge.
+
+`~max` applies in `series` mode (the default). In `--review-mode parallel` each reviewer runs a single review-only pass and the orchestrator applies the union once, so there are no per-reviewer cycles to cap — `~max` is ignored there with a warning.
+
+Both suffixes chain in either order and are shell-safe: `ollama[qwen2.5-coder:32b]~opt~max=1`. Neither affects reviewer identity, so `ollama~max=2` and `ollama` still dedupe to one pass. Both also ride through `/do:config` saved defaults.
+
 ### Loop flags
 
 | Flag | Default | What it does |
 |:---|:---|:---|
-| `--review-with <list>` | none — no external reviewer | Comma-list of reviewers, run in order (see above) |
-| `--review-iterations <n>` | `1` | Cap review-and-fix cycles for a `copilot` or `@<login>` pass: request one review, apply every fix, stop (exiting early on 0 comments). `0` restores loop-until-clean, bounded by a 10-iteration guardrail. No effect on `codex`/`agy`/`claude`/`grok` (fixed 3-iteration cap) or `ollama` (own fixed cap) |
-| `--review-mode <series\|parallel>` | `series` | `series` runs each reviewer to completion before the next starts, so later reviewers see earlier reviewers' committed fixes (list order matters). `parallel` runs every review concurrently against one frozen baseline and applies the deduped union of findings in a single pass — faster, but no reviewer sees another's fixes, and `--reviewer-applies` and the stop-mode flags are ignored. `/do:rpr` ignores this flag |
+| `--review-with <list>` | none — no external reviewer | Comma-list of reviewers, run in order (see above). Each entry may carry `~opt` and/or `~max=<n>` |
+| `--review-iterations <n>` | `1` | Cap review-and-fix cycles for a `copilot` or `@<login>` pass: request one review, apply every fix, stop (exiting early on 0 comments). `0` restores loop-until-clean, bounded by a 10-iteration guardrail. No effect on `codex`/`agy`/`claude`/`grok` (fixed 3-iteration cap) or `ollama` (own fixed cap) — use the per-entry `~max=<n>` suffix to move those, or to budget each reviewer separately |
+| `--review-mode <series\|parallel>` | `series` | `series` runs each reviewer to completion before the next starts, so later reviewers see earlier reviewers' committed fixes (list order matters). `parallel` runs every review concurrently against one frozen baseline and applies the deduped union of findings in a single pass — faster, but no reviewer sees another's fixes, and `--reviewer-applies`, the stop-mode flags, and per-entry `~max=<n>` are ignored. `/do:rpr` ignores this flag |
 | `--review-stop-on-findings` | off | Stop the loop after the first reviewer that fixes at least one finding; skip the rest. Mutually exclusive with `--review-stop-on-clean` |
 | `--review-stop-on-clean` | off | Stop after the first reviewer that reports zero findings |
 | `--reviewer-applies` | off | Let the reviewing CLI edit the working tree directly, instead of the orchestrator applying its findings. Applies to `codex`/`agy`/`claude`/`grok` passes; no effect on `copilot`, `@<login>` (both review read-only cloud-side), or `ollama` (always review-only) |
