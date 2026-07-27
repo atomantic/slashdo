@@ -82,4 +82,22 @@ describe('review-loop parse contracts', () => {
       assert.match(body, /`MAX_EXPLICIT`/, `${name} must distinguish capped from guardrail`);
     }
   });
+
+  it('lets ~opt excuse no-verdict and lets capped satisfy partial', () => {
+    // Two ways a new status gets stranded: added to a loop's status set but not to
+    // the aggregate rules that consume it. A ~opt no-verdict must reach the
+    // optional-inconclusive exclusion, and a stop-mode run whose only pass returned
+    // capped must match `partial` — otherwise it matches NO rule at all (`clean`
+    // excludes stop-short-circuited runs) and the merge is blocked.
+    const wrapper = readLib('multi-reviewer-loop.md');
+    assert.match(
+      wrapper,
+      /\{OPTIONAL\}` is true and whose status is inconclusive \(`timeout`\/`error`\/`guardrail`\/`no-verdict`/,
+    );
+    assert.match(wrapper, /`no-verdict` — a local agent that ran but did not answer in the verdict format/);
+    assert.match(
+      wrapper,
+      /- `partial` — .*every executed pass returned a clean-equivalent status — `clean`, copilot `too-large`, or `capped`/,
+    );
+  });
 });

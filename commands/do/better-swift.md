@@ -1092,7 +1092,7 @@ Launch all PR sub-agents in parallel. Wait for all to complete.
 
 Each sub-agent returns the multi-reviewer wrapper's `{OVERALL_STATUS}` for its PR:
 - **clean**: every executed pass returned clean (copilot `too-large`, plus `capped` from any of the four loops — an explicitly configured cap, `~max=<n>` or `--review-iterations`, reached after applying every fix — count as clean; a *built-in* cap is `guardrail`, which is inconclusive) — mark PR as ready to merge
-- **partial**: a stop-mode flag short-circuited the list and every executed pass was clean — mark PR as ready to merge (the user opted into the short-circuit)
+- **partial**: a stop-mode flag short-circuited the list and every executed pass was clean-equivalent (`clean`, copilot `too-large`, or `capped`) — mark PR as ready to merge (the user opted into the short-circuit)
 - **inconclusive**: at least one requested pass timed out, errored, hit its guardrail, or was skipped (e.g. a missing CLI binary, or copilot when no PR review could be produced). **Default mode**: leave the PR open for manual review. **Interactive mode**: inform the user and ask whether to merge anyway, re-run, or skip
 - **dirty**: a pass left the branch with a broken build / failed tests / explicit reject. **Default mode**: leave the PR open. **Interactive mode**: ask whether to fix-and-retry or skip
 
