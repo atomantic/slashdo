@@ -19,7 +19,7 @@ List all available `/do:*` commands with their descriptions.
 | `/do:fpr` | Commit, push to fork, and open a PR against the upstream repo |
 | `/do:goals` | Scan codebase to infer project goals and generate GOALS.md (autonomous by default; `--interactive` to review with you) |
 | `/do:help` | List all available slashdo commands |
-| `/do:next` | Claim the next unclaimed PLAN.md item (or tracker issue with `--issues`), implement it in an isolated worktree, ship a reviewed PR, and clean up — `--swarm[=N]` ships several independent issues in parallel |
+| `/do:next` | Claim the next unclaimed PLAN.md item (or tracker issue with `--issues`), implement it in an isolated worktree, ship a reviewed PR, and clean up — `--swarm[=N]` ships several independent issues in parallel, auto-picked or named (`--swarm #12 #14`) |
 | `/do:omd` | Audit and optimize markdown files (CLAUDE.md, README.md, etc.) against best practices |
 | `/do:plan-task` | Plan a task by investigating the codebase, then file a robust, decision-complete issue in the repo's tracker (GitHub `gh` / GitLab `glab`, auto-detected) — with an approval gate you can skip with `--yes` |
 | `/do:pr` | Commit, push, and open a PR (GitHub) or merge request (GitLab) against the repo's default branch — `--merge` auto-merges once reviews and CI pass |

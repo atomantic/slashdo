@@ -162,7 +162,7 @@ All commands live under the `do:` namespace:
 | `/do:goals` | Generate GOALS.md from codebase analysis (autonomous by default; `--interactive` to review with you) |
 | `/do:plan-task` | Investigate the codebase, draft a decision-complete issue, show it for approval, file it in the tracker ([workflow](#plan-a-task-then-let-an-agent-ship-it)) |
 | `/do:replan` | Audit/triage the plan — prune completed items, suggest new work — in `PLAN.md` or the issue tracker ([Issue mode](#issue-mode---issues)) |
-| `/do:next` | Claim the next unclaimed plan item or issue, implement it in an isolated worktree, ship a reviewed PR, clean up. `--swarm[=N]` ships several independent issues in parallel ([Issue mode](#issue-mode---issues)) |
+| `/do:next` | Claim the next unclaimed plan item or issue, implement it in an isolated worktree, ship a reviewed PR, clean up. `--swarm[=N]` ships several independent issues in parallel — auto-picked, or the exact numbers you name ([Issue mode](#issue-mode---issues)) |
 | `/do:omd` | Audit and optimize markdown files against best practices |
 | `/do:config` | View or set saved defaults so future commands can omit their flags ([Configuration](#configuration-doconfig)) |
 | `/do:update` | Update slashdo to latest version |
@@ -260,6 +260,8 @@ By default the plan lives in `PLAN.md`. Pass `--issues` (or save it — `/do:con
 /do:next --issues                         # claim + ship the oldest eligible open issue
 /do:next --issues #42                     # cherry-pick a specific issue
 /do:next --issues --swarm                 # ship 3 independent issues in parallel
+/do:next --issues --swarm #12 #14 #15     # or swarm exactly the issues you name
+/do:next --issues --swarm=2 12,14,15,19   # named batch, 2 at a time (waves)
 /do:next --issues --self                  # only claim issues YOU filed (security boundary)
 ```
 
@@ -277,6 +279,8 @@ By default the plan lives in `PLAN.md`. Pass `--issues` (or save it — `/do:con
 **Epics are child-aware.** An `epic` (umbrella) issue — identified by the `epic` label, native GitHub sub-issues, or a body that task-lists other issues — is judged by its **children**, not by code evidence. `/do:next --issues` skips an epic while any child is open; once every child closes it claims the epic's remaining wrap-up tasks (or closes the epic outright if nothing remains). After shipping a child, `/do:next` re-checks the parent and closes it when that child was the last. `/do:replan --issues` applies the same rule during triage.
 
 **Swarm mode (`/do:next --issues --swarm[=N]`).** Instead of one item per run, `--swarm` claims and ships **several independent open issues at once** — each in its own worktree subagent running the normal single-issue flow — then serializes only the merge. It picks the first N independent issues off the same priority/oldest queue (skipping ones that depend on or obviously overlap another in the batch), fans out one agent per issue to implement and open a reviewed PR, then merges them one at a time, re-syncing each onto the advancing default branch. Default 3 agents; `--swarm=N` sets the count (clamped `1..6` — N agents cost ≈N× the tokens). A PR that isn't cleanly mergeable is left open rather than force-merged, and a dead agent's claim is released back to the queue.
+
+**Swarm an explicit list.** Name the issues instead of letting swarm pick them — `/do:next --swarm #12 #14 #15` (or `--swarm 12,14,15`), the natural follow-up to filing a batch with `/do:plan-task`. The named list *is* the batch, in your order, and it's a deliberate cherry-pick: parking labels, an active `--issues-label` filter, and blockers outside the list are overridden (each override is stated), while `--self` still refuses a list containing someone else's issue rather than shrinking the batch silently. Issues that are closed or already claimed are dropped with a reason and never substituted; name more than the concurrency cap and they ship in **waves** of N, each wave merging before the next begins — which is also where an issue that depends on (or obviously collides with) another in the list gets placed. The summary accounts for every number you named. `--swarm=N` still caps concurrency, but the token cost tracks the list length, not N.
 
 ## Configuration (`/do:config`)
 
