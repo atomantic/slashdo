@@ -88,7 +88,7 @@ above as **repeated `--label <name>`** flags (one per label):
 - **Category** — when the finding carries one (audit findings always do): a label
   named for the finding's category slug, lowercased (e.g. `security`, `dry`,
   `architecture`, `deps`, `bugs-perf`, `code-quality`, `stack-specific`, `tests`,
-  `ux`, `structural`). This replaces the `[dry]`-style title prefix.
+  `ux`, `structural`, `cognitive-load`). This replaces the `[dry]`-style title prefix.
 - **Severity** — when the finding carries one: `severity:critical`, `severity:high`,
   `severity:medium`, or `severity:low`. This replaces the `[LOW]`-style title prefix.
 
