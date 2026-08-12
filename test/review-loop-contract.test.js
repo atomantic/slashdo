@@ -210,7 +210,16 @@ describe('review-loop parse contracts', () => {
     // A conflicted retry must not strand the branch mid-rebase: push-failed is a
     // continue-signal, so the next reviewer would inherit a detached HEAD whose own
     // assertion then silently skips (no resolvable @{u} to compare against).
-    assert.match(wrapper, /git rebase --abort/, 'a conflicted retry must not leave a rebase in progress');
+    // Anchored to the else-branch, not a bare substring: naming `git rebase --abort`
+    // anywhere in the prose would otherwise satisfy this while the code path is gone.
+    // The trailing `false` is what makes a failed push observable to the orchestrator
+    // — without it the abort's own success flips the block to exit 0, the pass is
+    // never recorded push-failed, and the stranded commits reach the merge gate.
+    assert.match(
+      wrapper,
+      /else\n\s*git rebase --abort 2>\/dev\/null[^\n]*\n\s*false\n/,
+      'a conflicted retry must abort the rebase AND still exit non-zero so the pass records push-failed',
+    );
 
     const pr = readCommand('pr.md');
     assert.match(pr, /`git push origin \{current_branch\}` — an explicit refspec, never a bare `git push`/);
