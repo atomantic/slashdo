@@ -80,13 +80,21 @@ This is the default path. Iterate `REVIEW_AGENTS` in order, running each reviewe
    # /do:better can run on a branch that was never pushed, and a detached HEAD or a
    # missing origin fails this the same way. This is a "did the push step run" check,
    # not a "must have a remote" requirement.
-   if UPSTREAM="$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)"; then
+   if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
      UNPUSHED="$(git log --oneline @{u}..HEAD)"
-     # Derive the push target from the upstream itself, not the local branch name.
-     # e.g. origin/next/issue-134 -> remote "origin", branch "next/issue-134".
-     PUSH_REMOTE="${UPSTREAM%%/*}"; PUSH_BRANCH="${UPSTREAM#*/}"
    else
      UNPUSHED=""   # no upstream — nothing to assert
+   fi
+   # Derive the push target from CONFIG, not by splitting the abbrev-ref: a remote
+   # name may itself contain a slash (`up/stream/main`), and a LOCAL upstream
+   # (`branch.<n>.remote=.`, what `git branch --set-upstream-to=main` produces)
+   # abbreviates to a bare `main` with no slash at all — a `%%/`+`#*/` split mangles
+   # both into a bogus remote. Empty on a detached HEAD, which skips the check.
+   BR="$(git branch --show-current)"
+   PUSH_REMOTE="$(git config --get "branch.$BR.remote")"
+   PUSH_BRANCH="$(git config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
+   if [ -z "$PUSH_REMOTE" ] || [ "$PUSH_REMOTE" = "." ]; then
+     UNPUSHED=""   # upstream is a local branch (or none) — no remote to assert against
    fi
    # Scope it to THIS pass. A pass that committed nothing has nothing of its own
    # stranded, so anything ahead of the upstream predates the pass — deliberately
@@ -96,11 +104,18 @@ This is the default path. Iterate `REVIEW_AGENTS` in order, running each reviewe
    if [ "$PASS_START_SHA" = "$(git rev-parse HEAD)" ]; then
      UNPUSHED=""   # pass committed nothing — nothing of its own is stranded
    fi
+   # Push in the SAME shell that derived the target — these variables do not survive
+   # across separate Bash invocations, and an empty PUSH_REMOTE would push to the
+   # empty-string remote: a fatal error, reported as a bogus push-failed.
+   if [ -n "$UNPUSHED" ]; then
+     git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH" ||
+       { git pull --rebase --autostash && git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"; }
+   fi
    ```
 
-   If `UNPUSHED` is non-empty, the inner loop's push step did not run. Push now with the same retry the loop files use — `git push "$PUSH_REMOTE" "HEAD:refs/heads/$PUSH_BRANCH"`; on a non-fast-forward, `git pull --rebase --autostash` once, then retry.
+   If `UNPUSHED` was non-empty the inner loop's push step did not run, and the block above already pushed it — `git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"`, retried once behind `git pull --rebase --autostash` on a non-fast-forward, exactly the retry the loop files use. **Run the whole thing as one block**: `PUSH_REMOTE`/`PUSH_BRANCH` live only in the shell that set them. If the push still fails, record the pass per the rules below.
 
-   **Push to the ref the upstream names — not a bare `git push`, and not `git push origin HEAD`.** A bare push fans out under `push.default=matching` to every local branch with a same-named remote (publishing unrelated branches — including a `release` branch that may auto-tag and publish), and errors outright under `push.default=nothing`. `git push origin HEAD` is the subtler trap: with no `<dst>`, git resolves `HEAD` to the **local** branch name and pushes to `refs/heads/<local-name>`, ignoring the upstream entirely — so on a branch whose upstream has a different name (or lives on another remote) it creates a spurious remote branch, leaves the real PR head stale, and `@{u}..HEAD` is *still* non-empty afterward. That is issue #134's exact failure, reintroduced by the guard meant to prevent it. Deriving `<dst>` from `@{u}` is what makes the push land on the branch the PR was opened from.
+   **Push to the ref the upstream names — not a bare `git push`, and not `git push origin HEAD`.** A bare push fans out under `push.default=matching` to every local branch with a same-named remote (publishing unrelated branches — including a `release` branch that may auto-tag and publish), and errors outright under `push.default=nothing`. `git push origin HEAD` is the subtler trap: with no `<dst>`, git resolves `HEAD` to the **local** branch name and pushes to `refs/heads/<local-name>`, ignoring the upstream entirely — so on a branch whose upstream has a different name (or lives on another remote) it creates a spurious remote branch, leaves the real PR head stale, and `@{u}..HEAD` is *still* non-empty afterward. That is issue #134's exact failure, reintroduced by the guard meant to prevent it. Deriving the destination from `branch.<name>.merge` is what makes the push land on the branch the PR was opened from — and because that value is already fully qualified, it is `HEAD:$PUSH_BRANCH`, never `HEAD:refs/heads/$PUSH_BRANCH`.
 
    If the push still fails, **record the pass as `push-failed`** and print the unpushed SHAs so the user can see exactly what is stranded. This overrides whatever status the inner loop returned — **except a hard-error** (`cli-error`/`broken-build`/`test-failed`/`rejected`), which keeps its own status so the hard-error short-circuit still fires and the aggregate stays `dirty`; note the stranded SHAs in that pass's Notes instead. Downgrading a `dirty` pass to `push-failed` would turn the aggregate into `inconclusive` and let a caller like `/do:pr` — which aborts before creating a PR only on `dirty` — open a PR against a branch it was supposed to refuse.
 
@@ -141,7 +156,7 @@ Run only when `{REVIEW_MODE}=parallel` was explicitly resolved (flag or saved de
 3. **Barrier**: wait for every launched review to finish (each is bounded by its own loop's timeout). Wait ACTIVELY, with the local-agent loop's bounded blocking-chunk idiom (repeated ~9-minute foreground `for … sleep 10` calls checking each reviewer's `$DONE_FILE`) — **never end your turn expecting the host to notify you when a background review exits.** That notification only exists for top-level sessions; when this loop runs inside a subagent (a `/do:next --swarm` worker, a CoS/background agent), ending the turn terminates the run and the reviews' findings are lost.
 4. **Dedupe the union** of findings across all reviewers — collapse findings that name the same file + line + substantively the same issue into one (keep the clearest description/fix, and note which reviewers raised it).
 5. **Apply once, sequentially, in the orchestrator** (the only writer): for each deduped finding, apply the fix, run `{BUILD_CMD}` (skip when empty) + `{TEST_CMD}`, dropping any finding whose fix breaks the build/tests or that is wrong on inspection. Before committing, **run the fix regression guard** on the applied diff (`git diff "$PARALLEL_START_SHA..HEAD"`) — scan for unscoped state-clearing/restoring writes and side effects added to hot paths, re-scope any that fail, and add a focused regression test where the fix touches scoping or timestamp/side-effect logic (see `~/.claude/lib/fix-regression-guard.md`). The guard matters **most** here: step 7 below does no automatic re-review, so a fix's own regression has no second reviewer to catch it. Commit the applied fixes (group sensibly) as `address review (parallel: <agents>): <summary>`, then **push once**. Because fixes are applied after collection, there is no per-reviewer commit attribution as in series — the aggregate report notes the parallel commit instead.
-6. **Assert the applied fixes reached the remote** — the identical check the series dispatch's step 5 defines, applied once here after the union push: skip when `git rev-parse --abbrev-ref --symbolic-full-name @{u}` fails (no upstream) or when the apply committed nothing (`PARALLEL_START_SHA == HEAD`), otherwise require `git log --oneline @{u}..HEAD` to be empty; if it isn't, push with `git push "$PUSH_REMOTE" "HEAD:refs/heads/$PUSH_BRANCH"` derived from `@{u}` (never a bare `git push`, never `git push origin HEAD` — see step 5 for why both are wrong) and the one `git pull --rebase --autostash` retry, and record `push-failed` if it still fails. This matters *more* in parallel mode than in series: the union apply is the only writer in the whole run, so an unpushed union strands **every** reviewer's fixes at once rather than one pass's.
+6. **Assert the applied fixes reached the remote** — run **the same block** the series dispatch's step 5 defines, verbatim, with `PARALLEL_START_SHA` substituted for `PASS_START_SHA`, so the config-based target derivation and the push travel together in one shell. Record `push-failed` if the push and its one retry both fail. This matters *more* in parallel mode than in series: the union apply is the only writer in the whole run, so an unpushed union strands **every** reviewer's fixes at once rather than one pass's.
 7. **Re-review is NOT automatic in parallel mode.** The series loop's per-reviewer re-review recursion (re-review the new commits, governed by the convergence gate) does not run here, because no single reviewer owns the apply. If the applied fixes warrant another look, that is a follow-up series run — and apply the convergence gate (`~/.claude/lib/review-convergence-gate.md`) to that decision too: only re-run when the applied fixes were *substantive*, not to chase marginal edge cases. Say so in the report rather than silently re-fanning out.
 
 A hard-error during apply (build/tests cannot be made green, or a finding forces a revert) sets `{OVERALL_STATUS}=dirty` exactly as the series hard-error short-circuit does.

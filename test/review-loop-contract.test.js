@@ -112,8 +112,8 @@ describe('review-loop parse contracts', () => {
     const wrapper = readLib('multi-reviewer-loop.md');
     assert.match(wrapper, /\*\*Assert the pass's fixes reached the remote\.\*\*/);
     assert.match(wrapper, /UNPUSHED="\$\(git log --oneline @\{u\}\.\.HEAD\)"/);
-    assert.match(wrapper, /if UPSTREAM="\$\(git rev-parse --abbrev-ref --symbolic-full-name @\{u\} 2>\/dev\/null\)"; then/);
-    assert.match(wrapper, /UNPUSHED=""   # no upstream — nothing to assert/);
+    assert.match(wrapper, /git rev-parse --abbrev-ref --symbolic-full-name @\{u\} >\/dev\/null 2>&1/);
+    assert.match(wrapper, /else\n\s*UNPUSHED=""/, 'no upstream must skip the assertion');
     assert.match(wrapper, /`git status` is not a substitute/);
     assert.match(wrapper, /\*\*record the pass as `push-failed`\*\*/);
     // The union apply in parallel mode is the only writer, so it needs the same guard.
@@ -164,19 +164,47 @@ describe('review-loop parse contracts', () => {
     // local branch — including a release branch that may auto-tag and publish.
     const wrapper = readLib('multi-reviewer-loop.md');
     assert.match(wrapper, /if \[ "\$PASS_START_SHA" = "\$\(git rev-parse HEAD\)" \]; then/);
-    assert.match(wrapper, /`PARALLEL_START_SHA == HEAD`/, 'parallel mode needs the same zero-commit scoping');
+    // Parallel mode reuses the whole block (derivation + scoping + push together)
+    // rather than restating a push whose variables nothing in that section defines.
+    assert.match(
+      wrapper,
+      /\*\*the same block\*\* the series dispatch's step 5 defines, verbatim, with `PARALLEL_START_SHA` substituted for `PASS_START_SHA`/,
+      'parallel mode needs the same zero-commit scoping and target derivation',
+    );
     // The destination must come from @{u}, never from the local branch name:
     // `git push origin HEAD` resolves <dst> to refs/heads/<local-name>, so when the
     // upstream is named differently it pushes a spurious branch, leaves the PR head
     // stale, and @{u}..HEAD stays non-empty — #134's failure inside its own guard.
-    assert.match(wrapper, /PUSH_REMOTE="\$\{UPSTREAM%%\/\*\}"; PUSH_BRANCH="\$\{UPSTREAM#\*\/\}"/);
-    assert.match(wrapper, /git push "\$PUSH_REMOTE" "HEAD:refs\/heads\/\$PUSH_BRANCH"/);
+    // Derive from config, not by splitting the abbrev-ref: a remote name may contain
+    // a slash, and a LOCAL upstream (remote ".") abbreviates with no slash at all —
+    // which a %%/ + #*/ split turns into a bogus remote, firing a false push-failed
+    // on a healthy branch. A local upstream has no remote to assert against at all.
+    assert.match(wrapper, /PUSH_REMOTE="\$\(git config --get "branch\.\$BR\.remote"\)"/);
+    assert.match(wrapper, /PUSH_BRANCH="\$\(git config --get "branch\.\$BR\.merge"\)"/);
+    assert.match(wrapper, /\[ "\$PUSH_REMOTE" = "\." \]/, 'a local-branch upstream must skip the check');
     assert.match(wrapper, /not a bare `git push`, and not `git push origin HEAD`/);
+    // Every PRESCRIBED push (identified by an explicit HEAD: destination — the prose
+    // warnings about `git push origin HEAD` carry none) must use the derived form.
+    // A verbatim doesNotMatch only ever blocks the one phrasing it quotes.
+    // Scan raw text, not just backticked spans: the in-block occurrences are inside a
+    // fence and carry no backticks, so a backtick-anchored scan would miss the very
+    // command that actually runs.
+    const prescribed = [...wrapper.matchAll(/git push [^\n`]*?HEAD:[^\s"`]*/g)].map((m) => m[0]);
+    assert.ok(prescribed.length >= 3, 'the push must appear in the block (twice, with retry) and in prose');
+    assert.ok(
+      prescribed.every((c) => c === 'git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH'),
+      `every prescribed push must target the upstream-derived ref, got: ${prescribed.join(' | ')}`,
+    );
+    // branch.<name>.merge is already refs/heads/<name>; re-prefixing would produce
+    // refs/heads/refs/heads/<name>.
     assert.doesNotMatch(
       wrapper,
-      /push with `git push origin HEAD`/,
-      'the push target must be derived from the upstream ref, not the local branch name',
+      /git push [^\n`]*HEAD:refs\/heads\//,
+      'no prescribed push may re-prefix refs/heads/ (naming it in a warning is fine)',
     );
+    // The variables must be consumed in the shell that set them — spec snippets run
+    // as separate Bash calls, where an empty PUSH_REMOTE means `git push "" "HEAD:"`.
+    assert.match(wrapper, /if \[ -n "\$UNPUSHED" \]; then\n\s*git push "\$PUSH_REMOTE" "HEAD:\$PUSH_BRANCH"/);
 
     const pr = readCommand('pr.md');
     assert.match(pr, /`git push origin \{current_branch\}` — an explicit refspec, never a bare `git push`/);
