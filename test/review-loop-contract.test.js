@@ -275,7 +275,9 @@ describe('review-loop parse contracts', () => {
       // ...and the opposite slip: a mechanical rewrite that wraps an already-guarded
       // expansion a second time. Harmless to bash, but it publishes a second "correct"
       // spelling of the rule this partial exists to teach, which is how it drifts.
-      const doubled = body.match(/\$\{([A-Z][A-Z0-9_]*)\[@\]\+\$\{\1\[@\]\+/g);
+      // `"?` because the second wrap may or may not quote the inner expansion —
+      // ${A[@]+${A[@]+…}} and ${A[@]+"${A[@]+…}"} are both the same slip.
+      const doubled = body.match(/\$\{([A-Z][A-Z0-9_]*)\[@\]\+"?\$\{\1\[@\]\+/g);
       assert.equal(doubled, null, `${name}: double-wrapped guard ${doubled && doubled.join(', ')} — one \${ARR[@]+…} is enough`);
     }
   });
