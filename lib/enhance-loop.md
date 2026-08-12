@@ -107,7 +107,12 @@ logic; run it, don't narrate it:
 # no wrapper (rely on each CLI's own limits). An ARRAY, not a string: zsh (a common
 # host shell) does not word-split an unquoted expansion, so a two-word string like
 # 'timeout 1800' would be executed as one bogus command name; the array expands to
-# separate words in bash and zsh alike, and to zero words when empty. Enhancement is
+# separate words in bash and zsh alike. Stock macOS ships NEITHER `timeout` nor
+# `gtimeout`, so the empty array is the common case — always expand it (and MODEL_FLAG)
+# as ${ARR[@]+"${ARR[@]}"}, never as a bare "${ARR[@]}": under bash 3.2 (macOS
+# /bin/bash) the latter is an unset expansion that aborts with `unbound variable`
+# under `set -u` before the CLI ever runs. The guarded form yields zero words
+# when empty, on bash 3.2+ and zsh alike. Enhancement is
 # lighter than a full review (no build/test), but a large draft on a heavy model can
 # still exceed the ~10-min host foreground cap, so the same background+poll launch
 # below is used.
@@ -151,11 +156,11 @@ as a positional argument (never via stdin) and prints the improved draft to stdo
 <!-- if:teams -->
 | `claude` | Dispatch an in-process sub-agent via the `Agent` tool (`subagent_type: "general-purpose"`, prompt `$ENHANCE_PROMPT`, `model` = `{ENH_MODEL}` when set) — **not** `claude -p`, so it stays on the host session's plan billing instead of hitting the API. Its returned message is the agent's stdout. |
 <!-- else -->
-| `claude` | `claude -p "$ENHANCE_PROMPT" "${MODEL_FLAG[@]}" --dangerously-skip-permissions` |
+| `claude` | `claude -p "$ENHANCE_PROMPT" ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} --dangerously-skip-permissions` |
 <!-- /if:teams -->
-| `codex` | `codex "${MODEL_FLAG[@]}" --sandbox read-only -a never exec "$ENHANCE_PROMPT"` — `exec` (free-form prompt) is the right subcommand here, not `codex review`; `-m`/`--model`, `--sandbox`, and `-a` are all top-level flags that MUST precede `exec`. `--sandbox read-only` enforces the read-only contract at the sandbox level while still allowing tree reads and git queries — the same posture `lib/local-agent-review-loop.md` uses for its review-only codex pass (only its *reviewer-applies* path needs `danger-full-access`). |
+| `codex` | `codex ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} --sandbox read-only -a never exec "$ENHANCE_PROMPT"` — `exec` (free-form prompt) is the right subcommand here, not `codex review`; `-m`/`--model`, `--sandbox`, and `-a` are all top-level flags that MUST precede `exec`. `--sandbox read-only` enforces the read-only contract at the sandbox level while still allowing tree reads and git queries — the same posture `lib/local-agent-review-loop.md` uses for its review-only codex pass (only its *reviewer-applies* path needs `danger-full-access`). |
 | `agy` | `agy --dangerously-skip-permissions --model "$AGY_ENH_MODEL" --print-timeout 30m -p "$ENHANCE_PROMPT"` |
-| `grok` | `grok --permission-mode bypassPermissions "${MODEL_FLAG[@]}" -p "$ENHANCE_PROMPT"` |
+| `grok` | `grok --permission-mode bypassPermissions ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} -p "$ENHANCE_PROMPT"` |
 
 **Grok flag rationale.** `grok -p`/`--single <PROMPT>` runs a single-turn headless
 prompt, prints the response to stdout, and exits — the grok analog of `claude -p` /
@@ -247,7 +252,7 @@ one's output):
      # after <<<ENHANCED_BODY>>> to end-of-output", so any stderr the CLI emits after
      # the answer (telemetry warnings, timing/shutdown lines, update nags) would be
      # pasted verbatim into the enhanced draft and end up in the filed issue.
-     "${TIMEOUT_CMD[@]}" {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"; echo $? > "$DONE_FILE"
+     ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"; echo $? > "$DONE_FILE"
      ```
      Then wait with **bounded blocking-chunk foreground calls** — do NOT end your turn
      to wait for a notification (a stopped subagent is dead, not waiting):

@@ -241,4 +241,37 @@ describe('review-loop parse contracts', () => {
     assert.match(pr, /\s+exit 1/);
     assert.match(pr, /Never merge on `dirty`\/`inconclusive`, never merge while the branch has unpushed commits/);
   });
+
+  it('guards every possibly-empty array expansion against bash 3.2 + set -u', () => {
+    // Stock macOS has neither `timeout` nor `gtimeout`, so TIMEOUT_CMD is legitimately
+    // empty there — and under /bin/bash 3.2 a bare "${ARR[@]}" on an empty array is an
+    // UNSET expansion that aborts with `unbound variable` before the reviewer ever runs.
+    // Every file then comes back RC=1 with empty output, the loop counts them all as
+    // REVIEW_ERRORS, and the pass resolves to `cli-error` — a hard error `~opt` does not
+    // excuse — blocking the merge on a PR no reviewer looked at. Only the
+    // ${ARR[@]+"${ARR[@]}"} form is safe on bash 3.2, bash 4/5, and zsh alike.
+    const arrays = ['TIMEOUT_CMD', 'MODEL_FLAG', 'OLLAMA_FLAGS'];
+    for (const name of ['local-agent-review-loop.md', 'ollama-review-loop.md', 'enhance-loop.md']) {
+      const body = readLib(name);
+      for (const arr of arrays) {
+        assert.doesNotMatch(
+          body,
+          new RegExp(String.raw`(?<!\+)"\$\{${arr}\[@\]\}"`),
+          `${name}: bare "\${${arr}[@]}" aborts under bash 3.2 + set -u when the array is empty — use \${${arr}[@]+"\${${arr}[@]}"}`,
+        );
+      }
+    }
+  });
+
+  it('documents the empty timeout wrapper as a supported configuration', () => {
+    // An absent timeout binary is an environment condition, not a reviewer failure —
+    // the loops must say so, or the next reader re-reports it as a genuine cli-error.
+    const ollama = readLib('ollama-review-loop.md');
+    assert.match(ollama, /Stock macOS ships \*\*neither\*\* `timeout\(1\)`.*nor `gtimeout`/);
+    assert.match(ollama, /supported configuration\*\*: the review runs unbounded and must never be recorded as a reviewer failure/);
+
+    const local = readLib('local-agent-review-loop.md');
+    assert.match(local, /Stock macOS ships NEITHER `timeout\(1\)`/);
+    assert.match(local, /a supported configuration and never a reviewer failure/);
+  });
 });
