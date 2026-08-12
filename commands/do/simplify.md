@@ -24,7 +24,8 @@ Argument handling:
 - Pass `$ARGUMENTS` through to `do:better` verbatim. It parses every flag itself, including the saved `/do:config` defaults, so there is nothing to extract or re-validate here.
 - `--simplify-only` / `--refactor-only` in `$ARGUMENTS` is redundant but harmless — do not error on it.
 - `--strict` / `--nuclear` is implied (`SIMPLIFY_ONLY=true` sets `STRICT_MODE=true`); passing it explicitly changes nothing.
-- Every other `do:better` flag works as documented: `--scan-only` stops after the narrowed plan, `--interactive` prompts at each gate, `--no-merge` stops after PR creation, `--issues`/`--issues-label` file deferred findings as tracker issues, and the review flags (`--review-with`, `--review-mode`, `--review-iterations`, `--review-stop-on-*`, `--reviewer-applies`) drive the Phase 6 loop.
+- Every other `do:better` flag works as documented: `--scan-only` stops after the narrowed plan, `--interactive` prompts at each gate, `--no-merge` stops after PR creation, and the review flags (`--review-with`, `--review-mode`, `--review-iterations`, `--review-stop-on-*`, `--reviewer-applies`) drive the Phase 6 loop.
+- `--issues` / `--issues-label <name>` select **where** deferred findings are recorded — tracker issues instead of `PLAN.md` lines. They do **not** change what the run does: `/do:simplify --issues` still remediates in a worktree, opens per-category PRs, runs CI and the review loop, and merges. To audit and file the work without touching your code, combine with `--scan-only` — a `--scan-only` run in issue mode remediates nothing, so **every** surviving finding is filed as a labelled issue, and those issues are the run's entire output.
 
 ## Notes
 
