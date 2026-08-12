@@ -134,6 +134,41 @@ describe('review-loop parse contracts', () => {
     assert.match(wrapper, /- \*\*`push-failed`\.\*\* An optional reviewer's \*findings\* are still real fixes/);
     // Inconclusive, not a verdict: it can never satisfy a stop-mode short-circuit.
     assert.match(wrapper, /`no-verdict`\/`skipped`\/`not-requestable`\/`push-failed`/);
+    // The `inconclusive` bullet ends by excusing ~opt passes. Unqualified, that
+    // sentence flatly contradicts the push-failed carve-out two clauses earlier and
+    // an orchestrator could read it as license to merge an ~opt reviewer's stranded
+    // fixes — so the exemption must name the statuses it applies to.
+    assert.doesNotMatch(
+      wrapper,
+      /Passes marked `~opt` are ignored here \(see the exclusion note above\)/,
+      'the ~opt exemption must be scoped to the inconclusive statuses, not stated unconditionally',
+    );
+    assert.match(wrapper, /but never for `push-failed`, which lands the aggregate here regardless of `\{OPTIONAL\}`/);
+    // A hard-error must keep its own status: rewriting it to push-failed would
+    // silence the hard-error short-circuit and downgrade the aggregate from dirty
+    // to inconclusive, past do:pr's "abort before creating the PR on dirty" gate.
+    assert.match(wrapper, /\*\*except a hard-error\*\* \(`cli-error`\/`broken-build`\/`test-failed`\/`rejected`\), which keeps its own status/);
+    // The consumers that restate the aggregate rule must agree with it.
+    assert.match(readCommand('release.md'), /or `push-failed`, a pass whose fix commits never reached the remote/);
+  });
+
+  it('scopes the push assertion to the pass and never pushes by fan-out', () => {
+    // Two ways this check could do damage rather than prevent it: publishing
+    // deliberately-unpushed local commits on a pass that committed nothing (it is a
+    // "did the push step run" check, not a "sync my branch" command), and a bare
+    // `git push`, which under push.default=matching fans out to every same-named
+    // local branch — including a release branch that may auto-tag and publish.
+    const wrapper = readLib('multi-reviewer-loop.md');
+    assert.match(wrapper, /\[ "\$PASS_START_SHA" = "\$\(git rev-parse HEAD\)" \] && UNPUSHED=""/);
+    assert.match(wrapper, /\*\*Push the branch explicitly, never a bare `git push`\*\*/);
+    assert.match(wrapper, /`git push origin HEAD`/);
+    assert.match(wrapper, /`PARALLEL_START_SHA == HEAD`/, 'parallel mode needs the same zero-commit scoping');
+
+    const pr = readCommand('pr.md');
+    assert.match(pr, /`git push origin \{current_branch\}` — an explicit refspec, never a bare `git push`/);
+    // Without a stop-on-failure clause the orchestrator falls through to gh pr create
+    // and opens exactly the stale pre-review PR this guard exists to prevent.
+    assert.match(pr, /\*\*If the push still fails after that one retry, do NOT create the PR\*\*/);
   });
 
   it('blocks PR creation and merge on unpushed commits in do:pr', () => {
