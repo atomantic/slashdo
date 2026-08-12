@@ -144,7 +144,7 @@ describe('review-loop parse contracts', () => {
     // contradiction while a literal-string guard kept passing.
     assert.doesNotMatch(
       wrapper,
-      /whose status is `push-failed`[\s\S]{0,600}?(Passes marked `~opt` are ignored here\.|`~opt` passes are ignored here\.|are ignored here \(see)/,
+      /whose status is `push-failed`[\s\S]{0,2000}?(Passes marked `~opt` are ignored here\.|`~opt` passes are ignored here\.|are ignored here \(see)/,
       'any ~opt exemption following the push-failed clause must name the statuses it covers',
     );
     assert.match(wrapper, /but never for `push-failed`, which lands the aggregate here regardless of `\{OPTIONAL\}`/);
@@ -204,7 +204,9 @@ describe('review-loop parse contracts', () => {
     );
     // The variables must be consumed in the shell that set them — spec snippets run
     // as separate Bash calls, where an empty PUSH_REMOTE means `git push "" "HEAD:"`.
-    assert.match(wrapper, /if \[ -n "\$UNPUSHED" \]; then\n\s*git push "\$PUSH_REMOTE" "HEAD:\$PUSH_BRANCH"/);
+    // Tolerate an intervening comment line — the point is that the push lives inside
+    // the guard, not that it sits on the literally-next line.
+    assert.match(wrapper, /if \[ -n "\$UNPUSHED" \]; then\s*(?:#[^\n]*\n\s*)*git push "\$PUSH_REMOTE" "HEAD:\$PUSH_BRANCH"/);
 
     const pr = readCommand('pr.md');
     assert.match(pr, /`git push origin \{current_branch\}` — an explicit refspec, never a bare `git push`/);
@@ -219,7 +221,11 @@ describe('review-loop parse contracts', () => {
     const pr = readCommand('pr.md');
     assert.match(pr, /\*\*First, assert the branch's commits reached the remote\.\*\*/);
     assert.match(pr, /\*\*Unpushed-commits gate\*\* — \*\*refuse to merge while the local branch is ahead of its remote\.\*\*/);
-    assert.match(pr, /git log --oneline @\{u\}\.\.HEAD {3}# must be empty to merge/);
+    // Fails closed: the gate exits non-zero rather than printing a result someone
+    // has to interpret — the whole failure mode here is a step being skimmed past.
+    assert.match(pr, /UNPUSHED="\$\(git log --oneline @\{u\}\.\.HEAD\)"[\s\S]{0,200}?if \[ -n "\$UNPUSHED" \]; then/);
+    assert.match(pr, /REFUSING TO MERGE — these commits are not on the remote:/);
+    assert.match(pr, /\s+exit 1/);
     assert.match(pr, /Never merge on `dirty`\/`inconclusive`, never merge while the branch has unpushed commits/);
   });
 });
