@@ -16,6 +16,10 @@ while work happens on issues.
 - **`--issues`**: file plan items as tracker issues instead of `PLAN.md` lines.
   Record `ISSUE_MODE=true` (default `false`). A saved `issues=true` default resolves
   to the same `ISSUE_MODE=true` when neither `--issues` nor `--no-issues` is typed.
+  **This flag selects a destination, not a run mode.** It changes *where* items are
+  recorded and nothing else — a command that remediates, opens PRs, or merges still
+  does all of that. In a command that also offers `--scan-only`, that is the flag
+  which stops the pipeline; see "Recording every finding under `--scan-only`" below.
 - **`--issues-label <name>`**: the label that scopes plan-tracking issues. Record
   `PLAN_LABEL` (default `plan`). Only meaningful when `ISSUE_MODE` is true.
 
@@ -42,6 +46,19 @@ while work happens on issues.
    (glab: `glab issue list --state opened --per-page 100 -F json`). Record this as
    `EXISTING_ISSUES`. Listing **all** open issues (not just `--label <PLAN_LABEL>`)
    avoids re-filing a finding someone already opened by hand under a different label.
+
+## Recording every finding under `--scan-only`
+
+The rules below record an item when a command **defers** it — decides not to act on
+it this run. A `--scan-only` run acts on *nothing*, so under `--scan-only` +
+`ISSUE_MODE` **every surviving finding is deferred and must be filed**, not just the
+subset a full run would have skipped. The filed issues are the entire output of that
+run: no worktree, no code changes, no PRs. Apply the same dedup, labels, and
+title/body rules below to all of them, and report the created and reused `#<number>`s
+in the command's summary.
+
+This is the combination to reach for when the intent is "audit and file the work,
+don't touch my code" — `--issues` alone does not do it.
 
 ## Recording a plan item
 
