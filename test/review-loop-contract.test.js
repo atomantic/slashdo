@@ -8,6 +8,15 @@ const path = require('path');
 const readLib = (name) => fs.readFileSync(path.join(__dirname, '..', 'lib', name), 'utf8');
 const readCommand = (name) => fs.readFileSync(path.join(__dirname, '..', 'commands', 'do', name), 'utf8');
 
+// The loop partials whose invocations carry arrays that can legitimately be empty
+// (TIMEOUT_CMD when no timeout/gtimeout is installed, MODEL_FLAG when no model is
+// pinned, OLLAMA_FLAGS on an ollama too old for the optional flags).
+const LOOPS_WITH_OPTIONAL_ARRAYS = [
+  'local-agent-review-loop.md',
+  'ollama-review-loop.md',
+  'enhance-loop.md',
+];
+
 describe('review-loop parse contracts', () => {
   it('requires structured local-agent verdicts without weakening Codex handling', () => {
     const body = readLib('local-agent-review-loop.md');
@@ -250,28 +259,45 @@ describe('review-loop parse contracts', () => {
     // REVIEW_ERRORS, and the pass resolves to `cli-error` — a hard error `~opt` does not
     // excuse — blocking the merge on a PR no reviewer looked at. Only the
     // ${ARR[@]+"${ARR[@]}"} form is safe on bash 3.2, bash 4/5, and zsh alike.
-    const arrays = ['TIMEOUT_CMD', 'MODEL_FLAG', 'OLLAMA_FLAGS'];
-    for (const name of ['local-agent-review-loop.md', 'ollama-review-loop.md', 'enhance-loop.md']) {
+    // Scan by PATTERN, not by a hardcoded array-name list, so a newly introduced
+    // optional-argument array is covered the day it lands.
+    for (const name of LOOPS_WITH_OPTIONAL_ARRAYS) {
       const body = readLib(name);
-      for (const arr of arrays) {
-        assert.doesNotMatch(
-          body,
-          new RegExp(String.raw`(?<!\+)"\$\{${arr}\[@\]\}"`),
-          `${name}: bare "\${${arr}[@]}" aborts under bash 3.2 + set -u when the array is empty — use \${${arr}[@]+"\${${arr}[@]}"}`,
-        );
-      }
+      // A bare "${ARR[@]}" — the lookbehind lets through the guarded ${ARR[@]+"${ARR[@]}"},
+      // and the negative lookahead exempts the literal name `ARR`, which is the prose
+      // metavariable used to *state* the rule, never a real array.
+      const bare = body.match(/(?<!\+)"\$\{(?!ARR\[)[A-Z][A-Z0-9_]*\[@\]\}"/g);
+      assert.equal(
+        bare,
+        null,
+        `${name}: unguarded ${bare && bare.join(', ')} aborts under bash 3.2 + set -u when empty — use \${ARR[@]+"\${ARR[@]}"}`,
+      );
+      // ...and the opposite slip: a mechanical rewrite that wraps an already-guarded
+      // expansion a second time. Harmless to bash, but it publishes a second "correct"
+      // spelling of the rule this partial exists to teach, which is how it drifts.
+      const doubled = body.match(/\$\{([A-Z][A-Z0-9_]*)\[@\]\+\$\{\1\[@\]\+/g);
+      assert.equal(doubled, null, `${name}: double-wrapped guard ${doubled && doubled.join(', ')} — one \${ARR[@]+…} is enough`);
     }
   });
 
-  it('documents the empty timeout wrapper as a supported configuration', () => {
-    // An absent timeout binary is an environment condition, not a reviewer failure —
-    // the loops must say so, or the next reader re-reports it as a genuine cli-error.
-    const ollama = readLib('ollama-review-loop.md');
-    assert.match(ollama, /Stock macOS ships \*\*neither\*\* `timeout\(1\)`.*nor `gtimeout`/);
-    assert.match(ollama, /supported configuration\*\*: the review runs unbounded and must never be recorded as a reviewer failure/);
+  it('keeps the empty-array rule in one partial the loops point at', () => {
+    // An absent timeout binary is an environment condition, not a reviewer failure.
+    // The explanation lives in ONE partial (the lib/gh-host.md convention) — five
+    // near-identical copies is how the rule drifted mid-PR the first time. Assert the
+    // partial carries the contract and that each loop links to it; do NOT assert on
+    // the loops' own prose wording, which is theirs to copy-edit.
+    const partial = readLib('empty-array-expansion.md');
+    assert.match(partial, /\$\{ARR\[@\]\+"\$\{ARR\[@\]\}"\}\s+# correct/);
+    assert.match(partial, /Stock macOS ships \*\*neither\*\* `timeout\(1\)`/);
+    assert.match(partial, /supported configuration\*\*/);
+    assert.match(partial, /unbound variable/);
 
-    const local = readLib('local-agent-review-loop.md');
-    assert.match(local, /Stock macOS ships NEITHER `timeout\(1\)`/);
-    assert.match(local, /a supported configuration and never a reviewer failure/);
+    for (const name of LOOPS_WITH_OPTIONAL_ARRAYS) {
+      assert.match(
+        readLib(name),
+        /lib\/empty-array-expansion\.md/,
+        `${name} must point at the shared empty-array-expansion partial rather than restating it`,
+      );
+    }
   });
 });

@@ -103,16 +103,15 @@ Resolve the timeout wrapper — the only genuinely run-once piece; this is settl
 logic; run it, don't narrate it:
 
 ```bash
-# macOS ships no timeout(1) unless coreutils is installed; probe for it. Empty array =
-# no wrapper (rely on each CLI's own limits). An ARRAY, not a string: zsh (a common
-# host shell) does not word-split an unquoted expansion, so a two-word string like
-# 'timeout 1800' would be executed as one bogus command name; the array expands to
-# separate words in bash and zsh alike. Stock macOS ships NEITHER `timeout` nor
-# `gtimeout`, so the empty array is the common case — always expand it (and MODEL_FLAG)
-# as ${ARR[@]+"${ARR[@]}"}, never as a bare "${ARR[@]}": under bash 3.2 (macOS
-# /bin/bash) the latter is an unset expansion that aborts with `unbound variable`
-# under `set -u` before the CLI ever runs. The guarded form yields zero words
-# when empty, on bash 3.2+ and zsh alike. Enhancement is
+# Stock macOS ships NEITHER timeout(1) (GNU coreutils) nor gtimeout (Homebrew
+# coreutils), so probe for them and expect the empty array — the common case, not an
+# edge case. Empty array = no wrapper (rely on each CLI's own limits). An ARRAY, not a
+# string: zsh (a common host shell) does not word-split an unquoted expansion, so a
+# two-word string like 'timeout 1800' would be executed as one bogus command name; the
+# array expands to separate words in bash and zsh alike. Expand it (and MODEL_FLAG)
+# only in the guarded ${ARR[@]+"${ARR[@]}"} form — the bare form aborts under bash 3.2
+# + `set -u` before the CLI runs; see ~/.claude/lib/empty-array-expansion.md.
+# Enhancement is
 # lighter than a full review (no build/test), but a large draft on a heavy model can
 # still exceed the ~10-min host foreground cap, so the same background+poll launch
 # below is used.

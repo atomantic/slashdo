@@ -79,12 +79,14 @@ fi
 CODEX_APPLY_PROMPT="Review the diff from $BASE_BRANCH to HEAD in this repo for logic issues (correctness, security, test coverage, contract drift). The linter, type-checker, and test suite already run separately — do NOT spend effort on syntax, lint, formatting, or build errors, and do NOT raise style/rename/extract-a-helper suggestions; report only behavior bugs you can tie to a concrete wrong outcome. For each finding, apply the fix in the working tree, then run \`$BUILD_CMD\` (skip if empty) and \`$TEST_CMD\` to verify, and commit each fix with message 'address review (codex): <summary>'. Do not introduce changes beyond the scope of fixing the findings. Do not skip tests or weaken assertions."
 
 # Resolve the timeout wrapper used by the step-2 invocation
-# (`${TIMEOUT_CMD[@]+${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"}} {INVOCATION}`).
+# (`${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION}`).
 # Stock macOS ships NEITHER `timeout(1)` (GNU coreutils) nor `gtimeout` (Homebrew
 # coreutils), so an empty array is the common case here, not an edge case; bare
 # `timeout 1800 …` would exit 127 before the reviewer runs. Empty array = no wrapper
 # (rely on the CLI's own internal limits) — a supported configuration, never a
-# reviewer failure. An ARRAY, not a string, for the same zsh
+# reviewer failure; expand it (and MODEL_FLAG) only in the guarded
+# ${ARR[@]+"${ARR[@]}"} form — see ~/.claude/lib/empty-array-expansion.md.
+# An ARRAY, not a string, for the same zsh
 # reason as MODEL_FLAG below: zsh does not word-split an unquoted expansion, so a
 # two-word string ('timeout 1800') would be executed as one bogus command name and
 # fail every invocation precisely on machines that HAVE coreutils installed.
@@ -234,7 +236,7 @@ Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` fro
      EXIT_CODE=$?
      ```
 
-   - `TIMEOUT_CMD` was already resolved during pre-flight (the array `(timeout 1800)`, `(gtimeout 1800)`, or empty; on stock macOS it is empty, which is a supported configuration and never a reviewer failure). Expand it exactly as `${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"}` — the `${ARR[@]+…}` guard is required, **not** decoration: an unguarded `"${ARR[@]}"` on an empty array is an *unset* expansion under **bash 3.2** (still `/bin/bash` on macOS), so with `set -u` it aborts with `unbound variable` before the reviewer starts, turning every file into an empty RC=1 result and a false `cli-error` that blocks the merge. The guarded form expands to zero words — a direct invocation — under bash 3.2+, bash 4/5, and zsh alike. Same rule for `MODEL_FLAG` and any other array that can legitimately be empty. No re-checking or commentary needed.
+   - `TIMEOUT_CMD` was already resolved during pre-flight (the array `(timeout 1800)`, `(gtimeout 1800)`, or empty; on stock macOS it is empty, which is a supported configuration and never a reviewer failure). Expand it exactly as `${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"}` — the guard is required, **not** decoration: the bare form aborts under bash 3.2 + `set -u` before the reviewer starts, which surfaces as a false `cli-error` that blocks the merge (see `~/.claude/lib/empty-array-expansion.md`). Same rule for `MODEL_FLAG`. No re-checking or commentary needed.
    - If `EXIT_CODE != 0` and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of **`$ERR_FILE`** (that is where a failing CLI writes its diagnostics now that the streams are split — fall back to `$LOG_FILE` if `$ERR_FILE` is empty), and exit the loop. Surface both paths so the user can inspect. A `124` exit (from `timeout`/`gtimeout`) or an empty log after the poll loop gave up means the review genuinely ran past 30 minutes — report it as `cli-error` with the log paths, do not record `clean`.
 
 3. **Detect changes and apply fixes** (logic depends on `{REVIEWER_APPLIES}`):
