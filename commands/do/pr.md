@@ -203,11 +203,15 @@ When `MERGE_ENABLED=true`, gate the merge on **all three** of the review result,
 
    ```bash
    if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
-     git log --oneline @{u}..HEAD   # must be empty to merge
+     UNPUSHED="$(git log --oneline @{u}..HEAD)"
+     if [ -n "$UNPUSHED" ]; then
+       echo "REFUSING TO MERGE — these commits are not on the remote:"; echo "$UNPUSHED"
+       exit 1
+     fi
    fi
    ```
 
-   If that output is non-empty, **do not merge**: print the unpushed SHAs, leave the PR open, and report that the branch has unmerged local work to push. Skip the gate entirely when the branch has no upstream — there is nothing to compare against. This gate is independent of `{OVERALL_STATUS}`: a `clean` review whose fixes are unpushed is exactly the failure it exists to catch.
+   The snippet **fails closed on purpose**: it exits non-zero rather than just printing, so the gate can't be skimmed past the way a bare `git log` whose output needs interpreting can. If it exits non-zero, **do not merge**: report the unpushed SHAs, leave the PR open, and say the branch has local work to push. Skip the gate entirely when the branch has no upstream — there is nothing to compare against. This gate is independent of `{OVERALL_STATUS}`: a `clean` review whose fixes are unpushed is exactly the failure it exists to catch.
 3. **Resolve the merge method** into `{MERGE_METHOD}`: the explicit flag or saved `merge-method` default if set; otherwise query `gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed` and pick from the repo's allowed methods — if exactly one is allowed use it; if several are, prefer `squash`, then `merge`, then `rebase`. State the chosen method. (GitLab: omit the method flag and let `glab` use the project default.)
 4. **Merge once CI is green** — GitHub (`gh`):
    - First try GitHub-native auto-merge, so the merge lands when required checks pass even if this session ends: `gh pr merge {number} --auto --{MERGE_METHOD} --delete-branch`.
