@@ -112,7 +112,8 @@ describe('review-loop parse contracts', () => {
     const wrapper = readLib('multi-reviewer-loop.md');
     assert.match(wrapper, /\*\*Assert the pass's fixes reached the remote\.\*\*/);
     assert.match(wrapper, /UNPUSHED="\$\(git log --oneline @\{u\}\.\.HEAD\)"/);
-    assert.match(wrapper, /git rev-parse --abbrev-ref --symbolic-full-name @\{u\} >\/dev\/null 2>&1/);
+    assert.match(wrapper, /if UPSTREAM="\$\(git rev-parse --abbrev-ref --symbolic-full-name @\{u\} 2>\/dev\/null\)"; then/);
+    assert.match(wrapper, /UNPUSHED=""   # no upstream — nothing to assert/);
     assert.match(wrapper, /`git status` is not a substitute/);
     assert.match(wrapper, /\*\*record the pass as `push-failed`\*\*/);
     // The union apply in parallel mode is the only writer, so it needs the same guard.
@@ -138,10 +139,13 @@ describe('review-loop parse contracts', () => {
     // sentence flatly contradicts the push-failed carve-out two clauses earlier and
     // an orchestrator could read it as license to merge an ~opt reviewer's stranded
     // fixes — so the exemption must name the statuses it applies to.
+    // Structural, not verbatim: a reworded but still-unqualified exemption
+    // ("Optional passes are ignored here.") would reintroduce the same
+    // contradiction while a literal-string guard kept passing.
     assert.doesNotMatch(
       wrapper,
-      /Passes marked `~opt` are ignored here \(see the exclusion note above\)/,
-      'the ~opt exemption must be scoped to the inconclusive statuses, not stated unconditionally',
+      /whose status is `push-failed`[\s\S]{0,600}?(Passes marked `~opt` are ignored here\.|`~opt` passes are ignored here\.|are ignored here \(see)/,
+      'any ~opt exemption following the push-failed clause must name the statuses it covers',
     );
     assert.match(wrapper, /but never for `push-failed`, which lands the aggregate here regardless of `\{OPTIONAL\}`/);
     // A hard-error must keep its own status: rewriting it to push-failed would
@@ -159,10 +163,20 @@ describe('review-loop parse contracts', () => {
     // `git push`, which under push.default=matching fans out to every same-named
     // local branch — including a release branch that may auto-tag and publish.
     const wrapper = readLib('multi-reviewer-loop.md');
-    assert.match(wrapper, /\[ "\$PASS_START_SHA" = "\$\(git rev-parse HEAD\)" \] && UNPUSHED=""/);
-    assert.match(wrapper, /\*\*Push the branch explicitly, never a bare `git push`\*\*/);
-    assert.match(wrapper, /`git push origin HEAD`/);
+    assert.match(wrapper, /if \[ "\$PASS_START_SHA" = "\$\(git rev-parse HEAD\)" \]; then/);
     assert.match(wrapper, /`PARALLEL_START_SHA == HEAD`/, 'parallel mode needs the same zero-commit scoping');
+    // The destination must come from @{u}, never from the local branch name:
+    // `git push origin HEAD` resolves <dst> to refs/heads/<local-name>, so when the
+    // upstream is named differently it pushes a spurious branch, leaves the PR head
+    // stale, and @{u}..HEAD stays non-empty — #134's failure inside its own guard.
+    assert.match(wrapper, /PUSH_REMOTE="\$\{UPSTREAM%%\/\*\}"; PUSH_BRANCH="\$\{UPSTREAM#\*\/\}"/);
+    assert.match(wrapper, /git push "\$PUSH_REMOTE" "HEAD:refs\/heads\/\$PUSH_BRANCH"/);
+    assert.match(wrapper, /not a bare `git push`, and not `git push origin HEAD`/);
+    assert.doesNotMatch(
+      wrapper,
+      /push with `git push origin HEAD`/,
+      'the push target must be derived from the upstream ref, not the local branch name',
+    );
 
     const pr = readCommand('pr.md');
     assert.match(pr, /`git push origin \{current_branch\}` — an explicit refspec, never a bare `git push`/);
