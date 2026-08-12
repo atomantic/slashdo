@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const readLib = (name) => fs.readFileSync(path.join(__dirname, '..', 'lib', name), 'utf8');
+const readCommand = (name) => fs.readFileSync(path.join(__dirname, '..', 'commands', 'do', name), 'utf8');
 
 describe('review-loop parse contracts', () => {
   it('requires structured local-agent verdicts without weakening Codex handling', () => {
@@ -99,5 +100,49 @@ describe('review-loop parse contracts', () => {
       wrapper,
       /- `partial` — .*every executed pass returned a clean-equivalent status — `clean`, copilot `too-large`, or `capped`/,
     );
+  });
+
+  it('asserts each pass pushed its fixes, and skips the check without an upstream', () => {
+    // Every inner loop pushes its own fix commits as its last step and nothing
+    // downstream re-checks it, so an improvised loop body leaves the fixes local
+    // while the reviewer still reports clean and CI still passes on the stale
+    // pushed tree. The assertion must compare against the UPSTREAM ref (a clean
+    // working tree says nothing about committed-but-unpushed commits) and must
+    // no-op on a never-pushed branch, which /do:review and /do:better allow.
+    const wrapper = readLib('multi-reviewer-loop.md');
+    assert.match(wrapper, /\*\*Assert the pass's fixes reached the remote\.\*\*/);
+    assert.match(wrapper, /UNPUSHED="\$\(git log --oneline @\{u\}\.\.HEAD\)"/);
+    assert.match(wrapper, /git rev-parse --abbrev-ref --symbolic-full-name @\{u\} >\/dev\/null 2>&1/);
+    assert.match(wrapper, /`git status` is not a substitute/);
+    assert.match(wrapper, /\*\*record the pass as `push-failed`\*\*/);
+    // The union apply in parallel mode is the only writer, so it needs the same guard.
+    assert.match(wrapper, /\*\*Assert the applied fixes reached the remote\*\*/);
+  });
+
+  it('routes push-failed to inconclusive and refuses to let ~opt excuse it', () => {
+    // Same stranding failure the ~opt/capped test above guards: a status added to
+    // the dispatch step but never wired into the aggregate rules is inert. And
+    // push-failed specifically must NOT follow the optional-inconclusive exclusion
+    // — an optional reviewer's fixes sitting unpushed still mean the merged tree
+    // is not the reviewed tree.
+    const wrapper = readLib('multi-reviewer-loop.md');
+    assert.match(
+      wrapper,
+      /\*\*or any pass at all — optional included — whose status is `push-failed`\*\*/,
+      'the inconclusive rule must consume push-failed regardless of {OPTIONAL}',
+    );
+    assert.match(wrapper, /- \*\*`push-failed`\.\*\* An optional reviewer's \*findings\* are still real fixes/);
+    // Inconclusive, not a verdict: it can never satisfy a stop-mode short-circuit.
+    assert.match(wrapper, /`no-verdict`\/`skipped`\/`not-requestable`\/`push-failed`/);
+  });
+
+  it('blocks PR creation and merge on unpushed commits in do:pr', () => {
+    // Backstop for the two moments where unpushed review fixes become user-visible
+    // damage: a PR opened from the pre-review tree, and a merge that lands it.
+    const pr = readCommand('pr.md');
+    assert.match(pr, /\*\*First, assert the branch's commits reached the remote\.\*\*/);
+    assert.match(pr, /\*\*Unpushed-commits gate\*\* — \*\*refuse to merge while the local branch is ahead of its remote\.\*\*/);
+    assert.match(pr, /git log --oneline @\{u\}\.\.HEAD {3}# must be empty to merge/);
+    assert.match(pr, /Never merge on `dirty`\/`inconclusive`, never merge while the branch has unpushed commits/);
   });
 });

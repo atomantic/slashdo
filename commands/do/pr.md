@@ -141,6 +141,7 @@ This phase drives the **multi-reviewer wrapper** (defined under "Reviewer loop b
 
 ## Open the PR
 
+- **First, assert the branch's commits reached the remote.** The Local Code Review gate and every pre-PR local reviewer above commit their fixes onto this branch; if one of their push steps didn't run, `gh pr create` opens a PR containing only the pre-review commits and those findings never reach the PR at all. Confirm `git log --oneline @{u}..HEAD` is empty; if it isn't, push first (`git push`, retrying once after `git pull --rebase --autostash` on a non-fast-forward) and only then create the PR. Skip the check when the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1` fails — detached HEAD or no origin): there is nothing to compare against. Note `git status` is **not** a substitute — a clean working tree says nothing about committed-but-unpushed commits, which is exactly the state this catches.
 - Create a PR / merge request from `{current_branch}` to `{default_branch}`:
   - GitHub: `gh pr create --base {default_branch} --head {current_branch} --title "..." --body "..."`
   - GitLab: `glab mr create --source-branch {current_branch} --target-branch {default_branch} --title "..." --description "..."` (add `--yes` to skip the interactive prompt; `--remove-source-branch` if the project deletes merged branches)
@@ -192,21 +193,30 @@ Otherwise combine `LOCAL_OVERALL_STATUS` (from "Pre-PR Local Reviews", or `clean
 
 **If `MERGE_ENABLED` is not `true`, skip this section** — report the PR/MR URL plus the review summary and stop. This is the historical `/do:pr` behavior: open the PR and hand it back for manual merge.
 
-When `MERGE_ENABLED=true`, gate the merge on **both** the review result and CI:
+When `MERGE_ENABLED=true`, gate the merge on **all three** of the review result, the unpushed-commits check, and CI:
 
 1. **Review gate** — consume the review loop's `{OVERALL_STATUS}` exactly as `/do:release` does:
    - `clean` — eligible (this includes the no-reviewer path above, which set `OVERALL_STATUS=clean` on a passing Local Code Review gate, and copilot `too-large`, plus `capped` from any of the four loops — an explicitly configured cap, `~max=<n>` or `--review-iterations`, reached after applying every fix; a *built-in* cap is `guardrail`, which is inconclusive).
    - `partial` — eligible only when an explicit `--review-stop-on-findings`/`--review-stop-on-clean` flag was set (the user opted into the short-circuit).
    - `inconclusive` or `dirty` — **do NOT merge.** Leave the PR open and report the proximate status + URL so the user can intervene. A requested reviewer that never produced a verdict is not a clean review.
-2. **Resolve the merge method** into `{MERGE_METHOD}`: the explicit flag or saved `merge-method` default if set; otherwise query `gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed` and pick from the repo's allowed methods — if exactly one is allowed use it; if several are, prefer `squash`, then `merge`, then `rebase`. State the chosen method. (GitLab: omit the method flag and let `glab` use the project default.)
-3. **Merge once CI is green** — GitHub (`gh`):
+2. **Unpushed-commits gate** — **refuse to merge while the local branch is ahead of its remote.** The PR-side reviewers above commit their fixes onto this branch, as does any fix you applied after the last push; if those commits never reached `origin`, the tree that was reviewed and CI-tested is not the tree the merge would land, and merging silently drops every one of those fixes while every signal still reads green. Check it:
+
+   ```bash
+   if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+     git log --oneline @{u}..HEAD   # must be empty to merge
+   fi
+   ```
+
+   If that output is non-empty, **do not merge**: print the unpushed SHAs, leave the PR open, and report that the branch has unmerged local work to push. Skip the gate entirely when the branch has no upstream — there is nothing to compare against. This gate is independent of `{OVERALL_STATUS}`: a `clean` review whose fixes are unpushed is exactly the failure it exists to catch.
+3. **Resolve the merge method** into `{MERGE_METHOD}`: the explicit flag or saved `merge-method` default if set; otherwise query `gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed` and pick from the repo's allowed methods — if exactly one is allowed use it; if several are, prefer `squash`, then `merge`, then `rebase`. State the chosen method. (GitLab: omit the method flag and let `glab` use the project default.)
+4. **Merge once CI is green** — GitHub (`gh`):
    - First try GitHub-native auto-merge, so the merge lands when required checks pass even if this session ends: `gh pr merge {number} --auto --{MERGE_METHOD} --delete-branch`.
    - If that errors because auto-merge is not enabled on the repo (e.g. `gh` reports auto-merge is not allowed / not enabled), **fall back to watching checks in-session, then merging directly**: `gh pr checks {number} --required --watch --fail-fast` — scope the watch to **required** checks only so an optional/non-required job's failure or slowness can't block a merge that branch protection would allow; on success run `gh pr merge {number} --{MERGE_METHOD} --delete-branch`. If a required check **fails**, apply the **CI flake handling** routine (one conservative re-run on the same commit — see `~/.claude/lib/ci-flake-handling.md`): if the same SHA passes on the single re-run, treat it as a flake and proceed with the merge (logging which check flaked); if it fails again, leave the PR open and report which check failed — do not merge. (If `gh` reports no required checks exist on the branch, the required-CI gate is vacuously satisfied — merge directly.)
    - GitLab (`glab`): `glab mr merge {number} --auto-merge --yes --remove-source-branch` (merges when the pipeline succeeds). If the installed `glab` doesn't support `--auto-merge`, fall back to polling `glab ci status` until the pipeline passes, then `glab mr merge {number} --yes`.
-4. **Verify** the result: `gh pr view {number} --json state,mergedAt` (GitLab: `glab mr view {number}`). Distinguish *merged now* from *queued to auto-merge on green CI*.
-5. After a **completed** merge, switch back and sync the default branch locally: `git checkout {default_branch} && git pull --rebase --autostash`. When the merge is merely **queued** (native auto-merge, checks still running), skip the local sync — the merge hasn't happened yet — and say so.
+5. **Verify** the result: `gh pr view {number} --json state,mergedAt` (GitLab: `glab mr view {number}`). Distinguish *merged now* from *queued to auto-merge on green CI*.
+6. After a **completed** merge, switch back and sync the default branch locally: `git checkout {default_branch} && git pull --rebase --autostash`. When the merge is merely **queued** (native auto-merge, checks still running), skip the local sync — the merge hasn't happened yet — and say so.
 
-Never merge on `dirty`/`inconclusive`, never merge before required checks pass, and never override branch protection — `--auto` respects it, and the in-session fallback waits on `gh pr checks`.
+Never merge on `dirty`/`inconclusive`, never merge while the branch has unpushed commits, never merge before required checks pass, and never override branch protection — `--auto` respects it, and the in-session fallback waits on `gh pr checks`.
 
 **Report the final status** to the user including the PR/MR URL, the multi-reviewer aggregate report (per-pass status table plus overall status), and — when merge mode was enabled — whether the PR merged, is queued to auto-merge on green CI, or was left open (with why).
 
