@@ -117,18 +117,19 @@ Suppose it files issue `#123`. On GitHub, ship it immediately:
 /do:next --swarm=4                  # or ship up to 4 independent issues in parallel
 ```
 
-With the saved `--issues` default, every plan-aware command (`/do:next`, `/do:replan`, `/do:better`, `/do:depfree`, `/do:review`, `/do:rpr`) reads and files tracker issues instead of PLAN.md lines. On a shared tracker, add `--self` so your agent only ever claims issues **you** filed — see [Issue mode](#issue-mode---issues).
+With the saved `--issues` default, every plan-aware command (`/do:next`, `/do:replan`, `/do:better`, `/do:simplify`, `/do:depfree`, `/do:review`, `/do:rpr`) reads and files tracker issues instead of PLAN.md lines. On a shared tracker, add `--self` so your agent only ever claims issues **you** filed — see [Issue mode](#issue-mode---issues).
 
 ### Audit and harden
 
 ```
 /do:better --review-with claude,codex     # full DevSecOps audit → per-category PRs → review loop → merge
+/do:simplify                              # refactor-only pass: architecture, DRY, cognitive load — behavior unchanged
 /do:review --strict                       # deep code review of the current branch's changes
 /do:depfree --heavy                       # remove unnecessary dependencies by writing replacement code
 /do:scan ~/Downloads/sketchy-repo         # read-only malware/safety audit of an unfamiliar directory
 ```
 
-Note: `/do:better`, `/do:better-swift`, and `/do:depfree` only run their review loop **and auto-merge** when you pass (or have saved) `--review-with` — without it they leave their PRs open for manual review.
+Note: `/do:better`, `/do:better-swift`, `/do:simplify`, and `/do:depfree` only run their review loop **and auto-merge** when you pass (or have saved) `--review-with` — without it they leave their PRs open for manual review.
 
 ### Configure once, omit flags forever
 
@@ -157,6 +158,7 @@ All commands live under the `do:` namespace:
 | `/do:review` | Deep code review of changed files against best practices (`--strict`/`--nuclear` raise the bar) |
 | `/do:better` | Full DevSecOps audit with multi-agent scan, remediation, and per-category PRs |
 | `/do:better-swift` | SwiftUI DevSecOps audit with multi-platform coverage (iOS, macOS, watchOS, tvOS, visionOS) |
+| `/do:simplify` | Refactor-only audit — architecture, DRY, simplification, cognitive load — as per-category PRs that must not change behavior ([details](#refactor-only-dosimplify)) |
 | `/do:scan` | Read-only safety audit of an unfamiliar directory — flags malware patterns, network calls, and vulnerable deps without executing code |
 | `/do:depfree` | Audit dependencies, remove unnecessary ones, write replacement code (`--heavy` targets all non-foundational libraries) |
 | `/do:goals` | Generate GOALS.md from codebase analysis (autonomous by default; `--interactive` to review with you) |
@@ -168,9 +170,28 @@ All commands live under the `do:` namespace:
 | `/do:update` | Update slashdo to latest version |
 | `/do:help` | List all available commands |
 
+## Refactor-only (`/do:simplify`)
+
+`/do:simplify` is `/do:better --simplify-only`: the same pipeline — worktree isolation, per-category PRs, CI, review loop, merge — with the audit narrowed to **refactoring, architecture, DRY, simplification, and cognitive load**. Security, runtime bugs, performance, stack-specific gotchas, dependency removal, test authoring, and UX are out of scope for the run.
+
+Five audit agents run instead of eight-to-ten: Code Quality (readability half only), DRY & YAGNI, Architecture & SOLID (structural half only), Structural Ambition (`--strict` is implied), and a Cognitive Load & Readability agent that runs only in this mode — long functions, deep nesting, flag arguments, names that lie, action at a distance, conditional ladders a table would collapse.
+
+Four gates keep a refactor pass from inventing work. **The deletion test**: a proposed abstraction must concentrate complexity behind a smaller interface, not spread it across callers — the guard against a DRY pass merging three incidental look-alikes into one abstraction serving three masters. **Depth over size**: judge a module by how much behavior sits behind how small an interface, not by line count. **Churn bias**: findings are ranked against the files people actually edit, and a cleanup in dormant code drops a severity tier — a refactor nobody cashes in isn't worth a PR. **No re-litigating rejections**: reframings earlier runs tried and rejected are recorded in the plan and fed back in, so each run starts where the last one stopped.
+
+The contract that makes it safe to merge: **every fix must be observably behavior-preserving**, and the existing test suite must keep passing *unmodified* as the proof. A changed assertion means the refactor moved behavior — it gets reverted, not accommodated. Findings that can only be fixed by changing behavior are deferred to `PLAN.md` (or the tracker under `--issues`) instead of applied. Test enhancement is the one phase that's skipped; everything else runs as usual.
+
+```
+/do:simplify                              # audit → refactor PRs → review loop
+/do:simplify --scan-only                  # just show me what's costing me
+/do:simplify --review-with claude src/     # scope to a path, run a reviewer, auto-merge on clean
+/do:pr-better --simplify-only             # fold a refactor pass into the feature PR you're building
+```
+
+Every `/do:better` flag works here — `--interactive`, `--scan-only`, `--no-merge`, `--issues`, and the whole [review loop](#review-loop) set.
+
 ## Review loop
 
-`/do:pr`, `/do:release`, `/do:pr-better`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:depfree`, and `/do:rpr` share one review system: you pick the reviewer(s) with `--review-with`, and a set of companion flags controls how the loop runs. **No reviewer is ever hardcoded** — omit the flag and no external review runs (each command still runs its own unconditional self-review gate). The one exception is `/do:rpr`, whose conditional default is [documented below](#command-specific-behavior).
+`/do:pr`, `/do:release`, `/do:pr-better`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:simplify`, `/do:depfree`, and `/do:rpr` share one review system: you pick the reviewer(s) with `--review-with`, and a set of companion flags controls how the loop runs. **No reviewer is ever hardcoded** — omit the flag and no external review runs (each command still runs its own unconditional self-review gate). The one exception is `/do:rpr`, whose conditional default is [documented below](#command-specific-behavior).
 
 ### Reviewers
 
@@ -225,7 +246,7 @@ By default the orchestrator that opened the PR applies every reviewer's fixes it
 ### Command-specific behavior
 
 - **`/do:review`** — the listed agents run *after* the host CLI's own multi-agent self-review; the list names *additional* reviewers.
-- **`/do:better` / `/do:better-swift` / `/do:depfree`** — the chosen reviewers run as the post-PR review loop (per PR, in parallel for the multi-PR better commands). **Omitting `--review-with` skips the review loop and the auto-merge** — PRs are left open for manual review.
+- **`/do:better` / `/do:better-swift` / `/do:simplify` / `/do:depfree`** — the chosen reviewers run as the post-PR review loop (per PR, in parallel for the multi-PR better commands). **Omitting `--review-with` skips the review loop and the auto-merge** — PRs are left open for manual review.
 - **`/do:rpr`** — resolves review threads from any author (Copilot, human, or bot). Its `--review-with` default is a *conditional* `copilot`: it requests a Copilot review only when the PR has no review yet, or when Copilot is already the reviewer in play. It accepts only `--review-with` and `--reviewer-applies` (not `--review-iterations`, `--review-mode`, or the stop-mode flags), and it doesn't support `@<login>` entries — it drops them with a notice and falls back to its conditional copilot default.
 
 ## Auto-merge (`/do:pr --merge`)
@@ -248,11 +269,11 @@ By default `/do:pr` opens the PR and hands it back for manual merge. Pass `--mer
 
 **How CI is awaited:** slashdo first enables GitHub-native auto-merge (`gh pr merge --auto`), so the merge lands when required checks pass even if your session ends. If the repo hasn't enabled auto-merge, it falls back to watching checks in-session (`gh pr checks --watch`) and merging once green — leaving the PR open if a required check fails. On GitLab it uses `glab mr merge --auto-merge`. It never merges on a non-clean review aggregate, before checks pass, or over branch protection.
 
-Save the behavior once with `/do:config --merge` (see [Configuration](#configuration-doconfig)). Only `/do:pr` reads the saved `merge`/`merge-method` defaults — `/do:better`, `/do:better-swift`, `/do:depfree`, and `/do:release` keep their own documented merge behavior.
+Save the behavior once with `/do:config --merge` (see [Configuration](#configuration-doconfig)). Only `/do:pr` reads the saved `merge`/`merge-method` defaults — `/do:better`, `/do:better-swift`, `/do:simplify`, `/do:depfree`, and `/do:release` keep their own documented merge behavior.
 
 ## Issue mode (`--issues`)
 
-By default the plan lives in `PLAN.md`. Pass `--issues` (or save it — `/do:config --issues`) to track it in your GitHub/GitLab issue tracker instead. **Every command that records plan items understands it**: `/do:replan` triages issues; `/do:next` claims them; `/do:better`, `/do:better-swift`, and `/do:depfree` file deferred findings as labeled issues; `/do:review` and `/do:rpr` file deferred findings as issues instead of PLAN.md lines. `--no-issues` on a single run overrides a saved default.
+By default the plan lives in `PLAN.md`. Pass `--issues` (or save it — `/do:config --issues`) to track it in your GitHub/GitLab issue tracker instead. **Every command that records plan items understands it**: `/do:replan` triages issues; `/do:next` claims them; `/do:better`, `/do:better-swift`, `/do:simplify`, and `/do:depfree` file deferred findings as labeled issues; `/do:review` and `/do:rpr` file deferred findings as issues instead of PLAN.md lines. `--no-issues` on a single run overrides a saved default.
 
 ```
 /do:replan --issues                       # triage the tracker instead of PLAN.md

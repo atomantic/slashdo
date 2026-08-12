@@ -20,7 +20,7 @@ Split `$ARGUMENTS` into groups before forwarding — every `do:pr` review flag m
 - **`--reviewer-applies`** is also a `do:pr` flag, NOT a `do:better` flag. Extract it from `$ARGUMENTS`, record as `REVIEWER_APPLIES_ARG` (the literal token `--reviewer-applies`, or empty string if not supplied), and remove it from the string passed to `do:better`.
 - **`--review-iterations <n>`** is a `do:pr` flag, NOT a `do:better` flag. Extract it from `$ARGUMENTS`, record the value as `REVIEW_ITERATIONS_ARG` (the full `--review-iterations <value>` token pair preserved verbatim, or empty string if not supplied), and remove it from the string passed to `do:better`. Leave validation to `do:pr` — forward the token as-is so `do:pr` surfaces the canonical `--review-iterations must be a non-negative integer` error.
 - **`--review-mode <series|parallel>`** is a `do:pr` flag, NOT a `do:better` flag. Extract it from `$ARGUMENTS`, record the value as `REVIEW_MODE_ARG` (the full `--review-mode <value>` token pair preserved verbatim, or empty string if not supplied), and remove it from the string passed to `do:better`. Leave validation to `do:pr` — forward the token as-is so `do:pr` surfaces the canonical `--review-mode must be one of series, parallel` error.
-- All remaining flags (`--interactive`, path filter, focus areas) pass through to `do:better` verbatim.
+- All remaining flags (`--interactive`, `--simplify-only`, `--strict`, path filter, focus areas) pass through to `do:better` verbatim. `--simplify-only` narrows the audit to refactoring, architecture, DRY, simplification, and cognitive load, and holds every fix to `do:better`'s behavior-preservation contract — the resulting PR is a pure refactor of the branch.
 
 Constraints applied automatically:
 - **`--scan-only` is incompatible** — if the user passes it, refuse and explain that pr-better must remediate
@@ -37,7 +37,7 @@ Constraints applied automatically:
 Execute the full `do:better` workflow defined in `~/.claude/commands/do/better.md` with these mandatory deviations:
 
 ### Phase 0 → 4a: unchanged
-Run discovery, audit (all 8 core agents, plus the UX Consistency & Responsive Layout agent when the project ships a UI — `HAS_UI=true` — and the Structural Ambition agent when `--strict`/`--nuclear` is passed), plan generation, worktree setup, foundation utilities, parallel remediation, build/test verification, and internal code review exactly as specified in `do:better`.
+Run discovery, audit (all 8 core agents, plus the UX Consistency & Responsive Layout agent when the project ships a UI — `HAS_UI=true` — and the Structural Ambition agent when `--strict`/`--nuclear` is passed; under `--simplify-only`, the narrowed five-agent roster instead), plan generation, worktree setup, foundation utilities, parallel remediation, build/test verification, and internal code review exactly as specified in `do:better`.
 
 ### Phase 4b: Force the "Commit directly" path
 
@@ -63,7 +63,7 @@ When you reach Phase 4b's decision point, **do not present the AskUserQuestion**
 
 ### Phase 4c: Test Enhancement
 
-Run Phase 4c (test enhancement) **before** the merge-back if the worktree is still active, so the new/fixed tests ship in the same merge. The Phase 4c.3 `FILE_OWNER_MAP` update is unnecessary in pr-better (we're not building per-category branches), so skip that step.
+Run Phase 4c (test enhancement) **before** the merge-back if the worktree is still active, so the new/fixed tests ship in the same merge. The Phase 4c.3 `FILE_OWNER_MAP` update is unnecessary in pr-better (we're not building per-category branches), so skip that step. Under `--simplify-only`, Phase 4c is skipped entirely per `do:better` — there are no test findings to act on.
 
 ### Phases 5, 6, 7: SKIP entirely
 

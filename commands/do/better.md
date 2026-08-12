@@ -1,11 +1,11 @@
 ---
 description: Unified DevSecOps audit, remediation, test enhancement, per-category PRs, CI verification, and an optional multi-reviewer review loop with worktree isolation
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--strict|--nuclear] [--issues|--no-issues] [--issues-label <name>] [path filter or focus areas]"
+argument-hint: "[--interactive] [--scan-only] [--simplify-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--strict|--nuclear] [--issues|--no-issues] [--issues-label <name>] [path filter or focus areas]"
 ---
 
 # Better — Unified DevSecOps Pipeline
 
-Run the full DevSecOps lifecycle: audit the codebase with up to 10 deduplicated agents (8 core, plus a UX Consistency & Responsive Layout agent for UI-bearing projects and a Structural Ambition agent in strict mode), consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run the requested review loop(s), and merge.
+Run the full DevSecOps lifecycle: audit the codebase with up to 10 deduplicated agents (8 core, plus a UX Consistency & Responsive Layout agent for UI-bearing projects and a Structural Ambition agent in strict mode — or a narrowed five-agent roster under `--simplify-only`), consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run the requested review loop(s), and merge.
 
 **Default mode: fully autonomous.** Uses Balanced model profile, proceeds through all phases without prompting. **There is no default reviewer**: if `--review-with` is omitted, no external review runs and PRs are left open for manual review (no auto-merge). Pass `--review-with <agent>` to run a review loop and auto-merge PRs with clean reviews.
 
@@ -14,6 +14,7 @@ Run the full DevSecOps lifecycle: audit the codebase with up to 10 deduplicated 
 Parse `$ARGUMENTS` for:
 - **`--interactive`**: pause at each decision point for user approval
 - **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation
+- **`--simplify-only`** (alias: **`--refactor-only`**): narrow the run to structural quality — refactoring, architecture, DRY, simplification, and cognitive load. Set `SIMPLIFY_ONLY=true`. The pipeline is unchanged (worktree remediation → per-category PRs → CI → review loop → merge); only the audit roster, the category set, and the remediation contract narrow. See [Simplify-Only Mode](#simplify-only-mode---simplify-only) for the exact deltas. `/do:simplify` is the shorthand for `/do:better --simplify-only`
 - **`--no-merge`**: run through PR creation (Phase 5), skip the review loop and merge
 - **`--review-with <agent[,agent,...]>`**: which reviewer(s) run the Phase 6 review loop on each PR. Accepted slugs: `copilot`, `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `grok`, `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`; `codex`/`claude`/`agy`/`grok` likewise accept a `<agent>[<model>]` bracket — e.g. `codex[o3]`, `claude[claude-opus-4-8]`, `grok[grok-code-fast-1]` — stripped into a per-entry `REVIEW_MODEL`, empty → the reviewer's built-in default; `copilot` and `@<login>` take no model bracket), or an arbitrary GitHub login `@<login>` — any GitHub user or App/bot (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`); slashdo requests its review on the PR and waits for it (GitHub only, never posts an approval itself) (comma-separated, ordered list; split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, dedupe preserving first-occurrence order, with each model-taking agent's (`codex`/`claude`/`agy`/`grok`/`ollama`) `[<model>]` bracket suffix part of the dedup identity). Record as `REVIEW_AGENTS`. **There is no built-in default** — if omitted, leave `REVIEW_AGENTS` **unset for now**; the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (Phase 6 skipped, PRs left open without merging — see Phase 6). `copilot` is never added implicitly. Any slot may end in `~opt` (e.g. `ollama~opt`, `ollama[qwen2.5-coder:32b]~opt`) to mark that reviewer **optional/non-blocking** — still requested and its findings still fixed, but an inconclusive result from it (timeout/skipped/incomplete/no-verdict) never blocks the PR merge (a hard-error from it still does); strip `~opt` into a per-entry `{OPTIONAL}` flag before slug parsing, and it is **not** part of the dedup identity (`ollama~opt` == `ollama`, optional-wins on collapse). A slot may also end in `~max=<n>` (e.g. `claude~max=2`, `ollama~max=1`) to cap how many review → fix → re-review cycles **that one reviewer** runs — the per-entry form of `--review-iterations`, and the only way to move the local-agent / `ollama` caps (otherwise fixed at 3), so one run can budget each reviewer separately (`claude~max=2,ollama~max=1,codex~max=3`). `<n>` is a non-negative integer (`0` = loop until clean, bounded by each loop's 10-iteration guardrail); strip it into a per-entry `{ENTRY_MAX}` alongside `~opt` — both suffixes come off the right of the token in either order before slug parsing, and neither is part of the dedup identity (the cap comes from the first occurrence that carried a `~max`, so a bare earlier occurrence does not erase a later cap). A reviewer that stops because it reached a `~max` you set returns `capped`, which is clean-equivalent for the merge gate. See `lib/multi-reviewer-loop.md`. Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: copilot, codex, agy, claude, grok, ollama, @<login> (each optionally suffixed ~opt and/or ~max=<n>).` The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no reviewer (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default.
 - **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to the multi-reviewer loop for each PR; control when a per-PR reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
@@ -25,7 +26,7 @@ After parsing the review flags above, apply any **saved defaults** (set via `/do
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
-- **`--strict`** (alias: **`--nuclear`**): enable the Structural Ambition agent (10th audit agent) and promote its blocker-tier findings to CRITICAL severity for remediation. Flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications. Set `STRICT_MODE=true` when present
+- **`--strict`** (alias: **`--nuclear`**): enable the Structural Ambition agent (10th audit agent) and promote its blocker-tier findings to CRITICAL severity for remediation. Flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications. Set `STRICT_MODE=true` when present. `--simplify-only` implies it — set `STRICT_MODE=true` whenever `SIMPLIFY_ONLY=true`, whether or not `--strict` was passed
 - **`--issues`** / **`--no-issues`** / **`--issues-label <name>`**: track deferred findings as GitHub/GitLab issues instead of PLAN.md lines (see Phase 2). `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`. If the user passes **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`.
 - **Path filter**: limit scanning scope to specific directories or files
 - **Focus areas**: e.g., "security only", "DRY and bugs"
@@ -72,6 +73,72 @@ When the resolved model is `opus`, **omit** the `model` parameter on the Agent/T
 
 Opus reduces false positives in audit (judgment-heavy). Sonnet is the floor for code-writing agents (remediation). Haiku works for fast first-pass pattern scanning but may produce more false positives — remediation agents (Sonnet+) validate before fixing.
 
+## Simplify-Only Mode (`--simplify-only`)
+
+When `SIMPLIFY_ONLY=true`, the pipeline runs end to end exactly as documented (discovery → audit → plan → worktree remediation → verification → per-category PRs → CI → review loop → merge). What narrows is *what the run looks for and touches*: *refactoring, architecture, DRY, simplification, and cognitive load*, and nothing else. Security, runtime bugs, performance, stack-specific gotchas, dependency removal, test authoring, and UX are **out of scope for this run** — findings in those areas are not audited, not remediated, and not filed.
+
+### Audit roster (Phase 1)
+
+Exactly five agents run, all dispatched in **one parallel batch** — the Batch 1 → Batch 2 ordering exists only to feed Batch 1's findings to the Test Quality agent, which does not run here.
+
+| # | Agent | In this mode |
+|---|-------|--------------|
+| 2 | Code Quality & Style | Runs, narrowed to its structural focus — the split is marked at the agent |
+| 3 | DRY & YAGNI | Runs unchanged; its whole remit is in scope |
+| 4 | Architecture & SOLID | Runs, narrowed to its structural focus — the split is marked at the agent |
+| 10 | Structural Ambition | Always on (`--simplify-only` implies `--strict`), blocker-tier findings promoted to CRITICAL as usual |
+| 11 | Cognitive Load & Readability | Runs only in this mode |
+
+Agents **1** (Security & Secrets), **5** (Bugs, Performance & Error Handling), **6** (Stack-Specific), **7** (Dependency Freedom), **8** (Test Quality & Coverage), and **9** (UX Consistency & Responsive Layout) do **not** run. Phase 0b still records `HAS_UI` (it costs nothing and stays in the state snapshot), but it no longer gates anything in this mode.
+
+Agents 10 and 11 overlap by design — structural reframings and reader-cost reductions often land on the same code. Phase 2's dedup resolves it: when both flag the same `file:line`, keep the **structural** finding (the larger reframing subsumes the local cleanup) and drop the cognitive-load duplicate.
+
+### Finding gates
+
+A refactor-only run has no bug to point at, so its findings are only as good as its filters.
+
+Gates **1, 2, and 4** are filters and go in every audit agent's instructions; because they're idempotent, Phase 2 re-applies them during consolidation as a backstop. Gate **3 is a mutation, so it is applied exactly once, by Phase 2 alone** — audit agents report their raw assessed severity and the file and do not adjust for churn themselves. Applying it at both layers would drop a cold-file finding two tiers, silently stranding HIGH findings below the remediation cut.
+
+**1. The deletion test (any finding that proposes a new module, helper, layer, or abstraction).** Ask: *would this concentrate complexity behind a smaller interface, or just spread it across callers?* Only the first qualifies. An extraction that leaves every call site passing the same arguments through one more hop, or that forces callers to learn a new vocabulary to do what they already did inline, fails the test — **drop the finding**. This is the guard against the classic failure mode of a DRY pass: deduplicating three incidental look-alikes into an abstraction that now has to serve three masters.
+
+**2. Depth, not just size.** A deep module puts a lot of behavior behind a small, stable interface; a shallow one leaks its implementation, so its interface costs about as much to learn as the body costs to read. Judge a module by that ratio, not by line count alone — a 400-line module behind three obvious functions is fine, and a 40-line one requiring six parameters and knowledge of call ordering is not. Prefer findings that make an interface smaller over findings that only make a file shorter.
+
+**3. Churn bias — refactor what people actually touch** _(Phase 2 only)_. A simplification in code nobody edits is a payoff that never gets cashed. Rank findings against `HOT_FILES` (Phase 0e): a finding in a hot file keeps its assessed severity, and a finding in a file with no commits in the churn window drops **one tier** (which pushes marginal ones to LOW, i.e. tracked but not auto-remediated). Never promote on churn alone — a hot file does not make a weak finding strong. Exception: a finding that spans many files (a canonical-helper duplication, a boundary leak) is ranked by its hottest file.
+
+**4. Don't re-litigate settled rejections.** Before filing, check `PRIOR_REJECTIONS` (Phase 0e) and do not re-propose a reframing that has already been tried and rejected.
+
+**This is the only place the recording rule is written** — Phases 2, 3c, and 4b point here rather than restating it. When any phase rejects a reframing (infeasible after investigation, or reverted in 4b for changing behavior), record it so the next run inherits the decision:
+- **Default**: append to the `### Rejected reframings` subsection of the run's PLAN.md audit section — `- ~~{description}~~ — rejected {YYYY-MM-DD}: {one-line reason}`
+- **Under `--issues`** (where PLAN.md is not written at all): file an issue titled with the reframing, labeled `{PLAN_LABEL}` **and `rejected-reframing`**, then immediately close it with the reason as a closing comment. File-then-close is required because a rejection can arise in Phase 3c or 4b from a finding that was remediated rather than deferred, so there is no existing issue to close. The extra label is what keeps Phase 0e's read bounded — without it a rejection is indistinguishable from a completed item.
+
+Findings also inherit the standard evidence bar from the Structural Ambition agent: quoted code, and a named concrete transformation. "This could be cleaner" without a named transformation is not a finding.
+
+### Behavior preservation (hard constraint)
+
+Every fix in this mode must be **observably behavior-preserving**. Give each remediation agent this rule verbatim on top of the standard template:
+
+> This is a refactor-only run. Your changes must not alter observable behavior: same return values, same side effects, same error types and messages, same public API shape. Do not fix bugs you notice, do not add features, do not change validation, do not "improve" an output format — if you find a real bug, leave the code alone and report it as a deferred finding instead. Public exports you move must keep a backward-compatible re-export at the original path.
+>
+> The existing test suite is the safety net, so it must keep passing **unmodified**. Mechanical updates are allowed (an import path, a renamed symbol, a moved fixture); anything beyond that — changing an assertion, relaxing an expectation, deleting a case — means your refactor changed behavior. Revert it rather than editing the test to match.
+
+A finding whose only available fix would change behavior is **deferred**, not remediated: it goes to PLAN.md (or a tracker issue under `--issues`) per the normal disposition rules, with a one-line note that it was out of scope for a simplify-only run.
+
+### The category set
+
+`SIMPLIFY_CATEGORIES` is the in-scope set for the whole run, in Phase 2's short-label → slug form:
+
+| Short label | Full category | Slug |
+|---|---|---|
+| Code Quality | Code Quality & Style | `code-quality` |
+| DRY & YAGNI | DRY & YAGNI | `dry` |
+| Architecture | Architecture & SOLID | `architecture` |
+| Structural | Structural Ambition | `structural` |
+| Cognitive Load | Cognitive Load & Readability | `cognitive-load` |
+
+Every phase that enumerates categories — Phase 2's plan sections and summary table, Phase 3c's worker spawn, Phase 5's branch slugs, Phase 7's summary rows — is restricted to this set and refers to it by name. **This table is the only place the set is written down**; change it here, not at the individual phases.
+
+Every remaining deviation is written at the phase it applies to, the same way `HAS_UI` and `STRICT_MODE` are — Phase 0e computes this mode's inputs, and Phases 2, 3c, 4, 4b, 4c, 5, and 7 each carry their own `When SIMPLIFY_ONLY=true` clause. `--simplify-only` composes with every other flag: `--scan-only` stops after the narrowed plan, `--interactive` still prompts at each gate, `--issues` still files deferred findings as issues, and the review flags drive Phase 6 as usual.
+
 ## Compaction Guidance
 
 When compacting during this workflow, always preserve:
@@ -82,6 +149,8 @@ When compacting during this workflow, always preserve:
 - `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR`, `REPO_DIR` values
 - `VCS_HOST`, `CLI_TOOL`, `GH_HOST`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
 - `STRICT_MODE` (true/false — determines whether the Structural Ambition agent runs and whether structural findings are promoted to CRITICAL)
+- `SIMPLIFY_ONLY` (true/false — determines the narrowed audit roster, the five-category set, the behavior-preservation contract, and the Phase 4c skip)
+- `HOT_FILES` and `PRIOR_REJECTIONS` when `SIMPLIFY_ONLY=true` (the churn ranking and do-not-re-propose list — both feed the finding gates and are expensive to re-derive)
 - `HAS_UI` (true/false — determines whether the UX Consistency & Responsive Layout agent runs and whether the `ux` category exists downstream)
 - `PHASE_4C_START_SHA` (needed for FILE_OWNER_MAP update in Phase 4c.3)
 - `VACUOUS_TESTS_FIXED`, `WEAK_TESTS_STRENGTHENED`, `NEW_TEST_CASES`, `NEW_TEST_FILES`
@@ -136,6 +205,24 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 - Check for `.changelog/` directory → `HAS_CHANGELOG`
 - Check for existing `../better-*` worktrees: `git worktree list`. If found, inform the user and ask whether to resume (use existing worktree) or clean up (remove it and start fresh)
 
+### 0e: Simplify-Only Inputs _(only when `SIMPLIFY_ONLY=true`)_
+
+Three cheap reads: two gate inputs plus the project's vocabulary. Skip this step entirely in a normal run.
+
+1. **`HOT_FILES`** (gate 3) — the files worth refactoring, because they're the ones people edit:
+   ```bash
+   git -C {REPO_DIR} log --since="6 months ago" --format= --name-only \
+     | grep -Fxf <(git -C {REPO_DIR} ls-files) \
+     | sort | uniq -c | sort -rn | head -40
+   ```
+   The `ls-files` filter drops paths that no longer exist, so deleted files can't crowd out live ones. Record the paths with their commit counts. If the repo is younger than the window or the list comes back near-empty, re-run **the same pipeline** with `--since` dropped rather than treating every file as cold — a young repo has no dormant code to deprioritize. Never run a bare `git log --name-only` without the `sort | uniq -c | head` aggregation: on a mid-size repo that is tens of thousands of lines straight into context.
+2. **`PRIOR_REJECTIONS`** (gate 4) — reframings earlier runs tried and rejected, as a do-not-re-propose list for the audit agents. Default: the `### Rejected reframings` subsections of PLAN.md. Under `--issues`: issues carrying **both** `{PLAN_LABEL}` and `rejected-reframing`, which is what makes this a bounded read rather than a scan of every closed plan issue —
+   ```bash
+   {CLI_TOOL} issue list --state closed --label "{PLAN_LABEL}" --label rejected-reframing \
+     --limit 200 --json number,title,body
+   ```
+3. **`DOMAIN_DOCS`** — whichever of `CONTEXT.md`, `GOALS.md`, `docs/adr/`, and `docs/decisions/` exist (read the index or the most recent handful of ADRs, not the whole directory). **Distill them here, once**, into a short glossary of domain terms plus a list of reframings the ADRs already ruled out, and pass *that* to the audit agents — not the documents. Fanning 20–50 KB of docs out to five agents buys nothing the glossary doesn't. Its purpose is that proposed modules, seams, and names use the project's own vocabulary instead of invented ones.
+
 
 <audit_instructions>
 
@@ -143,7 +230,11 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 
 Project conventions are already in your context. Pass relevant conventions to each agent.
 
-Launch the Explore agents in two batches (8 core agents; agent 9 runs only when `HAS_UI=true`, agent 10 only when `STRICT_MODE=true`). Each agent must report findings in this format:
+Launch the Explore agents in two batches (8 core agents; agent 9 runs only when `HAS_UI=true`, agent 10 only when `STRICT_MODE=true`).
+
+**When `SIMPLIFY_ONLY=true`, ignore the batching below** and dispatch exactly agents **2, 3, 4, 10, and 11** in a single parallel batch, with the narrowed per-agent scopes from [Simplify-Only Mode](#simplify-only-mode---simplify-only). Agents 1, 5, 6, 7, 8, and 9 do not run. Give every one of the five [gates 1, 2, and 4](#finding-gates) verbatim (gate 3 is Phase 2's, not theirs), plus the two Phase 0e inputs they consume: `PRIOR_REJECTIONS` (the do-not-re-propose list) and the distilled `DOMAIN_DOCS` glossary — the glossary, not the documents. Agent 11 also gets `HOT_FILES` as a where-to-look-first list; that is a search priority, not a severity input.
+
+Each agent must report findings in this format:
 ```
 - **[CRITICAL/HIGH/MEDIUM/LOW]** `file:line` - Description. Suggested fix: ... Complexity: Simple/Medium/Complex
 ```
@@ -179,7 +270,8 @@ Skip step 4 if steps 1-3 reveal the code is correct.
 
 2. **Code Quality & Style**
    Sources: code brittleness, convention violations, test workarounds, logging & observability
-   Focus: magic numbers, brittle conditionals, hardcoded execution paths, test-specific hacks, narrow implementations that pass specific cases but lack generality, dead/unreachable code, unused imports/variables, violations of CLAUDE.md conventions (try/catch usage, window.alert/confirm, class-based code where functional preferred), anti-patterns specific to the detected tech stack, inconsistent or missing structured logging (raw `console.log`/`print` in production code instead of a logger), missing log levels or correlation IDs, swallowed errors (empty catch blocks, `.catch(() => {})`, bare `except: pass`), missing request/response logging at API boundaries
+   Structural focus: magic numbers, brittle conditionals, hardcoded execution paths, test-specific hacks, narrow implementations that pass specific cases but lack generality, dead/unreachable code, unused imports/variables, violations of CLAUDE.md conventions (try/catch usage, window.alert/confirm, class-based code where functional preferred), anti-patterns specific to the detected tech stack
+   Runtime focus _(skip when `SIMPLIFY_ONLY=true` — these are behavior, owned by agent 5, which is not running)_: inconsistent or missing structured logging (raw `console.log`/`print` in production code instead of a logger), missing log levels or correlation IDs, swallowed errors (empty catch blocks, `.catch(() => {})`, bare `except: pass`), missing request/response logging at API boundaries
 
 3. **DRY & YAGNI**
    Sources: duplication patterns, speculative abstractions
@@ -187,8 +279,8 @@ Skip step 4 if steps 1-3 reveal the code is correct.
 
 4. **Architecture & SOLID**
    Sources: structural violations, coupling analysis, modularity, API contract quality
-   Focus: Single Responsibility violations (god files >500 lines, functions >50 lines doing multiple things), tight coupling between modules, circular dependencies, mixed concerns in single files, dependency inversion violations, classes/modules with too many responsibilities (>20 public methods), deep nesting (>4 levels), long parameter lists, modules reaching into other modules' internals, inconsistent API error response shapes across endpoints, list endpoints missing pagination, missing rate limiting on public endpoints, inconsistent request/response envelope patterns
-   API contract consistency: breaking response shape changes without versioning, inconsistent error envelopes across endpoints, missing deprecation headers on sunset endpoints
+   Structural focus: Single Responsibility violations (god files >500 lines, functions >50 lines doing multiple things), tight coupling between modules, circular dependencies, mixed concerns in single files, dependency inversion violations, classes/modules with too many responsibilities (>20 public methods), deep nesting (>4 levels), long parameter lists, modules reaching into other modules' internals
+   API contract focus _(skip when `SIMPLIFY_ONLY=true` — these are behavior, not structure)_: inconsistent API error response shapes across endpoints, list endpoints missing pagination, missing rate limiting on public endpoints, inconsistent request/response envelope patterns, breaking response shape changes without versioning, missing deprecation headers on sunset endpoints
 
 5. **Bugs, Performance & Error Handling**
    Sources: runtime safety, resource management, async correctness, performance, race conditions
@@ -282,6 +374,19 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    Focus: missed code-judo simplifications (reframings that delete whole branches/modes/helpers), file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers / identity abstractions, boundary leaks (feature logic in shared modules), bespoke duplicates of canonical helpers, cast-heavy / `any`-heavy / optional-soup contracts, sequential orchestration where the parallel/atomic shape is obviously cleaner.
    Report findings using the standard severity format. The skill file's presumptive blockers (file pushed past 1000 lines, spaghetti growth in existing code, thin wrappers, boundary leaks, canonical-helper duplication) must be marked `[CRITICAL]` so Phase 2 picks them up for remediation. Every finding must name a concrete suggested reframing — drop findings that only say "could be cleaner" without a path. Tag this agent's category as `structural` for Phase 2 ownership mapping.
 
+11. **Cognitive Load & Readability** _(simplify-only mode — dispatch only when `SIMPLIFY_ONLY=true`, otherwise skip)_
+   Sources: `HOT_FILES` from Phase 0e (start here — these are the files whose reader-cost is paid most often; it tells you where to look, not how severe a finding is), the largest files, and the entry points a newcomer would read first (main/index modules, primary route or command handlers)
+   Focus: **how much a reader must hold in their head to change one line safely**. Where the Structural Ambition agent asks "can this whole shape be deleted or reframed?", this agent asks "can the next person understand this without a guide?"
+   - Mixed abstraction levels inside one function — high-level orchestration interleaved with raw SQL, byte manipulation, or DOM detail
+   - Flag arguments: boolean or enum parameters that make one function do two unrelated jobs
+   - Names that lie or say nothing (`data`, `tmp2`, `handle`, `doStuff`), abbreviations that need tribal knowledge, negated booleans (`notDisabled`, `hideNothing`) that force double-negative reasoning
+   - Comments that exist to explain code a rename or extraction would make self-evident; commented-out code left as documentation
+   - Action at a distance: module-level mutable state, implicit ordering requirements between calls ("must call `init()` first"), side effects hidden behind names that read as pure
+   - Repeated `if`/`else if` ladders or `switch` chains that a lookup table, dispatch map, or early return would collapse
+   - Defensive `?.` / `|| fallback` soup that obscures which values are actually possible, and casts that paper over an unclear contract
+   **Size and shape thresholds belong to agent 4**, which is also running — god files, over-long functions, nesting depth, and long parameter lists are its findings, not yours. Do not re-flag them here; report only the reader-cost issues above, which agent 4 does not look for.
+   Every finding must name the concrete transformation (extract, invert, rename, table-ize, early-return) **and** the reader-cost it removes. Do NOT flag cosmetic preference — formatting, quote style, import order, and line length belong to the formatter/linter, not here. Do NOT propose a rename of a public export without a backward-compatible re-export. Tag this agent's category as `cognitive-load` for Phase 2 ownership mapping.
+
 Wait for ALL agents to complete before proceeding.
 
 </audit_instructions>
@@ -345,7 +450,10 @@ For each file touched by multiple categories, document why it was assigned to on
 ### Test Quality & Coverage
 ### UX Consistency & Responsive Layout  _(only when HAS_UI=true)_
 ### Structural Ambition  _(only when STRICT_MODE=true)_
+### Cognitive Load & Readability  _(only when SIMPLIFY_ONLY=true)_
 ```
+
+When `SIMPLIFY_ONLY=true`, emit only the [`SIMPLIFY_CATEGORIES`](#the-category-set) sections and drop the rest. Apply [gate 3](#finding-gates) here — this is the one place churn adjusts severity — and record any rejection per [gate 4](#finding-gates), which in PLAN.md mode means opening a `### Rejected reframings` subsection for Phases 3c and 4b to append to.
 
 **Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct findings via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case derived from the title text, ≤50 chars, unique against every `[slug]` already in PLAN.md. Recommended pattern for audit findings: `<category-prefix>-<file-basename>-<short-hint>` (e.g. `[sec-routes-pr-validation]`, `[dry-cli-output-dedup]`). _(Issue mode skips slugs entirely — the issue number is the ID.)_
 
@@ -362,6 +470,7 @@ For each file touched by multiple categories, document why it was assigned to on
    - Tests → Test Quality & Coverage → `tests`
    - UX → UX Consistency & Responsive Layout → `ux` _(UI projects only)_
    - Structural → Structural Ambition → `structural` _(strict mode only)_
+   - Cognitive Load → Cognitive Load & Readability → `cognitive-load` _(simplify-only mode)_
 
 ```
 | Category          | CRITICAL | HIGH | MEDIUM | LOW | Total |
@@ -376,10 +485,11 @@ For each file touched by multiple categories, document why it was assigned to on
 | Tests             | ...      | ...  | ...    | ... | ...   |
 | UX                | ...      | ...  | ...    | ... | ...   |
 | Structural        | ...      | ...  | ...    | ... | ...   |
+| Cognitive Load    | ...      | ...  | ...    | ... | ...   |
 | TOTAL             | ...      | ...  | ...    | ... | ...   |
 ```
 
-Omit the **UX** row when `HAS_UI=false` and the **Structural** row when `STRICT_MODE=false`.
+Omit the **UX** row when `HAS_UI=false`, the **Structural** row when `STRICT_MODE=false`, and the **Cognitive Load** row when `SIMPLIFY_ONLY=false`. When `SIMPLIFY_ONLY=true`, keep only the [`SIMPLIFY_CATEGORIES`](#the-category-set) rows.
 
 **GATE: If `--scan-only` was passed, STOP HERE.** Print the summary and exit.
 
@@ -432,7 +542,10 @@ Remediation runs in parallel, one worker per category that has CRITICAL, HIGH, o
 - Stack-Specific
 - Dependency Freedom
 - UX Consistency & Responsive Layout _(UI projects only)_ — remediation must be conservative and verifiable: fix layout, markup, and CSS mechanics without redesigning. Above-the-fold fixes come first (reserve dimensions, fix LCP loading, unblock first paint). When consolidating one-off values to design tokens or shared components, change call sites mechanically and preserve rendered output — never change copy or visual design intent. If a finding requires a design decision (e.g., which of two button styles is canonical), pick the variant with the most call sites and note the choice in the commit message
-- Structural Ambition _(strict mode only)_ — remediation worker must apply the specific reframing named in each finding (extract module, collapse condition chain, delete wrapper, move logic to canonical layer). Do NOT settle for "cleaner version of the same idea" — if the finding says "delete this branch by reframing X as Y," the fix must actually delete the branch. If a reframing turns out to be infeasible after investigation, leave the finding as-is and document why in the commit message rather than substituting a cosmetic change
+- Structural Ambition _(strict mode only)_ — remediation worker must apply the specific reframing named in each finding (extract module, collapse condition chain, delete wrapper, move logic to canonical layer). Do NOT settle for "cleaner version of the same idea" — if the finding says "delete this branch by reframing X as Y," the fix must actually delete the branch. If a reframing turns out to be infeasible after investigation, leave the finding as-is and document why in the commit message rather than substituting a cosmetic change — and when `SIMPLIFY_ONLY=true`, also record the rejection per [gate 4](#finding-gates) so the next run doesn't re-propose it
+- Cognitive Load & Readability _(simplify-only mode)_ — remediation worker applies the named transformation (extract, invert, rename, table-ize, early-return, split file) and nothing else. A rename must be applied at every call site in the same commit; an extraction must leave a backward-compatible re-export at the original path
+
+**When `SIMPLIFY_ONLY=true`**, only `code-quality`, `dry`, `architecture`, `structural`, and `cognitive-load` have findings, so only those workers spawn — and every worker also gets the behavior-preservation rule verbatim from [Simplify-Only Mode](#simplify-only-mode---simplify-only) appended to its instructions.
 
 <!-- if:teams -->
 1. Use `TeamCreate` with name `better-{DATE}`.
@@ -475,6 +588,7 @@ After all agents complete:
    - Identify which commits caused the failure via `git bisect` or manual review
    - Attempt to fix in a new commit: `fix: resolve build/test failure from {category} changes`
    - If unfixable, revert the problematic commit(s): `git -C {WORKTREE_DIR} revert <sha>` and note which findings were skipped
+   - **When `SIMPLIFY_ONLY=true`**, a failing test is a regression by definition — the run promised identical behavior. Fix the refactor or revert it; do not edit the test to match the new behavior
 <!-- if:teams -->
 4. Shut down all agents via `SendMessage` with `type: "shutdown_request"`
 5. Clean up team via `TeamDelete`
@@ -494,6 +608,7 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
    ```
    !`cat ~/.claude/lib/code-review-checklist.md`
    ```
+   **When `SIMPLIFY_ONLY=true`**, carry one extra question through this same pass: *does any hunk change what this program does?* — different return value, different side effect, different error type or message, changed validation, changed output format, changed public API without a re-export. Every such hunk is reverted, not fixed. Then dispose of the finding behind it: if the improvement is still worth making in a run that's allowed to change behavior, **defer** it (an open PLAN.md item / tracker issue noting it needs behavior review); if the transformation cannot be done at all without changing behavior it must not change, record it as a rejection per [gate 4](#finding-gates).
 3. For each issue found:
    - Fix in a new commit: `fix: {description of review finding}`
    - Re-run `{BUILD_CMD}` and `{TEST_CMD}` to verify
@@ -536,6 +651,8 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
    - Restore stash if needed (`git stash pop`), update PLAN.md, print final summary, then **stop** — this completes the workflow (Phases 5, 6, and 7 are skipped entirely since no PRs or category branches were created)
 
 ## Phase 4c: Test Enhancement
+
+**GATE: If `SIMPLIFY_ONLY=true`, SKIP this entire phase** (including 4c.3's `FILE_OWNER_MAP` update — the Phase 2 map is final). Agent 8 never ran, so there are no test findings, and authoring new tests is not a simplification. Report all four test-enhancement stats as `— (skipped: --simplify-only)` in the Phase 7 summary and proceed to Phase 5.
 
 After internal code review passes, evaluate and enhance the project's test suite. This phase acts on Agent 8's findings AND ensures all remediation work from Phase 3 has proper test coverage.
 
@@ -651,7 +768,8 @@ Initialize `CREATED_CATEGORY_SLUGS=""` (empty space-delimited string). After eac
 For each category that has findings:
 1. Switch to `{DEFAULT_BRANCH}`: `git checkout {DEFAULT_BRANCH}`
 2. Create a category branch: `git checkout -b better/{CATEGORY_SLUG}`
-   - Use slugs: `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`, `ux` (UI projects only), and `structural` (strict mode only)
+   - Use slugs: `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`, `ux` (UI projects only), `structural` (strict mode only), and `cognitive-load` (simplify-only mode)
+   - When `SIMPLIFY_ONLY=true`, the only possible slugs are the [`SIMPLIFY_CATEGORIES`](#the-category-set) ones, and the per-category commit in step 4 below plus its PR title take the `refactor:` prefix. This does not touch the pipeline's other mandated messages — the version bump stays `chore:`, and build/review/CI fixes stay `fix:`
 3. For each file assigned to this category in `FILE_OWNER_MAP`:
    - **Modified files**: `git checkout better/{DATE} -- {file_path}`
    - **New files (Added)**: `git checkout better/{DATE} -- {file_path}`
@@ -721,6 +839,13 @@ EOF
 ```bash
 glab mr create --source-branch better/{CATEGORY_SLUG} --target-branch {DEFAULT_BRANCH} \
   --title "{prefix}: {short description}" --description "..."
+```
+
+When `SIMPLIFY_ONLY=true`, add a line to each PR/MR body stating that the change is behavior-preserving and naming the safety net that verified it:
+
+```markdown
+Behavior-preserving refactor: no observable change to return values, side
+effects, errors, or public API. Verified by `{TEST_CMD}` passing unmodified.
 ```
 
 Record all `PR_NUMBERS` and `PR_URLS` in a map: `{category: {number, url}}`.
@@ -887,9 +1012,10 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
 | Tests              | ...      | ...   | ...     | #number  | pass   | approved |
 | UX                 | ...      | ...   | ...     | #number  | pass   | approved |
 | Structural         | ...      | ...   | ...     | #number  | pass   | approved |
+| Cognitive Load     | ...      | ...   | ...     | #number  | pass   | approved |
 | TOTAL              | ...      | ...   | ...     | N PRs    |        |          |
 
-Omit the **UX** row when `HAS_UI=false` and the **Structural** row when `STRICT_MODE=false`.
+Omit the **UX** row when `HAS_UI=false`, the **Structural** row when `STRICT_MODE=false`, and the **Cognitive Load** row when `SIMPLIFY_ONLY=false`. When `SIMPLIFY_ONLY=true`, keep only the [`SIMPLIFY_CATEGORIES`](#the-category-set) rows and report every Test Enhancement stat below as `— (skipped: --simplify-only)`.
 
 Test Enhancement Stats:
 - Vacuous tests fixed: {VACUOUS_TESTS_FIXED}
@@ -929,4 +1055,5 @@ Test Enhancement Stats:
 - **No default reviewer**: without `--review-with`, Phase 6 and the auto-merge are skipped and all PRs are left open for manual review. Pass `--review-with <agent[,agent,...]>` to run a review loop and enable auto-merge on a clean result. `copilot` is never added implicitly
 - GitLab projects skip the Phase 6 review loop + auto-merge entirely and stop after MR creation (the loop drives GitHub PRs; local-agent reviewers aside, there is no GitLab merge path here)
 - CI must pass on each PR before its review loop runs or it is merged
+- `--simplify-only` (alias `--refactor-only`) narrows the run to refactoring, architecture, DRY, simplification, and cognitive load — five audit agents (2, 3, 4, 10, 11), five categories, `--strict` implied, Phase 4c skipped, and a hard behavior-preservation contract on every fix. Everything else about the pipeline is unchanged. `/do:simplify` is the shorthand. Use it when you want the codebase easier to work in without any behavioral risk; use plain `/do:better` when you also want security, bugs, performance, dependencies, tests, and UX covered
 - `--strict` (alias `--nuclear`) adds the Structural Ambition agent and promotes its blocker-tier findings (file >1000 lines, spaghetti additions, thin wrappers, boundary leaks, canonical-helper duplication) to CRITICAL. Use when auditing a branch you want to land cleanly. The Structural Ambition category produces high-judgment findings — expect more remediation churn than the runtime/security agents and budget extra review iterations for its PR. If a finding's reframing turns out to be infeasible after investigation, leave it and document why rather than substituting a cosmetic change
