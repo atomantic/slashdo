@@ -204,9 +204,13 @@ describe('review-loop parse contracts', () => {
     );
     // The variables must be consumed in the shell that set them — spec snippets run
     // as separate Bash calls, where an empty PUSH_REMOTE means `git push "" "HEAD:"`.
-    // Tolerate an intervening comment line — the point is that the push lives inside
-    // the guard, not that it sits on the literally-next line.
-    assert.match(wrapper, /if \[ -n "\$UNPUSHED" \]; then\s*(?:#[^\n]*\n\s*)*git push "\$PUSH_REMOTE" "HEAD:\$PUSH_BRANCH"/);
+    // The point is that the push lives inside the guard, in the same shell — not
+    // that it sits on any particular line.
+    assert.match(wrapper, /if \[ -n "\$UNPUSHED" \]; then[\s\S]{0,600}?git push "\$PUSH_REMOTE" "HEAD:\$PUSH_BRANCH"/);
+    // A conflicted retry must not strand the branch mid-rebase: push-failed is a
+    // continue-signal, so the next reviewer would inherit a detached HEAD whose own
+    // assertion then silently skips (no resolvable @{u} to compare against).
+    assert.match(wrapper, /git rebase --abort/, 'a conflicted retry must not leave a rebase in progress');
 
     const pr = readCommand('pr.md');
     assert.match(pr, /`git push origin \{current_branch\}` — an explicit refspec, never a bare `git push`/);

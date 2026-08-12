@@ -108,12 +108,21 @@ This is the default path. Iterate `REVIEW_AGENTS` in order, running each reviewe
    # across separate Bash invocations, and an empty PUSH_REMOTE would push to the
    # empty-string remote: a fatal error, reported as a bogus push-failed.
    if [ -n "$UNPUSHED" ]; then
-     git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH" ||
-       { git pull --rebase --autostash && git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"; }
+     if ! git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"; then
+       # Never leave a conflicted rebase behind: `push-failed` is a continue-signal,
+       # so the next reviewer would otherwise run against a detached, mid-rebase HEAD
+       # with this pass's fix commit unapplied — worse than the unpushed state.
+       if git pull --rebase --autostash; then
+         git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"
+       else
+         git rebase --abort 2>/dev/null   # no-op when the pull failed for another reason
+         false
+       fi
+     fi
    fi
    ```
 
-   If `UNPUSHED` was non-empty the inner loop's push step did not run, and the block above already pushed it — `git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"`, retried once behind `git pull --rebase --autostash` on a non-fast-forward, exactly the retry the loop files use. **Run the whole thing as one block**: `PUSH_REMOTE`/`PUSH_BRANCH` live only in the shell that set them. If the push still fails, record the pass per the rules below.
+   If `UNPUSHED` was non-empty the inner loop's push step did not run, and the block above already pushed it — `git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"`, retried once behind `git pull --rebase --autostash` on a non-fast-forward, exactly the retry the loop files use. **Run the whole thing as one block**: `PUSH_REMOTE`/`PUSH_BRANCH` live only in the shell that set them. If the retry's rebase hits a conflict it is **aborted**, leaving the branch exactly as the reviewer left it, and the pass is recorded `push-failed` — never left mid-rebase. That matters more here than in the inner loops, which run the same `pull --rebase && push` idiom as their last act before reporting failure: `push-failed` is a *continue-signal*, so execution goes on to the next reviewer, and a detached mid-rebase HEAD would both corrupt that reviewer's tree and silently disable its own assertion (no resolvable `@{u}` on a detached HEAD ⇒ the check skips). If the push still fails, record the pass per the rules below.
 
    **Push to the ref the upstream names — not a bare `git push`, and not `git push origin HEAD`.** A bare push fans out under `push.default=matching` to every local branch with a same-named remote (publishing unrelated branches — including a `release` branch that may auto-tag and publish), and errors outright under `push.default=nothing`. `git push origin HEAD` is the subtler trap: with no `<dst>`, git resolves `HEAD` to the **local** branch name and pushes to `refs/heads/<local-name>`, ignoring the upstream entirely — so on a branch whose upstream has a different name (or lives on another remote) it creates a spurious remote branch, leaves the real PR head stale, and `@{u}..HEAD` is *still* non-empty afterward. That is issue #134's exact failure, reintroduced by the guard meant to prevent it. Deriving the destination from `branch.<name>.merge` is what makes the push land on the branch the PR was opened from — and because that value is already fully qualified, it is `HEAD:$PUSH_BRANCH`, never `HEAD:refs/heads/$PUSH_BRANCH`.
 
