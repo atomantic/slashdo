@@ -154,8 +154,9 @@ describe('review-loop parse contracts', () => {
     // a window on BOTH sides — a qualification may precede the phrase ("Passes marked
     // `~opt` whose status is not `push-failed` are ignored here") just as easily as
     // follow it. No length>0 canary: a correctly-qualified rewording that happens to
-    // avoid every stem must not fail for being differently worded — line 159's
-    // positive assertion is what pins that the qualification exists at all.
+    // avoid every stem must not fail for being differently worded — the verbatim
+    // "but never for `push-failed`" assertion further down is what pins that the
+    // qualification exists at all.
     const exemptions = [...wrapper.matchAll(/(?:ignor|exclud|excus|count|waiv|appl)\w*\s+here/gi)];
     for (const m of exemptions) {
       assert.match(
@@ -279,8 +280,14 @@ describe('review-loop parse contracts', () => {
     // -u rewrites branch.<n>.remote/.merge, so an unconditional `git push -u origin
     // <local-name>` re-points an existing upstream and defeats the derived guard at
     // its source — it must be scoped to the never-published case.
-    assert.match(pr, /\*\*No upstream yet\*\*[^\n]*`git push -u origin \{current_branch\}`/);
+    assert.match(pr, /\*\*Not yet published to a remote\*\*[^\n]*`git push -u origin \{current_branch\}`/);
     assert.match(pr, /`-u` \*rewrites\* `branch\.<name>\.remote`\/`\.merge`/);
+    // The Commit-and-Push case split must key on the REMOTE VALUE, not on whether
+    // @{u} resolves: a local upstream resolves fine, so an @{u}-based test routes it
+    // into the derived-push case and pushes into the local repo — the same CRITICAL,
+    // one section earlier. The "not yet published" case must cover empty AND ".".
+    assert.match(pr, /Discriminate on `branch\.<name>\.remote`, \*\*not\*\* on whether `@\{u\}` resolves/);
+    assert.match(pr, /\*\*Not yet published to a remote\*\* — `PUSH_REMOTE` is empty \(no upstream at all\) \*\*or\*\* `\.`/);
     // A conflicted retry must not strand the branch mid-rebase for /do:next and
     // /do:pr-better, which invoke /do:pr programmatically.
     assert.match(pr, /conflicts, abort it\*\* \(`git rebase --abort 2>\/dev\/null`\)/);

@@ -87,9 +87,17 @@ Print: `PR flow: {current_branch} → {default_branch}`
   - `git rebase {default_branch}` to replay this branch's commits on top of the now-current default branch.
   - If the rebase hits conflicts, **abort** (`git rebase --abort`) and stop — print the conflicting files and ask the user to resolve them, rather than guessing at a merge. Do not proceed to review against a half-rebased tree.
   - After a clean rebase the branch's merge-base with the refreshed local `{default_branch}` is current, so `git diff {default_branch}...HEAD` shows only this branch's own changes.
-- Push the branch to remote (use `--force-with-lease` on any of these if the rebase above rewrote already-pushed history; never a bare `--force`). **Which form depends on whether the branch already tracks a remote** — `-u` *rewrites* `branch.<name>.remote`/`.merge`, so using it unconditionally would re-point an existing upstream at `origin/{current_branch}` and defeat the config-derived guard under "Open the PR" at its source:
-  - **No upstream yet** (`git rev-parse --abbrev-ref --symbolic-full-name @{u}` fails — the branch was never published): `git push -u origin {current_branch}`, which publishes it and sets the tracking config for the first time.
-  - **An upstream already exists**: push to the ref that upstream names, deriving it from config exactly as "Open the PR" below does — never `-u`, and never a destination built from the local branch name. A branch whose upstream is `upstream/feature-x` or `origin/pr-123-head` must keep pointing there.
+- Push the branch to remote (use `--force-with-lease` on any of these if the rebase above rewrote already-pushed history; never a bare `--force`). **Which form depends on whether the branch's upstream names a remote** — `-u` *rewrites* `branch.<name>.remote`/`.merge`, so using it unconditionally would re-point an existing upstream at `origin/{current_branch}` and defeat the config-derived guard under "Open the PR" at its source. Discriminate on `branch.<name>.remote`, **not** on whether `@{u}` resolves: a branch tracking a *local* ref (`branch.<name>.remote=.`, what `git branch --set-upstream-to=main` produces) resolves `@{u}` perfectly well, so an `@{u}`-based test would route it into the second case and push into the local repository:
+
+  ```bash
+  BR="$(git branch --show-current)"
+  PUSH_REMOTE="$(git config --get "branch.$BR.remote")"
+  ```
+
+  - **Not yet published to a remote** — `PUSH_REMOTE` is empty (no upstream at all) **or** `.` (upstream is a local branch): `git push -u origin {current_branch}`. This publishes the branch and sets the tracking config for the first time, re-pointing a local upstream at the remote — which is exactly what makes the "Open the PR" guard below defense-in-depth rather than a dead end.
+  - **A genuine remote upstream** (`PUSH_REMOTE` is a real remote name): push to the ref that upstream names, deriving it from config exactly as "Open the PR" below does — never `-u`, and never a destination built from the local branch name. A branch whose upstream is `upstream/feature-x` or `origin/pr-123-head` must keep pointing there.
+
+  The empty/`.` check is part of **the derivation being reused here**, not part of the PR-creation assertion — so it applies at this step too, even though the guard's message under "Open the PR" is phrased for that later moment.
 
 ## Local Code Review (REQUIRED GATE)
 
