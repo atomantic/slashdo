@@ -17,15 +17,14 @@ Thanks for considering a contribution. slashdo is a small, actively-maintained p
 
 ## Making a change
 
-1. Fork and clone the repo.
-2. Install dependencies: `npm install` (none currently required beyond dev tooling, but run it anyway).
-3. Edit the relevant `commands/do/*.md` or `lib/*.md` source file. If you touch environment-specific behavior, wrap it in `<!-- if:teams -->…<!-- else -->…<!-- /if:teams -->` (or the matching capability flag in `src/environments.js`) rather than hard-coding for one environment.
-4. If you add or rename a command or lib file, update the `COMMANDS`/`LIBS` arrays in both `install.sh` and `uninstall.sh` — CI will fail the drift check otherwise.
-5. Verify locally:
+1. Fork and clone the repo. There are no npm dependencies to install — the package has none, and the test suite runs on Node's built-in test runner.
+2. Edit the relevant `commands/do/*.md` or `lib/*.md` source file. If you touch environment-specific behavior, wrap it in `<!-- if:teams -->…<!-- else -->…<!-- /if:teams -->` (or the matching capability flag in `src/environments.js`) rather than hard-coding for one environment.
+3. If you add or rename a command or lib file, update the `COMMANDS`/`LIBS` arrays in both `install.sh` and `uninstall.sh` — CI will fail the drift check otherwise.
+4. Verify locally:
    - `node bin/cli.js --list` — confirm the command shows up correctly
    - `node bin/cli.js --dry-run` — preview what install would do
    - `npm test` — run the full test suite
-6. If your change affects behavior covered by an existing test, update it; if it adds new behavior worth locking in, add a test under `test/`.
+5. If your change affects behavior covered by an existing test, update it; if it adds new behavior worth locking in, add a test under `test/`.
 
 ## Commit and PR conventions
 

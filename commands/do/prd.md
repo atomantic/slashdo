@@ -9,7 +9,7 @@ Shorthand for `/do:goals --prd`: scan the codebase and generate a detailed `PRD.
 
 ## Execution
 
-Run the workflow defined in `~/.claude/commands/do/goals.md` **verbatim**, with `--prd` forced on — whether or not it appears in `$ARGUMENTS`. Its [PRD.md Structure](goals.md#prdmd-structure---prd) section and every other `--prd`-mode deviation (Discovery's Agent 4, Synthesis, Validation 3g-3i, Refresh Mode) is the specification. This command adds none of its own.
+Run the workflow defined in `~/.claude/commands/do/goals.md` **verbatim**, with `--prd` forced on — whether or not it appears in `$ARGUMENTS`. Its [PRD.md Structure](goals.md#prdmd-structure---prd) section and every other `--prd`-mode deviation (Discovery's Agent 4, Synthesis, Validation 3g-3j, Refresh Mode) is the specification. This command adds none of its own.
 
 Argument handling:
 - Pass `$ARGUMENTS` through to `do:goals` verbatim, with `--prd` added if not already present. It parses every flag itself, including `--interactive`, `--refresh`, and focus hints — there is nothing to extract or re-validate here.
