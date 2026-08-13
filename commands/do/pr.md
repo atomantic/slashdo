@@ -87,7 +87,9 @@ Print: `PR flow: {current_branch} → {default_branch}`
   - `git rebase {default_branch}` to replay this branch's commits on top of the now-current default branch.
   - If the rebase hits conflicts, **abort** (`git rebase --abort`) and stop — print the conflicting files and ask the user to resolve them, rather than guessing at a merge. Do not proceed to review against a half-rebased tree.
   - After a clean rebase the branch's merge-base with the refreshed local `{default_branch}` is current, so `git diff {default_branch}...HEAD` shows only this branch's own changes.
-- Push the branch to remote: `git push -u origin {current_branch}` (use `--force-with-lease` if the rebase above rewrote already-pushed history; never a bare `--force`)
+- Push the branch to remote (use `--force-with-lease` on any of these if the rebase above rewrote already-pushed history; never a bare `--force`). **Which form depends on whether the branch already tracks a remote** — `-u` *rewrites* `branch.<name>.remote`/`.merge`, so using it unconditionally would re-point an existing upstream at `origin/{current_branch}` and defeat the config-derived guard under "Open the PR" at its source:
+  - **No upstream yet** (`git rev-parse --abbrev-ref --symbolic-full-name @{u}` fails — the branch was never published): `git push -u origin {current_branch}`, which publishes it and sets the tracking config for the first time.
+  - **An upstream already exists**: push to the ref that upstream names, deriving it from config exactly as "Open the PR" below does — never `-u`, and never a destination built from the local branch name. A branch whose upstream is `upstream/feature-x` or `origin/pr-123-head` must keep pointing there.
 
 ## Local Code Review (REQUIRED GATE)
 
@@ -103,7 +105,7 @@ This review catches bugs that Copilot misses — incomplete pattern copying is t
    c. For each finding, quote the specific code line and explain why it's a problem
 4. After reviewing all files, verify: does the code actually deliver what the commits claim?
 5. Print a review summary table (see do:review for format)
-6. Fix any issues, run tests, verify tests cover the changed code paths, then **commit and push those fixes** — leaving them uncommitted in the working tree is invisible to the "Open the PR" assertion below, which compares against the upstream ref and so only ever sees *committed* work
+6. Fix any issues, run tests, verify tests cover the changed code paths, then **commit and push those fixes** — using the upstream-derived push described under "Open the PR" below, never a bare `git push` and never a destination built from the local branch name. Leaving the fixes uncommitted is invisible to that section's assertion, which compares against the upstream ref and so only ever sees *committed* work
 7. Only after printing the review summary may you proceed to "Pre-PR Local Reviews"
 
 If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.
@@ -141,14 +143,24 @@ This phase drives the **multi-reviewer wrapper** (defined under "Reviewer loop b
 
 ## Open the PR
 
-- **First, assert the branch's commits reached the remote.** The Local Code Review gate and every pre-PR local reviewer above commit their fixes onto this branch; if one of their push steps didn't run, `gh pr create` opens a PR containing only the pre-review commits and those findings never reach the PR at all. Confirm `git log --oneline @{u}..HEAD` is empty; if it isn't, push first — deriving the destination from the branch's upstream config exactly as `lib/multi-reviewer-loop.md` step 5 does, in one shell so the variables survive:
+- **First, assert the branch's commits reached the remote.** The Local Code Review gate and every pre-PR local reviewer above commit their fixes onto this branch; if one of their push steps didn't run, `gh pr create` opens a PR containing only the pre-review commits and those findings never reach the PR at all. Confirm `git log --oneline @{u}..HEAD` is empty; if it isn't, push first — deriving the destination from the branch's upstream config exactly as `lib/multi-reviewer-loop.md` step 5 does, as **one block** so the variables survive (they do not persist across separate Bash calls):
 
   ```bash
   BR="$(git branch --show-current)"
-  git push "$(git config --get "branch.$BR.remote")" "HEAD:$(git config --get "branch.$BR.merge")"
+  PUSH_REMOTE="$(git config --get "branch.$BR.remote")"
+  PUSH_BRANCH="$(git config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
+  if [ -z "$PUSH_REMOTE" ] || [ "$PUSH_REMOTE" = "." ]; then
+    # Upstream is a LOCAL branch (branch.<n>.remote=".", what `git branch
+    # --set-upstream-to=main` produces) or absent — there is no remote to push to.
+    echo "REFUSING TO CREATE THE PR — '$BR' tracks a local ref, not a remote; publish it first (git push -u origin $BR)"
+    exit 1
+  fi
+  git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"
   ```
 
-  — never a bare `git push`, which under `push.default=matching` fans out to every same-named local branch, and never `git push origin {current_branch}`, which hardcodes the *local* branch name as the destination: on a branch whose upstream is named differently (or lives on another remote) that pushes a spurious remote branch, leaves the real PR head stale, and `@{u}..HEAD` is still non-empty afterward while the push itself "succeeded". Retry once after `git pull --rebase --autostash` on a non-fast-forward, then create the PR. **If the push still fails after that one retry, do NOT create the PR** — print the unpushed SHAs and the push error and stop, exactly as the unpushed-commits merge gate below refuses to merge; a PR opened from a tree missing the review fixes is the precise failure this check exists to prevent. Skip the check when the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1` fails — detached HEAD or no origin): there is nothing to compare against. Note `git status` is **not** a substitute — a clean working tree says nothing about committed-but-unpushed commits, which is exactly the state this catches.
+  The `"$PUSH_REMOTE" = "."` guard is **load-bearing, not defensive**: on a local upstream `@{u}` resolves fine, so the no-upstream carve-out below never fires, and an unguarded push runs `git push . HEAD:refs/heads/main` — which silently fast-forwards the *local* default branch onto this branch's HEAD, exits 0, and leaves `@{u}..HEAD` empty. The assertion would then report the branch "reached the remote" and open a PR for a branch that was never pushed to any remote at all.
+
+  Never a bare `git push`, which under `push.default=matching` fans out to every same-named local branch, and never `git push origin {current_branch}`, which hardcodes the *local* branch name as the destination: on a branch whose upstream is named differently (or lives on another remote) that pushes a spurious remote branch, leaves the real PR head stale, and `@{u}..HEAD` is still non-empty afterward while the push itself "succeeded". On a non-fast-forward, retry once behind `git pull --rebase --autostash` — and if that rebase **conflicts, abort it** (`git rebase --abort 2>/dev/null`) before reporting the failure, exactly as `lib/multi-reviewer-loop.md` step 5 does. `/do:pr` is invoked programmatically by `/do:next` and `/do:pr-better`, so a branch left detached mid-rebase becomes the tree their next step runs against — and a later `@{u}` assertion silently skips on a detached HEAD. Then create the PR. **If the push still fails after that one retry, do NOT create the PR** — print the unpushed SHAs and the push error and stop, exactly as the unpushed-commits merge gate below refuses to merge; a PR opened from a tree missing the review fixes is the precise failure this check exists to prevent. Skip the check when the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1` fails — detached HEAD or no origin): there is nothing to compare against. A **local** upstream is the case that does *not* skip — `@{u}` resolves, so the check runs and the `"."` guard above stops it rather than letting it push into the local repo. Note `git status` is **not** a substitute — a clean working tree says nothing about committed-but-unpushed commits, which is exactly the state this catches.
 - Create a PR / merge request from `{current_branch}` to `{default_branch}`:
   - GitHub: `gh pr create --base {default_branch} --head {current_branch} --title "..." --body "..."`
   - GitLab: `glab mr create --source-branch {current_branch} --target-branch {default_branch} --title "..." --description "..."` (add `--yes` to skip the interactive prompt; `--remove-source-branch` if the project deletes merged branches)

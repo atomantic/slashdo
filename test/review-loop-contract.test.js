@@ -148,15 +148,18 @@ describe('review-loop parse contracts', () => {
     // sentence flatly contradicts the push-failed carve-out two clauses earlier and
     // an orchestrator could read it as license to merge an ~opt reviewer's stranded
     // fixes — so the exemption must name the statuses it applies to.
-    // Structural, not verbatim: match EVERY "<verb> here" exemption wherever it is
-    // worded and require each one to qualify itself, rather than blocklisting the
-    // handful of phrasings we happened to think of. A reworded exemption
-    // ("Optional passes do not count here.") is caught by the same rule.
-    const exemptions = [...wrapper.matchAll(/(?:ignored|excluded|excused|do not count)\s+here/g)];
-    assert.ok(exemptions.length > 0, 'the aggregate rules must state an ~opt exemption somewhere');
+    // Structural, not verbatim: match every "<verb> here" exemption by verb STEM, so
+    // inflections ("does not count here", "is not counted here", "waived here") are
+    // covered rather than only the handful of full phrasings we thought of, and check
+    // a window on BOTH sides — a qualification may precede the phrase ("Passes marked
+    // `~opt` whose status is not `push-failed` are ignored here") just as easily as
+    // follow it. No length>0 canary: a correctly-qualified rewording that happens to
+    // avoid every stem must not fail for being differently worded — line 159's
+    // positive assertion is what pins that the qualification exists at all.
+    const exemptions = [...wrapper.matchAll(/(?:ignor|exclud|excus|count|waiv|appl)\w*\s+here/gi)];
     for (const m of exemptions) {
       assert.match(
-        wrapper.slice(m.index, m.index + 200),
+        wrapper.slice(Math.max(0, m.index - 200), m.index + 200),
         /push-failed/,
         `an ~opt exemption at index ${m.index} does not name the statuses it covers — unqualified, it reads as license to merge a pass whose fixes never reached the remote`,
       );
@@ -242,16 +245,62 @@ describe('review-loop parse contracts', () => {
     // upstream is named differently the push succeeds against a spurious ref, @{u}..HEAD
     // stays non-empty, and the run opens the PR anyway.
     const pr = readCommand('pr.md');
-    assert.match(pr, /git push "\$\(git config --get "branch\.\$BR\.remote"\)" "HEAD:\$\(git config --get "branch\.\$BR\.merge"\)"/);
+    assert.match(pr, /PUSH_REMOTE="\$\(git config --get "branch\.\$BR\.remote"\)"/);
+    assert.match(pr, /PUSH_BRANCH="\$\(git config --get "branch\.\$BR\.merge"\)"/);
+    assert.match(pr, /git push "\$PUSH_REMOTE" "HEAD:\$PUSH_BRANCH"/);
     assert.match(pr, /never a bare `git push`/);
     assert.match(pr, /never `git push origin \{current_branch\}`/);
     // The gate that feeds this assertion must actually COMMIT its fixes: the check
     // compares against the upstream ref, so a fix left uncommitted in the working tree
     // is invisible to it and the PR opens from the pre-fix tree regardless.
-    assert.match(pr, /commit and push those fixes\*\* — leaving them uncommitted/);
+    assert.match(pr, /\*\*commit and push those fixes\*\*/);
+    assert.match(pr, /Leaving the fixes uncommitted is invisible to that section's assertion/);
+    // The gate's push must name its form, not leave it to the orchestrator — the two
+    // forms it would otherwise reach for are the two this file forbids.
+    assert.match(pr, /using the upstream-derived push described under "Open the PR"/);
     // Without a stop-on-failure clause the orchestrator falls through to gh pr create
     // and opens exactly the stale pre-review PR this guard exists to prevent.
     assert.match(pr, /\*\*If the push still fails after that one retry, do NOT create the PR\*\*/);
+  });
+
+  it('refuses to push into a local upstream instead of a remote', () => {
+    // `git branch --set-upstream-to=main` sets branch.<n>.remote=".", and @{u} then
+    // resolves fine — so the "no upstream, skip the check" carve-out never fires. An
+    // unguarded derived push runs `git push . HEAD:refs/heads/main`, which silently
+    // fast-forwards the LOCAL default branch onto this branch's HEAD, exits 0, and
+    // leaves @{u}..HEAD empty — so the guard reports the branch reached the remote and
+    // opens a PR for a branch never pushed anywhere. Verified against a scratch repo.
+    for (const [label, body] of [['pr.md', readCommand('pr.md')], ['multi-reviewer-loop.md', readLib('multi-reviewer-loop.md')]]) {
+      assert.match(body, /\[ "\$PUSH_REMOTE" = "\." \]/, `${label} must guard against a local ("." ) upstream`);
+    }
+    const pr = readCommand('pr.md');
+    // The guard must come BEFORE the push it protects, and must stop the run.
+    assert.match(pr, /if \[ -z "\$PUSH_REMOTE" \] \|\| \[ "\$PUSH_REMOTE" = "\." \][\s\S]{0,600}?exit 1[\s\S]{0,200}?git push "\$PUSH_REMOTE" "HEAD:\$PUSH_BRANCH"/);
+    // -u rewrites branch.<n>.remote/.merge, so an unconditional `git push -u origin
+    // <local-name>` re-points an existing upstream and defeats the derived guard at
+    // its source — it must be scoped to the never-published case.
+    assert.match(pr, /\*\*No upstream yet\*\*[^\n]*`git push -u origin \{current_branch\}`/);
+    assert.match(pr, /`-u` \*rewrites\* `branch\.<name>\.remote`\/`\.merge`/);
+    // A conflicted retry must not strand the branch mid-rebase for /do:next and
+    // /do:pr-better, which invoke /do:pr programmatically.
+    assert.match(pr, /conflicts, abort it\*\* \(`git rebase --abort 2>\/dev\/null`\)/);
+  });
+
+  it('files issues inside the scan-only gate, not after it', () => {
+    // The instruction originally sat in the paragraph AFTER "STOP HERE ... and exit",
+    // so an orchestrator following the gate literally exited before reaching it and
+    // `--scan-only --issues` filed nothing at all. Moving it back reads fine in
+    // isolation, which is exactly why it needs a test rather than a reviewer.
+    for (const name of ['better.md', 'better-swift.md', 'depfree.md']) {
+      const body = readCommand(name);
+      const gate = body.match(/\*\*GATE: If `--scan-only` was passed, STOP HERE[^\n]*/);
+      assert.ok(gate, `${name}: scan-only gate not found`);
+      assert.match(
+        gate[0],
+        /file every surviving finding as an issue first/,
+        `${name}: the issue-filing instruction must be inside the gate sentence, before the exit`,
+      );
+    }
   });
 
   it('blocks PR creation and merge on unpushed commits in do:pr', () => {
