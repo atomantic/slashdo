@@ -26,7 +26,7 @@
 <p align="center">
   <img src="https://img.shields.io/npm/v/slash-do?style=flat-square&color=blue" alt="npm version" />
   <img src="https://img.shields.io/badge/environments-5-green?style=flat-square" alt="environments" />
-  <img src="https://img.shields.io/badge/commands-20-orange?style=flat-square" alt="commands" />
+  <img src="https://img.shields.io/badge/commands-21-orange?style=flat-square" alt="commands" />
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="license" />
 </p>
 
