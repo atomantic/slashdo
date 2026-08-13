@@ -288,6 +288,11 @@ describe('review-loop parse contracts', () => {
     // one section earlier. The "not yet published" case must cover empty AND ".".
     assert.match(pr, /Discriminate on `branch\.<name>\.remote`, \*\*not\*\* on whether `@\{u\}` resolves/);
     assert.match(pr, /\*\*Not yet published to a remote\*\* — `PUSH_REMOTE` is empty \(no upstream at all\) \*\*or\*\* `\.`/);
+    // ...and the OTHER half of the split, which is where the round-1 CRITICAL would
+    // re-enter: `-u` on a genuine remote upstream rewrites branch.<n>.remote/.merge,
+    // re-pointing a differently-named or non-origin upstream at origin/<local-name>.
+    // Without this, reintroducing `-u` in the second bullet passes every other test.
+    assert.match(pr, /\*\*A genuine remote upstream\*\*[^\n]*never `-u`/);
     // A conflicted retry must not strand the branch mid-rebase for /do:next and
     // /do:pr-better, which invoke /do:pr programmatically.
     assert.match(pr, /conflicts, abort it\*\* \(`git rebase --abort 2>\/dev\/null`\)/);
