@@ -26,7 +26,7 @@
 <p align="center">
   <img src="https://img.shields.io/npm/v/slash-do?style=flat-square&color=blue" alt="npm version" />
   <img src="https://img.shields.io/badge/environments-5-green?style=flat-square" alt="environments" />
-  <img src="https://img.shields.io/badge/commands-19-orange?style=flat-square" alt="commands" />
+  <img src="https://img.shields.io/badge/commands-20-orange?style=flat-square" alt="commands" />
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="license" />
 </p>
 
@@ -161,7 +161,8 @@ All commands live under the `do:` namespace:
 | `/do:simplify` | Refactor-only audit — architecture, DRY, simplification, cognitive load — as per-category PRs that must not change behavior ([details](#refactor-only-dosimplify)) |
 | `/do:scan` | Read-only safety audit of an unfamiliar directory — flags malware patterns, network calls, and vulnerable deps without executing code |
 | `/do:depfree` | Audit dependencies, remove unnecessary ones, write replacement code (`--heavy` targets all non-foundational libraries) |
-| `/do:goals` | Generate GOALS.md from codebase analysis (autonomous by default; `--interactive` to review with you) |
+| `/do:goals` | Generate GOALS.md from codebase analysis — `--prd` generates a detailed PRD.md instead ([details](#prd-mode-dogoals---prd)) (autonomous by default; `--interactive` to review with you) |
+| `/do:prd` | Generate a detailed PRD.md from codebase analysis (`/do:goals --prd`) ([details](#prd-mode-dogoals---prd)) |
 | `/do:plan-task` | Investigate the codebase, draft a decision-complete issue, show it for approval, file it in the tracker ([workflow](#plan-a-task-then-let-an-agent-ship-it)) |
 | `/do:replan` | Audit/triage the plan — prune completed items, suggest new work — in `PLAN.md` or the issue tracker ([Issue mode](#issue-mode---issues)) |
 | `/do:next` | Claim the next unclaimed plan item or issue, implement it in an isolated worktree, ship a reviewed PR, clean up. `--swarm[=N]` ships several independent issues in parallel — auto-picked, or the exact numbers you name ([Issue mode](#issue-mode---issues)) |
@@ -188,6 +189,22 @@ The contract that makes it safe to merge: **every fix must be observably behavio
 ```
 
 Every `/do:better` flag works here — `--interactive`, `--scan-only`, `--no-merge`, `--issues`, and the whole [review loop](#review-loop) set.
+
+## PRD mode (`/do:goals --prd`)
+
+`/do:goals --prd` (shorthand: `/do:prd`) runs the same discovery pipeline as `/do:goals` but writes a `PRD.md` instead of a `GOALS.md` — a detailed, requirements-level document rather than a strategic one. GOALS.md answers *why* the project exists; PRD.md answers *what exactly* the product must (and must not) do.
+
+PRD.md is built from: an overview and problem statement, goals & objectives (aligned with an existing GOALS.md's Core Tenets when one exists), target users/personas, **functional requirements** grouped by feature area (stable `FR-` IDs, MUST/SHOULD/MAY priority, acceptance criteria), **non-functional requirements** (`NFR-` IDs — performance, security, reliability, usability), **negative requirements** (`NR-` IDs — explicit things the system must not do), an out-of-scope list, assumptions & constraints, success metrics, and open questions.
+
+An extra discovery agent mines test suites, validation/guard-clause logic, and auth/rate-limit code for requirements that are already implicitly specified in the codebase, since executable tests are high-confidence evidence of intended behavior. Numeric success metrics are never fabricated — where the codebase doesn't evidence a concrete target, it's left as an open question instead.
+
+```
+/do:goals --prd                # generate PRD.md autonomously
+/do:prd --interactive          # same, with a validation pass on requirements, guardrails, and metrics
+/do:prd --refresh              # re-scan and update an existing PRD.md, preserving requirement IDs
+```
+
+Requirement IDs are stable across `--refresh` runs — unchanged requirements keep their ID, new ones get the next unused number, and requirements that no longer hold are marked `(status: removed — verify)` rather than silently deleted.
 
 ## Review loop
 
@@ -432,11 +449,7 @@ Existing installs from before this feature get asked on their next `npx slash-do
 
 ## Contributing
 
-1. Commands live in `commands/do/` as Claude Code format `.md` files (source of truth)
-2. Lib files (shared partials) live in `lib/`
-3. The transformer handles format conversion for each environment
-4. Capability-gated content: wrap environment-specific instructions in `<!-- if:teams -->…<!-- else -->…<!-- /if:teams -->` blocks. The transformer keeps the matching branch per the target environment's capability flag (`supportsTeams` in `src/environments.js`) and strips the markers — e.g. `do:better` uses `TeamCreate` on Claude Code and falls back to parallel sub-agents elsewhere.
-5. Test with `node bin/cli.js --list` and `node bin/cli.js --dry-run`
+Issues and PRs are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) for the project structure, local dev/test workflow, and PR conventions.
 
 ## License
 

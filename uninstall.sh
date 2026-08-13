@@ -24,7 +24,7 @@ banner() {
 
 COMMANDS=(
   better better-swift config depfree fpr goals help next omd
-  plan-task pr pr-better push release replan review rpr scan simplify update
+  plan-task pr pr-better prd push release replan review rpr scan simplify update
 )
 
 

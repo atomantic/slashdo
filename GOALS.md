@@ -13,19 +13,19 @@ slashdo is a curated library of slash commands that automate the software develo
 ## Core Goals
 
 ### 1. Multi-Environment Support
-Provide a single source of truth for commands that works across Claude Code, OpenCode, Antigravity CLI, and Codex. Each environment gets commands in its native format with zero manual conversion.
+Provide a single source of truth for commands that works across Claude Code, OpenCode, Antigravity CLI, Codex, and Grok Build. Each environment gets commands in its native format with zero manual conversion.
 
 ### 2. Automate DevSecOps Workflows
-Provide one-command security auditing, code quality analysis, and automated remediation. `/do:better` scans across 7 dimensions, remediates findings in an isolated worktree, and delivers clean PRs.
+Provide one-command security auditing, code quality analysis, and automated remediation. `/do:better` scans across up to 10 dimensions (8 core agents, plus a UX Consistency agent for UI-bearing projects and a Structural Ambition agent in strict mode), remediates findings in an isolated worktree, and delivers clean PRs.
 
 ### 3. Standardize Development Rituals
 Enforce consistent commit practices, SemVer versioning, and changelog management across projects. `/do:push` ensures every commit follows conventional commit prefixes and updates changelogs.
 
 ### 4. Orchestrate AI-Powered Code Review
-Integrate Copilot review loops with automated thread resolution into the PR workflow. `/do:pr` and `/do:rpr` handle the full cycle from PR creation through review iteration.
+Integrate multi-reviewer review loops — GitHub Copilot, CLI reviewers (Codex, Claude, Antigravity, Grok, Ollama), or any GitHub login — with automated thread resolution into the PR workflow. `/do:pr` and `/do:rpr` handle the full cycle from PR creation through review iteration.
 
 ### 5. Maintain Project Governance Documentation
-Keep planning and standards documents current and well-structured. `/do:replan` manages the tactical backlog, `/do:goals` generates strategic goal documents, and `/do:omd` audits and optimizes markdown files (CLAUDE.md, README.md, AGENTS.md, etc.).
+Keep planning and standards documents current and well-structured. `/do:replan` manages the tactical backlog, `/do:goals` generates strategic goal documents (or, with `--prd`, a detailed PRD.md of product requirements), and `/do:omd` audits and optimizes markdown files (CLAUDE.md, README.md, AGENTS.md, etc.).
 
 ### 6. Be Project-Agnostic
 Auto-detect tech stacks and adapt build commands, test runners, version bumping, and audit strategies accordingly. Commands should work on any codebase without manual configuration.

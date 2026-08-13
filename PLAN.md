@@ -1,6 +1,6 @@
 # Development Plan
 
-For project mission, goals, and non-goals, see [GOALS.md](./GOALS.md).
+For project mission, goals, and non-goals, see [GOALS.md](./GOALS.md). For detailed product requirements, see [PRD.md](./PRD.md).
 
 ## Work tracking
 
