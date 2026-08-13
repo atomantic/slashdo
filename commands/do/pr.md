@@ -103,7 +103,7 @@ This review catches bugs that Copilot misses — incomplete pattern copying is t
    c. For each finding, quote the specific code line and explain why it's a problem
 4. After reviewing all files, verify: does the code actually deliver what the commits claim?
 5. Print a review summary table (see do:review for format)
-6. Fix any issues, run tests, and verify tests cover the changed code paths
+6. Fix any issues, run tests, verify tests cover the changed code paths, then **commit and push those fixes** — leaving them uncommitted in the working tree is invisible to the "Open the PR" assertion below, which compares against the upstream ref and so only ever sees *committed* work
 7. Only after printing the review summary may you proceed to "Pre-PR Local Reviews"
 
 If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.
@@ -141,7 +141,14 @@ This phase drives the **multi-reviewer wrapper** (defined under "Reviewer loop b
 
 ## Open the PR
 
-- **First, assert the branch's commits reached the remote.** The Local Code Review gate and every pre-PR local reviewer above commit their fixes onto this branch; if one of their push steps didn't run, `gh pr create` opens a PR containing only the pre-review commits and those findings never reach the PR at all. Confirm `git log --oneline @{u}..HEAD` is empty; if it isn't, push first (`git push origin {current_branch}` — an explicit refspec, never a bare `git push`, which under `push.default=matching` fans out to every same-named local branch — retrying once after `git pull --rebase --autostash` on a non-fast-forward) and only then create the PR. **If the push still fails after that one retry, do NOT create the PR** — print the unpushed SHAs and the push error and stop, exactly as the unpushed-commits merge gate below refuses to merge; a PR opened from a tree missing the review fixes is the precise failure this check exists to prevent. Skip the check when the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1` fails — detached HEAD or no origin): there is nothing to compare against. Note `git status` is **not** a substitute — a clean working tree says nothing about committed-but-unpushed commits, which is exactly the state this catches.
+- **First, assert the branch's commits reached the remote.** The Local Code Review gate and every pre-PR local reviewer above commit their fixes onto this branch; if one of their push steps didn't run, `gh pr create` opens a PR containing only the pre-review commits and those findings never reach the PR at all. Confirm `git log --oneline @{u}..HEAD` is empty; if it isn't, push first — deriving the destination from the branch's upstream config exactly as `lib/multi-reviewer-loop.md` step 5 does, in one shell so the variables survive:
+
+  ```bash
+  BR="$(git branch --show-current)"
+  git push "$(git config --get "branch.$BR.remote")" "HEAD:$(git config --get "branch.$BR.merge")"
+  ```
+
+  — never a bare `git push`, which under `push.default=matching` fans out to every same-named local branch, and never `git push origin {current_branch}`, which hardcodes the *local* branch name as the destination: on a branch whose upstream is named differently (or lives on another remote) that pushes a spurious remote branch, leaves the real PR head stale, and `@{u}..HEAD` is still non-empty afterward while the push itself "succeeded". Retry once after `git pull --rebase --autostash` on a non-fast-forward, then create the PR. **If the push still fails after that one retry, do NOT create the PR** — print the unpushed SHAs and the push error and stop, exactly as the unpushed-commits merge gate below refuses to merge; a PR opened from a tree missing the review fixes is the precise failure this check exists to prevent. Skip the check when the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1` fails — detached HEAD or no origin): there is nothing to compare against. Note `git status` is **not** a substitute — a clean working tree says nothing about committed-but-unpushed commits, which is exactly the state this catches.
 - Create a PR / merge request from `{current_branch}` to `{default_branch}`:
   - GitHub: `gh pr create --base {default_branch} --head {current_branch} --title "..." --body "..."`
   - GitLab: `glab mr create --source-branch {current_branch} --target-branch {default_branch} --title "..." --description "..."` (add `--yes` to skip the interactive prompt; `--remove-source-branch` if the project deletes merged branches)

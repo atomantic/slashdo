@@ -148,14 +148,19 @@ describe('review-loop parse contracts', () => {
     // sentence flatly contradicts the push-failed carve-out two clauses earlier and
     // an orchestrator could read it as license to merge an ~opt reviewer's stranded
     // fixes — so the exemption must name the statuses it applies to.
-    // Structural, not verbatim: a reworded but still-unqualified exemption
-    // ("Optional passes are ignored here.") would reintroduce the same
-    // contradiction while a literal-string guard kept passing.
-    assert.doesNotMatch(
-      wrapper,
-      /whose status is `push-failed`[\s\S]{0,2000}?(Passes marked `~opt` are ignored here\.|`~opt` passes are ignored here\.|are ignored here \(see)/,
-      'any ~opt exemption following the push-failed clause must name the statuses it covers',
-    );
+    // Structural, not verbatim: match EVERY "<verb> here" exemption wherever it is
+    // worded and require each one to qualify itself, rather than blocklisting the
+    // handful of phrasings we happened to think of. A reworded exemption
+    // ("Optional passes do not count here.") is caught by the same rule.
+    const exemptions = [...wrapper.matchAll(/(?:ignored|excluded|excused|do not count)\s+here/g)];
+    assert.ok(exemptions.length > 0, 'the aggregate rules must state an ~opt exemption somewhere');
+    for (const m of exemptions) {
+      assert.match(
+        wrapper.slice(m.index, m.index + 200),
+        /push-failed/,
+        `an ~opt exemption at index ${m.index} does not name the statuses it covers — unqualified, it reads as license to merge a pass whose fixes never reached the remote`,
+      );
+    }
     assert.match(wrapper, /but never for `push-failed`, which lands the aggregate here regardless of `\{OPTIONAL\}`/);
     // A hard-error must keep its own status: rewriting it to push-failed would
     // silence the hard-error short-circuit and downgrade the aggregate from dirty
@@ -230,8 +235,20 @@ describe('review-loop parse contracts', () => {
       'a conflicted retry must abort the rebase AND still exit non-zero so the pass records push-failed',
     );
 
+    // do:pr's pre-PR push must derive its destination the SAME way, from the branch's
+    // upstream config — `git push origin {current_branch}` hardcodes the local branch
+    // name as the destination, which is the very property multi-reviewer-loop.md calls
+    // "#134's failure, reintroduced by the guard meant to prevent it": on a branch whose
+    // upstream is named differently the push succeeds against a spurious ref, @{u}..HEAD
+    // stays non-empty, and the run opens the PR anyway.
     const pr = readCommand('pr.md');
-    assert.match(pr, /`git push origin \{current_branch\}` — an explicit refspec, never a bare `git push`/);
+    assert.match(pr, /git push "\$\(git config --get "branch\.\$BR\.remote"\)" "HEAD:\$\(git config --get "branch\.\$BR\.merge"\)"/);
+    assert.match(pr, /never a bare `git push`/);
+    assert.match(pr, /never `git push origin \{current_branch\}`/);
+    // The gate that feeds this assertion must actually COMMIT its fixes: the check
+    // compares against the upstream ref, so a fix left uncommitted in the working tree
+    // is invisible to it and the PR opens from the pre-fix tree regardless.
+    assert.match(pr, /commit and push those fixes\*\* — leaving them uncommitted/);
     // Without a stop-on-failure clause the orchestrator falls through to gh pr create
     // and opens exactly the stale pre-review PR this guard exists to prevent.
     assert.match(pr, /\*\*If the push still fails after that one retry, do NOT create the PR\*\*/);

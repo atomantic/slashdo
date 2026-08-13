@@ -379,9 +379,9 @@ For each dependency to remove:
 | Total      | ...   |                                   |
 ```
 
-**GATE: If `--scan-only` was passed, STOP HERE.** Print the summary and exit.
+**GATE: If `--scan-only` was passed, STOP HERE** — but not before doing the one thing a scan-only run in issue mode exists to do: **when `ISSUE_MODE` is also true, file every surviving finding as an issue first**, then print the summary and exit. (When `ISSUE_MODE` is false, just print the summary and exit.)
 
-**When `ISSUE_MODE` is also true, file every surviving finding as an issue before exiting** — not just the ones the disposition rules would defer. A scan-only run remediates nothing, so "deferred" covers the whole set; the filed issues ARE the run's output. Apply the same labels, dedup-against-`EXISTING_ISSUES`, and title/body rules the disposition partial specifies, and report the created and reused `#<number>`s in the summary. Do not open a worktree or write any code.
+**Filing every surviving finding** means all of them — not just the ones the disposition rules would defer. A scan-only run remediates nothing, so "deferred" covers the whole set; the filed issues ARE the run's output. Apply the same labels, dedup-against-`EXISTING_ISSUES`, and title/body rules the disposition partial specifies, and report the created and reused `#<number>`s in the summary. Do not open a worktree or write any code.
 
 **GATE: If no removable dependencies were found, print "All dependencies are justified" and exit.**
 
