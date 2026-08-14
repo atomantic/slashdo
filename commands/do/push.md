@@ -36,11 +36,10 @@ Commit and push all work from this session, updating documentation as needed.
      ```
    - If no changelog directory exists, skip this step
 
-3. **Update PLAN.md** (if exists):
-   - Mark completed items as done by flipping `- [ ]` → `- [x]`
-   - **Preserve the `[plan-id]` slug** on any line you touch — only the box character changes, the slug stays. See [lib/plan-id-format.md](../../lib/plan-id-format.md) for the slug convention. If you reference a finished item in the commit message or changelog, include its slug (e.g. `feat([slug]): …`) so the work is grep-able across the changelog, branches, and PR titles.
-   - Update progress notes if relevant
-   - Skip if no PLAN.md exists or changes aren't plan-related
+3. **Update project documentation per this project's own conventions**:
+   - Check the target repo's `CLAUDE.md` / `AGENT.md` (or `AGENTS.md`), if present, for documentation conventions it states (e.g. "keep the README command table in sync," "update docs/ARCHITECTURE.md when adding a module") and follow them.
+   - If `PLAN.md` exists and completed work matches an item there, mark it done by flipping `- [ ]` → `- [x]`. **Preserve the `[plan-id]` slug** on any line you touch — only the box character changes, the slug stays. See [lib/plan-id-format.md](../../lib/plan-id-format.md) for the slug convention. If you reference a finished item in the commit message or changelog, include its slug (e.g. `feat([slug]): …`) so the work is grep-able across the changelog, branches, and PR titles.
+   - Do not assume PLAN.md or any other specific tracking file must exist — most projects and sessions won't have one. Base what needs updating on the target repo's own AGENT/CLAUDE context, not on a fixed file-existence check.
 
 4. **Commit and push**:
    - Stage all changed files (including `NEXT.md` if updated)
