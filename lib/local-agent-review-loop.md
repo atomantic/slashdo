@@ -1,12 +1,12 @@
 ## Local Agent Code Review Loop
 
-Run a local agent to review the PR branch, then either let that agent apply fixes itself (`--reviewer-applies`) or read its findings back into the orchestrating thread which applies the fixes (default). Either way, verify in the main thread before pushing. This is an alternative to the Copilot cloud review loop — selected via `--review-with codex|agy|claude|grok` (the `agy` slug also accepts the aliases `gemini` and `antigravity`).
+Run a local agent to review the PR branch, then either let that agent apply fixes itself (`--reviewer-applies`) or read its findings back into the orchestrating thread which applies the fixes (default). Either way, verify in the main thread before pushing. This is the primary review path — selected via `--review-with codex|agy|claude|grok` (the `agy` slug also accepts the aliases `gemini` and `antigravity`).
 
 The reviewer is a headless CLI subprocess (`codex` / `agy` / `grok`, and `claude` on non-Claude-Code hosts).<!-- if:teams --> The one exception is the `claude` reviewer under Claude Code: it runs as an **in-process sub-agent** (via the `Agent` tool), not a `claude -p` subprocess. A headless `claude -p` invocation bills against the Anthropic API even when the host session is already on a plan; an in-process sub-agent runs under the host session's plan instead, so it incurs no extra API billing. See the invocation table and Step 2.<!-- /if:teams -->
 
-When to use this instead of Copilot:
-- The repo isn't connected to GitHub Copilot review (or you don't want to pay for it)
-- You want a different reviewer's perspective (Codex, Antigravity, Grok, or a separate Claude reviewer — an in-process sub-agent under Claude Code, or a headless `claude -p` session on other hosts)
+When to use this:
+- The work isn't on a GitHub PR yet, or the repo has no cloud review configured
+- You want a specific reviewer's perspective (Codex, Antigravity, Grok, or a separate Claude reviewer — an in-process sub-agent under Claude Code, or a headless `claude -p` session on other hosts)
 - You want the review to happen entirely locally, before pushing
 
 ### Pre-flight

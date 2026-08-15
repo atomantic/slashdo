@@ -151,7 +151,7 @@
 
    **Automated pipeline discipline**
    - Internal code review must run on all automated remediation changes BEFORE creating PRs — never go straight from "tests pass" to PR creation
-   - Copilot review must complete (approved or commented) on all PRs before merging — never merge while reviews are still pending unless the user explicitly approves
+   - Every review that was requested on a PR must complete (approved or commented) before merging — never merge while reviews are still pending unless the user explicitly approves
    - Automated agents may introduce subtle issues that pass tests but violate project conventions — review agent output against CLAUDE.md conventions
 
    **AI-generated code quality** _(Claude-specific failure modes)_

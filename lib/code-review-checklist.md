@@ -268,7 +268,7 @@ The most expensive misses are not pattern misses — they are *consequence-reaso
 - Composed prompts whose mode/role variants contradict always-present clauses
 
 **Automated pipeline discipline**
-- Internal review must run before PR; Copilot review must complete before merge
+- Internal review must run before PR; whichever external reviewer(s) the PR requested must complete before merge
 - Automated agent output reviewed against project conventions
 
 **AI-generated code quality**

@@ -1,6 +1,6 @@
-## Copilot Code Review Loop
+## Copilot Code Review Loop (legacy)
 
-After the PR is created, run the Copilot review-and-fix loop.
+After the PR is created, run the Copilot review-and-fix loop. **This loop only runs when `copilot` is explicitly in `REVIEW_AGENTS`** — no command selects it for you. The local-agent loop (`local-agent-review-loop.md`) and the generalized GitHub-reviewer loop (`github-reviewer-loop.md`) are the actively-developed paths; this one is kept for the `copilot` slug and unchanged in behavior.
 
 **Note on `--reviewer-applies`**: the `--reviewer-applies` flag (which routes edits through the reviewing CLI rather than the orchestrator) is a no-op on this path. Copilot reviews are read-only by design — they generate comments cloud-side without working-tree access — so there is no reviewer-side edit path to enable. If the calling command saw `--reviewer-applies` alongside `--review-with copilot`, it should have already printed a warning and continued; this loop's behavior is unchanged either way. Fixes are always applied by the sub-agent the parent spawns (see "Sub-agent prompt template" below), reading from Copilot's comments.
 

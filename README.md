@@ -208,25 +208,25 @@ Requirement IDs are stable across `--refresh` runs — unchanged requirements ke
 
 ## Review loop
 
-`/do:pr`, `/do:release`, `/do:pr-better`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:simplify`, `/do:depfree`, and `/do:rpr` share one review system: you pick the reviewer(s) with `--review-with`, and a set of companion flags controls how the loop runs. **No reviewer is ever hardcoded** — omit the flag and no external review runs (each command still runs its own unconditional self-review gate). The one exception is `/do:rpr`, whose conditional default is [documented below](#command-specific-behavior).
+`/do:pr`, `/do:release`, `/do:pr-better`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:simplify`, `/do:depfree`, and `/do:rpr` share one review system: you pick the reviewer(s) with `--review-with`, and a set of companion flags controls how the loop runs. **No reviewer is ever hardcoded, in any command** — omit the flag and no external review runs (each command still runs its own unconditional self-review gate).
 
 ### Reviewers
 
 | Slug | What runs | Model pinnable? |
 |:---|:---|:---|
-| `copilot` | GitHub's cloud Copilot review on the PR (GitHub only) | no |
 | `codex` | The Codex CLI in headless mode, reviewing locally | yes |
 | `claude` | The Claude Code CLI in headless mode | yes |
 | `agy` | The Antigravity CLI (`agy` binary; aliases: `gemini`, `antigravity`) | yes |
 | `grok` | The Grok CLI in headless mode, reviewing locally | yes |
 | `ollama` | A local Ollama model — review-only (non-agentic). Bare `ollama` auto-selects your most capable installed coding model | yes |
 | `@<login>` | Any GitHub user or App/bot (e.g. `@octocat`, `@some-app[bot]`): slashdo requests their review on the PR, waits for it, and fixes what it surfaces. GitHub only; slashdo never posts an approval itself | no |
+| `copilot` | **Legacy.** GitHub's cloud Copilot review on the PR (GitHub only). Still fully supported when you name it, but no command selects it for you | no |
 
-Reviewers run **in the order listed**, and whatever you list is exactly what runs — `--review-with codex` runs codex only; copilot is never added implicitly.
+Reviewers run **in the order listed**, and whatever you list is exactly what runs — `--review-with codex` runs codex only; nothing is ever added implicitly.
 
 ```
 /do:pr --review-with codex                          # one local reviewer
-/do:pr --review-with codex,agy,copilot              # codex, then Antigravity, then Copilot — each sees the prior's fixes
+/do:pr --review-with codex,agy                      # codex, then Antigravity — each sees the prior's fixes
 /do:pr --review-with claude[claude-opus-4-8],codex[o3]   # pin the model per reviewer
 /do:pr --review-with ollama[qwen2.5-coder:32b]      # pin a specific installed Ollama model
 /do:pr --review-with codex,@org-review-bot          # codex, then request a review from a GitHub bot
@@ -264,7 +264,7 @@ By default the orchestrator that opened the PR applies every reviewer's fixes it
 
 - **`/do:review`** — the listed agents run *after* the host CLI's own multi-agent self-review; the list names *additional* reviewers.
 - **`/do:better` / `/do:better-swift` / `/do:simplify` / `/do:depfree`** — the chosen reviewers run as the post-PR review loop (per PR, in parallel for the multi-PR better commands). **Omitting `--review-with` skips the review loop and the auto-merge** — PRs are left open for manual review.
-- **`/do:rpr`** — resolves review threads from any author (Copilot, human, or bot). Its `--review-with` default is a *conditional* `copilot`: it requests a Copilot review only when the PR has no review yet, or when Copilot is already the reviewer in play. It accepts only `--review-with` and `--reviewer-applies` (not `--review-iterations`, `--review-mode`, or the stop-mode flags), and it doesn't support `@<login>` entries — it drops them with a notice and falls back to its conditional copilot default.
+- **`/do:rpr`** — resolves review threads from any author (Copilot, human, or bot). Like every other command it has **no default reviewer**: omit `--review-with` (and set no saved default) and rpr requests nothing — it just fetches and resolves the unresolved threads the PR already carries. Name a reviewer and rpr requests it, then loops review → fix → re-review. It accepts only `--review-with` and `--reviewer-applies` (not `--review-iterations`, `--review-mode`, or the stop-mode flags), and it doesn't support `@<login>` entries — it drops them with a notice.
 
 ## Auto-merge (`/do:pr --merge`)
 
