@@ -149,7 +149,7 @@ All commands live under the `do:` namespace:
 
 | Command | What it does |
 |:---|:---|
-| `/do:push` | Commit and push all work with changelog |
+| `/do:push` | Commit and push all work, logging it per the project's own changelog convention |
 | `/do:pr` | Commit, push, and open a PR (GitHub `gh`) or merge request (GitLab `glab`) with self-review. External reviewers run only when you list them ([Review loop](#review-loop)); `--merge` auto-merges once reviews and CI pass ([Auto-merge](#auto-merge-dopr---merge)) |
 | `/do:pr-better` | Run a full do:better audit on the current branch, commit fixes directly, then open a single PR |
 | `/do:fpr` | Fork PR — push to fork, PR against upstream |

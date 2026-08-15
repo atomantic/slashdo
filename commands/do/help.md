@@ -25,7 +25,7 @@ List all available `/do:*` commands with their descriptions.
 | `/do:pr` | Commit, push, and open a PR (GitHub) or merge request (GitLab) against the repo's default branch — `--merge` auto-merges once reviews and CI pass |
 | `/do:pr-better` | Run a full do:better audit on the current branch, commit fixes directly, then open a single PR |
 | `/do:prd` | Scan codebase to infer product requirements and generate a detailed PRD.md (`/do:goals --prd`) |
-| `/do:push` | Commit and push all work with changelog |
+| `/do:push` | Commit and push all work, logging it per the project's own changelog convention |
 | `/do:release` | Create a release PR using the project's documented release workflow |
 | `/do:replan` | Automated audit/triage of PLAN.md (or the issue tracker with `--issues`) — prune completed items, suggest new work, keep the plan lean |
 | `/do:review` | Deep code review of changed files against best practices |

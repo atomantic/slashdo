@@ -120,7 +120,7 @@ Runs **once per invocation**, after the last wave, over every result the batch p
    - **A PR opened:** recompute its gate from scratch before merging — re-run the run's review flags against it (`/do:pr --no-merge` with the same `--review-with`), or, for a no-external-review run, treat green required-CI + a mergeable state as `opened-no-review`-eligible. Merge it through the Phase C queue only on a clean recompute; if requested external reviewers can't be re-run to clean, leave the PR open and flag it for a human.
    - **No PR (or an unclean recompute you won't finish):** **release the claim** — remove the assignee, delete the local+remote `next/issue-<num>` branch, drop `in-progress` — so the issue returns to the queue, and flag it for human follow-up.
 3. **Re-evaluate parent epics** for every issue that closed — a shipped issue may have been an epic's last child (the Phase 7 "re-evaluate the parent epic" step, run once per closed child).
-4. **Reconcile changelog/PLAN churn.** Parallel claims all touch `NEXT.md`; the deletions-win re-syncs in Phase C should have kept it consistent — confirm the merged default branch's `NEXT.md` carries every shipped issue's entry with no duplicate or resurrected lines.
+4. **Reconcile changelog/PLAN churn.** Parallel claims all touch the same changelog file, when the project has one; the deletions-win re-syncs in Phase C should have kept it consistent — confirm the merged default branch's changelog carries every shipped issue's entry with no duplicate or resurrected lines. Skip this check for a project whose release notes come from commit messages.
 5. **Print a summary table** — one row per batch issue, including the ones dropped in A1e and any held in a later wave: `issue · wave · PR · result (merged / open: why / yielded / skipped / held / needs-input) · review status`. For an explicit list, **account for every number the user named** — a named issue that never ran must appear with its reason, never be silently absent.
 
 ## Phase 1: Pick
@@ -373,27 +373,29 @@ Write the code, tests, and docs the item requires, following the **target repo's
 - **PLAN.md mode** — **remove the picked `- [ ]` line outright** (the changelog and git history are the audit trail; don't leave a checked `- [x]` behind unless the repo keeps items as a design log). If removing it empties a heading, leave the heading — section curation is `/do:replan`'s job.
 - **Issues mode** — **don't touch PLAN.md.** Close the issue via the PR: put `Closes #<num>` in the PR body (Phase 6) so merge auto-closes it.
 
-**Changelog (both modes).** Check for `.changelogs/` or `.changelog/` (whichever exists); if found, append a user-facing entry to its `NEXT.md`, creating `NEXT.md` with just a `# Unreleased Changes` title if absent. **Group the entry under a `##` heading named for the feature or capability it touches** (e.g. `## PR review loop`) — reuse an existing feature heading if one fits; do NOT use generic `## Added` / `## Changed` / `## Fixed` / `## Removed` buckets. Lead the bullet with the slug in brackets; write for a *user* of the app, not a coder inside it (no file paths, module/function names, test counts). The one exception: purely internal code-administration/organization work with no user-visible effect goes under a `## Internal` heading and may be described in code terms. If no changelog directory exists, skip this step.
+**Changelog (both modes).** Log the shipped work **the way this project already logs changes** — slashdo has no opinion about the format. Resolve the convention the same way `/do:push` does (stated convention in `CLAUDE.md` / `AGENT.md` / `AGENTS.md` / `CONTRIBUTING.md` first; otherwise imitate whatever changelog artifacts already exist — a rolling `CHANGELOG.md`, a per-release directory with an unreleased staging file, a fragment tool like `.changeset/` or `changelog.d/`; otherwise nothing). If the project has **no** file-based changelog — because its release notes are derived from commit messages — skip this step entirely: the PR title and commits carry the entry instead. Never invent a changelog file the project didn't ask for.
+
+Whatever the format: **lead the bullet with the slug in brackets** so the work stays grep-able, and write for a *user* of the app, not a coder inside it (no file paths, module/function names, test counts). Purely internal work with no user-visible effect is the exception and may be described in code terms. Match the existing entries' grouping; where there's no established shape yet, prefer a `##` heading named for the feature or capability touched (e.g. `## PR review loop`) over generic `Added`/`Changed`/`Fixed` buckets.
 
 ```markdown
 ## <Feature or capability name>
 - **[<slug>] <Short, user-facing title>** — <one sentence on the user-visible effect>
 ```
 
-Stage and commit:
+Stage and commit. `{CHANGELOG_FILE}` below is whatever file you actually wrote above — there may be none:
 
 ```bash
 # PLAN.md mode:
 git add PLAN.md
-git add .changelogs/NEXT.md 2>/dev/null || git add .changelog/NEXT.md 2>/dev/null || true
-git commit -m "docs([<slug>]): remove from PLAN.md and log to changelog"
+git add {CHANGELOG_FILE}   # omit entirely if the project has no file-based changelog
+git commit -m "docs([<slug>]): remove from PLAN.md and log the change"
 
-# Issues mode (no PLAN.md edit): commit ONLY if a changelog was actually staged.
-# A repo with no .changelogs/.changelog dir stages nothing here, and PLAN.md is
-# untouched in issue mode — so an unconditional `git commit` would exit non-zero
-# ("nothing to commit") and abort an otherwise-valid run. Guard with a staged check:
-git add .changelogs/NEXT.md 2>/dev/null || git add .changelog/NEXT.md 2>/dev/null || true
-git diff --cached --quiet || git commit -m "docs([issue-<num>]): log issue #<num> to changelog"
+# Issues mode (no PLAN.md edit): commit ONLY if something was actually staged.
+# A repo whose release notes come from commit messages stages nothing here, and
+# PLAN.md is untouched in issue mode — so an unconditional `git commit` would exit
+# non-zero ("nothing to commit") and abort an otherwise-valid run. Guard on staged:
+git add {CHANGELOG_FILE}   # omit entirely if there is none
+git diff --cached --quiet || git commit -m "docs([issue-<num>]): log issue #<num>"
 ```
 
 ## Phase 6: Review and ship — delegate to `/do:pr`

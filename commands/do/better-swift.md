@@ -188,7 +188,7 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 - Record `CURRENT_BRANCH` via `git rev-parse --abbrev-ref HEAD`
 - Record `DEFAULT_BRANCH` via `gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'` (or `glab` equivalent)
 - Record `IS_DIRTY` via `git status --porcelain`
-- Check for `.changelogs/` or `.changelog/` directory → `HAS_CHANGELOG`
+- Resolve how this project logs changes (stated convention in CLAUDE.md/AGENT.md/CONTRIBUTING.md first, else whatever changelog artifacts already exist — a rolling `CHANGELOG.md`, a per-release directory, a fragment tool, or nothing because the notes come from commit messages). Record the target as `CHANGELOG_TARGET` (empty when there is none) and `HAS_CHANGELOG` accordingly
 - Check for existing `../better-*` worktrees: `git worktree list`. If found, inform the user and ask whether to resume (use existing worktree) or clean up (remove it and start fresh)
 
 ### 0e: Known Gotchas Catalogue
@@ -982,7 +982,7 @@ Only if ALL category branches pass build on ALL platforms:
    git push
    ```
 
-4. If `HAS_CHANGELOG`, update changelog and include in the commit.
+4. If `HAS_CHANGELOG`, add an entry to `CHANGELOG_TARGET` in that project's established format and include it in the commit. Otherwise the commit message carries the change.
 
 ### 5c: Create PRs
 

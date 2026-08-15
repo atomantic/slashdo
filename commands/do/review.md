@@ -91,7 +91,7 @@ Pass whichever exists to the agents instead of (or in addition to) the local one
 Before dispatching agents, understand what this change set claims to do:
 
 1. Read commit messages (`git log {base}...HEAD --oneline`)
-2. Read PLAN.md, .changelog/NEXT.md (or equivalent), and the PR description for capability claims, test counts, and "deep-links to X" / "feature Y now works" assertions
+2. Read PLAN.md, the project's changelog (whatever form it takes, if any), and the PR description for capability claims, test counts, and "deep-links to X" / "feature Y now works" assertions
 3. Note the claims — verify after agents return whether the code actually delivers them. Concrete drift to flag:
    - Test counts in PLAN/changelog vs `find . -name '*.test.*' -exec grep -c '^\(it\|test\)(' {} +` (or project equivalent)
    - "Deep-links to record X" claims vs whether the destination route handler actually consumes the encoded parameter
