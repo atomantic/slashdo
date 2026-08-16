@@ -63,7 +63,7 @@ Aligned with [GOALS.md](./GOALS.md)'s Core Goals:
 |---|---|---|---|
 | FR-11 | The system MUST persist user-set defaults (e.g. `review-with`, `merge`, `autoUpdate`) to a per-environment config file and make them available to commands without the flag being re-specified each time. | Must | Setting `review-with` once via `/do:config` causes `/do:pr` to use it on a later run with no flag passed. |
 | FR-12 | Saved config MUST survive a filtered (single-command) uninstall — only a full uninstall or explicit reset clears it. | Must | Uninstalling just `push` leaves `.slashdo-config.json` intact. |
-| FR-13 | Config values MUST round-trip complex reviewer syntax verbatim (bracket groups, `~opt`, `~max=<n>`, `@login[bot]`). | Should | A saved `review-with` value with brackets and `~max=3` reads back identical to what was written. |
+| FR-13 | Config values MUST round-trip complex reviewer syntax verbatim (bracket groups, `~opt`, `~max=<n>`, `~effort=<level>`, `@login[bot]`). | Should | A saved `review-with` value with brackets, `~max=3`, and `~effort=max` reads back identical to what was written. |
 
 ### Self-Update
 

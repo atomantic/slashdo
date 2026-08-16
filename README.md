@@ -56,7 +56,34 @@ That's it. slashdo detects your installed AI coding environments and installs co
 
 ## Workflows
 
+> **Note on Command Syntax:** In the examples below, Claude Code syntax (`/do:<command>`) is shown. Syntax varies slightly by AI assistant:
+> - **Claude Code**: `/do:*` (e.g. `/do:plan-task`, `/do:next`, `/do:pr`)
+> - **Codex**: `$do-*` (e.g. `$do-plan-task`, `$do-next`, `$do-pr`)
+> - **Antigravity CLI (`agy`/`gemini`), OpenCode, Grok Build**: `/do-*` (e.g. `/do-plan-task`, `/do-next`, `/do-pr`)
+
 Real end-to-end examples of how the commands compose. Every flag shown here is optional — the bare command always works.
+
+### Typical Developer Loop: Plan → Implement → Custom Review PR
+
+A complete end-to-end workflow from idea to reviewed, merged PR:
+
+1. **Plan & file a decision-complete task:**
+   ```
+   /do:plan-task add a --json flag to the export command
+   ```
+   *Investigates the codebase, drafts a comprehensive issue with acceptance criteria, and files it in your tracker.*
+
+2. **Claim & implement the task in isolation:**
+   ```
+   /do:next --issues #123
+   ```
+   *Claims issue `#123`, implements the solution in an isolated git worktree, verifies tests, and opens a PR.*
+
+3. **Ship with custom multi-agent code reviews:**
+   ```
+   /do:pr --review-with=ollama[qwen2.5-coder:32b]~opt,codex[gpt-5.6-luna]~effort=max~opt --merge
+   ```
+   *Runs a local fast Ollama pass (`~opt` non-blocking) followed by a maximum-effort Codex pass (`~effort=max~opt`), automatically applying fixes and merging once CI passes.*
 
 ### Ship the work in your working tree
 
@@ -239,11 +266,13 @@ Reviewers run **in the order listed**, and whatever you list is exactly what run
 
 **Optional reviewers** (`~opt` suffix): the reviewer runs and its findings get fixed, but an *inconclusive* result (timeout / skipped / no verdict) is excluded from the merge gate, so it never blocks `--merge`. A hard error from it (broken build / failed tests) still blocks. Use it for a second-opinion reviewer that doesn't reliably return a verdict, such as a local Ollama model.
 
-**Per-reviewer iteration caps** (`~max=<n>` suffix): caps how many **review → fix → re-review cycles** that one reviewer runs. It is the per-entry form of `--review-iterations`, and unlike that flag it reaches every reviewer type — including `codex`/`agy`/`claude`/`grok` and `ollama`, whose caps are otherwise fixed at 3 — so a single run can budget each reviewer differently: `--review-with claude~max=2,ollama~max=1,codex~max=3`. `<n>` is a non-negative integer; `0` means "loop until clean", bounded by a 10-iteration safety guardrail. A reviewer that stops because it spent a cap *you* set reports `capped`, which counts as clean for the merge gate — as opposed to `guardrail`, which is what a *built-in* cap reports when it cuts off a reviewer that was still finding real problems, and which blocks the merge.
+**Per-reviewer iteration caps** (`~max=<n>` suffix): caps how many **review → fix → re-review cycles** that one reviewer runs. It is the per-entry form of `--review-iterations`, and unlike that flag it reaches every reviewer type — including `codex`/`agy`/`claude`/`grok` and `ollama`, whose caps are otherwise fixed at 3 — so a single run can budget each reviewer separately: `--review-with claude~max=2,ollama~max=1,codex~max=3`. `<n>` is a non-negative integer; `0` means "loop until clean", bounded by a 10-iteration safety guardrail. A reviewer that stops because it spent a cap *you* set reports `capped`, which counts as clean for the merge gate — as opposed to `guardrail`, which is what a *built-in* cap reports when it cuts off a reviewer that was still finding real problems, and which blocks the merge.
+
+**Per-reviewer reasoning effort** (`~effort=<level>` suffix): specifies the reasoning effort level (`low`, `medium`, `high`, `xhigh`, `max`) for that reviewer: `--review-with codex[gpt-5.6-luna]~effort=max~opt`, `--review-with claude~effort=high~max=2`.
 
 `~max` applies in `series` mode (the default). In `--review-mode parallel` each reviewer runs a single review-only pass and the orchestrator applies the union once, so there are no per-reviewer cycles to cap — `~max` is ignored there with a warning.
 
-Both suffixes chain in either order and are shell-safe: `ollama[qwen2.5-coder:32b]~opt~max=1`. Neither affects reviewer identity, so `ollama~max=2` and `ollama` still dedupe to one pass. Both also ride through `/do:config` saved defaults.
+All three suffixes chain in any order and are shell-safe: `codex[gpt-5.6-luna]~effort=max~opt~max=1`. None affects reviewer identity, so `ollama~effort=high` and `ollama` still dedupe to one pass. All ride through `/do:config` saved defaults.
 
 ### Loop flags
 
@@ -385,13 +414,15 @@ Defaults are stored per host CLI (the one you run `/do:config` in) under a `defa
 
 ## Supported Environments
 
-```
-  Claude Code      ~/.claude/commands/do/             YAML frontmatter + subdirectories
-  OpenCode         ~/.config/opencode/commands/       YAML frontmatter + flat naming
-  Antigravity CLI  ~/.gemini/antigravity-cli/skills/  Agent Skills (SKILL.md) — aliases: gemini, agy
-  Codex            ~/.codex/skills/                   SKILL.md per-command directories
-  Grok Build       ~/.grok/skills/                    SKILL.md per-command directories
-```
+Each environment formats commands appropriately for its host assistant:
+
+| Assistant / Environment | Invocation Syntax | Installed Path | Format |
+|:---|:---|:---|:---|
+| **Claude Code** | `/do:<command>` (e.g. `/do:plan-task`, `/do:pr`) | `~/.claude/commands/do/` | YAML frontmatter + subdirectories |
+| **Codex** | `$do-<command>` (e.g. `$do-plan-task`, `$do-pr`) | `~/.codex/skills/` | SKILL.md per-command directories |
+| **Antigravity CLI** (`agy`/`gemini`) | `/do-<command>` (e.g. `/do-plan-task`, `/do-pr`) | `~/.gemini/antigravity-cli/skills/` | Agent Skills (SKILL.md) |
+| **OpenCode** | `/do-<command>` (e.g. `/do-plan-task`, `/do-pr`) | `~/.config/opencode/commands/` | YAML frontmatter + flat naming |
+| **Grok Build** | `/do-<command>` (e.g. `/do-plan-task`, `/do-pr`) | `~/.grok/skills/` | SKILL.md per-command directories |
 
 slashdo auto-detects which environments you have installed. Or specify manually:
 
