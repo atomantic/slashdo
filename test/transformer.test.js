@@ -348,6 +348,33 @@ describe('inlineLibReferences', () => {
       assert.ok(!DANGLING_SIBLING_LINK.test(result), 'no dangling sibling link target remains');
     });
   });
+
+  // Sibling links make a MUTUAL citation natural — plan-issue-mode.md points at
+  // model-tiers.md for the resolution rules, and model-tiers.md points back for the
+  // label semantics. The appendix drain must terminate on that cycle and emit each
+  // lib exactly once; a regression here hangs the installer rather than failing it.
+  it('terminates on a bidirectional sibling-link cycle, appending each lib once', () => {
+    withLibs({
+      'a.md': 'A body. See [b.md](./b.md).',
+      'b.md': 'B body. See [a.md](./a.md).',
+    }, (dir) => {
+      const result = inlineLibReferences('Start at [a.md](./a.md).', dir);
+      assert.equal(result.match(/### a\b/g).length, 1, 'a appended exactly once');
+      assert.equal(result.match(/### b\b/g).length, 1, 'b appended exactly once');
+      assert.equal(result.match(/A body\./g).length, 1, 'a content not duplicated');
+      assert.equal(result.match(/B body\./g).length, 1, 'b content not duplicated');
+      assert.ok(!DANGLING_SIBLING_LINK.test(result), 'both directions of the cycle resolved');
+    });
+  });
+
+  // The real repo pair, guarding the shipped citation cycle rather than a synthetic one.
+  it('terminates on the real plan-issue-mode <-> model-tiers citation cycle', () => {
+    const repoLibs = path.join(__dirname, '..', 'lib');
+    const result = inlineLibReferences('See [plan-issue-mode.md](../../lib/plan-issue-mode.md).', repoLibs);
+    assert.equal(result.match(/### plan-issue-mode/g).length, 1, 'plan-issue-mode appended once');
+    assert.equal(result.match(/### model-tiers/g).length, 1, 'model-tiers appended once');
+    assert.ok(!DANGLING_SIBLING_LINK.test(result), 'no dangling sibling link in either lib');
+  });
 });
 
 // ── getTargetFilename ───────────────────────────────────────────────
