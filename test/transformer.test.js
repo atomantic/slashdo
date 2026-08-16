@@ -367,6 +367,35 @@ describe('inlineLibReferences', () => {
     });
   });
 
+  // The sibling-link guard resolves `./<name>.md` by BASENAME against lib/, not by
+  // resolving the link relative to the file that wrote it. That is unambiguous only
+  // while no command shares a basename with a lib — otherwise a command's link to
+  // its own sibling would be rewritten into a lib citation and an unrelated lib
+  // appended. Assert the invariant so the ambiguity fails CI instead of silently
+  // mis-rewriting; a future name collision must either be renamed or the guard
+  // taught to resolve paths relative to the citing file.
+  it('keeps commands/do and lib basenames disjoint (sibling-link guard invariant)', () => {
+    const cmdDir = path.join(__dirname, '..', 'commands', 'do');
+    const libDir = path.join(__dirname, '..', 'lib');
+    const names = (d) => new Set(fs.readdirSync(d).filter((f) => f.endsWith('.md')));
+    const cmds = names(cmdDir);
+    const collisions = [...names(libDir)].filter((n) => cmds.has(n));
+    assert.deepEqual(collisions, [], `basename collision between commands/do and lib: ${collisions.join(', ')}`);
+  });
+
+  it('has no command sibling-link that collides with a lib basename', () => {
+    const cmdDir = path.join(__dirname, '..', 'commands', 'do');
+    const libDir = path.join(__dirname, '..', 'lib');
+    const offenders = [];
+    for (const f of fs.readdirSync(cmdDir).filter((n) => n.endsWith('.md'))) {
+      const body = fs.readFileSync(path.join(cmdDir, f), 'utf8');
+      for (const m of body.matchAll(/\]\(\.\/([A-Za-z0-9._-]+\.md)\)/g)) {
+        if (fs.existsSync(path.join(libDir, m[1]))) offenders.push(`${f} -> ./${m[1]}`);
+      }
+    }
+    assert.deepEqual(offenders, [], `command sibling-link shadowed by a lib file: ${offenders.join(', ')}`);
+  });
+
   // The real repo pair, guarding the shipped citation cycle rather than a synthetic one.
   it('terminates on the real plan-issue-mode <-> model-tiers citation cycle', () => {
     const repoLibs = path.join(__dirname, '..', 'lib');
