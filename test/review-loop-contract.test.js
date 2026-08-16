@@ -93,6 +93,20 @@ describe('review-loop parse contracts', () => {
     }
   });
 
+  it('threads the per-reviewer ~effort level through to the loops that honor it', () => {
+    const wrapper = readLib('multi-reviewer-loop.md');
+    assert.match(wrapper, /~effort=<level>/);
+    assert.match(wrapper, /ENTRY_EFFORT/);
+    assert.match(wrapper, /REVIEW_EFFORT/);
+
+    const localAgent = readLib('local-agent-review-loop.md');
+    assert.match(localAgent, /REVIEW_EFFORT/);
+    assert.match(localAgent, /EFFORT_FLAG/);
+
+    const ollama = readLib('ollama-review-loop.md');
+    assert.match(ollama, /OLLAMA_EFFORT/);
+  });
+
   it('lets ~opt excuse no-verdict and lets capped satisfy partial', () => {
     // Two ways a new status gets stranded: added to a loop's status set but not to
     // the aggregate rules that consume it. A ~opt no-verdict must reach the

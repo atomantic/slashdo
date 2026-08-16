@@ -25,6 +25,7 @@ When to use this:
 5. Record `{REVIEWER_APPLIES}` — boolean, defaults to `false`. Set to `true` when the orchestrating command was invoked with `--reviewer-applies`. This flag selects which side of the loop holds the editor: when `false` (default), the orchestrator applies fixes from the CLI's findings log; when `true`, the headless CLI applies fixes directly in the working tree and the orchestrator only verifies.
 6. Record `{REVIEW_MODEL}` — the model to run this reviewer on, resolved by the caller (the multi-reviewer loop: explicit `<agent>[<model>]` bracket → saved `review-models[slug]` default → empty). **May be empty**, which means "use the reviewer's built-in default" — for `codex`/`claude`/`grok` that is the CLI's own default model (no `--model` flag passed); for `agy` it is the pinned `AGY_REVIEW_MODEL` default resolved below. When set, it is passed through to the reviewer's invocation (`codex --model`, `claude --model` / the in-process `Agent` tool's `model`, `agy --model`, or `grok --model`) so a run/config can pin which model reviews. The value is free-form (model names churn and may contain spaces/parens, e.g. `Gemini 3.5 Flash (High)`) — do not validate it against an allowlist; pass it verbatim.
 7. Record `{MAX_ITERATIONS}` — how many review → fix → re-review cycles this reviewer may run, resolved by the caller (the multi-reviewer loop: a per-entry `~max=<n>` suffix on the `--review-with` token → this loop's built-in default of `3`). **Defaults to `3`** when the caller passes nothing, which is the historical behavior. `0` means **unlimited** — loop until the reviewer is clean or the convergence gate converges, bounded by the 10-iteration safety guardrail in Step 6. Also record `{MAX_EXPLICIT}` — boolean, `true` only when the cap came from a `~max=<n>` the user typed (or saved), `false` when it is this loop's built-in `3`. Step 6 uses it to decide whether exhausting the cap is `capped` (a budget the user chose — clean-equivalent for the merge gate) or `guardrail` (a built-in ceiling nobody vouched for — inconclusive). Note the `--review-iterations` flag never reaches this loop; `~max` is the only way to move this cap.
+8. Record `{REVIEW_EFFORT}` — optional reasoning effort string for this reviewer (`low`, `medium`, `high`, `xhigh`, `max`), resolved by the caller (the multi-reviewer loop: explicit `~effort=<level>` suffix on the `--review-with` token → empty). **Defaults to empty** when unset. When set, it is appended as advisory reasoning effort to the prompt preamble and passed as `--effort` where supported.
 
 ### Editing mode
 
@@ -54,6 +55,7 @@ REVIEW_TITLE=$(git log -1 --format=%s HEAD)   # subject of HEAD commit; falls ba
 # Shared review task. The "do NOT dispatch/spawn sub-agents" clause is load-bearing:
 # it is what keeps the review a single synchronous agent the print-mode CLI can wait on.
 REVIEW_TASK="Review the code changes on the current branch against the base branch '$BASE_BRANCH'. Do the review YOURSELF in this single session — do NOT dispatch, spawn, or delegate to sub-agents or background tasks (a fanned-out review never re-syncs into print/headless output and the run will time out with no findings). Run \`git diff $BASE_BRANCH...HEAD --stat\` then \`git diff $BASE_BRANCH...HEAD\`, read each changed file in full for context, and review for correctness bugs, security issues, broken producer/consumer contracts, resource leaks, and missing test coverage. The project's linter, type-checker, and test suite already run separately — do NOT spend effort on syntax, lint, formatting, import order, or build errors; they are covered. Report only logic issues found by reasoning about behavior, each tied to a concrete wrong outcome — not style preferences, renames, or 'extract a helper' suggestions."
+[ -n "$REVIEW_EFFORT" ] && REVIEW_TASK="$REVIEW_TASK Target reasoning effort level: $REVIEW_EFFORT."
 
 if [ "$REVIEWER_APPLIES" = "true" ]; then
   LOCAL_PROMPT="$REVIEW_TASK
@@ -77,6 +79,7 @@ fi
 # Codex-only prompt for REVIEWER_APPLIES=true (codex exec invocation —
 # codex doesn't have slashdo installed, so describe the task directly).
 CODEX_APPLY_PROMPT="Review the diff from $BASE_BRANCH to HEAD in this repo for logic issues (correctness, security, test coverage, contract drift). The linter, type-checker, and test suite already run separately — do NOT spend effort on syntax, lint, formatting, or build errors, and do NOT raise style/rename/extract-a-helper suggestions; report only behavior bugs you can tie to a concrete wrong outcome. For each finding, apply the fix in the working tree, then run \`$BUILD_CMD\` (skip if empty) and \`$TEST_CMD\` to verify, and commit each fix with message 'address review (codex): <summary>'. Do not introduce changes beyond the scope of fixing the findings. Do not skip tests or weaken assertions."
+[ -n "$REVIEW_EFFORT" ] && CODEX_APPLY_PROMPT="$CODEX_APPLY_PROMPT Target reasoning effort level: $REVIEW_EFFORT."
 
 # Resolve the timeout wrapper used by the step-2 invocation
 # (`${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION}`).
@@ -106,6 +109,8 @@ elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_CMD=(gtimeout 1800); fi
 # (built-in default), so its flag is never empty.
 MODEL_FLAG=()
 [ -n "$REVIEW_MODEL" ] && MODEL_FLAG=(--model "$REVIEW_MODEL")
+EFFORT_FLAG=()
+[ -n "$REVIEW_EFFORT" ] && EFFORT_FLAG=(--effort "$REVIEW_EFFORT")
 
 # agy only: pin the review model. A per-run/config model wins via {REVIEW_MODEL}
 # (the `agy[<model>]` bracket or a saved `review-models` default), then the

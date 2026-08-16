@@ -185,4 +185,21 @@ describe('writeConfig', () => {
     assert.equal(readConfig(file).defaults['review-iterations'], 1);
     fs.rmSync(dir, { recursive: true });
   });
+
+  it('round-trips a review-with with per-reviewer reasoning effort (~effort=<level>) unchanged', () => {
+    const { dir, file } = tmpFile();
+    const cfg = {
+      defaults: {
+        'review-with':
+          'codex[gpt-5.6-luna]~effort=max~opt,claude~effort=high~max=2,ollama[qwen2.5-coder:32b]~opt~max=1~effort=low',
+      },
+    };
+    writeConfig(file, cfg);
+    assert.deepEqual(readConfig(file), cfg);
+    assert.equal(
+      readConfig(file).defaults['review-with'],
+      'codex[gpt-5.6-luna]~effort=max~opt,claude~effort=high~max=2,ollama[qwen2.5-coder:32b]~opt~max=1~effort=low',
+    );
+    fs.rmSync(dir, { recursive: true });
+  });
 });
