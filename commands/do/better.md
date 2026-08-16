@@ -35,7 +35,7 @@ After parsing the review flags above, apply any **saved defaults** (set via `/do
 
 ### Default Mode (autonomous)
 
-Use the **Balanced** model profile automatically (`AUDIT_MODEL=sonnet`, `REMEDIATION_MODEL=sonnet`).
+Use the **Balanced** model profile automatically (`AUDIT_MODEL_TIER=medium`, `REMEDIATION_MODEL_TIER=medium`).
 
 ### Interactive Mode (`--interactive`)
 
@@ -48,30 +48,29 @@ AskUserQuestion([
     header: "Model",
     multiSelect: false,
     options: [
-      { label: "Quality", description: "Opus for all agents — fewest false positives, best fixes (highest cost, 8+ Opus agents)" },
-      { label: "Balanced (Recommended)", description: "Sonnet for audit and remediation — good quality at moderate cost" },
-      { label: "Budget", description: "Haiku for audit, Sonnet for remediation — fastest and cheapest" }
+      { label: "Quality", description: "Strongest model for all agents — fewest false positives, best fixes (highest cost, 8+ heavy agents)" },
+      { label: "Balanced (Recommended)", description: "Workhorse model for audit and remediation — good quality at moderate cost" },
+      { label: "Budget", description: "Cheapest model for audit, workhorse for remediation — fastest and cheapest" }
     ]
   }
 ])
 ```
 
-Record the selection as `MODEL_PROFILE` and derive agent models from this table:
+Record the selection as `MODEL_PROFILE` and derive two **tiers** from this table:
 
 | Agent Role | Quality | Balanced | Budget |
 |------------|---------|----------|--------|
-| Audit agents (8–10 Explore agents, Phase 1) | opus | sonnet | haiku |
-| Remediation agents (general-purpose, Phase 3) | opus | sonnet | sonnet |
+| Audit agents (8–10 Explore agents, Phase 1) | `heavy` | `medium` | `light` |
+| Remediation agents (general-purpose, Phase 3) | `heavy` | `medium` | `medium` |
 
-Derive two variables:
-- `AUDIT_MODEL`: `opus` / `sonnet` / `haiku` based on profile
-- `REMEDIATION_MODEL`: `opus` / `sonnet` / `sonnet` based on profile
+- `AUDIT_MODEL_TIER`: `heavy` / `medium` / `light` based on profile
+- `REMEDIATION_MODEL_TIER`: `heavy` / `medium` / `medium` based on profile
 
-When the resolved model is `opus`, **omit** the `model` parameter on the Agent/Task call so the agent inherits the session's Opus version. This avoids version conflicts when organizations pin specific Opus versions.
+**These are tiers, not model names — resolve each against the host you're running on**, per [lib/model-tiers.md](../../lib/model-tiers.md). In particular `heavy` means **omit** the `model` parameter on the Agent/Task call so the agent inherits the session's model, rather than pinning a slug that would fight an org's pinned version and go stale. A host that can't set a per-agent model runs everything at the session default — state it and continue.
 
 ### Model Profile Rationale
 
-Opus reduces false positives in audit (judgment-heavy). Sonnet is the floor for code-writing agents (remediation). Haiku works for fast first-pass pattern scanning but may produce more false positives — remediation agents (Sonnet+) validate before fixing.
+A `heavy` model reduces false positives in audit (judgment-heavy). `medium` is the **floor for code-writing agents** (remediation) — never drop remediation to `light`, which is why the Budget profile keeps remediation at `medium`. `light` works for fast first-pass pattern scanning but produces more false positives; the `medium`+ remediation agents validate each finding before fixing.
 
 ## Simplify-Only Mode (`--simplify-only`)
 
@@ -260,7 +259,7 @@ Skip step 4 if steps 1-3 reveal the code is correct.
 
 ### Batch 1 (5 parallel Explore agents via Task tool):
 
-**Model**: Pass `AUDIT_MODEL` as the `model` parameter on each agent. If `AUDIT_MODEL` is `opus`, omit the parameter to inherit from session.
+**Model**: Resolve `AUDIT_MODEL_TIER` to this host's model per [lib/model-tiers.md](../../lib/model-tiers.md) and pass it as the `model` parameter on each agent. If `AUDIT_MODEL_TIER` is `heavy`, omit the parameter to inherit from session.
 
 1. **Security & Secrets**
    Sources: authentication checks, credential exposure, infrastructure security, input validation, dependency health
@@ -290,7 +289,7 @@ Skip step 4 if steps 1-3 reveal the code is correct.
 
 ### Batch 2 (3–5 agents after Batch 1 completes):
 
-**Model**: Same `AUDIT_MODEL` as Batch 1.
+**Model**: Same `AUDIT_MODEL_TIER` as Batch 1.
 
 6. **Stack-Specific**
    Dynamically focus based on `PROJECT_TYPE` detected in Phase 0:
@@ -552,9 +551,9 @@ Remediation runs in parallel, one worker per category that has CRITICAL, HIGH, o
 <!-- if:teams -->
 1. Use `TeamCreate` with name `better-{DATE}`.
 2. Use `TaskCreate` for each category above that has actionable findings.
-3. Spawn up to 5 general-purpose agents as teammates. **Pass `REMEDIATION_MODEL` as the `model` parameter on each agent.** If `REMEDIATION_MODEL` is `opus`, omit the parameter to inherit from session. Each teammate marks its task complete via `TaskUpdate` when done.
+3. Spawn up to 5 general-purpose agents as teammates. **Resolve `REMEDIATION_MODEL_TIER` to this host's model per [lib/model-tiers.md](../../lib/model-tiers.md) and pass it as the `model` parameter on each agent.** If `REMEDIATION_MODEL_TIER` is `heavy`, omit the parameter to inherit from session. Each teammate marks its task complete via `TaskUpdate` when done.
 <!-- else -->
-1. Spawn up to 5 general-purpose `Agent` sub-agents — one per category above that has actionable findings. **Pass `REMEDIATION_MODEL` as the `model` parameter on each `Agent` call.** If `REMEDIATION_MODEL` is `opus`, omit the parameter to inherit from session.
+1. Spawn up to 5 general-purpose `Agent` sub-agents — one per category above that has actionable findings. **Resolve `REMEDIATION_MODEL_TIER` to this host's model per [lib/model-tiers.md](../../lib/model-tiers.md) and pass it as the `model` parameter on each `Agent` call.** If `REMEDIATION_MODEL_TIER` is `heavy`, omit the parameter to inherit from session.
 2. Launch all `Agent` calls **in parallel** (multiple tool calls in a single response) and wait for all to return. Each sub-agent returns its results directly — no task board or shutdown step is needed.
 <!-- /if:teams -->
 
@@ -681,7 +680,7 @@ Additionally, scan all remediation changes from Phase 3:
 
 ### 4c.2: Test Enhancement Execution
 
-Spawn a general-purpose agent (using `REMEDIATION_MODEL`) in the worktree to fix and write tests. Populate the template placeholders below from Phase 4c.1 triage output: `{VACUOUS_AND_WEAK_FINDINGS}` from `[VACUOUS]`/`[WEAK]` findings, `{MISSING_FINDINGS}` from `[MISSING]` findings, and `{REMEDIATED_FILES_WITHOUT_TESTS}` from the remediation-change scan. The agent instructions:
+Spawn a general-purpose agent (using `REMEDIATION_MODEL_TIER`) in the worktree to fix and write tests. Populate the template placeholders below from Phase 4c.1 triage output: `{VACUOUS_AND_WEAK_FINDINGS}` from `[VACUOUS]`/`[WEAK]` findings, `{MISSING_FINDINGS}` from `[MISSING]` findings, and `{REMEDIATED_FILES_WITHOUT_TESTS}` from the remediation-change scan. The agent instructions:
 
 ```
 You are a test enhancement agent working in {WORKTREE_DIR}.

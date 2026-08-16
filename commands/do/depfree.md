@@ -37,7 +37,7 @@ Set `HEAVY_MODE` to `true` if `--heavy` was passed, `false` otherwise.
 
 ### Default Mode (autonomous)
 
-Use the **Balanced** model profile automatically (`AUDIT_MODEL=sonnet`, `REMEDIATION_MODEL=sonnet`).
+Use the **Balanced** model profile automatically (`AUDIT_MODEL_TIER=medium`, `REMEDIATION_MODEL_TIER=medium`).
 
 ### Interactive Mode (`--interactive`)
 
@@ -49,18 +49,20 @@ AskUserQuestion([{
   header: "Model",
   multiSelect: false,
   options: [
-    { label: "Quality", description: "Opus for all agents — fewest false positives, best replacements (highest cost)" },
-    { label: "Balanced (Recommended)", description: "Sonnet for audit and remediation — good quality at moderate cost" },
-    { label: "Budget", description: "Haiku for audit, Sonnet for remediation — fastest and cheapest" }
+    { label: "Quality", description: "Strongest model for all agents — fewest false positives, best replacements (highest cost)" },
+    { label: "Balanced (Recommended)", description: "Workhorse model for audit and remediation — good quality at moderate cost" },
+    { label: "Budget", description: "Cheapest model for audit, workhorse for remediation — fastest and cheapest" }
   ]
 }])
 ```
 
-Record the selection as `MODEL_PROFILE` and derive:
-- `AUDIT_MODEL`: `opus` / `sonnet` / `haiku` based on profile
-- `REMEDIATION_MODEL`: `opus` / `sonnet` / `sonnet` based on profile
+Record the selection as `MODEL_PROFILE` and derive two **tiers**:
+- `AUDIT_MODEL_TIER`: `heavy` / `medium` / `light` based on profile
+- `REMEDIATION_MODEL_TIER`: `heavy` / `medium` / `medium` based on profile
 
-When the resolved model is `opus`, **omit** the `model` parameter on the Agent call so the agent inherits the session's Opus version.
+**These are tiers, not model names — resolve each against the host you're running on**, per [lib/model-tiers.md](../../lib/model-tiers.md). In particular `heavy` means **omit** the `model` parameter on the Agent call so the agent inherits the session's model, rather than pinning a slug that would fight an org's pinned version and go stale. A host that can't set a per-agent model runs everything at the session default — state it and continue.
+
+> **Three unrelated things in this command are called "tier" or "heavy" — keep them apart.** `AUDIT_MODEL_TIER`/`REMEDIATION_MODEL_TIER` (`light`/`medium`/`heavy`) select **which model an agent runs on**. The dependency **Tier 1/2/3** classification (Phase 1b) rates **how replaceable a package is**. And `HEAVY_MODE` (`--heavy`) sets **how aggressive the removal bar is**. They are independent: `--heavy` does *not* raise the model tier, and a Tier 1 dependency has nothing to do with a `heavy` model.
 
 ## Heavy Mode (`--heavy`)
 
@@ -258,7 +260,7 @@ Record the full classification as `DEPENDENCY_MAP`.
 
 ### 1c: Usage Analysis (Tier 2 & 3 only)
 
-Skip any dependency with `from_prior: true` (carried forward from Phase 1b). For all remaining Tier 2 and Tier 3 dependencies, launch parallel Explore agents (using `AUDIT_MODEL`) to determine actual usage:
+Skip any dependency with `from_prior: true` (carried forward from Phase 1b). For all remaining Tier 2 and Tier 3 dependencies, launch parallel Explore agents (using `AUDIT_MODEL_TIER`) to determine actual usage:
 
 Each agent should:
 1. Search all source files for imports/requires of the package
@@ -414,7 +416,7 @@ If "Review individually": present each dependency with REMOVE/KEEP options, then
 
 ### 3b: Write Replacement Code
 
-For each dependency to remove, spawn a general-purpose agent (using `REMEDIATION_MODEL`) with these instructions:
+For each dependency to remove, spawn a general-purpose agent (using `REMEDIATION_MODEL_TIER`) with these instructions:
 
 ```
 <context>

@@ -101,9 +101,9 @@ Before dispatching agents, understand what this change set claims to do:
 
 ## Dispatch Review Agents
 
-Read the agent instruction files, then spawn agents **in parallel** using the Agent tool with `model: "opus"`. Each agent reviews ALL changed files independently.
+Read the agent instruction files, then spawn agents **in parallel** using the Agent tool at the **`heavy` tier** — i.e. omit the `model` parameter so each agent inherits the session's model rather than being pinned to a slug that would go stale or name a model this host doesn't have (see [lib/model-tiers.md](../../lib/model-tiers.md)). Review is judgment-heavy; don't downgrade it. Each agent reviews ALL changed files independently.
 
-**The agents are deliberately short and principle-led.** Each agent's checklist is a prompt for attention — opus's job is to think about the problem space, not pattern-match against bullets. The most expensive misses in past reviews were *consequence-reasoning* bugs (a fallback path producing a different shape than the happy path; an encoder corrupting a downstream parser; a test asserting a symptom instead of the contract) — none findable by adding more bullets. Trust the agent to reason; the checklist seeds the lens, not the conclusions.
+**The agents are deliberately short and principle-led.** Each agent's checklist is a prompt for attention — the reviewing agent's job is to think about the problem space, not pattern-match against bullets. The most expensive misses in past reviews were *consequence-reasoning* bugs (a fallback path producing a different shape than the happy path; an encoder corrupting a downstream parser; a test asserting a symptom instead of the contract) — none findable by adding more bullets. Trust the agent to reason; the checklist seeds the lens, not the conclusions.
 
 Always dispatch agents 1–5. Dispatch agent 6 only when `STRICT_MODE=true`.
 

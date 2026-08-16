@@ -36,7 +36,7 @@ LIBS=(
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
   gh-host github-reviewer-loop graphql-escaping
-  local-agent-review-loop multi-reviewer-loop ollama-review-loop
+  local-agent-review-loop model-tiers multi-reviewer-loop ollama-review-loop
   per-finding-root-cause plan-id-format plan-issue-mode
   post-review-doc-recommendations remediation-agent-template
   review-config-defaults review-convergence-gate

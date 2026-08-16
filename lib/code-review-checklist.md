@@ -5,7 +5,7 @@
   watches for. The per-agent instruction files (review-surface-scan.md,
   review-surface-quality.md, review-security-audit.md, review-cross-file-
   tracing.md, review-cross-file-contract.md) are focused extracts that
-  prime opus's attention during the actual review.
+  prime the reviewing agent's attention during the actual review.
 
   Use this file to learn the system. Update agent files for runtime impact.
 
