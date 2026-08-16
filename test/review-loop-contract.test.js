@@ -102,9 +102,11 @@ describe('review-loop parse contracts', () => {
     const localAgent = readLib('local-agent-review-loop.md');
     assert.match(localAgent, /REVIEW_EFFORT/);
     assert.match(localAgent, /EFFORT_FLAG/);
+    assert.match(localAgent, /\$\{EFFORT_FLAG\[@\]\+"\$\{EFFORT_FLAG\[@\]\}"\}/);
 
     const ollama = readLib('ollama-review-loop.md');
     assert.match(ollama, /OLLAMA_EFFORT/);
+    assert.match(ollama, /PROMPT="\$PROMPT Target reasoning effort level: \$OLLAMA_EFFORT\."/);
   });
 
   it('lets ~opt excuse no-verdict and lets capped satisfy partial', () => {

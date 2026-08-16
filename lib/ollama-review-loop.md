@@ -119,6 +119,7 @@ If the diff has no logic issues worth raising, return {\"findings\": []}.
 
 --- DIFF ---
 $FILE_DIFF"
+   [ -n "$OLLAMA_EFFORT" ] && PROMPT="$PROMPT Target reasoning effort level: $OLLAMA_EFFORT."
    RESP=$(printf '%s' "$PROMPT" | ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} ollama run ${OLLAMA_FLAGS[@]+"${OLLAMA_FLAGS[@]}"} "$OLLAMA_MODEL" 2>> "$ERR_FILE")
    RC=$?
    printf '\n===== FILE: %s =====\n%s\n' "$F" "$RESP" >> "$LOG_FILE"
