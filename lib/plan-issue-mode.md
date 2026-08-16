@@ -108,6 +108,8 @@ above as **repeated `--label <name>`** flags (one per label):
   `ux`, `structural`, `cognitive-load`). This replaces the `[dry]`-style title prefix.
 - **Severity** — when the finding carries one: `severity:critical`, `severity:high`,
   `severity:medium`, or `severity:low`. This replaces the `[LOW]`-style title prefix.
+- **Dispatch hint** — two *optional*, independent labels recommending **how to run
+  the work**. See "The dispatch hint" below for what they mean and when to apply one.
 
 **Create each label if missing, immediately before applying it** (idempotent —
 the `|| true` swallows "already exists"):
@@ -120,7 +122,8 @@ glab label create --name <name> --color "#<hex>" 2>/dev/null || true
 ```
 
 Use these severity colors so the tags read at a glance; category labels share one
-neutral color:
+neutral color, and each dispatch-hint axis gets its own ramp so the two never read
+as one scale:
 
 | Label             | Color hex |
 |-------------------|-----------|
@@ -129,9 +132,64 @@ neutral color:
 | `severity:medium`   | `FBCA04` |
 | `severity:low`      | `0E8A16` |
 | any category label  | `0366D6` |
+| `model:light`       | `D4C5F9` |
+| `model:medium`      | `A371F7` |
+| `model:heavy`       | `6F42C1` |
+| `effort:low`        | `BFE5E5` |
+| `effort:medium`     | `76C7C7` |
+| `effort:high`       | `1D7874` |
+| `effort:xhigh`      | `0E4F4C` |
+| `effort:max`        | `05403D` |
 
 Reused (deduped) issues keep whatever labels they already have — don't re-label an
 existing issue unless the new finding genuinely changes its category or severity.
 
 Everything else about the command is unchanged: in issue mode it simply files
 labeled issues wherever it would have written `PLAN.md` lines.
+
+## The dispatch hint (`model:` + `effort:`)
+
+Two optional labels that record **how to run the work**, not how big it is. They are
+a recommendation to whoever (or whatever) claims the issue — not a size estimate, not
+a priority, and never a gate.
+
+- **`model:light` / `model:medium` / `model:heavy`** — the **capability tier** the
+  task needs. `light` is mechanical: a rename, a config bump, a doc fix, a port of an
+  established pattern. `heavy` is genuinely hard reasoning: a concurrency bug, an API
+  redesign, anything where the first plausible answer is usually wrong.
+- **`effort:low` / `effort:medium` / `effort:high` / `effort:xhigh` / `effort:max`** —
+  the **reasoning budget** per step. High when the work is wide, fiddly, or easy to
+  get subtly wrong, independent of how hard the underlying thinking is.
+
+**The two axes are independent, and the off-diagonal combinations are the point.**
+`model:light` + `effort:max` is the right hint for a mechanical change across forty
+call sites — no insight required, plenty of chances to miss one. `model:heavy` +
+`effort:low` fits a two-line change that hinges on one good idea. A hint that always
+moves both axes together is a size estimate wearing a costume.
+
+**Tier names, not model names — the label is host-neutral.** A concrete slug like
+`opus` or `gpt-5` is wrong on two independent time scales: it ages out while the
+issues outlive it, and it is meaningless to the *other* CLIs that read the same
+tracker. slashdo runs under Claude Code, OpenCode, Antigravity, Codex, and Grok
+Build, against local Ollama models too — an issue filed from one is routinely claimed
+from another, and none of them share a model namespace. So the label records **only
+the tier**, and the consumer resolves it against its own host's lineup at dispatch
+time, per [model-tiers.md](./model-tiers.md) — the same tier vocabulary `/do:better`,
+`/do:depfree`, `/do:review`, and `/do:rpr` use for their own agents. Read that file
+for the resolution rules, including why `heavy` means "inherit the session's model"
+rather than a pinned slug, and how a host with a coarser effort scale clamps.
+
+**Applying one is optional; an unlabeled issue is normal** and stays fully claimable.
+Only apply a hint you can justify from the work you actually investigated — a
+reflexive `model:medium` + `effort:medium` on everything is noise that makes the real
+signals unreadable. Prefer leaving an axis off to guessing it.
+
+**Not to be confused with `/do:config --review-models`**, which pins the model each
+*reviewer* runs on. The dispatch hint is about the *implementer*.
+
+**Consumer:** `/do:next` reads both — its `--model` / `--effort` flags filter the
+queue by them, and in `--swarm` mode it uses the claimed issue's labels to pick each
+worker agent's model and effort. **Filtering works on every host** (it is label
+matching, nothing more); dispatch degrades to a report on a host that can't spawn
+sub-agents or can't set their model, which costs nothing — the labels stay accurate
+for the next reader.

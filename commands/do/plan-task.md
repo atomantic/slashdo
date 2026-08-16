@@ -1,6 +1,6 @@
 ---
 description: Plan a task by investigating the codebase, then file a robust, decision-complete issue in the repo's tracker — GitHub (gh) or GitLab (glab), auto-detected from the git remote (custom/Enterprise hosts included). Drafts the issue and shows it for approval before creating; pass --yes to skip the gate.
-argument-hint: "[<task description>] [--yes|-y] [--label <name>] [--enhance-with <list>] [--no-dedup] [--dry-run]"
+argument-hint: "[<task description>] [--yes|-y] [--label <name>] [--model <tier>] [--effort <level>] [--enhance-with <list>] [--no-dedup] [--dry-run]"
 ---
 
 # Plan Task — investigate, draft a robust issue, and file it in the tracker
@@ -54,6 +54,17 @@ free.
   be a comma-list (`--label bug,area:cli`). These are **added to** any label the
   planning step infers (see Phase 4), deduped. Labels are created if missing
   (idempotent) exactly as in [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md).
+- **`--model <tier>`** / **`--effort <level>`** — set the issue's **dispatch hint**
+  explicitly instead of letting Phase 4 infer it. `<tier>` ∈ `light` / `medium` /
+  `heavy`; `<level>` ∈ `low` / `medium` / `high` / `xhigh` / `max`. Each applies the
+  corresponding `model:<tier>` / `effort:<level>` label (see
+  [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "The dispatch hint" for what
+  the axes mean). A typed value **wins over inference** for that axis and is not
+  re-litigated at the gate; the other axis is still inferred. `--model none` /
+  `--effort none` **suppress** that axis entirely — no label, no inference — for work
+  you'd rather leave untiered. Reject anything else with
+  `--model must be one of light, medium, heavy, none (got: {value}).` /
+  `--effort must be one of low, medium, high, xhigh, max, none (got: {value}).`
 - **`--enhance-with <list>`** — after the draft is written, route it through an
   **ordered pipeline of enhancement agents** that sharpen it before the approval gate
   (Phase 3.5), each refining the previous agent's output. A cheap second (and third)
@@ -245,13 +256,53 @@ any the user passed via `--label`. Prefer labels that **already exist** in
 with `--label` values, dedupe. Don't force a severity label onto a plain feature
 task — severity is for audit findings, not planned work.
 
+### The dispatch hint
+
+Then recommend **how to run the work** on the two independent axes defined in
+[lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) ("The dispatch hint") — read
+that section for the vocabulary; this phase decides the *values*. Phase 1 just
+investigated the actual code, which is exactly the evidence the call needs, so make
+it here rather than leaving it to whoever claims the issue cold.
+
+- **`model:<light|medium|heavy>`** — how much *capability* the task needs. Judge it
+  from what Phase 1 found, not from the request's wording: a task whose approach you
+  could write out line-by-line is `light` however long it is; one where you're
+  genuinely unsure which of two designs is right is `heavy`.
+- **`effort:<low|medium|high|xhigh|max>`** — how much *reasoning budget* per step.
+  Drive it from **surface area and blast radius**: how many call sites, how easy a
+  silent miss is, whether a wrong move corrupts data or breaks a public contract.
+
+**Set the axes independently.** If both land on the middle value every time, you're
+estimating size instead of recommending a dispatch — re-read the two definitions.
+The combinations that carry the most information are the off-diagonal ones
+(`model:light` + `effort:max` for a wide mechanical sweep; `model:heavy` +
+`effort:low` for a small change hinging on one idea).
+
+**Precedence and omission:**
+- A typed `--model` / `--effort` **wins outright** for that axis — don't second-guess
+  it, don't re-raise it at the gate.
+- `--model none` / `--effort none` suppress that axis: no label, no inference.
+- **Leave an axis off when you can't justify a value** from what you actually read.
+  An unlabeled axis is normal and costs nothing — a reflexive guess is worse than
+  silence, because `/do:next --model light` will act on it.
+- If the repo already uses its **own** sizing/dispatch taxonomy (`size/M`, story
+  points, `complexity:*` — visible in `EXISTING_ISSUES`' label set), prefer it and
+  skip these, exactly as the type-label rule above prefers existing labels over new
+  taxonomy. Say which you used.
+
+State the hint with a one-line justification in the Phase 5 gate (e.g. `model:light +
+effort:max — mechanical, but it touches 40 call sites and a miss is silent`) so a bad
+call is cheap to correct before the issue exists.
+
 ## Phase 5 — Confirm, then create
 
 **Interactive gate (default, unless `--yes` or `--dry-run`).** Present the full draft
-— **target tracker/host, title, body, and labels** — and ask the user to **approve,
-edit, or cancel**. Fold any requested edits (including answers to open questions) back
-into the draft and re-show if the change is substantial. Only proceed on explicit
-approval. `--yes` skips straight to creation (but still stops on a *blocking* open
+— **target tracker/host, title, body, and labels** (call out the **dispatch hint** on
+its own line with the one-line justification from Phase 4, since it's the label most
+worth correcting and the easiest to skim past inside a list) — and ask the user to
+**approve, edit, or cancel**. Fold any requested edits (including answers to open
+questions) back into the draft and re-show if the change is substantial. Only proceed
+on explicit approval. `--yes` skips straight to creation (but still stops on a *blocking* open
 question). `--dry-run` prints the draft and stops here without creating anything.
 
 **Create the issue** via the resolved `CLI_TOOL`, applying labels as **repeated

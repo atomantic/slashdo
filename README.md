@@ -301,18 +301,27 @@ By default the plan lives in `PLAN.md`. Pass `--issues` (or save it — `/do:con
 /do:next --issues --swarm #12 #14 #15     # or swarm exactly the issues you name
 /do:next --issues --swarm=2 12,14,15,19   # named batch, 2 at a time (waves)
 /do:next --issues --self                  # only claim issues YOU filed (security boundary)
+/do:next --issues --model light           # only claim work hinted as cheap to run
 ```
 
 | Flag | Default | What it does |
 |:---|:---|:---|
 | `--issues` | off — plan lives in `PLAN.md` | Track plan items as tracker issues. Requires an authenticated `gh` (GitHub) or `glab` (GitLab); commands abort rather than silently falling back |
 | `--issues-label <name>` | `plan` | The label that scopes which issues are plan items, so bug reports and questions in the same tracker aren't mistaken for the plan |
+| `--model <tier>[,…]` | off — any tier | (`/do:next`) Claim only issues hinted `model:light`/`medium`/`heavy`. `none` matches untiered issues |
+| `--effort <level>[,…]` | off — any level | (`/do:next`) Claim only issues hinted `effort:low`/`medium`/`high`/`xhigh`/`max`. `none` matches unlabelled issues |
 
 **Migration is automatic.** `/do:replan --issues` always reads `PLAN.md` if one exists: every open item is migrated into the tracker (one labeled issue each) and `PLAN.md` is emptied to a short note that the roadmap now lives on the Issues page. Before migrating an item, replan surfaces any open question it finds and asks you to resolve it, so every issue it files is immediately claimable. In issue mode the stable item ID is the **issue number** (e.g. `#42`); concurrent agents claim work via branch names carrying it.
 
 **`/do:next` is label-agnostic by default.** `--issues-label` scopes the commands that *file or triage* plan items, but a bare `/do:next --issues` claims the oldest open issue regardless of label (skipping only parking labels like `future`/`blocked`, epics with open children, and anything already in flight or assigned) — so a repo full of ordinary `bug`/`enhancement` issues works without stamping a `plan` label on everything. Pass `--issues-label <name>` (or save it) to restrict auto-pick to a curated queue.
 
 **Claim only your own issues (`--self`).** By default `/do:next` claims any open issue regardless of author — which on a shared tracker means acting on work items (and the instructions in their bodies) opened by anyone. `--self` restricts every claim — auto-pick, `--swarm` batches, and explicit `#<num>` — to issues authored by the running `gh` account; an explicit number for someone else's issue is **refused, not overridden**. Save it with `/do:config --self` so a multi-contributor tracker never auto-feeds third-party issues into your agent; `--no-self` on a run reverts to any-author. Issues mode only (PLAN.md items have no author).
+
+**Dispatch hints (`model:` + `effort:`).** Issues filed by slashdo can carry a recommendation for *how to run the work*, on two independent axes: **`model:light|medium|heavy`** (how much capability the task needs) and **`effort:low|medium|high|xhigh|max`** (how much reasoning budget per step). They're deliberately not a size estimate, and the off-diagonal combinations are the useful ones — `model:light` + `effort:max` is a mechanical change across forty call sites, where no insight is needed but a silent miss is easy. `/do:plan-task` infers both from what it found in the code and shows them at the approval gate (override with `--model`/`--effort`, or suppress an axis with `none`); `/do:better`, `/do:replan`, and `/do:next` apply them to the issues they file.
+
+Then `/do:next` reads them back. **`--model`/`--effort` filter the queue** — `/do:next --issues --model light,none --effort low,medium` claims only cheap work (`none` includes issues nobody has tiered yet; without it, untiered issues are filtered out). And in **`--swarm` mode the labels actually dispatch**: each worker agent runs at the tier and effort its own issue asks for, so a mixed batch doesn't pay one flat rate per agent.
+
+**The labels name tiers, not models — deliberately.** A concrete slug like `opus` or `gpt-5` is wrong on two axes at once: it ages out while the issue outlives it, and it's meaningless to the other CLIs reading the same tracker. slashdo runs under Claude Code, OpenCode, Antigravity, Codex, and Grok Build (and against local Ollama models), and an issue filed from one is routinely claimed from another, so **each host resolves `light`/`medium`/`heavy` against its own lineup** at dispatch time. `effort:`'s five levels are a fine-grained scale no host matches exactly, so each clamps to its own nearest level (and a host with no effort control ignores the axis). A host that can't set a sub-agent's model at all still filters fine and just reports the hint. Everything here is advisory: an unlabelled issue is always claimable, and an explicit `#<num>` overrides the filters.
 
 **Epics are child-aware.** An `epic` (umbrella) issue — identified by the `epic` label, native GitHub sub-issues, or a body that task-lists other issues — is judged by its **children**, not by code evidence. `/do:next --issues` skips an epic while any child is open; once every child closes it claims the epic's remaining wrap-up tasks (or closes the epic outright if nothing remains). After shipping a child, `/do:next` re-checks the parent and closes it when that child was the last. `/do:replan --issues` applies the same rule during triage.
 

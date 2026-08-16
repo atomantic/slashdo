@@ -299,6 +299,14 @@ Feed this graph to Phase 2: `blocked` issues are kept (`still-pending`, never `s
 > classification. Don't add, remove, or treat it as evidence here. When replan
 > *files* new work that has a clear ordering relationship, it MAY set `Depends on #N`
 > (for a hard predecessor) or `priority:<N>` (for soft sequencing) on the new issue.
+>
+> **Dispatch hints (`model:` / `effort:`) are advisory too** — same rule. They only
+> steer `/do:next`'s filter and swarm dispatch, so don't add, remove, or read them as
+> triage evidence. Replan MAY set one on **new** work it investigated well enough to
+> justify the call (per [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "The
+> dispatch hint"), but must **not** stamp hints onto migrated PLAN.md items or
+> existing issues in bulk: a hint guessed from a one-line backlog entry is noise that
+> makes the deliberate ones unreadable, and an unhinted issue stays fully claimable.
 > This does **not** breach the actionable-issues invariant: that invariant bars issues
 > with unresolved *questions/decisions*, not well-formed issues that are merely
 > *sequenced*. A `Depends on #N` issue is fully specified and self-clearing (it becomes
