@@ -25,17 +25,33 @@ is answered**. A command that hardcodes a vendor slug is a bug; fix it here inst
 |---|---|---|
 | `light` | the **cheapest capable coding model** this host offers | mechanical work: pattern-matching, inventory sweeps, well-specified edits |
 | `medium` | this host's **routine workhorse** | the default for real work — audits, remediation, review |
-| `heavy` | **inherit the session's model** — do not pin a slug | genuinely hard reasoning where a weaker model produces confident wrong answers |
+| `heavy` | this host's **strongest available coding model** | genuinely hard reasoning where a weaker model produces confident wrong answers |
 
-**`heavy` means inherit, not "pick the biggest".** Pinning an explicit top-tier slug
-fights an organization that has standardized on a specific model version, and it is
-the slug most likely to be stale. Omitting the parameter lets the agent inherit
-whatever the session is running, which is both current and policy-correct.
+**Name the tier with an alias, never a pinned version.** Most hosts expose
+tier-style model aliases (Claude Code's `model` parameter takes `opus` / `sonnet` /
+`haiku`) alongside fully-qualified version IDs (`claude-opus-4-8`). **Always use the
+alias.** An alias resolves to whatever version the organization has configured, so it
+neither goes stale as lineups churn nor overrides a pinned deployment — it gets you
+the tier while leaving the version choice where it belongs. A fully-qualified version
+ID in a slashdo command is a bug.
 
-**The honest consequence: `heavy` cannot *upgrade* a weak session.** If the session is
-running a mid-tier model, `heavy` work runs mid-tier. The tier reliably avoids
-*downgrading* important work; it cannot promote it. When that gap matters, say so
-once and continue — never block on it.
+**`heavy` should actually upgrade.** Naming the strongest alias is the whole point of
+the tier: work marked `heavy` is work where a weaker model produces confident wrong
+answers, so a `heavy` dispatch from a mid-tier session must reach *up*, not merely
+avoid reaching down.
+
+**Fallback — inherit — applies in exactly two cases**, and both are narrower than
+they look:
+
+1. **The host exposes no alias for its top tier** (only pinned version IDs, or no
+   model parameter at all). Omit the parameter and let the agent inherit the session.
+2. **The strongest alias is unavailable to this account** (no entitlement for that
+   tier — the dispatch errors on the model name). Retry once with the parameter
+   omitted so the agent inherits, and say so.
+
+In both fallback cases `heavy` degrades to "inherit," which prevents *downgrading*
+important work but cannot promote it. Note that plainly when it happens; never block
+on it.
 
 ## Reasoning effort
 
@@ -60,12 +76,18 @@ all). When you cannot set them:
 **Run the agent at the session default and report the tier you would have used.** The
 tiering is an optimization; the command's actual work is the feature. A command must
 never refuse to run, or fall back to doing less work, because it could not set a
-model parameter.
+model parameter — including when a `heavy` dispatch is rejected because the account
+lacks that tier. Retry once with the parameter omitted, note the degrade, and carry
+on.
 
 ## Worked example — Claude Code
 
 **Model:** `light` → `model: "haiku"`; `medium` → `model: "sonnet"`; `heavy` →
-**omit** the `model` parameter so the agent inherits the session.
+`model: "opus"`. All three are **aliases**, not pinned version IDs — `opus` resolves
+to whatever Opus version this account/org is configured for, which is why naming it
+is safe here and a literal `claude-opus-4-8` would not be. If an `opus` dispatch is
+rejected for lack of entitlement, retry once with `model` omitted (inherit) and say
+so.
 
 **Effort: not settable per call on this host.** Claude Code's `Agent` tool takes
 `description` / `prompt` / `subagent_type` / `model` / `isolation` — there is **no

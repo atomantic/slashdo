@@ -49,7 +49,7 @@ AskUserQuestion([{
   header: "Model",
   multiSelect: false,
   options: [
-    { label: "Quality", description: "Heavy tier for all agents — inherits this session's model, so it only beats Balanced when you are already on a top-tier model. Fewest false positives, highest cost." },
+    { label: "Quality", description: "Strongest available model for all agents — fewest false positives, best results, highest cost" },
     { label: "Balanced (Recommended)", description: "Workhorse model for audit and remediation — good quality at moderate cost" },
     { label: "Budget", description: "Cheapest model for audit, workhorse for remediation — fastest and cheapest" }
   ]
@@ -60,7 +60,7 @@ Record the selection as `MODEL_PROFILE` and derive two **tiers**:
 - `AUDIT_MODEL_TIER`: `heavy` / `medium` / `light` based on profile
 - `REMEDIATION_MODEL_TIER`: `heavy` / `medium` / `medium` based on profile
 
-**These are tiers, not model names — resolve each against the host you're running on**, per [lib/model-tiers.md](../../lib/model-tiers.md). In particular `heavy` means **omit** the `model` parameter on the Agent call so the agent inherits the session's model, rather than pinning a slug that would fight an org's pinned version and go stale. A host that can't set a per-agent model runs everything at the session default — state it and continue. **Because `heavy` inherits rather than pins, it cannot *upgrade* a weak session** — on a session already running a mid-tier model, the Quality profile resolves to the same models as Balanced. When the resolved profile is Quality and this session is not on your strongest model, **say so once before spawning** (`Quality profile selected, but this session is on <model> — agents will not run heavier than that`) and continue; never block on it.
+**These are tiers, not model names — resolve each against the host you're running on**, per [lib/model-tiers.md](../../lib/model-tiers.md). In particular `heavy` means **this host's strongest available model, named by its alias** (on Claude Code, `model: "opus"`) — an alias resolves to whatever version the org has configured, so it upgrades the work without going stale or overriding a pinned deployment. Never write a fully-qualified version ID. A host that can't set a per-agent model runs everything at the session default — state it and continue. If a `heavy` dispatch is rejected because the account lacks that tier, retry once with `model` omitted so the agent inherits the session, note the degrade, and continue — never block on it.
 
 > **Three unrelated things in this command are called "tier" or "heavy" — keep them apart.** `AUDIT_MODEL_TIER`/`REMEDIATION_MODEL_TIER` (`light`/`medium`/`heavy`) select **which model an agent runs on**. The dependency **Tier 1/2/3** classification (Phase 1b) rates **how replaceable a package is**. And `HEAVY_MODE` (`--heavy`) sets **how aggressive the removal bar is**. They are independent: `--heavy` does *not* raise the model tier, and a Tier 1 dependency has nothing to do with a `heavy` model.
 

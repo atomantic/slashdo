@@ -48,7 +48,7 @@ AskUserQuestion([
     header: "Model",
     multiSelect: false,
     options: [
-      { label: "Quality", description: "Heavy tier for all agents — inherits this session's model, so it only beats Balanced when you are already on a top-tier model. Fewest false positives, highest cost." },
+      { label: "Quality", description: "Strongest available model for all agents — fewest false positives, best results, highest cost" },
       { label: "Balanced (Recommended)", description: "Workhorse model for audit and remediation — good quality at moderate cost" },
       { label: "Budget", description: "Cheapest model for audit, workhorse for remediation — fastest and cheapest" }
     ]
@@ -66,7 +66,7 @@ Record the selection as `MODEL_PROFILE` and derive two **tiers** from this table
 - `AUDIT_MODEL_TIER`: `heavy` / `medium` / `light` based on profile
 - `REMEDIATION_MODEL_TIER`: `heavy` / `medium` / `medium` based on profile
 
-**These are tiers, not model names — resolve each against the host you're running on**, per [lib/model-tiers.md](../../lib/model-tiers.md). In particular `heavy` means **omit** the `model` parameter on the Agent/Task call so the agent inherits the session's model, rather than pinning a slug that would fight an org's pinned version and go stale. A host that can't set a per-agent model runs everything at the session default — state it and continue. **Because `heavy` inherits rather than pins, it cannot *upgrade* a weak session** — on a session already running a mid-tier model, the Quality profile resolves to the same models as Balanced. When the resolved profile is Quality and this session is not on your strongest model, **say so once before spawning** (`Quality profile selected, but this session is on <model> — agents will not run heavier than that`) and continue; never block on it.
+**These are tiers, not model names — resolve each against the host you're running on**, per [lib/model-tiers.md](../../lib/model-tiers.md). In particular `heavy` means **this host's strongest available model, named by its alias** (on Claude Code, `model: "opus"`) — an alias resolves to whatever version the org has configured, so it upgrades the work without going stale or overriding a pinned deployment. Never write a fully-qualified version ID. A host that can't set a per-agent model runs everything at the session default — state it and continue. If a `heavy` dispatch is rejected because the account lacks that tier, retry once with `model` omitted so the agent inherits the session, note the degrade, and continue — never block on it.
 
 ### Model Profile Rationale
 
@@ -259,7 +259,7 @@ Skip step 4 if steps 1-3 reveal the code is correct.
 
 ### Batch 1 (5 parallel Explore agents via Task tool):
 
-**Model**: Resolve `AUDIT_MODEL_TIER` to this host's model per [lib/model-tiers.md](../../lib/model-tiers.md) and pass it as the `model` parameter on each agent. If `AUDIT_MODEL_TIER` is `heavy`, omit the parameter to inherit from session.
+**Model**: Resolve `AUDIT_MODEL_TIER` to this host's model per [lib/model-tiers.md](../../lib/model-tiers.md) and pass it as the `model` parameter on each agent. If `AUDIT_MODEL_TIER` is `heavy`, pass this host's strongest alias (`model: "opus"` on Claude Code).
 
 1. **Security & Secrets**
    Sources: authentication checks, credential exposure, infrastructure security, input validation, dependency health
@@ -551,9 +551,9 @@ Remediation runs in parallel, one worker per category that has CRITICAL, HIGH, o
 <!-- if:teams -->
 1. Use `TeamCreate` with name `better-{DATE}`.
 2. Use `TaskCreate` for each category above that has actionable findings.
-3. Spawn up to 5 general-purpose agents as teammates. **Resolve `REMEDIATION_MODEL_TIER` to this host's model per [lib/model-tiers.md](../../lib/model-tiers.md) and pass it as the `model` parameter on each agent.** If `REMEDIATION_MODEL_TIER` is `heavy`, omit the parameter to inherit from session. Each teammate marks its task complete via `TaskUpdate` when done.
+3. Spawn up to 5 general-purpose agents as teammates. **Resolve `REMEDIATION_MODEL_TIER` to this host's model per [lib/model-tiers.md](../../lib/model-tiers.md) and pass it as the `model` parameter on each agent.** If `REMEDIATION_MODEL_TIER` is `heavy`, pass this host's strongest alias (`model: "opus"` on Claude Code). Each teammate marks its task complete via `TaskUpdate` when done.
 <!-- else -->
-1. Spawn up to 5 general-purpose `Agent` sub-agents — one per category above that has actionable findings. **Resolve `REMEDIATION_MODEL_TIER` to this host's model per [lib/model-tiers.md](../../lib/model-tiers.md) and pass it as the `model` parameter on each `Agent` call.** If `REMEDIATION_MODEL_TIER` is `heavy`, omit the parameter to inherit from session.
+1. Spawn up to 5 general-purpose `Agent` sub-agents — one per category above that has actionable findings. **Resolve `REMEDIATION_MODEL_TIER` to this host's model per [lib/model-tiers.md](../../lib/model-tiers.md) and pass it as the `model` parameter on each `Agent` call.** If `REMEDIATION_MODEL_TIER` is `heavy`, pass this host's strongest alias (`model: "opus"` on Claude Code).
 2. Launch all `Agent` calls **in parallel** (multiple tool calls in a single response) and wait for all to return. Each sub-agent returns its results directly — no task board or shutdown step is needed.
 <!-- /if:teams -->
 
