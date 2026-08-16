@@ -188,8 +188,14 @@ signals unreadable. Prefer leaving an axis off to guessing it.
 *reviewer* runs on. The dispatch hint is about the *implementer*.
 
 **Consumer:** `/do:next` reads both — its `--model` / `--effort` flags filter the
-queue by them, and in `--swarm` mode it uses the claimed issue's labels to pick each
-worker agent's model and effort. **Filtering works on every host** (it is label
-matching, nothing more); dispatch degrades to a report on a host that can't spawn
-sub-agents or can't set their model, which costs nothing — the labels stay accurate
-for the next reader.
+queue by them, and in `--swarm` mode it sets each worker agent's model from the
+claimed issue's tier.
+
+**Filtering is the primary use of both labels**, and it works on every host: it is
+label matching, nothing more. Choosing *which* issue to pick up — "give me something
+cheap", "give me the careful work" — is what these labels are for. Dispatch is a
+bonus applied where the host supports it: the model tier maps to a real parameter on
+most hosts, while `effort:` is advisory and an agent **may** pass it to a sub-agent
+where such a control exists. A host that can't spawn sub-agents, or can't set their
+model, simply reports the labels — which costs nothing, since they stay accurate for
+whoever reads the issue next.

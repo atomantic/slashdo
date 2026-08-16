@@ -55,15 +55,26 @@ on it.
 
 ## Reasoning effort
 
-Where a command also specifies effort, it uses five levels — `low`, `medium`, `high`,
-`xhigh`, `max` — which are **a deliberately fine-grained scale that no host is
-expected to match exactly**. Hosts differ in both directions: some expose three
-levels, some add one below `low`, some have no effort control at all.
+Effort uses five levels — `low`, `medium`, `high`, `xhigh`, `max`.
 
-- **Clamp to the nearest level this host actually has.** A host with three levels runs
-  `xhigh`/`max` at its highest. That is the correct reading of the request, not a
-  failure.
-- **A host with no effort control ignores the axis** entirely.
+**Effort is advisory, and it is not primarily a dispatch knob.** Unlike the model
+tier, its main job is to *describe the work* so it can be filtered and reasoned
+about: picking which issue to take, and telling whoever takes it how careful this one
+needs to be. That job works identically on every host, because it is metadata, not a
+parameter.
+
+**Applying it at dispatch is optional and opportunistic.** An agent that spawns a
+sub-agent for the work **may** set the sub-agent's reasoning effort from the level,
+where the host exposes such a control. Where it doesn't, nothing is lost — the level
+still did its real job. Treat this as an available refinement, never an obligation,
+and never report its absence as a degraded run.
+
+When you do apply it:
+
+- **Clamp to the nearest level this host actually has.** The five levels are
+  deliberately fine-grained and no host is expected to match them exactly — some
+  expose three, some add one below `low`. A host with three levels runs `xhigh`/`max`
+  at its highest. That is the correct reading of the request, not a failure.
 - **Never trade one axis for the other** — don't substitute a stronger model to
   compensate for missing effort control, or vice versa. They are independent.
 
@@ -89,18 +100,17 @@ is safe here and a literal `claude-opus-4-8` would not be. If an `opus` dispatch
 rejected for lack of entitlement, retry once with `model` omitted (inherit) and say
 so.
 
-**Effort: not settable per call on this host.** Claude Code's `Agent` tool takes
-`description` / `prompt` / `subagent_type` / `model` / `isolation` — there is **no
-`effort` parameter**. Reasoning effort comes from the agent *definition*, not the
-dispatch call. So under Claude Code the `effort:` axis falls under "a host with no
-effort control ignores the axis": **report the level the work asked for and run at
-the session's effort.** Do **not** pass an `effort` key on an `Agent` call — an
-unknown parameter fails input validation and takes the whole dispatch down with it,
-which is exactly the abort "Degrade, never abort" forbids.
+**Effort:** Claude Code's `Agent` tool takes `description` / `prompt` /
+`subagent_type` / `model` / `isolation` — there is **no `effort` parameter**
+(reasoning effort comes from the agent *definition*, not the dispatch call). So on
+this host the level is carried as the advisory signal it is: surface it, let it guide
+how carefully the work is approached, and run the sub-agent at the session's effort.
+Do **not** pass an `effort` key on an `Agent` call — an unknown parameter fails input
+validation and takes the whole dispatch down with it.
 
-(A host whose dispatch API *does* expose a reasoning-effort control — some
-orchestration APIs accept one alongside the model — passes the level through to that
-control, clamped per the rule above. Check the API you are actually calling before
+(Other dispatch APIs *do* expose a reasoning-effort control — slashdo's own
+`Workflow` scripts accept one per agent, for instance. Where the API you are actually
+calling has one, set it from the level, clamped per the rule above. Check before
 assuming either way.)
 
 This is an example of the resolution, **not** the rule. On another host, resolve
