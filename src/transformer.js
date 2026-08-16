@@ -77,8 +77,16 @@ const LIB_MD_LINK_RE = /\[[^\]]*\]\((?:\.\.\/)+lib\/([A-Za-z0-9._-]+\.md)\)/g;
 // the form a lib doc uses to cite another lib doc, where `../../lib/` would be the
 // wrong relative path. Unlike the two forms above, `./<name>.md` does NOT carry
 // `lib/` in its path, so a match is not self-evidently a lib reference (any file
-// may link a sibling doc). This one is therefore rewritten ONLY when the target
-// resolves to a real file in `lib/` — see the existence guard in resolveProseRefs.
+// may link a sibling doc). This one is therefore rewritten ONLY when a file of that
+// name exists in `lib/` — see the existence guard in resolveProseRefs.
+//
+// That guard matches on BASENAME; it does not resolve the link relative to the file
+// that wrote it (this function never sees the source path). So it is exact only
+// while no command shares a basename with a lib — otherwise a command's link to its
+// own sibling would be rewritten into a lib citation. Nothing collides today, and
+// test/transformer.test.js asserts the disjointness so a future collision fails CI
+// rather than silently mis-rewriting. Teach this to resolve source-relative paths if
+// that invariant ever needs to be relaxed.
 const LIB_SIBLING_LINK_RE = /\[[^\]]*\]\(\.\/([A-Za-z0-9._-]+\.md)\)/g;
 
 // For Agent Skills environments (Codex/Antigravity/Grok — `libDir: null`, no
