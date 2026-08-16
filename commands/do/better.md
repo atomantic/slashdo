@@ -48,7 +48,7 @@ AskUserQuestion([
     header: "Model",
     multiSelect: false,
     options: [
-      { label: "Quality", description: "Strongest model for all agents — fewest false positives, best fixes (highest cost, 8+ heavy agents)" },
+      { label: "Quality", description: "Heavy tier for all agents — inherits this session's model, so it only beats Balanced when you are already on a top-tier model. Fewest false positives, highest cost." },
       { label: "Balanced (Recommended)", description: "Workhorse model for audit and remediation — good quality at moderate cost" },
       { label: "Budget", description: "Cheapest model for audit, workhorse for remediation — fastest and cheapest" }
     ]
@@ -66,7 +66,7 @@ Record the selection as `MODEL_PROFILE` and derive two **tiers** from this table
 - `AUDIT_MODEL_TIER`: `heavy` / `medium` / `light` based on profile
 - `REMEDIATION_MODEL_TIER`: `heavy` / `medium` / `medium` based on profile
 
-**These are tiers, not model names — resolve each against the host you're running on**, per [lib/model-tiers.md](../../lib/model-tiers.md). In particular `heavy` means **omit** the `model` parameter on the Agent/Task call so the agent inherits the session's model, rather than pinning a slug that would fight an org's pinned version and go stale. A host that can't set a per-agent model runs everything at the session default — state it and continue.
+**These are tiers, not model names — resolve each against the host you're running on**, per [lib/model-tiers.md](../../lib/model-tiers.md). In particular `heavy` means **omit** the `model` parameter on the Agent/Task call so the agent inherits the session's model, rather than pinning a slug that would fight an org's pinned version and go stale. A host that can't set a per-agent model runs everything at the session default — state it and continue. **Because `heavy` inherits rather than pins, it cannot *upgrade* a weak session** — on a session already running a mid-tier model, the Quality profile resolves to the same models as Balanced. When the resolved profile is Quality and this session is not on your strongest model, **say so once before spawning** (`Quality profile selected, but this session is on <model> — agents will not run heavier than that`) and continue; never block on it.
 
 ### Model Profile Rationale
 

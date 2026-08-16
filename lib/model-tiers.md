@@ -64,12 +64,25 @@ model parameter.
 
 ## Worked example — Claude Code
 
-`light` → `model: "haiku"`; `medium` → `model: "sonnet"`; `heavy` → **omit** the
-`model` parameter so the agent inherits the session. Effort passes through verbatim
-(`effort: "<level>"`), since this host's levels are exactly the five above.
+**Model:** `light` → `model: "haiku"`; `medium` → `model: "sonnet"`; `heavy` →
+**omit** the `model` parameter so the agent inherits the session.
+
+**Effort: not settable per call on this host.** Claude Code's `Agent` tool takes
+`description` / `prompt` / `subagent_type` / `model` / `isolation` — there is **no
+`effort` parameter**. Reasoning effort comes from the agent *definition*, not the
+dispatch call. So under Claude Code the `effort:` axis falls under "a host with no
+effort control ignores the axis": **report the level the work asked for and run at
+the session's effort.** Do **not** pass an `effort` key on an `Agent` call — an
+unknown parameter fails input validation and takes the whole dispatch down with it,
+which is exactly the abort "Degrade, never abort" forbids.
+
+(A host whose dispatch API *does* expose a reasoning-effort control — some
+orchestration APIs accept one alongside the model — passes the level through to that
+control, clamped per the rule above. Check the API you are actually calling before
+assuming either way.)
 
 This is an example of the resolution, **not** the rule. On another host, resolve
-against that host's lineup.
+against that host's lineup and its dispatch API's actual parameters.
 
 ## Related
 
