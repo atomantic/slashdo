@@ -73,6 +73,13 @@ const LIB_PROSE_RE = /~\/\.claude\/lib\/([A-Za-z0-9._-]+\.md)/g;
 // One or more `../` segments precede `lib/<name>.md`; the whole `[text](url)` is
 // consumed and replaced by the bare doc name (link text is always the lib path).
 const LIB_MD_LINK_RE = /\[[^\]]*\]\((?:\.\.\/)+lib\/([A-Za-z0-9._-]+\.md)\)/g;
+// Matches an intra-lib SIBLING Markdown link, e.g. `[plan-id-format.md](./plan-id-format.md)` —
+// the form a lib doc uses to cite another lib doc, where `../../lib/` would be the
+// wrong relative path. Unlike the two forms above, `./<name>.md` does NOT carry
+// `lib/` in its path, so a match is not self-evidently a lib reference (any file
+// may link a sibling doc). This one is therefore rewritten ONLY when the target
+// resolves to a real file in `lib/` — see the existence guard in resolveProseRefs.
+const LIB_SIBLING_LINK_RE = /\[[^\]]*\]\(\.\/([A-Za-z0-9._-]+\.md)\)/g;
 
 // For Agent Skills environments (Codex/Antigravity/Grok — `libDir: null`, no
 // runtime `!cat`, and no `~/.claude/lib/` on disk for a host-only user), make
@@ -117,12 +124,17 @@ function inlineLibReferences(body, libDir) {
     return filename.replace(/\.md$/, '');
   };
 
-  // Resolve both citation forms — relative Markdown links and `~/.claude/lib/`
-  // prose refs — to bare doc names. Links are handled first so their `lib/<name>.md`
-  // link text isn't matched by the prose regex mid-rewrite.
+  // Resolve all three citation forms — relative Markdown links, intra-lib sibling
+  // links, and `~/.claude/lib/` prose refs — to bare doc names. Links are handled
+  // first so their `lib/<name>.md` link text isn't matched by the prose regex
+  // mid-rewrite. The sibling form is guarded on the target actually being a lib
+  // file: its path carries no `lib/` marker, so rewriting an unresolvable one would
+  // silently mangle an ordinary sibling-doc link into a bare word.
   const resolveProseRefs = (text) =>
     text
       .replace(LIB_MD_LINK_RE, (match, filename) => queueAndName(filename))
+      .replace(LIB_SIBLING_LINK_RE, (match, filename) =>
+        readLib(filename) === null ? match : queueAndName(filename))
       .replace(LIB_PROSE_RE, (match, filename) => queueAndName(filename));
 
   // Main body: inline includes first, then resolve the prose refs left behind

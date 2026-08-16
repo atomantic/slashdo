@@ -296,6 +296,58 @@ describe('inlineLibReferences', () => {
       assert.ok(!DANGLING_REL_LINK.test(result), 'no dangling relative link target remains');
     });
   });
+
+  // A lib doc citing a SIBLING lib uses `./<name>.md` — `../../lib/` would be the
+  // wrong relative path from inside lib/. That target is equally unresolvable in an
+  // Agent Skills install, so it resolves like the other forms — but only when it
+  // really is a lib, since `./x.md` carries no `lib/` marker to prove intent.
+  const DANGLING_SIBLING_LINK = /\(\.\/[A-Za-z0-9._-]+\.md\)/;
+
+  it('resolves an intra-lib sibling link and inlines its content as an appendix', () => {
+    withLibs({
+      'plan-issue-mode.md': 'Issue mode rules. Tiers in [model-tiers.md](./model-tiers.md).',
+      'model-tiers.md': 'Tier resolution rules.',
+    }, (dir) => {
+      const body = '!`cat ~/.claude/lib/plan-issue-mode.md`';
+      const result = inlineLibReferences(body, dir);
+      assert.ok(!DANGLING_SIBLING_LINK.test(result), 'no dangling sibling link target remains');
+      assert.ok(result.includes('Tiers in model-tiers.'), 'sibling link collapsed to bare doc name');
+      assert.ok(result.includes('## Referenced libraries'), 'appendix section added');
+      assert.ok(result.includes('Tier resolution rules.'), 'transitively cited lib content inlined');
+    });
+  });
+
+  it('resolves a sibling link cited directly from a command body', () => {
+    withLibs({ 'model-tiers.md': 'Tier resolution rules.' }, (dir) => {
+      const body = 'Resolve per [model-tiers.md](./model-tiers.md).';
+      const result = inlineLibReferences(body, dir);
+      assert.ok(!DANGLING_SIBLING_LINK.test(result), 'sibling link resolved');
+      assert.ok(result.includes('Resolve per model-tiers.'), 'collapsed to bare doc name');
+      assert.ok(result.includes('Tier resolution rules.'), 'content inlined as appendix');
+    });
+  });
+
+  // The guard that separates this form from the other two: `./x.md` has no `lib/`
+  // in its path, so a link to an ordinary sibling doc must survive untouched rather
+  // than being mangled into a bare word pointing at nothing.
+  it('leaves a sibling link alone when the target is not a lib file', () => {
+    withLibs({ 'model-tiers.md': 'Tier rules.' }, (dir) => {
+      const body = 'See [the changelog](./CHANGELOG.md) and [notes](./notes.md).';
+      const result = inlineLibReferences(body, dir);
+      assert.equal(result, body, 'non-lib sibling links are untouched');
+      assert.ok(!result.includes('## Referenced libraries'), 'nothing appended');
+    });
+  });
+
+  it('does not duplicate a sibling-linked lib already `!cat`-inlined', () => {
+    withLibs({ 'model-tiers.md': 'Tier rules.' }, (dir) => {
+      const body = '!`cat ~/.claude/lib/model-tiers.md`\nAlso [model-tiers.md](./model-tiers.md).';
+      const result = inlineLibReferences(body, dir);
+      assert.equal(result.match(/Tier rules\./g).length, 1, 'content appears exactly once');
+      assert.ok(!result.includes('## Referenced libraries'), 'no appendix — already inlined');
+      assert.ok(!DANGLING_SIBLING_LINK.test(result), 'no dangling sibling link target remains');
+    });
+  });
 });
 
 // ── getTargetFilename ───────────────────────────────────────────────
