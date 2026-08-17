@@ -97,8 +97,9 @@ Scan for what the project actually does:
 Extract: list of capabilities, deployment model, key domain concepts. **In `--prd` mode**, also enumerate each discrete feature/command/endpoint with its observed inputs, outputs, and error-handling behavior — this seeds functional requirements directly.
 
 ### Agent 3: Evolution & Direction
-Scan for trajectory signals:
+Scan for trajectory signals and the author's demonstrated intent:
 - Recent git log (last 30 commits): `git log --oneline -30`
+- Merged pull requests in the repository, when GitHub access is available: aim for 30-100 titles and read 8-15 full bodies spread across the range (`gh pr list --state merged --limit 100` and `gh pr view`). Do not filter by the repository owner, because organization accounts usually do not author their repositories' pull requests. If pull-request history is unavailable or empty, fall back to the default branch's commit history, filtering by the relevant maintainer when that identity is known.
 - Open issues (if available): `gh issue list --limit 20 --state open 2>/dev/null`
 - Open PRs: `gh pr list --limit 10 --state open 2>/dev/null`
 - `CHANGELOG.md` or `.changelog/` — recent changes and themes
@@ -106,7 +107,7 @@ Scan for trajectory signals:
 - `PLAN.md` — incomplete items represent intended direction
 - Branch names: `git branch -a --list '*feature*' --list '*feat*' 2>/dev/null`
 
-Extract: recent themes, planned direction, known gaps, active work areas.
+Extract: recent themes, planned direction, known gaps, active work areas, and repeated decisions about what the project accepts or refuses. Do not infer a product requirement from a generic engineering practice or an isolated historical change.
 
 ### Agent 4 (`--prd` mode only): Requirements Mining
 Scan for behavior that's already been specified, even if never written down as a requirement:
@@ -116,7 +117,7 @@ Scan for behavior that's already been specified, even if never written down as a
 - Config schemas, env vars, and documented limits (timeouts, size caps, pagination) — seeds non-functional requirements
 - An existing `GOALS.md`, if present — reuse its Mission and Core Tenets as the PRD's Goals & Objectives rather than re-deriving them from scratch
 
-Extract: candidate functional requirements (with source evidence), candidate non-functional requirements, candidate negative requirements.
+Extract: candidate functional requirements (with source evidence), candidate non-functional requirements, candidate negative requirements, and contradictions between documented intent and observed behavior. Maintain a private evidence ledger mapping each candidate to one or more concrete signals (documentation, a passing test, an observed interface contract, validation/error path, or merged change) and its confidence.
 
 Wait for all agents to complete (3 in default mode, 4 in `--prd` mode).
 
@@ -140,18 +141,20 @@ Consolidate the findings into a draft requirements structure:
 1. **Overview & Problem Statement** — one paragraph: what the product is, the problem it solves, and for whom
 2. **Goals & Objectives** — 3-7 objectives; reuse GOALS.md's Core Tenets verbatim where a GOALS.md exists rather than re-deriving them
 3. **Target Users / Personas** — one short persona per primary user type (role, need, context of use)
-4. **Functional Requirements** — grouped by feature area; each requirement gets a stable ID (`FR-1`, `FR-2`, ...), a MUST/SHOULD/MAY keyword, a one-sentence statement, and testable acceptance criteria
-5. **Non-Functional Requirements** — same ID scheme (`NFR-1`, ...), covering performance, security, reliability, usability, and compatibility/scalability as applicable to the project
-6. **Negative Requirements** — explicit "MUST NOT" statements (`NR-1`, ...) for safety/security guardrails and deliberately unsupported behavior
-7. **Out of Scope** — capabilities intentionally excluded from this version, with a one-line reason each
+4. **Functional Requirements** — grouped by feature area; each requirement gets a stable ID (`FR-1`, `FR-2`, ...), a MUST/SHOULD/MAY keyword, a one-sentence statement, concise evidence, and testable acceptance criteria
+5. **Non-Functional Requirements** — same ID scheme (`NFR-1`, ...), covering performance, security, reliability, usability, and compatibility/scalability as applicable, with concise evidence or an explicit open question
+6. **Negative Requirements** — explicit "MUST NOT" statements (`NR-1`, ...) for safety/security guardrails and deliberately unsupported behavior, with the evidence or rationale that establishes the boundary
+7. **Out of Scope** — capabilities intentionally excluded from this version, with a one-line reason and the signal that supports the exclusion where available
 8. **Assumptions & Constraints** — technical, business, or resourcing constraints taken as given
 9. **Success Metrics / KPIs** — measurable criteria for "this product is working"; only state a concrete number where Discovery found evidence for one, otherwise list it under Open Questions rather than inventing a target
-10. **Risks & Open Questions** — known unknowns and decisions still needed
+10. **Risks & Open Questions** — known unknowns and decisions still needed, including unresolved contradictions between stated intent and observed behavior
 
 Both modes: for each item, assign a confidence level:
 - **HIGH** — directly stated in docs or clearly evidenced by code (or, in `--prd` mode, by a passing test)
 - **MEDIUM** — strongly implied by patterns, architecture, or recent work
 - **LOW** — inferred/speculative, needs user confirmation
+
+In `--prd` mode, preserve the evidence ledger until the document is written. Every functional, non-functional, or negative requirement MUST have at least one evidence note or be explicitly labeled as an open question/inference. When evidence conflicts, do not silently choose a side: record the conflict in Risks & Open Questions and prefer the most recent verified behavior for acceptance criteria.
 
 ## Phase 3: Validation
 
@@ -197,6 +200,9 @@ For every KPI Discovery could not evidence with a concrete number, ask the user 
 Before writing the document, walk the user through every item synthesized into Risks & Open Questions and try to close it out rather than shipping it open by default:
 - **Judgment calls and missing information** (scope decisions, risk tolerance, product direction, anything only the user can decide) — ask with `AskUserQuestion`. If the user's answer resolves the question, fold it directly into the relevant PRD section (a resolved KPI target goes into Success Metrics, a scope call updates Out of Scope or Assumptions & Constraints, etc.) and drop it from Risks & Open Questions. If the user has no answer or wants it left open, keep it in Risks & Open Questions, refined with whatever context they gave.
 - **Purely factual items** verifiable from `gh`/`glab`, git history, or the filesystem (e.g. "is issue #N still open?") — check directly instead of asking the user; only fall back to asking if the check is inconclusive (tool unavailable, ambiguous result).
+
+#### 3k (`--prd` mode): Boundary Walkthrough
+Before writing the document, test the draft against 3-5 concrete edge cases drawn from validation failures, explicit refusals, or ambiguous scope. For each case, identify the requirement, negative requirement, or out-of-scope boundary it exercises, and ask the user about it only in `--interactive` mode. In autonomous mode, keep the case as a risk or open question unless the codebase provides decisive evidence. Do not invent hypothetical KPI targets or turn these cases into implementation tasks.
 
 ## Phase 4: Document Generation
 
@@ -301,10 +307,10 @@ For the tactical backlog and current work items, see [PLAN.md](./PLAN.md).
 
 ### {Feature Area}
 
-| ID | Requirement | Priority | Acceptance Criteria |
-|---|---|---|---|
-| FR-1 | The system MUST {behavior} | Must | {testable condition} |
-| FR-2 | The system SHOULD {behavior} | Should | {testable condition} |
+| ID | Requirement | Priority | Confidence | Evidence | Acceptance Criteria |
+|---|---|---|---|---|---|
+| FR-1 | The system MUST {behavior} | Must | High | {passing test, documented contract, or observed behavior} | {testable condition} |
+| FR-2 | The system SHOULD {behavior} | Should | Medium | {source signal or "inferred"} | {testable condition} |
 
 {Repeat per feature area. IDs are sequential and never reused across the whole document.}
 
@@ -312,10 +318,10 @@ For the tactical backlog and current work items, see [PLAN.md](./PLAN.md).
 
 ## Non-Functional Requirements
 
-| ID | Category | Requirement |
-|---|---|---|
-| NFR-1 | Performance | {requirement} |
-| NFR-2 | Security | {requirement} |
+| ID | Category | Requirement | Confidence | Evidence |
+|---|---|---|---|---|
+| NFR-1 | Performance | {requirement} | High | {source signal or open question} |
+| NFR-2 | Security | {requirement} | Medium | {source signal or open question} |
 
 ---
 
@@ -323,9 +329,9 @@ For the tactical backlog and current work items, see [PLAN.md](./PLAN.md).
 
 {Explicit things the system MUST NOT do.}
 
-| ID | Requirement | Why |
-|---|---|---|
-| NR-1 | The system MUST NOT {behavior} | {rationale - safety, security, or deliberate scope boundary} |
+| ID | Requirement | Confidence | Evidence / Why |
+|---|---|---|---|
+| NR-1 | The system MUST NOT {behavior} | High | {source signal and rationale - safety, security, or deliberate scope boundary} |
 
 ---
 
@@ -333,7 +339,9 @@ For the tactical backlog and current work items, see [PLAN.md](./PLAN.md).
 
 {Capabilities intentionally excluded from this version.}
 
-- **{Excluded capability}** - {why it's excluded or deferred}
+| Excluded capability | Reason | Evidence / Signal |
+|---|---|---|
+| {Excluded capability} | {why it's excluded or deferred} | {supporting signal, or "inferred" when no direct evidence exists} |
 
 ---
 
@@ -364,12 +372,13 @@ Requirement IDs (`FR-`, `NFR-`, `NR-`) are assigned sequentially at generation t
 
 If `--refresh` was passed and the target document already exists:
 1. Read the existing document
-2. Compare its content against the current codebase state
+2. Treat the existing document as the approved baseline: compare its content and evidence notes against the current codebase state and history
 3. Identify items whose status has changed (new progress, completed, abandoned — or, in `--prd` mode, requirements that no longer hold, or new behavior that isn't yet captured as a requirement)
-4. **Default mode**: Update the document in-place automatically, preserving user-written content where possible. Print a summary of what changed.
+4. **Default mode**: Update the document in-place automatically, preserving user-written content and stable requirement IDs where possible. Print a summary of what changed and which evidence caused each change.
    **Interactive mode (`--interactive`)**: Present changes to the user for confirmation before updating.
 5. **GOALS.md mode**: If any checkbox task lists are found in the existing GOALS.md, move them to PLAN.md automatically (default) or offer to move them (interactive). When inserting each item into PLAN.md, **assign it a unique `[<slug>]` ID** per [lib/plan-id-format.md](../../lib/plan-id-format.md): kebab-case slug derived from the item title, ≤50 chars, unique against every existing `[slug]` in PLAN.md.
 6. **PRD.md mode**: Preserve existing `FR-`/`NFR-`/`NR-` IDs for requirements that still hold. Assign the next unused ID (per prefix) to newly discovered requirements. If a requirement no longer appears to hold, mark it `(status: removed — verify)` in place rather than silently deleting it, and call it out in the change summary for the user to confirm.
+7. **PRD.md mode**: Do not replace a user-authored requirement with a semantically different inference merely because current code is incomplete. Mark the conflict in the evidence notes and Risks & Open Questions, retaining the baseline wording until resolved.
 
 ## Phase 5: Finalize
 
@@ -407,3 +416,4 @@ If `--refresh` was passed and the target document already exists:
 - If `gh` CLI is not authenticated, skip issue/PR scanning gracefully — don't halt
 - **Never put checkbox task lists in GOALS.md or PRD.md** — if you discover tactical items during scanning, note them for PLAN.md but keep them out of both
 - **In `--prd` mode, never fabricate numeric success metrics or KPIs** the codebase doesn't evidence — leave them as open questions, even in autonomous mode
+- **In `--prd` mode, never present an unsupported inference as an observed requirement** — include the evidence note and confidence, or place it in Risks & Open Questions
