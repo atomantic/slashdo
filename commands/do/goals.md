@@ -99,7 +99,7 @@ Extract: list of capabilities, deployment model, key domain concepts. **In `--pr
 ### Agent 3: Evolution & Direction
 Scan for trajectory signals and the author's demonstrated intent:
 - Recent git log (last 30 commits): `git log --oneline -30`
-- Merged pull requests by the repository owner, when GitHub access is available: aim for 30-100 titles and read 8-15 full bodies spread across the range (`gh pr list --author <owner> --state merged --limit 100` and `gh pr view`). If pull-request history is unavailable, fall back to the default branch's commit history (`git log --author=<owner>`).
+- Merged pull requests in the repository, when GitHub access is available: aim for 30-100 titles and read 8-15 full bodies spread across the range (`gh pr list --state merged --limit 100` and `gh pr view`). Do not filter by the repository owner, because organization accounts usually do not author their repositories' pull requests. If pull-request history is unavailable or empty, fall back to the default branch's commit history, filtering by the relevant maintainer when that identity is known.
 - Open issues (if available): `gh issue list --limit 20 --state open 2>/dev/null`
 - Open PRs: `gh pr list --limit 10 --state open 2>/dev/null`
 - `CHANGELOG.md` or `.changelog/` — recent changes and themes
@@ -339,7 +339,9 @@ For the tactical backlog and current work items, see [PLAN.md](./PLAN.md).
 
 {Capabilities intentionally excluded from this version.}
 
-- **{Excluded capability}** - {why it's excluded or deferred}
+| Excluded capability | Reason | Evidence / Signal |
+|---|---|---|
+| {Excluded capability} | {why it's excluded or deferred} | {supporting signal, or "inferred" when no direct evidence exists} |
 
 ---
 
