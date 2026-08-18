@@ -376,6 +376,58 @@ describe('review-loop parse contracts', () => {
     }
   });
 
+  it('accepts cursor as a local-agent reviewer and probes the Cursor CLI, not Grok agent', () => {
+    // Cursor Agent is a model-taking local reviewer. The slug is `cursor`
+    // (alias `cursor-agent`). The binary is NOT `cursor` and is NOT a bare
+    // `agent` without an identity check: Grok Build also installs `agent` on
+    // PATH, so treating that as Cursor would silently review with the wrong CLI.
+    const loop = readLib('local-agent-review-loop.md');
+    const wrapper = readLib('multi-reviewer-loop.md');
+
+    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|cursor`/);
+    assert.match(loop, /`cursor-agent` normalizes to `cursor`/);
+    assert.match(loop, /Cursor binary probe/);
+    assert.match(loop, /command -v cursor-agent/);
+    assert.match(loop, /Grok Build also installs an `agent` binary/);
+    assert.match(loop, /--mode=ask/);
+    assert.match(loop, /--force --trust/);
+    assert.match(loop, /Do not pass `EFFORT_FLAG` to `cursor`/);
+    // ~effort must actually change Cursor inference: fold into --model as
+    // [effort=<level>], matching cursor[gpt-5]~effort=max and a saved
+    // review-models cursor=gpt-5 plus cursor~effort=max. Never pass --effort.
+    assert.match(loop, /CURSOR_MODEL="\$\{REVIEW_MODEL\}\[effort=\$\{REVIEW_EFFORT\}\]"/);
+    assert.match(loop, /folds `\{REVIEW_EFFORT\}` into the `--model` value/);
+    assert.match(loop, /gpt-5\[effort=max\]/);
+    // Review-only must not grant --force; reviewer-applies must.
+    assert.match(loop, /omits `--force`/);
+
+    // Config and docs must advertise the same model + effort grammar as the
+    // other reviewers — a saved review-models entry and a ~effort suffix.
+    assert.match(readCommand('config.md'), /--review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5/);
+    assert.match(readCommand('config.md'), /cursor\[gpt-5\]~effort=max/);
+    const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+    assert.match(readme, /cursor\[gpt-5\]~effort=max/);
+    assert.match(readme, /--review-models cursor=/);
+
+    assert.match(wrapper, /`cursor` \(alias `cursor-agent`\)/);
+    assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `cursor`/);
+    assert.match(wrapper, /Use one of: codex, agy, claude, grok, cursor, ollama, copilot/);
+    assert.match(wrapper, /Cursor binary probe/);
+
+    const enhance = readLib('enhance-loop.md');
+    assert.match(enhance, /`cursor` \| `"\$REVIEW_BIN" -p --trust --mode=ask/);
+    assert.match(enhance, /Cursor binary probe/);
+
+    for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'rpr.md', 'config.md']) {
+      const body = readCommand(name);
+      assert.match(
+        body,
+        /`cursor`/,
+        `${name} must accept the cursor reviewer slug`,
+      );
+    }
+  });
+
   it('keeps the empty-array rule in one partial the loops point at', () => {
     // An absent timeout binary is an environment condition, not a reviewer failure.
     // The explanation lives in ONE partial (the lib/gh-host.md convention) — five

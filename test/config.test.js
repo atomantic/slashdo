@@ -131,6 +131,27 @@ describe('writeConfig', () => {
     fs.rmSync(dir, { recursive: true });
   });
 
+  it('round-trips a cursor reviewer (bare and model-pinned) in review-with and review-models', () => {
+    const { dir, file } = tmpFile();
+    // cursor is a model-taking local reviewer (like grok/codex): its
+    // `cursor[<model>]` bracket in review-with and its per-agent review-models
+    // entry must survive the JSON read/write verbatim, brackets and all.
+    const cfg = {
+      defaults: {
+        'review-with': 'codex,cursor[gpt-5]~effort=max,cursor-agent~opt,claude',
+        'review-models': { cursor: 'gpt-5', codex: 'o3' },
+      },
+    };
+    writeConfig(file, cfg);
+    assert.deepEqual(readConfig(file), cfg);
+    assert.equal(
+      readConfig(file).defaults['review-with'],
+      'codex,cursor[gpt-5]~effort=max,cursor-agent~opt,claude',
+    );
+    assert.equal(readConfig(file).defaults['review-models'].cursor, 'gpt-5');
+    fs.rmSync(dir, { recursive: true });
+  });
+
   it('round-trips an arbitrary GitHub reviewer (@<login>) in review-with unchanged', () => {
     const { dir, file } = tmpFile();
     // The `@<login>` form (user or App/bot, the latter carrying a [bot] suffix)

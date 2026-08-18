@@ -70,7 +70,7 @@ free.
   opinion folded into the draft. Uses the **same `agent[model]` list grammar** as
   `--review-with` (see `/do:pr`): a comma-separated, order-preserving list, each entry
   a slug with an optional `[<model>]` bracket. **Accepted slugs: `codex`, `claude`,
-  `agy` (aliases `gemini`/`antigravity`), and `grok`** — the agentic CLIs that take a
+  `agy` (aliases `gemini`/`antigravity`), `grok`, and `cursor` (alias `cursor-agent`)** — the agentic CLIs that take a
   free-form enhancement prompt; `ollama` and `copilot` are review-oriented (findings
   emitters, not draft rewriters) and are rejected here. Examples: `--enhance-with=grok`
   (hand the draft to Grok for a second pass); `--enhance-with=codex[o3],grok` (Codex on
@@ -85,9 +85,9 @@ free.
   its matching `]`, whatever it contains). Then parse the value exactly as
   `--review-with`: split on `,` (again, only commas outside brackets), trim, strip each
   `[<model>]` bracket into a per-entry `{ENH_MODEL}`, normalize `gemini`/`antigravity`
-  → `agy`, dedupe preserving first-occurrence order (the `[<model>]` bracket is part of
+  → `agy`, `cursor-agent` → `cursor`, dedupe preserving first-occurrence order (the `[<model>]` bracket is part of
   the identity, so `codex[o3]` and `codex[o4]` are distinct). Reject an unknown slug
-  with `Unknown --enhance-with value: {value}. Use one of: codex, claude, agy, grok.`
+  with `Unknown --enhance-with value: {value}. Use one of: codex, claude, agy, grok, cursor.`
   **`--enhance-with=none`** (case-insensitive) explicitly skips the pipeline (mirrors
   `--review-with none`). Absent → no enhancement pass runs.
 - **`--no-dedup`** — skip the Phase 2 duplicate check against existing open issues and
