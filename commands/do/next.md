@@ -259,7 +259,14 @@ Then:
    ```bash
    LIST_ARGS=(--output json)
    [ -n "$LABEL_FILTER" ] && LIST_ARGS+=(--label "$LABEL_FILTER")
-   [ "$SELF_MODE" = "true" ] && LIST_ARGS+=(--author "@me")
+   # glab's --author takes a username. Unlike `gh`, it does not resolve the
+   # GitHub-CLI token `@me` — pass the authenticated login so --self actually
+   # filters (the explicit-#num path below already compares against this same
+   # `glab api user` value).
+   if [ "$SELF_MODE" = "true" ]; then
+     ME="$(glab api user --jq .username)"
+     LIST_ARGS+=(--author "$ME")
+   fi
    glab issue list "${LIST_ARGS[@]}" --per-page 100 \
      --jq 'sort_by([ (([.labels[] | select(test("^priority:[0-9]+$")) | ltrimstr("priority:") | tonumber] | min) // infinite), .created_at ]) | .[]'
    ```
