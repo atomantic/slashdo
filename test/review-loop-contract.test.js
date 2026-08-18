@@ -426,6 +426,15 @@ describe('review-loop parse contracts', () => {
         `${name} must accept the cursor reviewer slug`,
       );
     }
+
+    // rpr dispatches the inner loop itself (not via the multi-reviewer wrapper),
+    // so its step-2 / Pass checklists must forward {REVIEW_EFFORT} — parse-only
+    // mention is not enough. Cursor folds that value into --model; drop it and
+    // `cursor[gpt-5]~effort=max` silently reviews at default effort.
+    const rpr = readCommand('rpr.md');
+    assert.match(rpr, /forwarding `REVIEWER_APPLIES`.+\{REVIEW_EFFORT\}/s);
+    assert.match(rpr, /Pass `\{REVIEW_AGENT\}`.+\{REVIEW_EFFORT\}/s);
+    assert.match(rpr, /\{OLLAMA_EFFORT\}/);
   });
 
   it('keeps the empty-array rule in one partial the loops point at', () => {
