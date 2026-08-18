@@ -109,6 +109,23 @@ describe('review-loop parse contracts', () => {
     assert.match(ollama, /PROMPT="\$PROMPT Target reasoning effort level: \$OLLAMA_EFFORT\."/);
   });
 
+  it('tells the in-process claude reviewer what to do with ~effort, and what not to reach for', () => {
+    // The Agent tool takes a model but no reasoning effort, so a dispatching agent
+    // handed `claude~effort=xhigh` has no parameter to put it in. Left unsaid, it
+    // improvises — one run substituted Claude Code's own `/code-review --effort xhigh`
+    // skill for $LOCAL_PROMPT, which fans out on its own and reports in its own
+    // format, so the loop's FINDING/NO FINDINGS parse had nothing to read and the
+    // reviewer's merge-gate slot was filled by a verdict nobody verified.
+    const localAgent = readLib('local-agent-review-loop.md');
+    const inProcess = localAgent.slice(localAgent.indexOf('When `REVIEW_AGENT=claude`: dispatch an in-process sub-agent'));
+    assert.match(inProcess, /\*\*Effort\*\*: there is no in-process analog of `--effort`/);
+    assert.match(inProcess, /no reasoning-effort parameter/);
+    assert.match(inProcess, /Target reasoning effort level/);
+    // And the host's own review command is named as the thing not to substitute.
+    assert.match(inProcess, /Never substitute the host's own review command/);
+    assert.match(inProcess, /\/code-review/);
+  });
+
   it('lets ~opt excuse no-verdict and lets capped satisfy partial', () => {
     // Two ways a new status gets stranded: added to a loop's status set but not to
     // the aggregate rules that consume it. A ~opt no-verdict must reach the
