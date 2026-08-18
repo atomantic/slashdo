@@ -19,10 +19,10 @@ becomes the next agent's input.
 
 - `{ENHANCE_AGENTS}` — the ordered, deduped agent list the caller parsed from
   `--enhance-with` (see the caller's Parse Arguments). Each entry is a slug —
-  `codex`, `claude`, `agy`, or `grok` — optionally carrying a `[<model>]` bracket
+  `codex`, `claude`, `agy`, `grok`, or `cursor` — optionally carrying a `[<model>]` bracket
   (`codex[o3]`, `grok[grok-code-fast-1]`), stripped by the caller into a per-entry
   `{ENH_MODEL}` (empty → the agent's built-in default). `gemini`/`antigravity`
-  normalize to `agy`. `ollama` and `copilot` are **not** valid here — they are
+  normalize to `agy`; `cursor-agent` normalizes to `cursor`. `ollama` and `copilot` are **not** valid here — they are
   review-oriented (findings emitters), not free-form draft rewriters; the caller
   rejects them before this loop runs. An empty list (or the literal `none`) means
   the caller skips this loop entirely.
@@ -129,8 +129,8 @@ agent to a model it doesn't have). The flag becomes a shell **array** (never a b
 string — model names may contain spaces/parens and zsh does not word-split an
 unquoted expansion, so a string would pass `--model X Y` as one bogus argv word; an
 array keeps them separate in bash and zsh and expands to zero words when empty).
-`codex`, `claude`, and `grok` all accept the long `--model` form, so one array serves
-all three:
+`codex`, `claude`, `grok`, and `cursor` all accept the long `--model` form, so one array serves
+all four:
 
 ```bash
 MODEL_FLAG=()
@@ -160,6 +160,7 @@ as a positional argument (never via stdin) and prints the improved draft to stdo
 | `codex` | `codex ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} --sandbox read-only -a never exec "$ENHANCE_PROMPT"` — `exec` (free-form prompt) is the right subcommand here, not `codex review`; `-m`/`--model`, `--sandbox`, and `-a` are all top-level flags that MUST precede `exec`. `--sandbox read-only` enforces the read-only contract at the sandbox level while still allowing tree reads and git queries — the same posture `lib/local-agent-review-loop.md` uses for its review-only codex pass (only its *reviewer-applies* path needs `danger-full-access`). |
 | `agy` | `agy --dangerously-skip-permissions --model "$AGY_ENH_MODEL" --print-timeout 30m -p "$ENHANCE_PROMPT"` |
 | `grok` | `grok --permission-mode bypassPermissions ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} -p "$ENHANCE_PROMPT"` |
+| `cursor` | `"$REVIEW_BIN" -p --trust --mode=ask --output-format text ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} "$ENHANCE_PROMPT"` — `{REVIEW_BIN}` is resolved by the Cursor binary probe in `lib/local-agent-review-loop.md` (prefer `cursor-agent`; fall back to `agent` only when it identifies as Cursor). `--mode=ask` is Cursor's read-only exploration mode; `--trust` is required for headless untrusted workspaces; omit `--force` so print mode cannot apply edits. Do **not** pass `--effort` (Cursor has no such flag). |
 
 **Grok flag rationale.** `grok -p`/`--single <PROMPT>` runs a single-turn headless
 prompt, prints the response to stdout, and exits — the grok analog of `claude -p` /
@@ -174,15 +175,28 @@ for the `grok[<model>]` bracket (empty → grok's own default). Output is grok's
 default `plain` format — the improved draft on stdout. Like the other `-p` CLIs, grok
 takes the prompt as the positional argument, **not** from stdin — do not pipe into it.
 
+**Cursor flag rationale.** `"$REVIEW_BIN" -p --trust --mode=ask` is Cursor Agent's
+headless read-only posture — the analog of `codex --sandbox read-only` for a CLI
+that has no sandbox flag of that shape. `--mode=ask` is Cursor's read-only
+exploration mode and `--force` is omitted, so print mode only proposes changes;
+`--trust` skips the workspace-trust prompt that would otherwise fail a headless
+run. Resolve `{REVIEW_BIN}` with the same Cursor binary probe the review loop
+uses: prefer `cursor-agent`, and accept `agent` only after an identity check
+(Grok Build also ships an `agent` binary). The prompt is a positional argument
+to `-p`, not stdin. The step-4 git contract check is still the backstop — Ask
+mode is a request the CLI can ignore.
+
 ### Loop
 
 For each entry in `{ENHANCE_AGENTS}`, **in order** (left to right — the pipeline is
 sequential by design; do not parallelize, since each agent enhances the previous
 one's output):
 
-1. **Normalize and pre-flight the binary.** Normalize `gemini`/`antigravity` → `agy`.
-   Resolve the binary (`claude`/`codex`/`agy`/`grok` — the `[<model>]` bracket never
-   changes which binary is required). `command -v {binary}`. **If it is missing:**
+1. **Normalize and pre-flight the binary.** Normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`.
+   Resolve the binary (`claude`/`codex`/`agy`/`grok`/`cursor` — the `[<model>]` bracket never
+   changes which binary is required; for `cursor` use the Cursor binary probe in
+   `lib/local-agent-review-loop.md`, not `command -v cursor`). `command -v {binary}`
+   for the other agents. **If it is missing:**
    print `{agent} CLI not installed — skipping this enhancement pass`, record the
    agent as `skipped`, leave `{DRAFT_TITLE}`/`{DRAFT_BODY}` **unchanged**, and
    **continue to the next agent** — never substitute a different agent, and never
@@ -234,7 +248,7 @@ one's output):
      sub-agent runs on the host session's plan (no API billing) rather than as a
      `claude` subprocess.
 <!-- /if:teams -->
-   - **`codex` / `agy` / `grok`<!-- if:teams --><!-- else --> / `claude`<!-- /if:teams -->:**
+   - **`codex` / `agy` / `grok` / `cursor`<!-- if:teams --><!-- else --> / `claude`<!-- /if:teams -->:**
      run in the **background**, not as a blocking foreground call — a large-draft pass
      on a heavy model can exceed the host's ~10-minute foreground cap. **The snippet
      below is not self-detaching — launch it with the host's background mode** (Claude
