@@ -1,5 +1,5 @@
 ---
-description: Claim the next unclaimed PLAN.md item (or GitHub issue with --issues) by its ID, do the work in an isolated worktree, ship a PR, and clean up — or, with --swarm, claim and ship several independent issues in parallel (auto-picked, or the exact issue numbers you name). Requires GitHub (gh) — it ships via /do:pr.
+description: Claim the next unclaimed PLAN.md item (or tracker issue with --issues) by its ID, do the work in an isolated worktree, ship a PR, and clean up — or, with --swarm, claim and ship several independent issues in parallel (auto-picked, or the exact issue numbers you name). Works on GitHub (gh) or GitLab (glab), including Enterprise/self-managed hosts — it ships via /do:pr.
 argument-hint: "[<slug>|#<issue> …] [--issues|--no-issues] [--issues-label <name>] [--model <tier>[,…]] [--effort <level>[,…]] [--self|--no-self] [--swarm[=<N>]] [--plan] [--review-with <agent>[,…]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--no-review]"
 ---
 
@@ -50,8 +50,8 @@ Collect targets into an ordered list `TARGETS` in three steps, **in this order**
 **When `SWARM` is true, this section replaces Phases 1–7 for the run.** It claims and ships up to `SWARM_N` independent open issues at once — each in its own worktree subagent running the normal single-issue flow — then serializes only the merge. When `--swarm` is absent, skip this section entirely and run Phases 1–7 below. Swarm reuses the single-issue phases wholesale: each agent runs the single-issue **Phases 2–6** for one issue (claim → implement → changelog → review, **no merge, no Phase 7 cleanup** — the orchestrator owns those), so the claim/lease, worktree, implement, changelog, and review-gate semantics are exactly the single-issue ones. The only new logic is partitioning the batch up front (Phase A) and serializing the merges at the end (Phase C).
 
 **Preconditions — check first; abort cleanly if any fails (do not partially claim):**
-- **Issues mode only.** Swarm's claim/lease is the GitHub assignee marker, and partitioning by dependency needs the tracker. **Resolve `ISSUE_MODE` here first, including Phase 1's auto-redirect** — because swarm replaces Phases 1–7, that redirect won't fire on its own: if `--issues`/a saved default didn't already set it, apply the same structural check Phase 1 does — a repo with **no PLAN.md, or only the issue-mode stub**, *is* issue-tracked, so set `ISSUE_MODE=true` (state the switch). **An explicit numeric target settles this too** — issue numbers are inherently tracker references, so **any** numeric target (one or several) sets `ISSUE_MODE=true` (state the switch) even in a repo with a real PLAN.md backlog — **unless the user explicitly typed `--no-issues`**, which wins per this file's usual typed-flag-beats-inference rule and routes straight to the abort below. One target matters as much as several here: a lone `#12` hands off to the single-issue Phases 1–7, which must run in *issues* mode or Phase 1 would go looking for a PLAN.md slug named `12`. Abort when it still resolves to PLAN.md mode — a real PLAN.md backlog with either (no `--issues` and no numeric targets) or an explicit `--no-issues`: ``--swarm works in issues mode only — pass --issues (or run in an issue-tracked repo). PLAN.md-mode swarm is a future enhancement.``
-- **GitHub + authenticated `gh`** — the same Phase 1 pre-flight (it ships through `/do:pr`).
+- **Issues mode only.** Swarm's claim/lease is the tracker's issue-assignee marker (GitHub or GitLab), and partitioning by dependency needs the tracker. **Resolve `ISSUE_MODE` here first, including Phase 1's auto-redirect** — because swarm replaces Phases 1–7, that redirect won't fire on its own: if `--issues`/a saved default didn't already set it, apply the same structural check Phase 1 does — a repo with **no PLAN.md, or only the issue-mode stub**, *is* issue-tracked, so set `ISSUE_MODE=true` (state the switch). **An explicit numeric target settles this too** — issue numbers are inherently tracker references, so **any** numeric target (one or several) sets `ISSUE_MODE=true` (state the switch) even in a repo with a real PLAN.md backlog — **unless the user explicitly typed `--no-issues`**, which wins per this file's usual typed-flag-beats-inference rule and routes straight to the abort below. One target matters as much as several here: a lone `#12` hands off to the single-issue Phases 1–7, which must run in *issues* mode or Phase 1 would go looking for a PLAN.md slug named `12`. Abort when it still resolves to PLAN.md mode — a real PLAN.md backlog with either (no `--issues` and no numeric targets) or an explicit `--no-issues`: ``--swarm works in issues mode only — pass --issues (or run in an issue-tracked repo). PLAN.md-mode swarm is a future enhancement.``
+- **GitHub or GitLab, with the matching CLI authenticated** — the same Phase 1 pre-flight (it ships through `/do:pr`, which supports both).
 - **A subagent-capable harness.** Swarm fans out parallel agents via the harness's subagent mechanism (Claude Code's `Agent`/Task tool, or the equivalent). **If the environment cannot spawn parallel subagents, fall back to sequential** — run Phase B's per-issue task (Phases 2–6, **no merge**) for each partitioned issue one after another in this same session, then proceed to Phase C so the merge stays owned by the serialized queue, not each iteration (still useful: it drains `SWARM_N` items in one invocation, just not concurrently). State that you're doing so.
 - **Targets are optional — and may be an explicit list.** **Check target *shape* first, before mode resolution or any claim:** every target must be an **issue number** (bare or `#`-prefixed), because a PLAN.md slug can never be a swarm member — abort on one, and let this abort win over the issues-mode abort above so the message names the real problem: ``--swarm works on issue numbers only — "<slug>" looks like a PLAN.md item. Drop --swarm to claim it, or pass issue numbers.`` Then route by count: **no target** → Phase A auto-picks the batch; **two or more** → that list IS the batch (Phase A's explicit-list path; the same `#<num>` cherry-pick semantics, `SWARM_N` at a time); **exactly one** → this isn't a swarm: run the single-issue **Phases 1–7** for it (in issues mode, per the bullet above) and say so.
 
@@ -85,7 +85,7 @@ Collect targets into an ordered list `TARGETS` in three steps, **in this order**
 
 Launch the current wave's agents **in parallel** (all Agent/Task calls in a single response) and wait for all to return.
 
-**Apply each issue's dispatch hint to its own agent.** Read `model:<tier>` / `effort:<level>` off the issue you're about to hand out and configure that agent from it. **A1's auto-pick queue already carries `labels` (its `gh issue list` requests them); A1e's explicit-list path does not** — it vets each named issue individually — so for a named batch, fetch them per issue before dispatching (`gh issue view <num> --json labels -q '[.labels[].name]'`) rather than assuming they're in hand. Skipping that is how a named swarm silently runs every worker at the session default despite A1e promising each member keeps its own hint — this is the payoff for the labels, and it's why a mixed batch shouldn't cost one flat rate per agent.
+**Apply each issue's dispatch hint to its own agent.** Read `model:<tier>` / `effort:<level>` off the issue you're about to hand out and configure that agent from it. **A1's auto-pick queue already carries `labels` (its issue-list call requests them); A1e's explicit-list path does not** — it vets each named issue individually — so for a named batch, fetch them per issue before dispatching rather than assuming they're in hand: GitHub `gh issue view <num> --json labels -q '[.labels[].name]'`; GitLab `glab issue view <num> --output json --jq '.labels'` (labels already come back as a flat string array, no `.name` needed). Skipping that is how a named swarm silently runs every worker at the session default despite A1e promising each member keeps its own hint — this is the payoff for the labels, and it's why a mixed batch shouldn't cost one flat rate per agent.
 
 **The labels name tiers, not models — resolve each against the host you're running on** using the shared rules in [lib/model-tiers.md](../../lib/model-tiers.md): `light` → this host's cheapest capable coding model, `medium` → its workhorse, `heavy` → **its strongest available model, named by alias** (`model: "opus"` on Claude Code — an alias, never a pinned version ID), and `effort:<level>` → **advisory**: it tells the worker how careful this issue needs to be, and you **may** additionally set the sub-agent's reasoning-effort control from it (clamped to the host's nearest level) where the dispatch API has one — Claude Code's `Agent` tool does not, so pass the level in the worker's brief instead and let it run at session effort. An issue missing either label inherits the session's setting for that axis. That file also carries the two consequences that matter here:
 
@@ -97,7 +97,7 @@ Two things this is **not**: it is not the `--model`/`--effort` *filter* (that ch
 Give each subagent exactly one issue number and this task:
 
 > Run the `/do:next` single-issue flow for issue **#`<num>`** — the **Phase 1 explicit-`#<num>` path** (for validation + variable setup) followed by **Phases 2 through 6 only** — in your own sibling worktree, with these adjustments:
-> - **Validate & set up via Phase 1's explicit-number path first:** run Phase 1's `#<num>` branch to confirm the issue is open and not in flight, resolve it if it's an epic, and set `ISSUE_NUM=<num>` / `SLUG=issue-<num>` — Phase 2's worktree/branch and every later `gh issue` call depend on those variables. (Skip the auto-pick walk; the orchestrator already vetted this issue in Phase A, and an explicit number deliberately bypasses the auto-pick skips.) **Map this validation's failures to the structured result instead of the explicit-path's normal print-and-stop:** if it fails because the issue is now **in flight or already assigned** (a sibling `/do:next` claimed it between Phase A and now — a lost race, not an error), return `{ issue, status: "yielded" }`; if it fails because the issue is **closed or no longer exists**, return `{ issue, status: "skipped", reason }`. Either way, do NOT pick a different issue.
+> - **Validate & set up via Phase 1's explicit-number path first:** run Phase 1's `#<num>` branch to confirm the issue is open and not in flight, resolve it if it's an epic, and set `ISSUE_NUM=<num>` / `SLUG=issue-<num>` — Phase 2's worktree/branch and every later `gh issue`/`glab issue` call depend on those variables. (Skip the auto-pick walk; the orchestrator already vetted this issue in Phase A, and an explicit number deliberately bypasses the auto-pick skips.) **Map this validation's failures to the structured result instead of the explicit-path's normal print-and-stop:** if it fails because the issue is now **in flight or already assigned** (a sibling `/do:next` claimed it between Phase A and now — a lost race, not an error), return `{ issue, status: "yielded" }`; if it fails because the issue is **closed or no longer exists**, return `{ issue, status: "skipped", reason }`. Either way, do NOT pick a different issue.
 > - **Then claim via that same explicit-number path:** it performs the Phase 2 worktree creation + assignee-marker claim with the race read-back. If the read-back shows a sibling won the race, **yield** (release the marker, retract the claim branch, clean up your worktree) and return `{ issue, status: "yielded" }` — do NOT pick a different issue.
 > - **Phase 3 still applies:** if the issue is stale/superseded/awaiting-input, skip it (release the marker, clean up) and return `{ issue, status: "skipped", reason }`.
 > - Implement (Phase 4) and record completion + changelog (Phase 5) as normal.
@@ -119,51 +119,83 @@ After the barrier, merge the wave's returned PRs **one at a time, never concurre
 
 1. **Skip non-mergeable results.** A result with `status: "yielded"`/`"skipped"` (no `pr_number`) has nothing to merge — record it. For the rest, apply **single-issue Phase 6's merge gate** to `review_status`: never merge `dirty` (build/test broken) or `inconclusive` (a requested reviewer missing/timed-out/errored) — leave that PR open and record why; merge only `clean`, `opened-no-review` (Local gate passed, no external reviewer requested), or `partial` **with** an explicit `--review-stop-on-*` flag. (Agents that never returned are reconciled in Phase D, not here.)
 2. **Re-sync onto the advanced default branch** from the PR's worktree — `git fetch origin <default>` then `git merge --no-edit origin/<default>` — resolving any PLAN.md/changelog conflict **deletions-win** (a line removed on either side stays removed; keep additions from both). If the merge **can't be resolved cleanly**, leave that PR open, record it for human follow-up, and move to the next — **never force it**.
-3. **Gate on required CI, then merge.** Because each swarm agent opened its PR with `/do:pr --no-merge`, `/do:pr`'s own CI merge gate never ran — and the re-sync in step 2 just pushed a new SHA whose checks are pending — so the orchestrator must run the required-CI gate here, exactly as the single-issue Phase 6 / `/do:pr` merge does, before `gh pr merge`. Push the re-synced SHA, watch the **required** checks, and only then merge; on a required-check failure apply **CI flake handling** (one re-run on the same commit; flake → proceed, real → leave that PR open, record it, and move to the next — see `~/.claude/lib/ci-flake-handling.md`). (If `gh` reports no required checks on the branch, the gate is vacuously satisfied — merge directly.)
-   ```bash
-   git -C "<worktree>" push
-   gh pr checks <pr_number> --required --watch --fail-fast   # vacuously satisfied when no required checks exist
-   gh pr merge <pr_number> --merge --delete-branch
-   ```
-4. **Close out the issue** — single-issue Phase 7's closure step applied per merged PR: confirm `Closes #<num>` auto-closed it on merge to the default branch; if still open, `gh issue close <num> --comment "Shipped in PR #<pr_number>."`. Drop the `in-progress` label.
+3. **Gate on required CI, then merge.** Because each swarm agent opened its PR with `/do:pr --no-merge`, `/do:pr`'s own CI merge gate never ran — and the re-sync in step 2 just pushed a new SHA whose checks are pending — so the orchestrator must run the CI gate here, exactly as the single-issue Phase 6 / `/do:pr` merge does, before merging. Push the re-synced SHA, wait for CI, and only then merge; on a check failure apply **CI flake handling** (one re-run on the same commit; flake → proceed, real → leave that PR open, record it, and move to the next — see `~/.claude/lib/ci-flake-handling.md`).
+   - GitHub (`gh`) — scope the watch to **required** checks only so an optional/non-required job can't block a merge branch protection would allow (vacuously satisfied when no required checks exist):
+     ```bash
+     git -C "<worktree>" push
+     gh pr checks <pr_number> --required --watch --fail-fast
+     gh pr merge <pr_number> --merge --delete-branch
+     ```
+   - GitLab (`glab`) — there's no discrete "required checks" list to scope to; the project's own merge/pipeline-success requirement governs, and `--auto-merge` (the default) already waits for the pipeline before merging:
+     ```bash
+     git -C "<worktree>" push
+     glab mr merge <pr_number> --auto-merge --yes --remove-source-branch
+     ```
+     If the installed `glab` doesn't support `--auto-merge`, fall back to `glab ci status --wait` then `glab mr merge <pr_number> --yes --remove-source-branch`.
+4. **Close out the issue** — single-issue Phase 7's closure step applied per merged PR: confirm `Closes #<num>` auto-closed it on merge to the default branch; if still open, close it explicitly (GitHub: `gh issue close <num> --comment "Shipped in PR #<pr_number>."`; GitLab: `glab issue note <num> -m "Shipped in PR #<pr_number>." && glab issue close <num>`). Drop the `in-progress` label.
 
 ### Swarm Phase D — Reconcile, clean up, report
 
 Runs **once per invocation**, after the last wave, over every result the batch produced.
 
 1. **Sweep worktrees & branches** from the main repo: `git worktree remove` + `git branch -d`/`-D` each merged agent's worktree/branch, then `git worktree prune`. **Keep** the worktree/branch of any PR left open so the work can be finished.
-2. **Handle agent death / spend-limit.** If an agent never returned (crash, monthly spend cap), reconcile from **GitHub state, not its last words** — and **never assume a review status survived the death** (slashdo's local-reviewer verdicts aren't persisted to the PR, so there's no stored `review_status` to read back). A worktree/branch/PR may exist:
+2. **Handle agent death / spend-limit.** If an agent never returned (crash, monthly spend cap), reconcile from **tracker state, not its last words** — and **never assume a review status survived the death** (slashdo's local-reviewer verdicts aren't persisted to the PR, so there's no stored `review_status` to read back). A worktree/branch/PR may exist:
    - **A PR opened:** recompute its gate from scratch before merging — re-run the run's review flags against it (`/do:pr --no-merge` with the same `--review-with`), or, for a no-external-review run, treat green required-CI + a mergeable state as `opened-no-review`-eligible. Merge it through the Phase C queue only on a clean recompute; if requested external reviewers can't be re-run to clean, leave the PR open and flag it for a human.
-   - **No PR (or an unclean recompute you won't finish):** **release the claim** — remove the assignee, delete the local+remote `next/issue-<num>` branch, drop `in-progress` — so the issue returns to the queue, and flag it for human follow-up.
+   - **No PR (or an unclean recompute you won't finish):** **release the claim** — remove the assignee (GitHub: `gh issue edit <num> --remove-assignee @me`; GitLab: `glab issue update <num> --assignee "-$ME"`), delete the local+remote `next/issue-<num>` branch, drop `in-progress` — so the issue returns to the queue, and flag it for human follow-up.
 3. **Re-evaluate parent epics** for every issue that closed — a shipped issue may have been an epic's last child (the Phase 7 "re-evaluate the parent epic" step, run once per closed child).
 4. **Reconcile changelog/PLAN churn.** Parallel claims all touch the same changelog file, when the project has one; the deletions-win re-syncs in Phase C should have kept it consistent — confirm the merged default branch's changelog carries every shipped issue's entry with no duplicate or resurrected lines. Skip this check for a project whose release notes come from commit messages.
 5. **Print a summary table** — one row per batch issue, including the ones dropped in A1e and any held in a later wave: `issue · wave · dispatch (model/effort actually used, or `session` when the issue carried no hint — or when this host couldn't set them) · PR · result (merged / open: why / yielded / skipped / held / needs-input) · review status`. The dispatch column is what makes a wrong hint visible: a `model:light` issue whose agent needed three review iterations is a label to correct, not a mystery. For an explicit list, **account for every number the user named** — a named issue that never ran must appear with its reason, never be silently absent.
 
 ## Phase 1: Pick
 
-> **Pre-flight — `/do:next` requires GitHub (`gh`), in BOTH modes.** The command ships via `/do:pr` and merges with `gh pr merge`, both of which are GitHub-only. So even PLAN.md mode (whose *claiming* is git-only) can't *complete* on a non-GitHub host. **Abort up front — before claiming or implementing anything — if the repo's `origin` isn't GitHub or `gh` isn't authenticated**, so the user never claims work they can't ship:
+> **Pre-flight — `/do:next` requires GitHub (`gh`) or GitLab (`glab`), in BOTH modes.** The command ships via `/do:pr`, which supports both hosts (including GitHub Enterprise and self-managed/Enterprise GitLab — both CLIs resolve a custom host from the repo's `origin` remote on their own). So even PLAN.md mode (whose *claiming* is git-only) needs a working `gh` or `glab` to *complete* the ship step. **Detect the host up front and abort if the matching CLI isn't authenticated — before claiming or implementing anything** — so the user never claims work they can't ship. Detection follows the exact same rule `/do:pr`'s own "Detect VCS Host" step uses (the `origin` remote is authoritative for which host the repo lives on; `auth status` only tells you which CLI is *usable*), so the two commands never disagree about which host a given repo is on:
 > ```bash
-> # `--active` scopes the check to the active account. A bare `gh auth status` exits
+> # Derive VCS_HOST/CLI_TOOL from the origin remote. A GitLab remote may be
+> # gitlab.com, gitlab.<company>.com, or any self-managed hostname that happens to
+> # contain "gitlab" — matching on that substring (rather than an exact-domain list)
+> # is what lets this work on a custom/Enterprise instance with zero configuration.
+> ORIGIN_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"
+> if printf '%s' "$ORIGIN_HOST" | grep -qi gitlab; then
+>   VCS_HOST=gitlab; CLI_TOOL=glab
+> elif [ -n "$ORIGIN_HOST" ]; then
+>   VCS_HOST=github; CLI_TOOL=gh
+> else
+>   # No origin remote at all — fall back to whichever CLI is authenticated.
+>   if gh auth status --active >/dev/null 2>&1; then VCS_HOST=github; CLI_TOOL=gh
+>   elif glab auth status >/dev/null 2>&1; then VCS_HOST=gitlab; CLI_TOOL=glab
+>   else
+>     echo "/do:next needs an authenticated gh (GitHub) or glab (GitLab). Run 'gh auth login' or 'glab auth login'."; exit 1
+>   fi
+> fi
+> # `--active` scopes the gh check to the active account. A bare `gh auth status` exits
 > # non-zero if ANY configured account has a stale/invalid token — even when the active
 > # account is authenticated fine — which would fail this pre-flight on every run.
-> # Use `gh repo view` (not a literal `grep github.com`) to confirm this is a GitHub
-> # repo: it resolves the host from `origin`, so it ACCEPTS GitHub Enterprise hosts
-> # (e.g. github.example.com) — which a `github.com` substring match would wrongly reject —
-> # while still failing on GitLab (gh doesn't recognize a GitLab remote as a GitHub host).
-> gh auth status --active >/dev/null 2>&1 && gh repo view >/dev/null 2>&1 || {
->   echo "/do:next requires a GitHub repo with an authenticated gh CLI (it ships via /do:pr). Run 'gh auth login', or use a different workflow for non-GitHub hosts."; exit 1; }
-> # Derive the API host for the `gh api` calls below. `gh api` ignores the repo remote
-> # and defaults to github.com, so on a GHES repo it must be passed --hostname "$GH_HOST"
-> # (see ~/.claude/lib/gh-host.md). `gh issue`/`gh pr` calls resolve the host on their own.
-> GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"; [ -n "$GH_HOST" ] || GH_HOST=github.com
+> if [ "$CLI_TOOL" = gh ]; then
+>   gh auth status --active >/dev/null 2>&1 && gh repo view >/dev/null 2>&1 || {
+>     echo "/do:next detected a GitHub repo ($ORIGIN_HOST) but gh is not authenticated to it. Run 'gh auth login'."; exit 1; }
+>   # Derive the API host for the `gh api` calls below. `gh api` ignores the repo remote
+>   # and defaults to github.com, so on a GHES repo it must be passed --hostname "$GH_HOST"
+>   # (see ~/.claude/lib/gh-host.md). `gh issue`/`gh pr` calls resolve the host on their own.
+>   GH_HOST="$ORIGIN_HOST"; [ -n "$GH_HOST" ] || GH_HOST=github.com
+> else
+>   glab auth status >/dev/null 2>&1 || {
+>     echo "/do:next detected a GitLab repo ($ORIGIN_HOST) but glab is not authenticated to it. Run 'glab auth login'."; exit 1; }
+>   # No GH_HOST-style workaround needed here: unlike `gh api`, `glab api` and
+>   # `glab issue`/`glab mr` already resolve the host from the repo's origin remote.
+> fi
 > ```
+> Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`. Carry `CLI_TOOL`/`VCS_HOST` (and `GH_HOST` on GitHub) through every later phase — [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md)'s own setup step reuses `CLI_TOOL` rather than re-detecting it.
 
 Build the in-flight set (identical in both modes):
 
 ```bash
 git fetch --prune 2>/dev/null
 git branch -a --no-color --format='%(refname:short)'
-gh pr list --state open --limit 500 --json headRefName -q '.[].headRefName' 2>/dev/null || true   # 500 cap avoids silent truncation; || true keeps a transient gh hiccup from aborting the scan (the pre-flight already confirmed gh works)
+if [ "$CLI_TOOL" = gh ]; then
+  gh pr list --state open --limit 500 --json headRefName -q '.[].headRefName' 2>/dev/null || true   # 500 cap avoids silent truncation; || true keeps a transient gh hiccup from aborting the scan (the pre-flight already confirmed gh works)
+else
+  glab mr list --per-page 100 --output json --jq '.[].source_branch' 2>/dev/null || true   # open is the default state; 100 is GitLab's per-page max (lower than gh's 500) — same "note the cap" caveat applies on a pathologically large open-MR backlog
+fi
 ```
 
 For every ref, split on `/` and collect each segment — that's the raw in-flight set.
@@ -171,7 +203,7 @@ For every ref, split on `/` and collect each segment — that's the raw in-fligh
 ### Phase 1 — PLAN.md mode (default)
 
 1. **Locate the queue — auto-redirect to issues when PLAN.md isn't the source of truth.** Read `PLAN.md` from the repo root, then route:
-   - **PLAN.md is absent, OR its body is the issue-mode stub** (`/do:replan --issues` empties PLAN.md to a "roadmap lives in the tracker" note — detect the sentinel phrase **"tracks its roadmap as issues"** or **"Managed by `/do:replan --issues`"**, i.e. a note pointing at the tracker with zero `- [ ]` items) → this repo is issue-tracked. **Unless the user explicitly typed `--no-issues`** — an explicit request for PLAN.md mode wins over the structural heuristic, so in that case report `No PLAN.md backlog and --no-issues was set — create a PLAN.md or drop --no-issues to work the tracker.` and stop — **switch to issue mode automatically**: set `ISSUE_MODE=true` and continue from the issues-mode Phase 1 below (which runs the [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) setup). State the switch plainly: `No PLAN.md backlog — this repo tracks work as issues; continuing in --issues mode.` If the issue-mode setup aborts because **no host is authenticated**, surface that abort to the user (the message tells them to run `gh auth login` or create a PLAN.md) — do NOT silently report an empty queue.
+   - **PLAN.md is absent, OR its body is the issue-mode stub** (`/do:replan --issues` empties PLAN.md to a "roadmap lives in the tracker" note — detect the sentinel phrase **"tracks its roadmap as issues"** or **"Managed by `/do:replan --issues`"**, i.e. a note pointing at the tracker with zero `- [ ]` items) → this repo is issue-tracked. **Unless the user explicitly typed `--no-issues`** — an explicit request for PLAN.md mode wins over the structural heuristic, so in that case report `No PLAN.md backlog and --no-issues was set — create a PLAN.md or drop --no-issues to work the tracker.` and stop — **switch to issue mode automatically**: set `ISSUE_MODE=true` and continue from the issues-mode Phase 1 below (which runs the [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) setup). State the switch plainly: `No PLAN.md backlog — this repo tracks work as issues; continuing in --issues mode.` If the issue-mode setup aborts because **no host is authenticated**, surface that abort to the user (the message tells them to run `gh auth login`/`glab auth login` or create a PLAN.md) — do NOT silently report an empty queue.
    - **PLAN.md exists with real `- [ ]` items** → continue in PLAN.md mode (steps 2–5).
    - **PLAN.md exists, is not the stub, but has zero `- [ ]` items** (a genuinely empty backlog) → report `PLAN.md has no open items.` and stop, suggesting `/do:replan` or `/do:goals` to populate it (or `--issues` to work the tracker).
 2. **If any `- [ ]` line lacks a `[<slug>]` ID, stop and tell the user to run `/do:replan` first** — its Phase 0 populates IDs in one pass, after which `/do:next` can find work.
@@ -185,15 +217,15 @@ For every ref, split on `/` and collect each segment — that's the raw in-fligh
 
 ### Phase 1 — issues mode (`--issues`)
 
-First run the shared issue-mode setup — detect `gh`/`glab` as `CLI_TOOL`, ensure `PLAN_LABEL` exists, and abort if neither host is authenticated (this file is inlined at install time, so it's available in every environment — not a dead link):
+Run the shared issue-mode setup — it reuses the `CLI_TOOL` (`gh`/`glab`) the Pre-flight above already detected, ensures `PLAN_LABEL` exists, and aborts if neither host is authenticated (this file is inlined at install time, so it's available in every environment — not a dead link):
 
 !`cat ~/.claude/lib/plan-issue-mode.md`
 
-> **Issue mode requires GitHub (`gh`).** `/do:next`'s claim mechanics depend on the GitHub assignee model as the cross-machine marker (Phase 2). **If the setup selected `CLI_TOOL=glab`, abort issue mode** with: "`/do:next --issues` currently supports GitHub only — the cross-machine claim relies on GitHub issue assignees. Use PLAN.md mode (drop `--issues`), or track GitLab claim support as a feature request." Don't attempt the GitLab path with untested `glab` assignee commands — a half-working claim is worse than a clean abort. (The shared label/list *setup* above is cross-host, but the claim/marker flow below is not yet.) All commands below are therefore `gh`.
+> **Issue mode works on GitHub or GitLab.** `/do:next`'s claim mechanics (Phase 2) use the tracker's **assignee** field as the cross-machine marker on either host — GitHub via `gh issue edit --add-assignee`/`--remove-assignee`, GitLab via `glab issue update --assignee "+<user>"`/`--assignee "-<user>"` (the `+`/`-` prefix adds/removes one assignee without clobbering any others already on the issue, which matters for the race read-back below). Every `gh issue`/`gh api` call in this phase has a `glab issue`/`glab api` equivalent alongside it, selected by `$CLI_TOOL`. One structural gap to know about: GitHub exposes a native, project-scoped **sub-issues** API for epic/child resolution (step 3) that GitLab does not — GitLab's closest analog (group-level Epics) is a different, tier-gated feature, so on GitLab the **convention fallback** (body task-lists + `Part of #N` back-references, per [lib/epic-children.md](../../lib/epic-children.md)) is the primary path rather than a fallback of last resort. It's fully host-agnostic once every `gh` call in it is paired with its `glab` form, which it already is.
 
 Then:
 
-1. **List candidates** — open issues, **by priority then oldest-first**, **across all labels by default** (`gh issue list` never returns pull requests, so PRs are excluded automatically). **By default there is no author filter and no required label** — auto-pick claims any open issue regardless of who filed it or what label it carries — the guards against claiming the wrong thing are the parking-label skip (step 3), the declared-dependency skip (step 4), and the in-flight/assigned checks, *not* a gating label. Three opt-in narrowings apply when active: a label filter (`LABEL_FILTER` set via `--issues-label` or a saved `issues-label` default) restricts the set to one curated label; a **dispatch-hint filter** (`MODEL_FILTER` / `EFFORT_FILTER` set via `--model` / `--effort`) restricts it to issues whose `model:`/`effort:` labels match; and — **when `SELF_MODE` is on (`--self` / saved `self` default)** — an **author filter restricts the set to issues YOU filed** (`--author "@me"`), so issues opened by anyone else are excluded at the source. The author filter is a **security boundary**, not advisory ordering like priority: it removes other people's issues from consideration entirely.
+1. **List candidates** — open issues, **by priority then oldest-first**, **across all labels by default** (`gh issue list`/`glab issue list` never return pull/merge requests, so those are excluded automatically). **By default there is no author filter and no required label** — auto-pick claims any open issue regardless of who filed it or what label it carries — the guards against claiming the wrong thing are the parking-label skip (step 3), the declared-dependency skip (step 4), and the in-flight/assigned checks, *not* a gating label. Three opt-in narrowings apply when active: a label filter (`LABEL_FILTER` set via `--issues-label` or a saved `issues-label` default) restricts the set to one curated label; a **dispatch-hint filter** (`MODEL_FILTER` / `EFFORT_FILTER` set via `--model` / `--effort`) restricts it to issues whose `model:`/`effort:` labels match; and — **when `SELF_MODE` is on (`--self` / saved `self` default)** — an **author filter restricts the set to issues YOU filed** (`--author "@me"`), so issues opened by anyone else are excluded at the source. The author filter is a **security boundary**, not advisory ordering like priority: it removes other people's issues from consideration entirely.
    ```bash
    # LABEL_FILTER is empty by default → all open issues; non-empty only when the user
    # explicitly opted into a curated queue via --issues-label / a saved issues-label default.
@@ -223,21 +255,44 @@ Then:
    ```
    The high `--limit` (500) avoids silently truncating the queue before the client-side priority/oldest sort — `gh issue list` defaults to 30, which would hide older eligible work. If a repo ever has >500 open candidate issues the queue is pathologically large (run `/do:replan --issues` to prune, or pass `--issues-label` to scope it); note the cap rather than silently dropping the overflow. **Priority is advisory ordering, not a gate** — an unprioritized issue is still claimable; the `priority:<N>` label only moves it earlier or later in the walk.
 
-   **Dispatch-hint filter — client-side, in the same `-q` program.** When `MODEL_FILTER` / `EFFORT_FILTER` is non-empty, `map(select(…))` the array **before** `sort_by`, one clause per active axis. It cannot go in `LIST_ARGS`: repeated `gh issue list --label` flags AND together, so `--label model:light --label model:medium` asks for issues carrying *both* — the opposite of the OR this flag means. Build each clause from the **validated enum values only** (they come from the fixed sets in Parse Arguments, never from raw user text), where `<axis>` is `model`/`effort` and `V1…Vn` are the requested values with the `none` sentinel removed:
+   **On GitLab, the same walk uses `glab issue list` — field names and shapes differ, not just the binary.** GitLab's JSON returns `iid` (not `number`), `labels` as a flat array of strings (not objects with `.name`), `assignees[].username` (not `.login`), `author.username` (not `.login`), `created_at` (not `createdAt`), `description` (not `body`), and `state` of `"opened"`/`"closed"` (not `OPEN`/`CLOSED`) — every jq expression below that touches these fields is adjusted accordingly, not just the flag names:
+   ```bash
+   LIST_ARGS=(--output json)
+   [ -n "$LABEL_FILTER" ] && LIST_ARGS+=(--label "$LABEL_FILTER")
+   [ "$SELF_MODE" = "true" ] && LIST_ARGS+=(--author "@me")
+   glab issue list "${LIST_ARGS[@]}" --per-page 100 \
+     --jq 'sort_by([ (([.labels[] | select(test("^priority:[0-9]+$")) | ltrimstr("priority:") | tonumber] | min) // infinite), .created_at ]) | .[]'
    ```
-   # membership clause — present whenever at least one real value was requested
+   GitLab's `--per-page` maxes out at 100 (lower than `gh`'s 500-item `--limit`) with no built-in "give me everything" pagination flag for a plain open-issue list — the same "note the cap, don't silently drop the overflow" guidance applies, just at a lower threshold; `--issues-label` is the practical way to keep a busy GitLab tracker's candidate set under it.
+
+   **Dispatch-hint filter — client-side, in the same list-and-filter program.** When `MODEL_FILTER` / `EFFORT_FILTER` is non-empty, `map(select(…))` the array **before** `sort_by`, one clause per active axis. It cannot go in `LIST_ARGS`: repeated `--label` flags AND together on both `gh` and `glab`, so `--label model:light --label model:medium` asks for issues carrying *both* — the opposite of the OR this flag means. Build each clause from the **validated enum values only** (they come from the fixed sets in Parse Arguments, never from raw user text), where `<axis>` is `model`/`effort` and `V1…Vn` are the requested values with the `none` sentinel removed:
+   ```
+   # GitHub (labels are {name: "..."} objects) — membership clause, present whenever
+   # at least one real value was requested:
    any(.labels[].name; . == "<axis>:V1" or . == "<axis>:V2" …)
-   # untiered clause — OR'd in ONLY when `none` was among the values
+   # untiered clause — OR'd in ONLY when `none` was among the values:
    ([.labels[].name | select(startswith("<axis>:"))] | length == 0)
+
+   # GitLab (labels are plain strings) — same two clauses without the `.name`:
+   any(.labels[]; . == "<axis>:V1" or . == "<axis>:V2" …)
+   ([.labels[] | select(startswith("<axis>:"))] | length == 0)
    ```
    An axis whose only value is `none` uses the untiered clause alone. Worked example — `--model light,none --effort max`:
    ```bash
+   # GitHub
    gh issue list "${LIST_ARGS[@]}" --limit 500 \
      --json number,title,assignees,labels,createdAt,body \
      -q 'map(select(any(.labels[].name; . == "model:light")
                     or ([.labels[].name | select(startswith("model:"))] | length == 0)))
          | map(select(any(.labels[].name; . == "effort:max")))
          | sort_by([ (([.labels[].name | select(test("^priority:[0-9]+$")) | ltrimstr("priority:") | tonumber] | min) // infinite), .createdAt ]) | .[]'
+
+   # GitLab
+   glab issue list "${LIST_ARGS[@]}" --output json --per-page 100 \
+     --jq 'map(select(any(.labels[]; . == "model:light")
+                   or ([.labels[] | select(startswith("model:"))] | length == 0)))
+         | map(select(any(.labels[]; . == "effort:max")))
+         | sort_by([ (([.labels[] | select(test("^priority:[0-9]+$")) | ltrimstr("priority:") | tonumber] | min) // infinite), .created_at ]) | .[]'
    ```
    Omit the `map` for an inactive axis entirely rather than emitting `select(true)`. **This filter runs before every other skip**, so an issue it excludes is never even considered for the parking-label / dependency / epic checks — and, unlike those skips, exclusion here means "not what you asked for," not "not workable." Report it that way in step 7: if the unfiltered queue had eligible work and the filter emptied it, say which filter did it — and **write the flags space-separated, exactly as they'd be typed** (`no eligible issue matching --model light --effort max — 14 open issues carry no dispatch hint; add `none` to include them`); joining them with a comma would render as one axis's OR-list in this flag's own grammar, telling the user a nonsensical invocation caused the empty queue, because a bare "nothing to do" on a barely-labelled tracker reads as a broken command.
 2. **Determine in-flight issues.** Issue `N` is in flight if EITHER `issue-N` appears in the raw in-flight set, OR the issue **already has an assignee** (someone took it via the Phase 2 marker, possibly on another machine). The assignee check is the cross-machine half of the claim — a local-only `next/issue-N` branch on a sibling machine is invisible here, but its assignee is not.
@@ -247,17 +302,17 @@ Then:
 
    Act on the resulting state:
    - `epic-open` (≥1 child still OPEN) → **skip** as not-yet-workable; note `epic #N: X/Y children open`.
-   - `epic-done` (all children CLOSED, no wrap-up tasks) → nothing to implement; **close it inline** as housekeeping (`gh issue close "$N" --comment "All children closed (#…) — closing epic. (slashdo)"`), note it, and keep scanning for the next item.
+   - `epic-done` (all children CLOSED, no wrap-up tasks) → nothing to implement; **close it inline** as housekeeping using [lib/epic-children.md](../../lib/epic-children.md)'s "Closing an epic" step (GitHub: `gh issue close "$N" --comment "..."`; GitLab: `glab issue note "$N" -m "..." && glab issue close "$N"`), note it, and keep scanning for the next item.
    - `epic-wrapup` (all children CLOSED, wrap-up tasks remain) → **this IS claimable work**: the work unit is "complete epic #N's remaining wrap-up tasks." Claim it like any issue — Phase 4 does the wrap-up (and ticks the wrap-up checkboxes in the epic body), and the Phase 6 PR carries `Closes #<N>` so merging closes the now-fully-done epic.
    - `epic-empty` (no children resolvable either way) → not really an umbrella; treat as an ordinary issue.
-4. **Resolve declared dependencies before picking (blocked-by).** A candidate may declare a hard dependency in its **body**: a line matching `Depends on #<N>` or `Blocked by #<N>` (case-insensitive; one such line may list several, e.g. `Depends on #12, #15`). Collect every `#<N>` referenced on those lines. A candidate is **blocked** when ANY referenced issue is still OPEN — check the freshest state (`gh issue view <N> --json state -q .state`); a referenced number that is CLOSED, or doesn't exist, does not block. Resolve this **lazily** as you walk the queue (only for the candidate you're about to pick), so a long backlog doesn't fan out a `gh` call per issue up front.
-   - `blocked` (≥1 referenced issue still OPEN) → **skip** in auto-pick; note `#N blocked by #M (open)`. The skip is **self-clearing** — when #M closes, #N becomes eligible on the next run with no manual relabel.
-   - Also honor GitHub's **native** blocked-by relationship when the API surfaces it; the body convention is the portable default and the two are OR'd (blocked by *either* source ⇒ skip).
+4. **Resolve declared dependencies before picking (blocked-by).** A candidate may declare a hard dependency in its **body**: a line matching `Depends on #<N>` or `Blocked by #<N>` (case-insensitive; one such line may list several, e.g. `Depends on #12, #15`). Collect every `#<N>` referenced on those lines. A candidate is **blocked** when ANY referenced issue is still open — check the freshest state (GitHub: `gh issue view <N> --json state -q .state`; GitLab: `glab issue view <N> --output json --jq .state`) and test for "closed" rather than an exact "open" match, since the two hosts spell it differently (`OPEN`/`CLOSED` vs `opened`/`closed`); a referenced number that is closed, or doesn't exist, does not block. Resolve this **lazily** as you walk the queue (only for the candidate you're about to pick), so a long backlog doesn't fan out a `gh`/`glab` call per issue up front.
+   - `blocked` (≥1 referenced issue still open) → **skip** in auto-pick; note `#N blocked by #M (open)`. The skip is **self-clearing** — when #M closes, #N becomes eligible on the next run with no manual relabel.
+   - Also honor each host's **native** blocked-by relationship when the API surfaces it — GitHub's GraphQL `blockedBy` connection, or GitLab's Issue Links API filtered to `link_type: "is_blocked_by"` (`glab api projects/:id/issues/<N>/links --jq '.[] | select(.link_type == "is_blocked_by")'`, id/iid resolved the same way the rest of this phase resolves them); the body convention is the portable default and the two are OR'd (blocked by *either* source ⇒ skip).
    - **Cycle / unresolvable chain** (A depends on B, B depends on A) → both stay skipped; note the cycle so a human can break it. Never loop trying to resolve one.
 5. **Pick the target issue:**
-   - **With argument** — the issue number (strip `#`); **set `ISSUE_NUM` to that stripped number now** (pulling step 6's assignment earlier so the checks below can reference `$ISSUE_NUM` — on a fresh run it isn't set yet). Verify open and NOT in flight. **`--self` first, as a hard gate:** when `SELF_MODE` is on, confirm the issue's author is the running account before anything else — `gh issue view "$ISSUE_NUM" --json author -q .author.login` must equal `gh api --hostname "$GH_HOST" user -q .login`; if it does not, **refuse and stop** with `Issue #<num> was filed by <author>, not you — /do:next --self only works on issues you filed. Drop --self to claim it.` This is the **one skip an explicit number does NOT override** — `--self` is a security boundary, not a curation preference, so a deliberate cherry-pick cannot cross it (unlike a parking label or label filter). If it's an epic, resolve its state (step 3) first and act on that state — claim an `epic-wrapup`, close an `epic-done`, or warn that children are still open on an `epic-open` (the explicit request still overrides — state that you're doing so). Otherwise a named number is an **explicit override**: it claims even an issue auto-pick would skip — a parking-labelled one, one with an **open declared blocker** (step 4), one outside the curated label when `LABEL_FILTER` is active, or one outside the dispatch-hint filter when `MODEL_FILTER`/`EFFORT_FILTER` is active (but **never** an issue another user filed while `--self` is on). State plainly when you're overriding a skip (e.g. "claiming `future`-labelled #123 by explicit request", "claiming #123 despite open blocker #120 by explicit request", or "claiming `model:heavy` #123 despite --model light by explicit request"). If any other check fails (closed, in flight), print why and stop.
+   - **With argument** — the issue number (strip `#`); **set `ISSUE_NUM` to that stripped number now** (pulling step 6's assignment earlier so the checks below can reference `$ISSUE_NUM` — on a fresh run it isn't set yet). Verify open and NOT in flight. **`--self` first, as a hard gate:** when `SELF_MODE` is on, confirm the issue's author is the running account before anything else — GitHub: `gh issue view "$ISSUE_NUM" --json author -q .author.login` must equal `gh api --hostname "$GH_HOST" user -q .login`; GitLab: `glab issue view "$ISSUE_NUM" --output json --jq .author.username` must equal `glab api user --jq .username`; if it does not, **refuse and stop** with `Issue #<num> was filed by <author>, not you — /do:next --self only works on issues you filed. Drop --self to claim it.` This is the **one skip an explicit number does NOT override** — `--self` is a security boundary, not a curation preference, so a deliberate cherry-pick cannot cross it (unlike a parking label or label filter). If it's an epic, resolve its state (step 3) first and act on that state — claim an `epic-wrapup`, close an `epic-done`, or warn that children are still open on an `epic-open` (the explicit request still overrides — state that you're doing so). Otherwise a named number is an **explicit override**: it claims even an issue auto-pick would skip — a parking-labelled one, one with an **open declared blocker** (step 4), one outside the curated label when `LABEL_FILTER` is active, or one outside the dispatch-hint filter when `MODEL_FILTER`/`EFFORT_FILTER` is active (but **never** an issue another user filed while `--self` is on). State plainly when you're overriding a skip (e.g. "claiming `future`-labelled #123 by explicit request", "claiming #123 despite open blocker #120 by explicit request", or "claiming `model:heavy` #123 despite --model light by explicit request"). If any other check fails (closed, in flight), print why and stop.
    - **Without argument** — pick the FIRST candidate in the priority/oldest walk (step 1) that is NOT in flight, NOT already assigned, NOT carrying a parking label (`blocked`, `needs-input`, `wontfix`, `discussion`, `future`, or any repo-specific parking label — skip and note it), NOT blocked by an open declared dependency (step 4 — skip and note it), and NOT an `epic-open`/`epic-done` epic per step 3 (an `epic-wrapup` epic **is** eligible). Because auto-pick is label-agnostic by default, the parking-label skip, the dependency skip, and the epic resolution are the primary guards against claiming parked, blocked, or umbrella work. An explicit `#num` can still claim a skipped issue; auto-pick never surfaces one.
-6. **Set `ISSUE_NUM=<num>` and `SLUG="issue-${ISSUE_NUM}"`** — later phases use `SLUG` for worktree/branch/commit/PR and `ISSUE_NUM` for `gh issue` calls.
+6. **Set `ISSUE_NUM=<num>` and `SLUG="issue-${ISSUE_NUM}"`** — later phases use `SLUG` for worktree/branch/commit/PR and `ISSUE_NUM` for `gh issue`/`glab issue` calls.
    - **Surface the claimed issue's dispatch hint, if it carries one** (`model:<tier>` / `effort:<level>`): `#42 hints model:heavy + effort:high`. In the **single-issue** flow this is a *report, not a dispatch* — a session cannot switch its own model or effort mid-run on any host, so the work proceeds in whatever session you're already in. Say so when there's a real mismatch worth acting on (`this session is on <current model> and #42 hints model:heavy — consider restarting on a stronger model, or continue as-is`), naming the mechanism **this** CLI uses to switch models if it has one, and then continue; never stall waiting for permission over an advisory label. Swarm is where the hint is actually *applied*, because that flow spawns a fresh agent per issue (Phase B).
 7. **If no eligible issue exists**, print why and stop — and **name the filter that emptied the queue** when one did (`LABEL_FILTER`, `MODEL_FILTER`/`EFFORT_FILTER`, or `SELF_MODE`), rather than reporting a bare empty backlog: an opt-in narrowing that hides workable issues looks identical to having none, and only one of those is worth the user's time. Do NOT open new issues here — that only happens for work *discovered while implementing* (Phase 4/6).
 
@@ -278,9 +333,9 @@ SLUG="<picked-slug>" && \
 if git ls-remote --exit-code --heads origin "next/${SLUG}" >/dev/null 2>&1; then
   echo "next/${SLUG} already on origin — another machine claimed it; re-run /do:next to pick the next item."; exit 1
 fi && \
-# Default-branch lookup via git (not `gh repo view`) — one less gh round-trip and
-# works even mid-auth-hiccup. Try the local origin/HEAD ref first, fall back to
-# querying the remote if it isn't set.
+# Default-branch lookup via git (not `gh repo view`/`glab repo view`) — one less
+# API round-trip and works even mid-auth-hiccup. Try the local origin/HEAD ref
+# first, fall back to querying the remote if it isn't set.
 DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)" && \
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(git remote show origin | sed -n 's/.*HEAD branch: //p')}" && \
 WORKTREE="../next-${SLUG}" && \
@@ -308,11 +363,21 @@ Immediately after the worktree is verified, claim the issue **on the host** so a
 
 ```bash
 ISSUE_NUM="<picked-issue-number>"; SLUG="issue-${ISSUE_NUM}"; WORKTREE="../next-${SLUG}"   # re-declare — shell vars don't cross snippets
+
 # Load-bearing marker — if the assign itself FAILS (no triage/write access, API
 # error), you have NOT claimed the issue. Abort immediately; do NOT fall through to
 # the read-back, which would see zero assignees, take the `else` path, and proceed
 # without a marker (letting a second machine work the same issue).
-gh issue edit "$ISSUE_NUM" --add-assignee @me || {
+if [ "$CLI_TOOL" = gh ]; then
+  ME="$(gh api --hostname "$GH_HOST" user -q .login)"
+  gh issue edit "$ISSUE_NUM" --add-assignee @me
+else
+  ME="$(glab api user --jq .username)"
+  # `+` ADDS one assignee without touching whatever's already on the issue. A bare
+  # `--assignee "$ME"` REPLACES the whole assignee list, which would silently
+  # overwrite a sibling who claimed first and defeat the read-back check below.
+  glab issue update "$ISSUE_NUM" --assignee "+$ME"
+fi || {
   echo "Could not claim issue #$ISSUE_NUM (missing write access?) — aborting."
   # Phase 2 already created and (best-effort) pushed next/issue-<num>. Retract the
   # REMOTE claim here (works from the worktree); then STOP and run Phase 7 cleanup from
@@ -322,19 +387,26 @@ gh issue edit "$ISSUE_NUM" --add-assignee @me || {
   exit 1   # then: cd <main repo>, git worktree remove --force "$WORKTREE", git branch -D "next/${SLUG}"
 }
 
-# Confirm exclusivity: --add-assignee is NOT a compare-and-swap — GitHub issues
-# allow MULTIPLE assignees, so a sibling machine that picked the same issue in the
-# race window can also add itself and keep going. Re-read the assignees; if anyone
-# OTHER than you is now assigned, a sibling won the race — yield: release your marker
-# and stop (re-run Phase 1 to pick the next issue).
-ASSIGNEES="$(gh issue view "$ISSUE_NUM" --json assignees -q '[.assignees[].login] | join(",")')"
-ME="$(gh api --hostname "$GH_HOST" user -q .login)"
+# Confirm exclusivity: adding an assignee is NOT a compare-and-swap — both GitHub
+# issues and GitLab issues allow MULTIPLE assignees, so a sibling machine that
+# picked the same issue in the race window can also add itself and keep going.
+# Re-read the assignees; if anyone OTHER than you is now assigned, a sibling won
+# the race — yield: release your marker and stop (re-run Phase 1 to pick the next issue).
+if [ "$CLI_TOOL" = gh ]; then
+  ASSIGNEES="$(gh issue view "$ISSUE_NUM" --json assignees -q '[.assignees[].login] | join(",")')"
+else
+  ASSIGNEES="$(glab issue view "$ISSUE_NUM" --output json --jq '[.assignees[].username] | join(",")')"
+fi
 if printf '%s' "$ASSIGNEES" | tr ',' '\n' | grep -qvxF "$ME" ; then
   # A sibling won the race. Release the marker and STOP — do NOT add the label,
   # do NOT continue to Phase 3+. Run Phase 7 cleanup (remove the worktree + branch)
   # and re-run Phase 1 to pick the NEXT issue. This is a hard exit from the claim.
   echo "Issue #$ISSUE_NUM already claimed by: $ASSIGNEES — yielding."
-  gh issue edit "$ISSUE_NUM" --remove-assignee @me 2>/dev/null || true
+  if [ "$CLI_TOOL" = gh ]; then
+    gh issue edit "$ISSUE_NUM" --remove-assignee @me 2>/dev/null || true
+  else
+    glab issue update "$ISSUE_NUM" --assignee "-$ME" 2>/dev/null || true
+  fi
   # Retract the REMOTE claim branch here (works from the worktree) so the yielded issue
   # doesn't read as in-flight to the next picker; the local worktree + branch are dropped
   # by Phase 7 cleanup run from the MAIN repo (not from inside the worktree).
@@ -345,24 +417,29 @@ if printf '%s' "$ASSIGNEES" | tr ',' '\n' | grep -qvxF "$ME" ; then
 else
   # Claim is exclusive (only you assigned) — mark in-progress for human visibility
   # and proceed to Phase 3.
-  gh label create in-progress --color FFA500 --description "Claimed and being worked" 2>/dev/null || true
-  gh issue edit "$ISSUE_NUM" --add-label in-progress 2>/dev/null || true
+  if [ "$CLI_TOOL" = gh ]; then
+    gh label create in-progress --color FFA500 --description "Claimed and being worked" 2>/dev/null || true
+    gh issue edit "$ISSUE_NUM" --add-label in-progress 2>/dev/null || true
+  else
+    glab label create --name in-progress --color "#FFA500" --description "Claimed and being worked" 2>/dev/null || true
+    glab issue update "$ISSUE_NUM" --label in-progress 2>/dev/null || true
+  fi
 fi
 ```
 
 **The race-detected branch is a hard stop, not a warning.** When the read-back shows another assignee, you have NOT claimed the issue — release your assignee, run Phase 7 cleanup to remove the worktree + branch you just created, and re-enter Phase 1 to pick the next eligible issue. Only the `else` branch (you are the sole assignee) proceeds to Phase 3.
 
-The re-read narrows the race from "the whole implementation" to "the sub-second window between `--add-assignee` and the read-back" — still not a true distributed lock (two reads can interleave so both yield, or in a tie both proceed), but close to compare-and-swap and far tighter than a blind assign. The assignee is the marker; the label is convenience (`|| true` keeps a label failure from aborting). **If you must stop after this (worktree failed, or the read-back showed a sibling won), release the marker before stopping:** `gh issue edit "$ISSUE_NUM" --remove-assignee @me --remove-label in-progress 2>/dev/null || true` — so a half-claimed issue isn't stranded as permanently "taken."
+The re-read narrows the race from "the whole implementation" to "the sub-second window between the assignee add and the read-back" — still not a true distributed lock (two reads can interleave so both yield, or in a tie both proceed), but close to compare-and-swap and far tighter than a blind assign. The assignee is the marker; the label is convenience (`|| true` keeps a label failure from aborting). **If you must stop after this (worktree failed, or the read-back showed a sibling won), release the marker before stopping:** GitHub `gh issue edit "$ISSUE_NUM" --remove-assignee @me --remove-label in-progress 2>/dev/null || true`; GitLab `glab issue update "$ISSUE_NUM" --assignee "-$ME" --unlabel in-progress 2>/dev/null || true` — so a half-claimed issue isn't stranded as permanently "taken."
 
 ## Phase 3: Verify still valid
 
 Before writing code, sanity-check that executing the item as worded won't regress newer work. **Ask the user before proceeding if ANY hold:**
 
 - **(PLAN.md)** The picked line has a `> ⚠️ DRIFT:` blockquote (you should have filtered it, but double-check), OR `git blame -L <line>,<line> -- PLAN.md` shows it was added in the last 24h AND conflicts with a since-merged commit.
-- **(issues)** The full issue body/comments (`gh issue view <num> --comments`) supersede the title, the issue is already resolved, it's a pure discussion/question with no actionable change, or it awaits an unanswered clarification.
+- **(issues)** The full issue body/comments (GitHub: `gh issue view <num> --comments`; GitLab: `glab issue view <num> --comments`) supersede the title, the issue is already resolved, it's a pure discussion/question with no actionable change, or it awaits an unanswered clarification.
 - **(both)** The item references a function/file/component that no longer exists or was heavily rewritten — `grep -rn` the named identifiers; if absent, it's stale and needs a human re-spec. OR it depends on an unshipped predecessor. OR the work would touch >5 unrelated files (bigger than estimated).
 
-On "skip", run Phase 7 cleanup and re-run Phase 1 for the next item. **In issues mode also release the marker:** `gh issue edit "$ISSUE_NUM" --remove-assignee @me --remove-label in-progress 2>/dev/null || true`.
+On "skip", run Phase 7 cleanup and re-run Phase 1 for the next item. **In issues mode also release the marker** — the same command Phase 2 uses to yield (GitHub `gh issue edit "$ISSUE_NUM" --remove-assignee @me --remove-label in-progress 2>/dev/null || true`; GitLab `glab issue update "$ISSUE_NUM" --assignee "-$ME" --unlabel in-progress 2>/dev/null || true`).
 
 ## Phase 3.5: Plan (interactive) — only when `--plan` was passed
 
@@ -378,17 +455,22 @@ Skip unless `--plan` is set. When present, don't touch code yet:
 
 Write the code, tests, and docs the item requires, following the **target repo's** `CLAUDE.md` conventions. Run the relevant test suite as you go.
 
-**Claimed an `epic-wrapup` epic** (Phase 1 step 3)? The work unit is the epic's own remaining wrap-up tasks (its children are already closed). Do that work, then **tick the corresponding `- [ ]` boxes in the epic body** (`gh issue edit "$ISSUE_NUM" --body …`, or via the API) so the audit trail is accurate. The Phase 6 PR carries `Closes #<epic>`, so merging closes the now-fully-done epic — no separate close needed.
+**Claimed an `epic-wrapup` epic** (Phase 1 step 3)? The work unit is the epic's own remaining wrap-up tasks (its children are already closed). Do that work, then **tick the corresponding `- [ ]` boxes in the epic body** so the audit trail is accurate — GitHub: `gh issue edit "$ISSUE_NUM" --body …` (or via the API); GitLab: `glab issue update "$ISSUE_NUM" --description …`. The Phase 6 PR carries `Closes #<epic>`, so merging closes the now-fully-done epic — no separate close needed.
 
 **Roll discovered backbone work INTO this PR — don't defer it.** A helper to extract, a shared abstraction the change should sit on, a small refactor that makes the fix cleaner — fold it in, test it, mention it in the PR body. Only defer work that is **genuinely large** (its own multi-file feature, a migration, a cross-cutting redesign warranting its own plan/PR). The bar is "this needs its own PR," not "slightly outside the line-item's wording." When in doubt, roll it in.
 
 **Where deferred work lands depends on the mode:**
 - **PLAN.md mode** → add a NEW `- [ ] [<slug>] **Title** — rationale` item (slug per [lib/plan-id-format.md](../../lib/plan-id-format.md)).
-- **Issues mode** → file a NEW tracker issue (never PLAN.md), with enough context to pick up cold (file paths, why split out, which issue surfaced it), tagged `PLAN_LABEL` so the next `/do:next --issues` and `/do:replan` treat it as queued. **Add a dispatch hint (`model:<tier>` / `effort:<level>`) when you can justify one** — you just had your hands in this code, which is the best evidence anyone will ever have for the call; leave the axis off rather than guessing, per [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "The dispatch hint". Create each hint label lazily (`gh label create <name> --color <hex> 2>/dev/null || true`, colors in that file) before applying it:
+- **Issues mode** → file a NEW tracker issue (never PLAN.md), with enough context to pick up cold (file paths, why split out, which issue surfaced it), tagged `PLAN_LABEL` so the next `/do:next --issues` and `/do:replan` treat it as queued. **Add a dispatch hint (`model:<tier>` / `effort:<level>`) when you can justify one** — you just had your hands in this code, which is the best evidence anyone will ever have for the call; leave the axis off rather than guessing, per [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "The dispatch hint". Create each hint label lazily before applying it (GitHub: `gh label create <name> --color <hex> 2>/dev/null || true`; GitLab: `glab label create --name <name> --color "#<hex>" 2>/dev/null || true`, colors in that file), then create the issue itself using the same `<label flags>` form that file's "Recording a plan item" section uses:
   ```bash
+  # GitHub
   gh issue create --title "<concise actionable title>" --label "$PLAN_LABEL" \
     <hint label flags — e.g. --label model:<tier> and/or --label effort:<level>; OMIT ENTIRELY when you can't justify one> \
     --body "$(printf 'Discovered while working issue #%s.\n\n<what, where (file:line), why it needs its own PR>\n' "$ISSUE_NUM")"
+  # GitLab
+  glab issue create --title "<concise actionable title>" --label "$PLAN_LABEL" \
+    <hint label flags — same as above, same placeholder rule> \
+    --description "$(printf 'Discovered while working issue #%s.\n\n<what, where (file:line), why it needs its own PR>\n' "$ISSUE_NUM")"
   ```
   The hint flags are a **placeholder like every other `<…>` in that command, not a default** — do not copy a literal `model:light` / `effort:high` through. Filing every discovered issue with the same stamped pair is worse than filing none: it contradicts the "leave the axis off rather than guessing" rule above and poisons `/do:next --model`, which would then claim work nobody ever assessed.
 
@@ -439,7 +521,7 @@ git diff --cached --quiet || git commit -m "docs([issue-<num>]): log issue #<num
 
 > **Issues mode — link the PR to the issue.** The PR body MUST contain `Closes #<num>` (or `Fixes #<num>`) so merging auto-closes the claimed issue. Reference any discovered follow-up issues you filed with plain `#<n>` (NOT `Closes` — they're not resolved by this PR).
 >
-> **Issues mode — major review findings become tracker issues, not PLAN.md items.** A substantial finding you decide *not* to fix here gets filed as a NEW issue (`gh issue create --label "$PLAN_LABEL" …`, same form as Phase 4). Nit/style findings just get parked verbally.
+> **Issues mode — major review findings become tracker issues, not PLAN.md items.** A substantial finding you decide *not* to fix here gets filed as a NEW issue (GitHub `gh issue create --label "$PLAN_LABEL" …`, GitLab `glab issue create --label "$PLAN_LABEL" …`, same form as Phase 4). Nit/style findings just get parked verbally.
 
 `/do:pr` already owns the entire review/ship pipeline — the required Local Code Review gate, `--review-with` multi-reviewer loop, `--review-iterations`, stop-modes, and `--reviewer-applies`. **Do not re-implement any of it here.** From inside the worktree, decide the review intensity, then invoke `/do:pr` with the flags this command received. **Always pass `--no-merge` to `/do:pr`** so it opens the PR but does not merge it — `/do:next` owns the merge decision (the gate below) plus its post-merge worktree/branch cleanup and `Closes #<num>` handling, and must stay in control even if the user has a global `/do:config --merge` default that would otherwise make `/do:pr` auto-merge out from under it:
 
@@ -460,7 +542,7 @@ State any skip/trim and why ("Diff is 3 lines in one file; skipping the quality 
 
 On a non-mergeable external-review status (`dirty`/`inconclusive`), **stop and leave the PR open** for the user: report the status and the PR URL, do NOT run the merge below, and do NOT run Phase 7 cleanup (the worktree/branch must stay so the work can be finished). The whole point of `--review-with` is the gate; merging through a non-clean result silently defeats it.
 
-**Encode the slug in the PR title** for grep-ability if `/do:pr` didn't: `gh pr edit <num> --title "feat([<slug>]): <description>"`.
+**Encode the slug in the PR title** for grep-ability if `/do:pr` didn't — GitHub: `gh pr edit <num> --title "feat([<slug>]): <description>"`; GitLab: `glab mr update <num> --title "feat([<slug>]): <description>"`.
 
 **Re-sync, then merge (only when the gate above passed).** A long review loop can let sibling claims merge after your Phase-5 sync — re-sync once more so a stale PLAN.md can't resurrect their removed items at merge time:
 
@@ -476,7 +558,12 @@ cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit 
 
 ```bash
 git push
-gh pr merge <num> --merge --delete-branch   # only reached when the review gate passed AND the tree is conflict-free
+# Only reached when the review gate passed AND the tree is conflict-free.
+# GitHub:
+gh pr merge <num> --merge --delete-branch
+# GitLab (`--auto-merge` is the default and, unlike the gh command above, makes
+# this wait for the pipeline to succeed before merging rather than merging outright):
+glab mr merge <num> --auto-merge --yes --remove-source-branch
 ```
 
 ## Phase 7: Clean up
@@ -500,15 +587,15 @@ git branch -d "next/${SLUG}" && \
 { git push origin --delete "next/${SLUG}" 2>/dev/null || true; }   # remote no-op after --delete-branch merge
 ```
 
-(Order matters: remove the worktree, **sync the default branch, delete the local claim branch, and only THEN touch the remote** — every step is `&&`-gated so the chain short-circuits on the first failure. Three invariants hold: (1) a `git branch -d` failure ("not fully merged") can't skip the sync, because the sync already ran; (2) any earlier failure (worktree-remove, fetch, checkout, rebase conflict) stops the chain *before* the local delete, so the claim branch is never removed while the default branch is stale; and (3) **the remote-delete is the LAST link**, so a failed/partial cleanup — which may still hold unmerged work in the worktree — never retracts the remote claim and re-exposes the item to other machines. On the happy path `gh pr merge --delete-branch` already removed the remote branch, so the trailing delete is a harmless no-op.)
+(Order matters: remove the worktree, **sync the default branch, delete the local claim branch, and only THEN touch the remote** — every step is `&&`-gated so the chain short-circuits on the first failure. Three invariants hold: (1) a `git branch -d` failure ("not fully merged") can't skip the sync, because the sync already ran; (2) any earlier failure (worktree-remove, fetch, checkout, rebase conflict) stops the chain *before* the local delete, so the claim branch is never removed while the default branch is stale; and (3) **the remote-delete is the LAST link**, so a failed/partial cleanup — which may still hold unmerged work in the worktree — never retracts the remote claim and re-exposes the item to other machines. On the happy path `gh pr merge --delete-branch` (GitHub) / `glab mr merge --remove-source-branch` (GitLab) already removed the remote branch, so the trailing delete is a harmless no-op.)
 
 **Abandoned a claim (Phase 3 skip / Phase 3.5 reject — no PR, work discarded)?** The branch is unmerged, so `git branch -d` won't remove it. Retract the claim explicitly instead (force-delete local, delete remote) so the item returns to the queue: from the main repo, `git worktree remove --force "${WORKTREE}"; git branch -D "next/${SLUG}"; git push origin --delete "next/${SLUG}" 2>/dev/null || true`. (Issues-mode abort branches in Phase 2 already do this inline.)
 
-**Issues mode — confirm closed, then clear the marker.** A `Closes #<num>` in the PR body auto-closes on merge to the **default branch**. Verify with `gh issue view <num> --json state -q .state` (expect `CLOSED`); if still `OPEN`, close explicitly: `gh issue close <num> --comment "Shipped in PR #<PR_NUM>."`. Then drop the stale label: `gh issue edit "$ISSUE_NUM" --remove-label in-progress 2>/dev/null || true`. (Leave the assignee — it records who shipped it; a closed issue is never a Phase 1 candidate anyway.)
+**Issues mode — confirm closed, then clear the marker.** A `Closes #<num>` in the PR body auto-closes on merge to the **default branch**. Verify state (GitHub: `gh issue view <num> --json state -q .state`, expect `CLOSED`; GitLab: `glab issue view <num> --output json --jq .state`, expect `closed`); if still open, close explicitly (GitHub: `gh issue close <num> --comment "Shipped in PR #<PR_NUM>."`; GitLab: `glab issue note <num> -m "Shipped in PR #<PR_NUM>." && glab issue close <num>`). Then drop the stale label (GitHub: `gh issue edit "$ISSUE_NUM" --remove-label in-progress 2>/dev/null || true`; GitLab: `glab issue update "$ISSUE_NUM" --unlabel in-progress 2>/dev/null || true`). (Leave the assignee — it records who shipped it; a closed issue is never a Phase 1 candidate anyway.)
 
 **Issues mode — re-evaluate the parent epic (the shipped issue may have been an epic's last child).** Once the issue is confirmed closed, resolve its parent epic with the shared epic logic ("Resolving a child's parent epic" in [lib/epic-children.md](../../lib/epic-children.md), inlined in Phase 1). If a parent epic `#P` exists, re-classify it:
-- `epic-done` (this was the last open child and `#P` has no remaining wrap-up tasks) → **close the epic** with an evidence comment: `gh issue close "$P" --comment "All children closed (incl. #<num>) — closing epic. (slashdo)"`.
-- `epic-wrapup` (children all closed but wrap-up tasks remain) → **don't close**; comment so a later `/do:next` surfaces it: `gh issue comment "$P" --body "All child issues are now closed — only the epic's own wrap-up tasks remain."`.
+- `epic-done` (this was the last open child and `#P` has no remaining wrap-up tasks) → **close the epic** with an evidence comment (GitHub: `gh issue close "$P" --comment "All children closed (incl. #<num>) — closing epic. (slashdo)"`; GitLab: `glab issue note "$P" -m "All children closed (incl. #<num>) — closing epic. (slashdo)" && glab issue close "$P"`).
+- `epic-wrapup` (children all closed but wrap-up tasks remain) → **don't close**; comment so a later `/do:next` surfaces it (GitHub: `gh issue comment "$P" --body "All child issues are now closed — only the epic's own wrap-up tasks remain."`; GitLab: `glab issue note "$P" -m "All child issues are now closed — only the epic's own wrap-up tasks remain."`).
 - `epic-open` (other children still open) → leave it untouched.
 
 This is the child-side half of epic closing; the auto-pick side (Phase 1 step 3) handles an epic encountered directly. Skip this step entirely when the shipped issue was *itself* an epic (its `Closes #<N>` already closed it).
@@ -529,12 +616,12 @@ Shipped issue #<num> "<Title>". PR #<PR_NUM>. Issue closed. Worktree + branch cl
 - **Swarm is an orchestration layer, not a new claim path.** `--swarm` adds exactly two things over the single-issue flow: a batch step that decides which issues run — auto-picking `SWARM_N` independent ones, or vetting and wave-ordering the ones you named — and a serialized merge queue at the end. Everything between — claim, worktree, implement, changelog, review gate — is the unchanged single-issue flow run once per agent. Keep it that way: never special-case a swarm agent's claim/ship logic, because divergence is how the lease protection rots. Cost scales ≈N×; correctness across the batch comes from the serialized, re-synced merges (deletions-win), not from trusting the agents not to overlap.
 - **Empty pick is not a failure.** Everything in flight / drifted / NEEDS_INPUT (PLAN.md), or every open issue in flight / assigned / parking-labelled / blocked by an open dependency — or, when `--issues-label` is active, no open issue carrying that label (issues) — is a healthy queue — exit clean and say so.
 - **Ordering issues mode (no new flags).** Auto-pick walks the queue **by priority then oldest-first**, with two opt-in, backward-compatible controls — neither changes behavior for a repo that uses neither:
-  - **Hard dependencies — `Depends on #<N>` / `Blocked by #<N>` in the issue body** (or GitHub's native blocked-by relationship). Auto-pick **skips** an issue while any declared blocker is still OPEN and surfaces it automatically once the blocker closes (self-clearing — Phase 1 step 4). This encodes the real dependency DAG without hand-maintained sequence numbers; an explicit `#num` overrides it. Use this to guarantee a predecessor ships first instead of parking the successor by hand.
+  - **Hard dependencies — `Depends on #<N>` / `Blocked by #<N>` in the issue body** (or each host's native blocked-by relationship — GitHub's GraphQL `blockedBy`, GitLab's Issue Links API). Auto-pick **skips** an issue while any declared blocker is still open and surfaces it automatically once the blocker closes (self-clearing — Phase 1 step 4). This encodes the real dependency DAG without hand-maintained sequence numbers; an explicit `#num` overrides it. Use this to guarantee a predecessor ships first instead of parking the successor by hand.
   - **Soft priority — a `priority:<N>` label** (lower N = earlier; unlabeled sorts last, `createdAt` breaks ties — Phase 1 step 1). Use this to sequence *independent, unblocked* issues. It only reorders the walk; it never gates.
   - Prefer `Depends on #N` for correctness ("Y needs X") and `priority:<N>` only for preference ("do these first"). Both are populated by humans or by `/do:replan` triage, never by `/do:next` itself.
 - **`/do:next` only *consumes* the queue.** New work comes from `/do:replan`, `/do:better`, `/do:depfree`, or human edits — never invented here, except *discovered* work split out of the current item (Phase 4/6).
 - **`--issues` resolves the same three ways on every slashdo command.** An explicit `--issues`/`--no-issues` on this run wins; otherwise the saved `issues` default (`/do:config --issues`, global or per-project `.slashdo.json`) applies; otherwise it's off. A repo that works issues-first can save the default once instead of passing `--issues` every time — and even without a saved default, the Phase 1 auto-redirect below covers the common case.
 - **Auto-redirect makes `--issues` optional for issue-tracked repos.** When there's no PLAN.md, or PLAN.md is the stub `/do:replan --issues` leaves behind, a bare `/do:next` recognizes the repo is issue-tracked and continues in issue mode on its own (stating the switch). So a repo that ran `/do:replan --issues` once doesn't need every contributor to remember the flag — the stub *is* the config signal. Passing `--issues` explicitly still works and skips the detection.
-- **Host support — GitHub only.** `/do:next` requires a GitHub repo with an authenticated `gh`, in **both** modes, and the Phase 1 pre-flight aborts up front otherwise. This is because it *ships* through `/do:pr` and `gh pr merge` (GitHub-only) — so even though PLAN.md *claiming* is pure git, the run can't complete on a non-GitHub host, and issue mode additionally depends on the GitHub assignee model for the cross-machine claim. GitLab support is a clean follow-up: it needs a host-agnostic ship path (a `/do:pr` that speaks `glab`) plus a tested `glab` assignee read-back for the claim marker — until both exist, aborting early is more honest than failing at the ship step after the work is done.
-- **`--self` is a security boundary — claim only issues you filed.** By default `/do:next --issues` claims any open issue regardless of author, which means it can act on a work item (and the instructions embedded in its body) opened by *anyone* with access to the tracker. `--self` (or a saved `self` default, or per-project `.slashdo.json`) restricts every claim — auto-pick, swarm batch, and explicit `#<num>` — to issues whose author is the running `gh`/host account (`@me`). Other people's issues are filtered out of auto-pick at the API (`--author "@me"`) and an explicit number for someone else's issue is **refused, not overridden** — the one skip a deliberate cherry-pick cannot cross, because it's a security gate rather than a curation preference. Save it once with `/do:config --self` (globally or `--project` per-repo) so a shared/multi-contributor tracker never auto-feeds third-party issues into your agent. Issues mode only (PLAN.md items have no author); GitHub only (issue mode already is).
+- **Host support — GitHub or GitLab, including Enterprise/self-managed instances of either.** `/do:next` requires a repo on one of those two hosts with the matching CLI (`gh`/`glab`) authenticated, in **both** modes, and the Phase 1 pre-flight aborts up front otherwise — it *ships* through `/do:pr`, which supports both, and issue mode's cross-machine claim marker (Phase 2) is the issue **assignee** field, which both hosts have. `$CLI_TOOL`, detected once in the Phase 1 pre-flight from the `origin` remote, selects which CLI every later phase uses; `/do:plan-task`'s VCS-host detection follows the identical rule, so the two commands never disagree about which host a given repo is on. The one real structural gap is epic/child resolution (Phase 1 step 3): GitHub has a native project-scoped sub-issues API, GitLab does not, so on GitLab the host-agnostic convention fallback ([lib/epic-children.md](../../lib/epic-children.md) — body task-lists + `Part of #N` back-references) is the primary path rather than a fallback of last resort.
+- **`--self` is a security boundary — claim only issues you filed.** By default `/do:next --issues` claims any open issue regardless of author, which means it can act on a work item (and the instructions embedded in its body) opened by *anyone* with access to the tracker. `--self` (or a saved `self` default, or per-project `.slashdo.json`) restricts every claim — auto-pick, swarm batch, and explicit `#<num>` — to issues whose author is the running `gh`/host account (`@me`). Other people's issues are filtered out of auto-pick at the API (`--author "@me"`) and an explicit number for someone else's issue is **refused, not overridden** — the one skip a deliberate cherry-pick cannot cross, because it's a security gate rather than a curation preference. Save it once with `/do:config --self` (globally or `--project` per-repo) so a shared/multi-contributor tracker never auto-feeds third-party issues into your agent. Issues mode only (PLAN.md items have no author); works on GitHub or GitLab, same as issue mode generally.
 - **Auto-pick is label-agnostic by default — `--issues-label` opts into a curated queue.** Without a label filter, every open issue is claimable regardless of what label it carries (and, unless `--self` is set, regardless of who filed it — see the `--self` note above); the guards against claiming the wrong thing are the parking-label skip (`future`/`blocked`/`needs-input`/`wontfix`/`discussion`/repo-specific), the child-aware epic resolution (Phase 1 step 3 — `epic-open`/`epic-done` epics are skipped, an `epic-wrapup` epic is claimable wrap-up work), and the in-flight/assigned checks — not a required label. This is deliberately permissive so a repo that files normal `enhancement`/`bug`/`area:*` issues works with `/do:next --issues` out of the box, without first running `/do:replan --issues` to stamp a `plan` label on everything. To restrict auto-pick to a curated set, pass `--issues-label <name>` (or save it as a default) — e.g. drain only the `plan`-labelled items `/do:replan --issues` produced. Newly-filed discovered/queued work still gets the `plan` label (so a default run and a `--issues-label plan` run agree on it), and an explicit `#num` always overrides every *other* skip — including parking labels and an active filter — **except** the `--self` security boundary (an explicit number for another user's issue is still refused while `--self` is on; see the `--self` note above).
