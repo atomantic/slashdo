@@ -19,10 +19,11 @@ const os = require('os');
 const { spawn } = require('child_process');
 
 const homeDir = os.homedir();
-const cacheDir = path.join(homeDir, '.claude', 'cache');
+const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(homeDir, '.claude');
+const cacheDir = path.join(claudeDir, 'cache');
 const cacheFile = path.join(cacheDir, 'slashdo-update-check.json');
-const versionFile = path.join(homeDir, '.claude', '.slashdo-version');
-const configFile = path.join(homeDir, '.claude', '.slashdo-config.json');
+const versionFile = path.join(claudeDir, '.slashdo-version');
+const configFile = path.join(claudeDir, '.slashdo-config.json');
 // Serializes the auto-update across concurrent Claude sessions — only the session
 // that atomically creates this file runs `npx slash-do@latest`; the rest defer.
 const lockFile = path.join(cacheDir, 'slashdo-update.lock');
@@ -121,9 +122,9 @@ try {
     // Auto-update: apply the update instead of surfacing the statusline hint.
     // Guard it with an exclusive lock file so that when several Claude sessions
     // start at once, only one spawns "npx slash-do@latest" against the shared
-    // ~/.claude/ — the installer's writes are idempotent today, but serializing
-    // keeps that assumption from being load-bearing if the install logic ever
-    // stops being safe to run concurrently.
+    // the Claude config directory — the installer's writes are idempotent today,
+    // but serializing keeps that assumption from being load-bearing if the
+    // install logic ever stops being safe to run concurrently.
     // Set when this session sees an available auto-update but yields the lock to
     // another session: the lock holder owns the cache write for this cycle, so a
     // deferring session must NOT write its own (stale update_available:true) result

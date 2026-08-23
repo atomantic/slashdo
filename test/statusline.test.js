@@ -143,4 +143,30 @@ describe('slashdo statusline', () => {
       fs.rmSync(bridgePath, { force: true });
     }
   });
+
+  it('reads update notifications from CLAUDE_CONFIG_DIR', () => {
+    const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-statusline-update-'));
+    const cacheDir = path.join(configDir, 'cache');
+
+    try {
+      fs.mkdirSync(cacheDir);
+      fs.writeFileSync(path.join(cacheDir, 'slashdo-update-check.json'), JSON.stringify({
+        update_available: true,
+        command: '/do:update',
+      }));
+
+      const result = runStatusline(JSON.stringify({
+        model: { display_name: 'Opus' },
+        workspace: { current_dir: '/project/root' },
+      }), {
+        env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+      });
+
+      assert.equal(result.status, 0);
+      assert.equal(result.stderr, '');
+      assert.match(result.stdout, /⬆ \/do:update/);
+    } finally {
+      fs.rmSync(configDir, { recursive: true, force: true });
+    }
+  });
 });
