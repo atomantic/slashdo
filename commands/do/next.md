@@ -127,7 +127,12 @@ After the barrier, merge the wave's returned PRs **one at a time, never concurre
      gh pr merge <pr_number> --merge
      # Delete the head branch ONLY once the PR really reads MERGED.
      if [ "$(gh pr view <pr_number> --json state -q .state)" = "MERGED" ]; then
-       git push origin --delete "<branch>" || echo "warning: remote branch <branch> not deleted"
+       if ! git push origin --delete "<branch>"; then
+         # Already gone (repo auto-deletes merged heads) is fine; still there is not.
+         if git ls-remote --exit-code --heads origin "<branch>" >/dev/null 2>&1; then
+           echo "ERROR: remote branch <branch> still exists and could not be deleted — record this PR for follow-up"
+         fi
+       fi
      else
        echo "PR <pr_number> is not MERGED — keeping <branch>"
      fi
@@ -600,10 +605,18 @@ git fetch origin "${DEFAULT_BRANCH}" && \
 git checkout "${DEFAULT_BRANCH}" && \
 git pull --rebase --autostash && \
 git branch -d "next/${SLUG}" && \
-{ git push origin --delete "next/${SLUG}" || echo "warning: remote branch next/${SLUG} not deleted"; }
+if ! git push origin --delete "next/${SLUG}"; then
+  # A branch that is already gone is success; one that survives the failed delete
+  # is not — it keeps reading as an in-flight claim to every other machine.
+  if git ls-remote --exit-code --heads origin "next/${SLUG}" >/dev/null 2>&1; then
+    echo "ERROR: remote claim branch next/${SLUG} still exists — delete it manually"; false
+  else
+    echo "note: remote branch next/${SLUG} was already gone"
+  fi
+fi
 ```
 
-(Order matters: remove the worktree, **sync the default branch, delete the local claim branch, and only THEN touch the remote** — every step is `&&`-gated so the chain short-circuits on the first failure. Three invariants hold: (1) a `git branch -d` failure ("not fully merged") can't skip the sync, because the sync already ran; (2) any earlier failure (worktree-remove, fetch, checkout, rebase conflict) stops the chain *before* the local delete, so the claim branch is never removed while the default branch is stale; and (3) **the remote-delete is the LAST link**, so a failed/partial cleanup — which may still hold unmerged work in the worktree — never retracts the remote claim and re-exposes the item to other machines. On GitHub the merge deliberately does **not** pass `--delete-branch` (it would fail from inside the worktree), so this trailing delete is the real remote deletion — and because it is now load-bearing rather than a no-op, its failure is **reported rather than swallowed**: the `|| echo` keeps an already-deleted branch (GitLab's `--remove-source-branch`, or a repo that auto-deletes merged heads) from failing the chain, while a real failure — network, branch protection, revoked push rights — prints instead of vanishing into `2>/dev/null` and letting the run claim a clean sweep.)
+(Order matters: remove the worktree, **sync the default branch, delete the local claim branch, and only THEN touch the remote** — every step is `&&`-gated so the chain short-circuits on the first failure. Three invariants hold: (1) a `git branch -d` failure ("not fully merged") can't skip the sync, because the sync already ran; (2) any earlier failure (worktree-remove, fetch, checkout, rebase conflict) stops the chain *before* the local delete, so the claim branch is never removed while the default branch is stale; and (3) **the remote-delete is the LAST link**, so a failed/partial cleanup — which may still hold unmerged work in the worktree — never retracts the remote claim and re-exposes the item to other machines. On GitHub the merge deliberately does **not** pass `--delete-branch` (it would fail from inside the worktree), so this trailing delete is the real remote deletion — and because it is now load-bearing rather than a no-op, a failure must be **distinguished, not swallowed**. A blanket `|| true` would report a clean sweep while the claim branch survives on the remote, where Phase 1's in-flight scan keeps reading the issue as claimed on every machine, forever. So the delete falls back to `git ls-remote`: a branch that is already gone (GitLab's `--remove-source-branch`, or a repo that auto-deletes merged heads) is success, and one that is still there after a failed delete — network, branch protection, revoked push rights — prints and fails the chain.)
 
 **Abandoned a claim (Phase 3 skip / Phase 3.5 reject — no PR, work discarded)?** The branch is unmerged, so `git branch -d` won't remove it. Retract the claim explicitly instead (force-delete local, delete remote) so the item returns to the queue: from the main repo, `git worktree remove --force "${WORKTREE}"; git branch -D "next/${SLUG}"; git push origin --delete "next/${SLUG}" 2>/dev/null || true`. (Issues-mode abort branches in Phase 2 already do this inline.)
 

@@ -43,7 +43,7 @@ describe('worktree-safe merge contracts', () => {
     // Anchor on Phase 7's own cleanup chain — the bare command also appears in the
     // Phase 2 abort branches and the abandoned-claim paragraph, so matching it alone
     // would still pass with Phase 7's delete removed entirely.
-    assert.match(body, /git branch -d "next\/\$\{SLUG\}" && \\\n\{ git push origin --delete "next\/\$\{SLUG\}"/);
+    assert.match(body, /git branch -d "next\/\$\{SLUG\}" && \\\nif ! git push origin --delete "next\/\$\{SLUG\}"; then/);
     assert.doesNotMatch(body, /remote no-op after --delete-branch merge/);
   });
 
@@ -54,20 +54,23 @@ describe('worktree-safe merge contracts', () => {
     const body = readCommand('next.md');
     assert.match(
       body,
-      /if \[ "\$\(gh pr view <pr_number> --json state -q \.state\)" = "MERGED" \]; then\n\s+git push origin --delete "<branch>"/,
+      /if \[ "\$\(gh pr view <pr_number> --json state -q \.state\)" = "MERGED" \]; then\n\s+if ! git push origin --delete "<branch>"; then/,
     );
   });
 
-  it('does not swallow a failed remote-branch delete', () => {
-    // Both deletes are now the real deletion, not a post-`--delete-branch` no-op,
-    // so a genuine failure must surface instead of vanishing into 2>/dev/null.
+  it('distinguishes an already-gone branch from a failed remote delete', () => {
+    // These deletes are the real deletion now, not a post-`--delete-branch` no-op.
+    // A blanket `|| true` would report a clean sweep while the claim branch
+    // survives on the remote, where Phase 1's scan keeps reading the issue as
+    // in-flight forever — so the fallback must check whether it is actually gone.
     const body = readCommand('next.md');
     for (const line of fencedLines(body).filter((l) => l.includes('git push origin --delete "<branch>"'))) {
-      assert.doesNotMatch(line, /2>\/dev\/null/, line.trim());
+      assert.doesNotMatch(line, /(2>\/dev\/null|\|\| true)/, line.trim());
     }
-    const phase7 = body.split('\n').find((l) => l.includes('git push origin --delete "next/${SLUG}"') && l.includes('warning:'));
-    assert.ok(phase7, 'expected Phase 7 to report a failed remote delete');
-    assert.doesNotMatch(phase7, /2>\/dev\/null/);
+    assert.match(body, /git ls-remote --exit-code --heads origin "<branch>"/);
+    assert.match(body, /git ls-remote --exit-code --heads origin "next\/\$\{SLUG\}"/);
+    // ...and a survivor fails Phase 7's cleanup chain rather than being logged away.
+    assert.match(body, /remote claim branch next\/\$\{SLUG\} still exists[^\n]*"; false/);
   });
 
   it('explains why the flag is absent so it is not "cleaned up" back in', () => {
@@ -79,13 +82,14 @@ describe('worktree-safe merge contracts', () => {
 
   it('makes /do:pr resolve LINKED_WORKTREE and gate the flag on it', () => {
     const body = readCommand('pr.md');
-    // --path-format=absolute is required: without it --git-common-dir is relative
-    // in a subdirectory of a plain clone, so the probe misreports every such repo
-    // as a linked worktree.
-    assert.match(
-      body,
-      /git rev-parse --path-format=absolute --git-dir.*git rev-parse --path-format=absolute --git-common-dir/,
-    );
+    // Both paths must be normalized — raw, --git-common-dir is relative in a
+    // subdirectory of a plain clone, so the probe would misreport every such repo
+    // as a linked worktree. `cd … && pwd -P` does that on any git version;
+    // --path-format=absolute fails OPEN on git < 2.31 (unknown flag => empty
+    // output on both sides => "equal" => the unsafe --delete-branch path).
+    assert.match(body, /GIT_DIR_ABS="\$\(cd "\$\(git rev-parse --git-dir\)" && pwd -P\)"/);
+    assert.match(body, /GIT_COMMON_ABS="\$\(cd "\$\(git rev-parse --git-common-dir\)" && pwd -P\)"/);
+    assert.doesNotMatch(body, /--path-format=absolute --git-(dir|common-dir)/);
     assert.match(body, /LINKED_WORKTREE=0/);
     assert.match(body, /LINKED_WORKTREE=1/);
     // Both merge forms must carry the drop-the-flag instruction.

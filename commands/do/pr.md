@@ -245,7 +245,9 @@ When `MERGE_ENABLED=true`, gate the merge on **all three** of the review result,
    - **Resolve `{LINKED_WORKTREE}` first** — `/do:pr` is routinely invoked from inside a `git worktree` (by `/do:next`, `/do:pr-better`, and the claim flows), and that changes which merge flags are safe:
 
      ```bash
-     if [ "$(git rev-parse --path-format=absolute --git-dir)" = "$(git rev-parse --path-format=absolute --git-common-dir)" ]; then
+     GIT_DIR_ABS="$(cd "$(git rev-parse --git-dir)" && pwd -P)"
+     GIT_COMMON_ABS="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
+     if [ "$GIT_DIR_ABS" = "$GIT_COMMON_ABS" ]; then
        LINKED_WORKTREE=0
      else
        LINKED_WORKTREE=1
@@ -255,7 +257,7 @@ When `MERGE_ENABLED=true`, gate the merge on **all three** of the review result,
 
      **Read the printed value and carry it yourself.** Shell variables do not survive from one Bash call to the next (the same caveat the push block above depends on), so steps 4–6 must branch on what this `echo` printed — re-expanding `$LINKED_WORKTREE` in a later call yields the empty string, which silently takes the *not-a-worktree* path in exactly the setup this check exists for.
 
-     `--path-format=absolute` (git ≥ 2.31) is **required, not tidiness**: without it `--git-common-dir` prints a *relative* path (`../.git`) whenever the cwd is a subdirectory of a plain clone while `--git-dir` prints an absolute one, so the bare comparison reports a linked worktree for every ordinary repo entered from a subdirectory — and every branch below would take the worktree path in a checkout that has no caller to clean up after it.
+     **Normalizing both paths is required, not tidiness**, and `cd … && pwd -P` is the normalization to use. Comparing the two `rev-parse` outputs raw misreports every ordinary repo entered from a subdirectory as a linked worktree: `--git-common-dir` prints a *relative* path there (`../.git`) while `--git-dir` prints an absolute one. `--path-format=absolute` would fix that but only on git ≥ 2.31 — older gits reject the flag, both substitutions come back **empty**, the two empty strings compare equal, and the probe fails *open* into `LINKED_WORKTREE=0`, restoring the exact `--delete-branch` breakage this check exists to prevent. `cd … && pwd -P` needs no flag support and resolves symlinks on both sides.
 
      `--delete-branch` deletes the **local** branch as well as the remote one, and to do that `gh` first checks out the default branch — which fails in a linked worktree (`fatal: '{default_branch}' is already used by worktree at …`, because the parent repo already has it checked out). `gh` then **exits non-zero even though the merge itself succeeded**, so the merge reads as a failure and any `||` fallback chain wrapped around it fires against an already-merged PR. **When `LINKED_WORKTREE=1`, omit `--delete-branch` from every merge command below**; then delete the remote branch explicitly once — and only once — the PR really reads `MERGED`, leaving the local worktree + branch to the caller's cleanup phase, which removes them from the parent repo where that works:
 
@@ -268,7 +270,11 @@ When `MERGE_ENABLED=true`, gate the merge on **all three** of the review result,
        DEL_REMOTE="$(git config --get "branch.$BR.remote")"
        DEL_REF="$(git config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
        if [ -n "$DEL_REMOTE" ] && [ "$DEL_REMOTE" != "." ]; then
-         git push "$DEL_REMOTE" --delete "$DEL_REF" || echo "warning: remote branch $DEL_REF not deleted"
+         if ! git push "$DEL_REMOTE" --delete "$DEL_REF"; then
+           # Already gone (the repo auto-deletes merged heads) is fine; still there is not.
+           git ls-remote --exit-code --heads "$DEL_REMOTE" "$DEL_REF" >/dev/null 2>&1 &&
+             echo "ERROR: remote branch $DEL_REF still exists and could not be deleted — delete it manually"
+         fi
        fi
      else
        echo "PR {number} is not MERGED — keeping its head branch"
