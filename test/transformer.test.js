@@ -10,7 +10,6 @@ const {
   parseFrontmatter,
   rewriteLibPaths,
   rewriteConfigPath,
-  inlineLibContent,
   inlineLibReferences,
   applyConditionalBlocks,
   getSkillName,
@@ -115,41 +114,6 @@ describe('rewriteConfigPath', () => {
   it('is a no-op when env has no configPath', () => {
     const body = 'read ~/.claude/.slashdo-config.json now';
     assert.equal(rewriteConfigPath(body, {}), body);
-  });
-});
-
-// ── inlineLibContent ────────────────────────────────────────────────
-
-describe('inlineLibContent', () => {
-  let tmpDir;
-
-  it('inlines content when file exists', () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-test-'));
-    fs.writeFileSync(path.join(tmpDir, 'checklist.md'), 'Checklist content\n', 'utf8');
-
-    const body = 'Before\n!`cat ~/.claude/lib/checklist.md`\nAfter';
-    const result = inlineLibContent(body, tmpDir);
-    assert.equal(result, 'Before\nChecklist content\nAfter');
-    fs.rmSync(tmpDir, { recursive: true });
-  });
-
-  it('preserves pattern when file is missing', () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-test-'));
-    const body = '!`cat ~/.claude/lib/missing.md`';
-    const result = inlineLibContent(body, tmpDir);
-    assert.equal(result, '!`cat ~/.claude/lib/missing.md`');
-    fs.rmSync(tmpDir, { recursive: true });
-  });
-
-  it('handles multiple inline patterns', () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-test-'));
-    fs.writeFileSync(path.join(tmpDir, 'a.md'), 'Content A\n', 'utf8');
-    fs.writeFileSync(path.join(tmpDir, 'b.md'), 'Content B\n', 'utf8');
-
-    const body = '!`cat ~/.claude/lib/a.md` and !`cat ~/.claude/lib/b.md`';
-    const result = inlineLibContent(body, tmpDir);
-    assert.equal(result, 'Content A and Content B');
-    fs.rmSync(tmpDir, { recursive: true });
   });
 });
 

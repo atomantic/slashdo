@@ -61,6 +61,45 @@ function filesAreEqual(fileA, contentB) {
   return contentA === contentB;
 }
 
+function syncFile({ label, content, targetPath, dryRun, results }) {
+  if (filesAreEqual(targetPath, content)) {
+    results.upToDate++;
+    results.actions.push({ name: label, status: 'up to date' });
+    return;
+  }
+
+  const isNew = !fs.existsSync(targetPath);
+  if (dryRun) {
+    results.actions.push({
+      name: label,
+      status: isNew ? 'would install' : 'would update',
+      target: targetPath,
+    });
+  } else {
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, content, 'utf8');
+    results.actions.push({
+      name: label,
+      status: isNew ? 'installed' : 'updated',
+      target: targetPath,
+    });
+  }
+  if (isNew) results.installed++;
+  else results.updated++;
+}
+
+function removeFile({ label, targetPath, dryRun, results }) {
+  if (!fs.existsSync(targetPath)) return;
+
+  if (dryRun) {
+    results.actions.push({ name: label, status: 'would remove', target: targetPath });
+  } else {
+    fs.unlinkSync(targetPath);
+    results.actions.push({ name: label, status: 'removed', target: targetPath });
+  }
+  results.removed++;
+}
+
 const RENAMED_COMMANDS = {
   cam: 'push',
   makegoals: 'goals',
@@ -264,31 +303,7 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
     const transformed = transformCommand(content, env, libDir, cmd.relPath);
     const targetRel = getTargetFilename(cmd.relPath, env);
     const targetPath = path.join(env.commandsDir, targetRel);
-
-    if (filesAreEqual(targetPath, transformed)) {
-      results.upToDate++;
-      results.actions.push({ name: `/do:${cmd.name}`, status: 'up to date' });
-      continue;
-    }
-
-    const isNew = !fs.existsSync(targetPath);
-    if (dryRun) {
-      results.actions.push({
-        name: `/do:${cmd.name}`,
-        status: isNew ? 'would install' : 'would update',
-        target: targetPath,
-      });
-    } else {
-      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-      fs.writeFileSync(targetPath, transformed, 'utf8');
-      results.actions.push({
-        name: `/do:${cmd.name}`,
-        status: isNew ? 'installed' : 'updated',
-        target: targetPath,
-      });
-    }
-    if (isNew) results.installed++;
-    else results.updated++;
+    syncFile({ label: `/do:${cmd.name}`, content: transformed, targetPath, dryRun, results });
   }
 
   if (env.libDir) {
@@ -296,31 +311,7 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
       const content = fs.readFileSync(lib.absPath, 'utf8');
       const transformed = transformLib(content, env);
       const targetPath = path.join(env.libDir, lib.relPath);
-
-      if (filesAreEqual(targetPath, transformed)) {
-        results.upToDate++;
-        results.actions.push({ name: `lib/${lib.name}`, status: 'up to date' });
-        continue;
-      }
-
-      const isNew = !fs.existsSync(targetPath);
-      if (dryRun) {
-        results.actions.push({
-          name: `lib/${lib.name}`,
-          status: isNew ? 'would install' : 'would update',
-          target: targetPath,
-        });
-      } else {
-        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-        fs.writeFileSync(targetPath, transformed, 'utf8');
-        results.actions.push({
-          name: `lib/${lib.name}`,
-          status: isNew ? 'installed' : 'updated',
-          target: targetPath,
-        });
-      }
-      if (isNew) results.installed++;
-      else results.updated++;
+      syncFile({ label: `lib/${lib.name}`, content: transformed, targetPath, dryRun, results });
     }
   }
 
@@ -328,31 +319,7 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
     for (const hook of hookFiles) {
       const content = fs.readFileSync(hook.absPath, 'utf8');
       const targetPath = path.join(env.hooksDir, hook.relPath);
-
-      if (filesAreEqual(targetPath, content)) {
-        results.upToDate++;
-        results.actions.push({ name: `hook/${hook.name}`, status: 'up to date' });
-        continue;
-      }
-
-      const isNew = !fs.existsSync(targetPath);
-      if (dryRun) {
-        results.actions.push({
-          name: `hook/${hook.name}`,
-          status: isNew ? 'would install' : 'would update',
-          target: targetPath,
-        });
-      } else {
-        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-        fs.writeFileSync(targetPath, content, 'utf8');
-        results.actions.push({
-          name: `hook/${hook.name}`,
-          status: isNew ? 'installed' : 'updated',
-          target: targetPath,
-        });
-      }
-      if (isNew) results.installed++;
-      else results.updated++;
+      syncFile({ label: `hook/${hook.name}`, content, targetPath, dryRun, results });
     }
 
     // Register hooks in settings.json (only for full installs, not filtered command installs)
@@ -440,45 +407,20 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
   for (const cmd of commands) {
     const targetRel = getTargetFilename(cmd.relPath, env);
     const targetPath = path.join(env.commandsDir, targetRel);
-
-    if (!fs.existsSync(targetPath)) continue;
-
-    if (dryRun) {
-      results.actions.push({ name: `/do:${cmd.name}`, status: 'would remove', target: targetPath });
-    } else {
-      fs.unlinkSync(targetPath);
-      results.actions.push({ name: `/do:${cmd.name}`, status: 'removed', target: targetPath });
-    }
-    results.removed++;
+    removeFile({ label: `/do:${cmd.name}`, targetPath, dryRun, results });
   }
 
   if (env.libDir) {
     for (const lib of libFiles) {
       const targetPath = path.join(env.libDir, lib.relPath);
-      if (!fs.existsSync(targetPath)) continue;
-
-      if (dryRun) {
-        results.actions.push({ name: `lib/${lib.name}`, status: 'would remove', target: targetPath });
-      } else {
-        fs.unlinkSync(targetPath);
-        results.actions.push({ name: `lib/${lib.name}`, status: 'removed', target: targetPath });
-      }
-      results.removed++;
+      removeFile({ label: `lib/${lib.name}`, targetPath, dryRun, results });
     }
   }
 
   if (env.supportsHooks && env.hooksDir && !filterNames?.length) {
     for (const hook of hookFiles) {
       const targetPath = path.join(env.hooksDir, hook.relPath);
-      if (!fs.existsSync(targetPath)) continue;
-
-      if (dryRun) {
-        results.actions.push({ name: `hook/${hook.name}`, status: 'would remove', target: targetPath });
-      } else {
-        fs.unlinkSync(targetPath);
-        results.actions.push({ name: `hook/${hook.name}`, status: 'removed', target: targetPath });
-      }
-      results.removed++;
+      removeFile({ label: `hook/${hook.name}`, targetPath, dryRun, results });
     }
 
     // Clean up obsolete hooks that may have been installed by prior versions
