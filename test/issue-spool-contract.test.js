@@ -68,7 +68,25 @@ describe('bulk issue-filing spool contracts', () => {
     // lines — a worker handed those alone remediates from a bare one-line title.
     for (const body of [readCommand('better.md'), readCommand('better-swift.md')]) {
       assert.match(body, /\*\*In issue mode the finding bodies are on disk, not in this context\.\*\*/);
-      assert.match(body, /read the full body for each of its ids out of `\$SPOOL_DIR\/<category-slug>\.md`/);
+      // <slug> not <category-slug>: Conflict avoidance merges two categories into one
+      // worker, so it must open every spool file its ids name, not just its own.
+      assert.match(body, /read the full body for each of its ids out of `\$SPOOL_DIR\/<slug>\.md`, where/);
+      assert.match(body, /must open every spool file its ids name/);
+      // 4c.1 triages on a [VACUOUS]/[WEAK]/[MISSING] tag the index line does not carry,
+      // so that phase cannot run off the index at all.
+      assert.match(body, /carries no `\[VACUOUS\]`\/`\[WEAK\]`\/`\[MISSING\]` tag at all/);
+      assert.match(body, /Read `\$SPOOL_DIR\/tests\.md`/);
+    }
+  });
+
+  it('keeps the spool alive until the phases that read it have returned', () => {
+    // Filing is not the end of the run: a remediating --issues run reads these same
+    // bodies again in Phase 3c and Phase 4c, so deleting the directory at the end of
+    // Phase 2 leaves every downstream worker with an empty path.
+    assert.match(partial, /only once nothing\ndownstream still needs the bodies/);
+    assert.match(partial, /a `--scan-only` run may remove it as soon as the report\nis printed/);
+    for (const body of [readCommand('better.md'), readCommand('better-swift.md')]) {
+      assert.match(body, /must not be removed until Phase 4c has returned/);
     }
   });
 

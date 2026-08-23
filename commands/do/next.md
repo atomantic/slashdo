@@ -142,8 +142,16 @@ After the barrier, merge the wave's returned PRs **one at a time, never concurre
      ```bash
      git -C "<worktree>" push
      glab mr merge <pr_number> --auto-merge --yes --remove-source-branch
+     # Read the state back for the same reason the gh path does: --auto-merge returns
+     # while the MR is still queued behind the pipeline, and step 4 gates issue closure
+     # on this answer.
+     if [ "$(glab mr view <pr_number> --output json --jq .state)" = "merged" ]; then
+       echo "MR <pr_number> merged"
+     else
+       echo "MR <pr_number> is not merged (queued on the pipeline) — leaving its issue open and keeping <branch>"
+     fi
      ```
-     If the installed `glab` doesn't support `--auto-merge`, fall back to `glab ci status --wait` then `glab mr merge <pr_number> --yes --remove-source-branch`.
+     If the installed `glab` doesn't support `--auto-merge`, fall back to `glab ci status --wait` then `glab mr merge <pr_number> --yes --remove-source-branch` — and read the state back either way. **`--auto-merge` returning is not "merged"**: it hands the MR to the pipeline and returns, so an unread status closes the tracking issue for work that has not landed, which is exactly what the GitHub side above was fixed for.
 4. **Close out the issue — only when step 3 read back `MERGED`.** A PR the merge left open or queued has shipped nothing, so closing its issue would drop live work out of the queue: record it as left-open with the reason instead, and let Phase D keep its worktree and branch. For a genuinely merged PR, apply single-issue Phase 7's closure step: confirm `Closes #<num>` auto-closed it on merge to the default branch; if still open, close it explicitly (GitHub: `gh issue close <num> --comment "Shipped in PR #<pr_number>."`; GitLab: `glab issue note <num> -m "Shipped in PR #<pr_number>." && glab issue close <num>`). Drop the `in-progress` label.
 
 ### Swarm Phase D — Reconcile, clean up, report

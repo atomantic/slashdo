@@ -153,7 +153,7 @@ When compacting during this workflow, always preserve:
 - `HAS_UI` (true/false — determines whether the UX Consistency & Responsive Layout agent runs and whether the `ux` category exists downstream)
 - `PHASE_4C_START_SHA` (needed for FILE_OWNER_MAP update in Phase 4c.3)
 - `VACUOUS_TESTS_FIXED`, `WEAK_TESTS_STRENGTHENED`, `NEW_TEST_CASES`, `NEW_TEST_FILES`
-- `SPOOL_DIR` (issue mode only — the literal spool path Phase 1 created; the filer agents in Phase 2 cannot find the bodies without it, and it cannot be re-derived)
+- `SPOOL_DIR` (issue mode only — the literal spool path Phase 1 created; it cannot be re-derived, and the bodies are read three times: the Phase 2 filer agents, the Phase 3c remediation workers, and the Phase 4c.1 triage — so it outlives filing and must not be removed until Phase 4c has returned)
 - `CREATED_CATEGORY_SLUGS` (list of branch slugs created in Phase 5)
 
 
@@ -451,7 +451,8 @@ Wait for ALL agents to complete before proceeding.
 > partial: reuse `CLI_TOOL` from Phase 0a.
 > Phase 1 spooled the finding **bodies** to `SPOOL_DIR` and returned only the
 > **index**, so consolidate and dedup against those index lines — steps 2–4 need
-> nothing else, and you should not open a spool file. When the surviving set is
+> nothing else, so do not open a spool file **for them**. The only reason to open one is to
+> lift a block verbatim into a `--body-file` on the inline path below. When the surviving set is
 > larger than ~20 findings, hand the ids off to per-category **filer agents** per
 > the partial's "Bulk filing — spool the bodies, dedup on an index" section rather
 > than running `gh issue create` yourself; at or below that, file them inline —
@@ -627,8 +628,11 @@ Remediation runs in parallel, one worker per category that has CRITICAL, HIGH, o
 them and returned only index lines, so a `{FINDINGS}` block built from those lines alone
 hands the worker a one-line title with no evidence and no suggested fix. Build `{FINDINGS}`
 from each worker's index lines **plus the literal `SPOOL_DIR` path**, and instruct the
-worker to read the full body for each of its ids out of `$SPOOL_DIR/<category-slug>.md`
-before fixing it. "The orchestrator never rewrites a spooled body" keeps the bodies out of
+worker to read the full body for each of its ids out of `$SPOOL_DIR/<slug>.md`, where
+`<slug>` is the category on **that id's own index line** — **Conflict avoidance** below
+merges two categories' findings into one worker when they touch the same file, so such a
+worker must open every spool file its ids name, not just the one matching its own category.
+Read the bodies before fixing. "The orchestrator never rewrites a spooled body" keeps the bodies out of
 *this* context — it does not license remediating from titles.
 
 ### Agent instructions template:
@@ -740,6 +744,13 @@ PHASE_4C_START_SHA="$(git rev-parse HEAD)"
 ```
 
 ### 4c.1: Test Audit Triage
+
+**In issue mode Agent 8's findings are on disk, not in this context.** Phase 1 returned
+only index lines, and the index (`<id> | <SEVERITY> | <category> | <file:line> | <title>`)
+carries no `[VACUOUS]`/`[WEAK]`/`[MISSING]` tag at all — triaging off it is not merely
+lossy, it is impossible. Read `$SPOOL_DIR/tests.md` (the literal path from run state) and
+triage off each finding's full body, then populate `{VACUOUS_AND_WEAK_FINDINGS}` /
+`{MISSING_FINDINGS}` from those bodies, never from the index titles.
 
 Review Agent 8 (Test Quality & Coverage) findings from Phase 1 and categorize them:
 

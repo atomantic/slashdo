@@ -264,7 +264,12 @@ Merge the filers' `<id> -> #<number>` maps and report created, reused (deduped),
 errored counts with their numbers, exactly as the single-item path would. **Any id
 that came back `ERROR` was not filed** — list those explicitly with the spool path so
 the user can file them by hand, and never report an errored finding as filed. Leave
-`SPOOL_DIR` on disk when any error occurred; otherwise remove it.
+`SPOOL_DIR` on disk when any error occurred. Otherwise remove it **only once nothing
+downstream still needs the bodies** — filing is not always the end of the run. A command
+that goes on to remediate (`/do:better --issues` without `--scan-only`) reads these same
+bodies again in its remediation and test-enhancement phases, so it keeps the directory
+until those agents have returned; a `--scan-only` run may remove it as soon as the report
+is printed.
 
 ## The dispatch hint (`model:` + `effort:`)
 

@@ -58,6 +58,15 @@ describe('worktree-safe merge contracts', () => {
     );
   });
 
+  it('reads the MR state back on the GitLab swarm path too', () => {
+    // `glab mr merge --auto-merge` hands the MR to the pipeline and returns, so its
+    // exit status says nothing about whether the work landed — and step 4 closes the
+    // tracking issue off that answer.
+    const body = readCommand('next.md');
+    assert.match(body, /glab mr view <pr_number> --output json --jq \.state\)" = "merged" \]; then/);
+    assert.match(body, /\*\*`--auto-merge` returning is not "merged"\*\*/);
+  });
+
   it('distinguishes an already-gone branch from a failed remote delete', () => {
     // These deletes are the real deletion now, not a post-`--delete-branch` no-op.
     // A blanket `|| true` would report a clean sweep while the claim branch
