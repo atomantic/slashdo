@@ -191,6 +191,24 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
     return stdout;
   }
 
+  // Pipe the script into bash from a directory with no repo around it — the
+  // real `curl ... | bash` shape, where LOCAL_MODE is off.
+  function runPiped(script, home, extraEnv = {}) {
+    const cwd = fs.mkdtempSync(path.join(TMP_ROOT, 'neutral-'));
+    try {
+      const stdout = execFileSync('bash', ['-s'], {
+        cwd,
+        input: fs.readFileSync(path.join(REPO_ROOT, script), 'utf8'),
+        env: { ...process.env, HOME: home, ...extraEnv },
+        encoding: 'utf8',
+        timeout: 120000,
+      });
+      return { stdout: stdout.replace(ANSI, ''), status: 0 };
+    } catch (e) {
+      return { stdout: (e.stdout || '').replace(ANSI, ''), status: e.status ?? 1 };
+    }
+  }
+
   // A PATH whose curl always fails, so nothing can be fetched from the network.
   function offlinePath() {
     const stubDir = fs.mkdtempSync(path.join(TMP_ROOT, 'stub-'));
@@ -205,13 +223,22 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
 
   function nodelessPath() {
     const binDir = fs.mkdtempSync(path.join(TMP_ROOT, 'nonode-'));
+    const resolved = [];
     for (const bin of SCRIPT_BINARIES) {
       try {
-        const resolved = execFileSync('command', ['-v', bin], { shell: '/bin/bash', encoding: 'utf8' }).trim();
-        if (resolved) fs.symlinkSync(resolved, path.join(binDir, bin));
+        const target = execFileSync('command', ['-v', bin], { shell: '/bin/bash', encoding: 'utf8' }).trim();
+        if (target) {
+          fs.symlinkSync(target, path.join(binDir, bin));
+          resolved.push(bin);
+        }
       } catch {
         // Not present on this runner — the scripts guard their own use of it.
       }
+    }
+    // Without these the script cannot start, and the test would fail on an
+    // empty stdout rather than saying why.
+    for (const required of ['bash', 'cp', 'rm', 'mktemp', 'sed']) {
+      assert.ok(resolved.includes(required), `could not build a node-less PATH: ${required} not found`);
     }
     fs.writeFileSync(path.join(binDir, 'curl'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
     return binDir;
@@ -276,9 +303,11 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
     assert.ok(fs.existsSync(path.join(home, '.claude', 'hooks', SETTINGS_HOOKS_CACHE)),
       'install.sh must leave a copy of the module for uninstall.sh');
 
-    // Offline: the cached copy is the only way to deregister, and uninstall
-    // must still complete and remove the cache along with everything else.
-    const { stdout, status } = run('uninstall.sh', home, { PATH: offlinePath() });
+    // Piped from a neutral cwd with curl stubbed to fail: LOCAL_MODE is off and
+    // the network is gone, so the cached copy is the ONLY source left. Run by
+    // path instead and the repo checkout would satisfy the fetch, making this
+    // pass even with the cache never read.
+    const { stdout, status } = runPiped('uninstall.sh', home, { PATH: offlinePath() });
     assert.equal(status, 0, stdout);
     assert.match(stdout, /settings\/SessionStart hook: deregistered/);
     assert.deepEqual(settingsOf(home), {});

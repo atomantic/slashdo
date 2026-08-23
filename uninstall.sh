@@ -151,7 +151,7 @@ uninstall_claude() {
     if [ "$deregistered" = false ]; then
       printf "    ${YELLOW}settings.json: could not deregister — nothing was removed${RESET}\n"
       printf "    ${DIM}(re-run with network access or from a checkout; if it persists, delete${RESET}\n"
-      printf "    ${DIM} $target_hooks/$SETTINGS_HOOKS_CACHE and try again)${RESET}\n"
+      printf "    ${DIM} %s and try again)${RESET}\n" "$target_hooks/$SETTINGS_HOOKS_CACHE"
       if [ -s "$MOD_DIR/node.err" ]; then sed -e 's/^/      /' "$MOD_DIR/node.err" >&2; fi
       claude_incomplete=true
       return 0
@@ -160,8 +160,10 @@ uninstall_claude() {
     print_settings_actions "$node_result"
     # A warn line means the module declined to touch settings.json — removing
     # the files it still references is exactly what this ordering prevents.
-    case "$node_result" in
-      *"warn "*)
+    # Line-anchored: only a line that starts with the severity token counts,
+    # so a status that merely contains the word cannot trip this.
+    case $'\n'"$node_result" in
+      *$'\n'"warn "*)
         printf "    ${YELLOW}settings.json was left as-is — nothing was removed${RESET}\n"
         claude_incomplete=true
         return 0

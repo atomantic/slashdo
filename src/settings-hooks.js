@@ -28,7 +28,14 @@ const SETTINGS_HOOKS_CACHE = '.slashdo-settings-hooks.js';
 function readSettings(settingsPath) {
   const raw = fs.readFileSync(settingsPath, 'utf8');
   if (raw.trim() === '') return {};
-  return JSON.parse(raw);
+  const parsed = JSON.parse(raw);
+  // Valid JSON that is not an object (null, a string, a number, an array) has
+  // no place to register into. Reject it here so it lands in the caller's
+  // "skipped (parse error)" path instead of throwing on property access.
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('settings.json is not a JSON object');
+  }
+  return parsed;
 }
 
 function registerHooksInSettings(env, hookFiles, dryRun) {

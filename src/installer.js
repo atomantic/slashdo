@@ -308,7 +308,18 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
     const settingsActions = deregisterHooksFromSettings(env, dryRun);
     results.actions.push(...settingsActions);
 
-    for (const hook of hookFiles) {
+    // If the module declined to touch settings.json, its SessionStart entry
+    // still names these files. Deleting them would leave Claude Code erroring
+    // on every session start — uninstall.sh refuses here for the same reason.
+    const settingsBlocked = settingsActions.some(a => a.status.startsWith('skipped'));
+    if (settingsBlocked) {
+      results.actions.push({
+        name: 'hooks',
+        status: 'kept (settings.json still references them)',
+      });
+    }
+
+    for (const hook of settingsBlocked ? [] : hookFiles) {
       const targetPath = path.join(env.hooksDir, hook.relPath);
       if (!fs.existsSync(targetPath)) continue;
 
@@ -322,7 +333,7 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
     }
 
     // Clean up obsolete hooks that may have been installed by prior versions
-    for (const oldName of OBSOLETE_HOOKS) {
+    for (const oldName of settingsBlocked ? [] : OBSOLETE_HOOKS) {
       const oldPath = path.join(env.hooksDir, oldName);
       if (fs.existsSync(oldPath)) {
         if (dryRun) {
@@ -338,7 +349,7 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
     // install.sh leaves a copy of settings-hooks.js here so an offline
     // uninstall still works. An npm uninstall must not orphan it.
     const settingsHooksCache = path.join(env.hooksDir, SETTINGS_HOOKS_CACHE);
-    if (fs.existsSync(settingsHooksCache)) {
+    if (!settingsBlocked && fs.existsSync(settingsHooksCache)) {
       if (dryRun) {
         results.actions.push({ name: `hook/${SETTINGS_HOOKS_CACHE}`, status: 'would remove' });
       } else {

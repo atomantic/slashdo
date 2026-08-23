@@ -42,6 +42,9 @@ SETTINGS_HOOKS_CACHE=".slashdo-settings-hooks.js"
 # Set when the commands installed but settings.json could not be updated.
 install_incomplete=false
 
+# Set when part of settings.json was left as-is but the install still succeeded.
+settings_skipped=false
+
 # Scratch space for src/settings-hooks.js, cleaned up however we exit.
 MOD_DIR="$(mktemp -d)"
 trap 'rm -rf "$MOD_DIR"' EXIT
@@ -199,8 +202,9 @@ install_claude() {
         # that is not a completed install, so do not sign off on it. A
         # narrower skip (a malformed hooks key, say) still configures the
         # statusline, so those stay a successful install.
-        case "$node_result" in
-          *"warn settings.json: skipped"*) install_incomplete=true ;;
+        case $'\n'"$node_result" in
+          *$'\n'"warn settings.json: skipped"*) install_incomplete=true ;;
+          *$'\n'"warn "*) settings_skipped=true ;;
         esac
       else
         printf "    ${YELLOW}settings.json: failed — hooks installed but not registered${RESET}\n"
@@ -281,7 +285,7 @@ if [ ${#envs[@]} -eq 0 ]; then
 fi
 
 if [ "$LOCAL_MODE" = true ]; then
-  printf "  Source: ${GREEN}local${RESET} (${DIM}$SCRIPT_DIR${RESET})\n"
+  printf "  Source: ${GREEN}local${RESET} (${DIM}%s${RESET})\n" "$SCRIPT_DIR"
 else
   printf "  Source: ${GREEN}github${RESET} (${DIM}$BASE_URL${RESET})\n"
 fi
@@ -302,6 +306,9 @@ done
 
 if [ "$curl_installed" = true ] && [ "$install_incomplete" = false ]; then
   printf "  ${GREEN}Done!${RESET} Commands are available as /do:<name> in your AI coding assistant.\n"
+  if [ "$settings_skipped" = true ]; then
+    printf "  ${YELLOW}Note:${RESET} part of settings.json was left as-is — see the warning above.\n"
+  fi
 elif [ "$curl_installed" = true ]; then
   printf "  ${YELLOW}Partly done.${RESET} Some files did not download, or settings.json was not\n"
   printf "  updated — see the warnings above. Re-run this script once Node.js and the\n"
