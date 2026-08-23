@@ -683,7 +683,8 @@ Resolve these before Phase 4:
 - `{COMPAT_SHIM}` = `re-export`, `{COMPAT_HOST}` = `module`
 - `{MULTI_CATEGORY_FILE_EXAMPLE}` = ``server/index.js`` with both security and stack-specific changes
 - `{CATEGORY_SLUGS}` = `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`, `ux` (UI projects only), `structural` (strict mode only), and `cognitive-load` (simplify-only mode)
-- `{COMMIT_PREFIX_RULE}` = **When `SIMPLIFY_ONLY=true`**, the only possible slugs are the [`SIMPLIFY_CATEGORIES`](#the-category-set) ones, and the per-category commit plus its PR title take the `refactor:` prefix. This does not touch the pipeline's other mandated messages — the version bump stays `chore:`, and build/review/CI fixes stay `fix:`
+- `{CATEGORY_SLUG_RULE}` = **When `SIMPLIFY_ONLY=true`**, the only possible slugs are the [`SIMPLIFY_CATEGORIES`](#the-category-set) ones
+- `{COMMIT_PREFIX_RULE}` = **When `SIMPLIFY_ONLY=true`**, the per-category commit and its PR title take the `refactor:` prefix. This does not touch the pipeline's other mandated messages — the version bump stays `chore:`, and build/review/CI fixes stay `fix:`
 - `{PR_BODY_SUMMARY_EXTRA}` = *(empty)*
 - `{PR_BODY_EXTRA_SECTIONS}` = *(empty)*
 - `{CI_FAILURE_CAUSES_EXTRA}` = a single bullet, indented to match the ones above it:
@@ -698,7 +699,9 @@ Resolve these before Phase 4:
 
 The checklist Phase 4b reviews the remediation diff against:
 
+```
 !`cat ~/.claude/lib/code-review-checklist.md`
+```
 
 ### Version Bump Procedure
 
@@ -712,24 +715,22 @@ git add package.json package-lock.json
 
 ### Final Summary Table
 
-The rows Phase 7 prints (`{SUMMARY_TABLE_ROWS}`):
+The rows Phase 7 prints (`{SUMMARY_TABLE_ROWS}`), at column 0 in the printed block:
 
-```
-| Category           | Findings | Fixed | Skipped | PR       | CI     | Review   |
-|--------------------|----------|-------|---------|----------|--------|----------|
-| Security & Secrets | ...      | ...   | ...     | #number  | pass   | approved |
-| Code Quality       | ...      | ...   | ...     | #number  | pass   | approved |
-| DRY & YAGNI        | ...      | ...   | ...     | #number  | pass   | approved |
-| Architecture       | ...      | ...   | ...     | #number  | pass   | approved |
-| Bugs & Perf        | ...      | ...   | ...     | #number  | pass   | approved |
-| Stack-Specific     | ...      | ...   | ...     | #number  | pass   | approved |
-| Dep Freedom        | ...      | ...   | ...     | #number  | pass   | approved |
-| Tests              | ...      | ...   | ...     | #number  | pass   | approved |
-| UX                 | ...      | ...   | ...     | #number  | pass   | approved |
-| Structural         | ...      | ...   | ...     | #number  | pass   | approved |
-| Cognitive Load     | ...      | ...   | ...     | #number  | pass   | approved |
-| TOTAL              | ...      | ...   | ...     | N PRs    |        |          |
-```
+      | Category           | Findings | Fixed | Skipped | PR       | CI     | Review   |
+      |--------------------|----------|-------|---------|----------|--------|----------|
+      | Security & Secrets | ...      | ...   | ...     | #number  | pass   | approved |
+      | Code Quality       | ...      | ...   | ...     | #number  | pass   | approved |
+      | DRY & YAGNI        | ...      | ...   | ...     | #number  | pass   | approved |
+      | Architecture       | ...      | ...   | ...     | #number  | pass   | approved |
+      | Bugs & Perf        | ...      | ...   | ...     | #number  | pass   | approved |
+      | Stack-Specific     | ...      | ...   | ...     | #number  | pass   | approved |
+      | Dep Freedom        | ...      | ...   | ...     | #number  | pass   | approved |
+      | Tests              | ...      | ...   | ...     | #number  | pass   | approved |
+      | UX                 | ...      | ...   | ...     | #number  | pass   | approved |
+      | Structural         | ...      | ...   | ...     | #number  | pass   | approved |
+      | Cognitive Load     | ...      | ...   | ...     | #number  | pass   | approved |
+      | TOTAL              | ...      | ...   | ...     | N PRs    |        |          |
 
 The rules for which of those rows to include (`{SUMMARY_TABLE_ROW_RULES}` — an
 instruction to you, never printed):

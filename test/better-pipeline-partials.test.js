@@ -102,6 +102,35 @@ describe('shared better-* pipeline partials', () => {
     }
   });
 
+  it('leaves no shared phase re-pasted inline', () => {
+    // The include test only proves the !cat is THERE. A command carrying both the
+    // include and a re-pasted copy of a phase passes it — and that copy is the
+    // drift, since the agent then reads two versions of Phase 5 and follows one.
+    // Phase 4c is the only phase heading that legitimately stays inline.
+    for (const name of AUDIT_COMMANDS) {
+      const strays = readCommand(name)
+        .split('\n')
+        .filter((l) => /^## Phase /.test(l) && !/^## Phase (0|1|2|3|4c)\b/.test(l));
+      assert.deepEqual(strays, [], `${name} re-pastes a shared phase the partials own`);
+    }
+  });
+
+  it('points Phase 6 at reviewer loops that come after it', () => {
+    // lib/better-review-loop.md tells the agent the wrapper is included "below".
+    // Hoisting the library block above the Phase 6 include leaves that pointer
+    // false while every other assertion here stays green.
+    for (const name of AUDIT_COMMANDS) {
+      const body = readCommand(name);
+      const phase6 = includeIndex(body, 'better-review-loop');
+      for (const lib of REVIEWER_LOOP_LIBS) {
+        assert.ok(
+          includeIndex(body, lib) > phase6,
+          `${name}: lib/${lib}.md must be included after lib/better-review-loop.md`,
+        );
+      }
+    }
+  });
+
   it('is driven by the same input token set from both commands', () => {
     // A token one command defines and the other does not is drift by another name:
     // the partial reads it, and one of the two pipelines runs with a hole in it.

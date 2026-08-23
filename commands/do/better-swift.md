@@ -844,6 +844,7 @@ Resolve these before Phase 4:
 - `{COMPAT_SHIM}` = `typealias`, `{COMPAT_HOST}` = `file`
 - `{MULTI_CATEGORY_FILE_EXAMPLE}` = ``ContentView.swift`` with both platform and architecture changes
 - `{CATEGORY_SLUGS}` = `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `platform-swiftui`, `tests`, `ux`
+- `{CATEGORY_SLUG_RULE}` = *(empty — every slug above is always available)*
 - `{COMMIT_PREFIX_RULE}` = *(empty — this command has no mode that changes the prefix)*
 - `{PR_BODY_SUMMARY_EXTRA}` = `Platforms verified: {PLATFORMS}`
 - `{PR_BODY_EXTRA_SECTIONS}` = one extra section, at column 0 like the sections around it, and ending with a blank line:
@@ -864,7 +865,9 @@ Resolve these before Phase 4:
 
 The checklist Phase 4b reviews the remediation diff against:
 
+```
 !`cat ~/.claude/lib/swift-review-checklist.md`
+```
 
 ### Version Bump Procedure
 
@@ -885,29 +888,25 @@ git diff --name-only -z -- '*.plist' '*.pbxproj' | xargs -0 git add  # stage onl
 
 ### Final Summary Table
 
-The rows Phase 7 prints (`{SUMMARY_TABLE_ROWS}`):
+The rows Phase 7 prints (`{SUMMARY_TABLE_ROWS}`), at column 0 in the printed block:
 
-```
-| Category               | Findings | Fixed | Skipped | PR       | CI     | Review   |
-|------------------------|----------|-------|---------|----------|--------|----------|
-| Security & Secrets     | ...      | ...   | ...     | #number  | pass   | approved |
-| Code Quality           | ...      | ...   | ...     | #number  | pass   | approved |
-| DRY & YAGNI            | ...      | ...   | ...     | #number  | pass   | approved |
-| Architecture           | ...      | ...   | ...     | #number  | pass   | approved |
-| Bugs & Perf            | ...      | ...   | ...     | #number  | pass   | approved |
-| Platform & SwiftUI     | ...      | ...   | ...     | #number  | pass   | approved |
-| Tests                  | ...      | ...   | ...     | #number  | pass   | approved |
-| UX                     | ...      | ...   | ...     | #number  | pass   | approved |
-| TOTAL                  | ...      | ...   | ...     | N PRs    |        |          |
-```
+      | Category               | Findings | Fixed | Skipped | PR       | CI     | Review   |
+      |------------------------|----------|-------|---------|----------|--------|----------|
+      | Security & Secrets     | ...      | ...   | ...     | #number  | pass   | approved |
+      | Code Quality           | ...      | ...   | ...     | #number  | pass   | approved |
+      | DRY & YAGNI            | ...      | ...   | ...     | #number  | pass   | approved |
+      | Architecture           | ...      | ...   | ...     | #number  | pass   | approved |
+      | Bugs & Perf            | ...      | ...   | ...     | #number  | pass   | approved |
+      | Platform & SwiftUI     | ...      | ...   | ...     | #number  | pass   | approved |
+      | Tests                  | ...      | ...   | ...     | #number  | pass   | approved |
+      | UX                     | ...      | ...   | ...     | #number  | pass   | approved |
+      | TOTAL                  | ...      | ...   | ...     | N PRs    |        |          |
 
 Every row above is always printed, so `{SUMMARY_TABLE_ROW_RULES}` is empty. The
-lines printed under the table (`{SUMMARY_TABLE_FOOTER}`) are:
+lines printed under the table (`{SUMMARY_TABLE_FOOTER}`), at column 0 in that same block, are:
 
-```
-Platforms verified: {PLATFORMS}
-Deployment targets: {DEPLOYMENT_TARGETS}
-```
+      Platforms verified: {PLATFORMS}
+      Deployment targets: {DEPLOYMENT_TARGETS}
 
 ---
 

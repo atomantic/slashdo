@@ -15,9 +15,12 @@ documents:
   `Better Swift Audit`).
 - `{CATEGORY_SLUGS}` — the pipeline's branch-slug set, as the prose line step 2
   prints (e.g. `` `security`, `code-quality`, … ``).
+- `{CATEGORY_SLUG_RULE}` — a mode-dependent narrowing of that slug set, or
+  **empty**. It sits under the slug list in 5a step 2, where branch names are
+  actually chosen.
 - `{COMMIT_PREFIX_RULE}` — a mode-dependent rule about the conventional prefix
   the per-category commit and its PR title take, or **empty**. It is repeated at
-  both use sites (5a step 4 and 5c) because it governs both.
+  5a step 4 and 5c because it governs both.
 - `{MULTI_CATEGORY_FILE_EXAMPLE}` — a representative file from this stack that
   could pick up changes from two categories, used in the file-isolation rule
   (e.g. "`server/index.js` with both security and stack-specific changes").
@@ -53,6 +56,7 @@ For each category that has findings:
 1. Switch to `{DEFAULT_BRANCH}`: `git checkout {DEFAULT_BRANCH}`
 2. Create a category branch: `git checkout -b {BRANCH_PREFIX}/{CATEGORY_SLUG}`
    - Use slugs: {CATEGORY_SLUGS}
+   - {CATEGORY_SLUG_RULE}
 3. For each file assigned to this category in `FILE_OWNER_MAP`:
    - **Modified files**: `git checkout {BRANCH_PREFIX}/{DATE} -- {file_path}`
    - **New files (Added)**: `git checkout {BRANCH_PREFIX}/{DATE} -- {file_path}`
@@ -88,7 +92,7 @@ Only if ALL category branches pass build{VERIFY_SCOPE_SUFFIX}:
 
 ### 5c: Create PRs
 
-For each category branch, create a PR. {COMMIT_PREFIX_RULE}
+For each category branch, create a PR. Its title takes the same conventional prefix as that branch's commit in 5a step 4. {COMMIT_PREFIX_RULE}
 
 **GitHub:**
 ```bash
