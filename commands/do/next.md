@@ -196,10 +196,12 @@ Runs **once per invocation**, after the last wave, over every result the batch p
 > if [ "$CLI_TOOL" = gh ]; then
 >   gh auth status --active >/dev/null 2>&1 && gh repo view >/dev/null 2>&1 || {
 >     echo "/do:next detected a GitHub repo ($ORIGIN_HOST) but gh is not authenticated to it. Run 'gh auth login'."; exit 1; }
->   # Derive the API host for the `gh api` calls below. `gh api` ignores the repo remote
->   # and defaults to github.com, so on a GHES repo it must be passed --hostname "$GH_HOST"
->   # (see ~/.claude/lib/gh-host.md). `gh issue`/`gh pr` calls resolve the host on their own.
->   GH_HOST="$ORIGIN_HOST"; [ -n "$GH_HOST" ] || GH_HOST=github.com
+>   # Seed the API host for the `gh api` calls below. `gh api` ignores the repo remote
+>   # and defaults to github.com, so on a GHES repo it must be passed --hostname "$GH_HOST".
+>   # $ORIGIN_HOST is the first step of the shared derivation included at the end of this
+>   # section — seed GH_HOST with it, then apply that snippet's remaining fallbacks and its
+>   # per-host auth precheck. `gh issue`/`gh pr` calls resolve the host on their own.
+>   GH_HOST="$ORIGIN_HOST"
 > else
 >   glab auth status >/dev/null 2>&1 || {
 >     echo "/do:next detected a GitLab repo ($ORIGIN_HOST) but glab is not authenticated to it. Run 'glab auth login'."; exit 1; }
@@ -222,6 +224,10 @@ fi
 ```
 
 For every ref, split on `/` and collect each segment — that's the raw in-flight set.
+
+**GitHub only — finish the `GH_HOST` derivation with the shared snippet at the end of this section.** `$ORIGIN_HOST` already is its first step (the same `origin`-remote parse), so seed `GH_HOST` with it and continue from the fallbacks, then run the per-host auth precheck before any `gh api` call.
+
+!`cat ~/.claude/lib/gh-host.md`
 
 ### Phase 1 — PLAN.md mode (default)
 
