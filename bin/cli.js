@@ -30,7 +30,11 @@ function usage() {
   const environmentHelp = Object.entries(ENVIRONMENTS).map(([key, env]) => {
     const aliases = aliasesByEnvironment[key];
     const aliasText = aliases?.length ? `  [aliases: ${aliases.join(', ')}]` : '';
-    return `  ${key.padEnd(12)} ${env.name.padEnd(16)} (${env.commandsDir.replace(HOME, '~')})${aliasText}`;
+    const relativeCommandsDir = path.relative(HOME, env.commandsDir);
+    const commandsDir = relativeCommandsDir && !relativeCommandsDir.startsWith(`..${path.sep}`)
+      ? `~${path.sep}${relativeCommandsDir}`
+      : env.commandsDir;
+    return `  ${key.padEnd(12)} ${env.name.padEnd(16)} (${commandsDir})${aliasText}`;
   }).join('\n');
 
   console.log(BANNER);

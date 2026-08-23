@@ -2,8 +2,23 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
+const path = require('node:path');
 
 const { parseArgs } = require('../bin/cli');
+
+const cliPath = path.resolve(__dirname, '../bin/cli.js');
+
+describe('help output', () => {
+  it('preserves the separator when the home directory is the filesystem root', () => {
+    const output = execFileSync(process.execPath, [cliPath, '--help'], {
+      encoding: 'utf8',
+      env: { ...process.env, HOME: path.parse(process.cwd()).root },
+    });
+
+    assert.match(output, /\(~[/\\]\.claude[/\\]commands\)/);
+  });
+});
 
 // ── parseArgs ───────────────────────────────────────────────────────
 
