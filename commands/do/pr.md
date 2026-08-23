@@ -84,7 +84,7 @@ Print: `PR flow: {current_branch} → {default_branch}`
 - Commit all changes to the current branch
 - Keep commit message concise and do not use co-author information
 - **Sync the branch onto the latest `origin/{default_branch}` first.** Reviewers below diff the branch against the **local** `{default_branch}` ref (`git diff {default_branch}...HEAD`), anchored on the merge-base. If `origin/{default_branch}` moved forward since this branch was cut and the branch was never rebased, reviewers evaluate against a stale base and flag unrelated changes that landed on the default branch outside this branch's work. Rebase to eliminate that noise:
-  - `git fetch origin {default_branch}:{default_branch}` to fast-forward the **local** `{default_branch}` ref (and its remote-tracking ref) to match origin. A plain `git fetch origin {default_branch}` only moves the remote-tracking ref — the reviewers diff against the *local* ref, so it must be the one advanced, or the merge-base stays stale and the noise remains. This works because the flow already moved you to a feature branch (Detect Branches step 3), so the default branch isn't checked out. If your local `{default_branch}` has diverged from origin and the fetch can't fast-forward it (unusual), surface that and stop rather than forcing it.
+  - `git fetch origin {default_branch}:{default_branch}` to fast-forward the **local** `{default_branch}` ref (and its remote-tracking ref) to match origin. A plain `git fetch origin {default_branch}` only moves the remote-tracking ref — the reviewers diff against the *local* ref, so it must be the one advanced, or the merge-base stays stale and the noise remains. This works because the flow already moved you to a feature branch (Detect Branches step 3), so the default branch isn't checked out **here**. **In a linked worktree it can still fail** — git's refusal is repo-wide, so `fatal: refusing to fetch into branch 'refs/heads/{default_branch}' checked out at …` means the *parent* repo holds it, which is the normal state when `/do:next` or a claim flow invoked `/do:pr`. That is not a divergence and not a reason to stop: fall back to `git fetch origin {default_branch}` and rebase onto the remote-tracking ref (`git rebase origin/{default_branch}`), and have the reviewers diff `origin/{default_branch}...HEAD` — the local ref is the parent repo's to advance, and its cleanup phase does that. If your local `{default_branch}` has diverged from origin and the fetch can't fast-forward it (unusual), surface that and stop rather than forcing it.
   - `git rebase {default_branch}` to replay this branch's commits on top of the now-current default branch.
   - If the rebase hits conflicts, **abort** (`git rebase --abort`) and stop — print the conflicting files and ask the user to resolve them, rather than guessing at a merge. Do not proceed to review against a half-rebased tree.
   - After a clean rebase the branch's merge-base with the refreshed local `{default_branch}` is current, so `git diff {default_branch}...HEAD` shows only this branch's own changes.
@@ -242,11 +242,57 @@ When `MERGE_ENABLED=true`, gate the merge on **all three** of the review result,
    The snippet **fails closed on purpose**: it exits non-zero rather than just printing, so the gate can't be skimmed past the way a bare `git log` whose output needs interpreting can. If it exits non-zero, **do not merge**: report the unpushed SHAs, leave the PR open, and say the branch has local work to push. Skip the gate entirely when the branch has no upstream — there is nothing to compare against. This gate is independent of `{OVERALL_STATUS}`: a `clean` review whose fixes are unpushed is exactly the failure it exists to catch.
 3. **Resolve the merge method** into `{MERGE_METHOD}`: the explicit flag or saved `merge-method` default if set; otherwise query `gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed` and pick from the repo's allowed methods — if exactly one is allowed use it; if several are, prefer `squash`, then `merge`, then `rebase`. State the chosen method. (GitLab: omit the method flag and let `glab` use the project default.)
 4. **Merge once CI is green** — GitHub (`gh`):
-   - First try GitHub-native auto-merge, so the merge lands when required checks pass even if this session ends: `gh pr merge {number} --auto --{MERGE_METHOD} --delete-branch`.
-   - If that errors because auto-merge is not enabled on the repo (e.g. `gh` reports auto-merge is not allowed / not enabled), **fall back to watching checks in-session, then merging directly**: `gh pr checks {number} --required --watch --fail-fast` — scope the watch to **required** checks only so an optional/non-required job's failure or slowness can't block a merge that branch protection would allow; on success run `gh pr merge {number} --{MERGE_METHOD} --delete-branch`. If a required check **fails**, apply the **CI flake handling** routine (one conservative re-run on the same commit — see `~/.claude/lib/ci-flake-handling.md`): if the same SHA passes on the single re-run, treat it as a flake and proceed with the merge (logging which check flaked); if it fails again, leave the PR open and report which check failed — do not merge. (If `gh` reports no required checks exist on the branch, the required-CI gate is vacuously satisfied — merge directly.)
+   - **Resolve `{LINKED_WORKTREE}` first** — `/do:pr` is routinely invoked from inside a `git worktree` (by `/do:next`, `/do:pr-better`, and the claim flows), and that changes which merge flags are safe:
+
+     ```bash
+     GIT_DIR_ABS="$(cd "$(git rev-parse --git-dir)" && pwd -P)"
+     GIT_COMMON_ABS="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
+     if [ "$GIT_DIR_ABS" = "$GIT_COMMON_ABS" ]; then
+       LINKED_WORKTREE=0
+     else
+       LINKED_WORKTREE=1
+     fi
+     echo "LINKED_WORKTREE=$LINKED_WORKTREE"
+     ```
+
+     **Read the printed value and carry it yourself.** Shell variables do not survive from one Bash call to the next (the same caveat the push block above depends on), so steps 4–6 must branch on what this `echo` printed — re-expanding `$LINKED_WORKTREE` in a later call yields the empty string, which silently takes the *not-a-worktree* path in exactly the setup this check exists for.
+
+     **Normalizing both paths is required, not tidiness**, and `cd … && pwd -P` is the normalization to use. Comparing the two `rev-parse` outputs raw misreports every ordinary repo entered from a subdirectory as a linked worktree: `--git-common-dir` prints a *relative* path there (`../.git`) while `--git-dir` prints an absolute one. `--path-format=absolute` would fix that but only on git ≥ 2.31 — older gits reject the flag, both substitutions come back **empty**, the two empty strings compare equal, and the probe fails *open* into `LINKED_WORKTREE=0`, restoring the exact `--delete-branch` breakage this check exists to prevent. `cd … && pwd -P` needs no flag support and resolves symlinks on both sides.
+
+     `--delete-branch` deletes the **local** branch as well as the remote one, and to do that `gh` first checks out the default branch — which fails in a linked worktree (`fatal: '{default_branch}' is already used by worktree at …`, because the parent repo already has it checked out). `gh` then **exits non-zero even though the merge itself succeeded**, so the merge reads as a failure and any `||` fallback chain wrapped around it fires against an already-merged PR. **When `LINKED_WORKTREE=1`, omit `--delete-branch` from every merge command below**; then delete the remote branch explicitly once — and only once — the PR really reads `MERGED`, leaving the local worktree + branch to the caller's cleanup phase, which removes them from the parent repo where that works:
+
+     ```bash
+     # One self-contained block: it re-derives the upstream because the push step's
+     # block is a DIFFERENT Bash call (and is skipped entirely when there was
+     # nothing to push), so its $PUSH_REMOTE/$PUSH_BRANCH are long gone by now.
+     if [ "$(gh pr view {number} --json state -q .state)" = "MERGED" ]; then
+       BR="$(git branch --show-current)"
+       DEL_REMOTE="$(git config --get "branch.$BR.remote")"
+       DEL_REF="$(git config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
+       if [ -n "$DEL_REMOTE" ] && [ "$DEL_REMOTE" != "." ]; then
+         if ! git push "$DEL_REMOTE" --delete "$DEL_REF"; then
+           # rc 2 means "no such ref" — already gone (the repo auto-deletes merged
+           # heads), which is success. Any other rc is a transport/auth failure that
+           # proves nothing, so do NOT report the branch as deleted.
+           git ls-remote --exit-code --heads "$DEL_REMOTE" "$DEL_REF" >/dev/null 2>&1; RC=$?
+           if [ "$RC" -eq 2 ]; then
+             echo "note: remote branch $DEL_REF was already gone"
+           else
+             echo "ERROR: could not confirm $DEL_REF is gone (ls-remote rc=$RC) — delete it manually"
+           fi
+         fi
+       fi
+     else
+       echo "PR {number} is not MERGED — keeping its head branch"
+     fi
+     ```
+
+     Deleting through the **config-derived** remote and ref — never a hardcoded `origin` plus the local branch name — is the same rule the push step follows: a branch whose upstream is `upstream/feature-x` or `origin/pr-123-head` would otherwise lose an unrelated remote branch while the real PR head survives. The `MERGED` read-back matters just as much: `gh pr merge` exits zero on a repo with a **merge queue** while the PR is only queued, and GitHub auto-closes a PR whose head branch disappears, so an exit-status-only gate can kill the very merge it was waiting for. Whenever the merge is queued rather than done — a merge queue, or native `--auto` — **delete nothing**: those branches outlive this session, and the repo's "automatically delete head branches" setting or the caller's cleanup owns them.
+   - First try GitHub-native auto-merge, so the merge lands when required checks pass even if this session ends: `gh pr merge {number} --auto --{MERGE_METHOD} --delete-branch` (drop `--delete-branch` when `LINKED_WORKTREE=1`).
+   - If that errors because auto-merge is not enabled on the repo (e.g. `gh` reports auto-merge is not allowed / not enabled), **fall back to watching checks in-session, then merging directly**: `gh pr checks {number} --required --watch --fail-fast` — scope the watch to **required** checks only so an optional/non-required job's failure or slowness can't block a merge that branch protection would allow; on success run `gh pr merge {number} --{MERGE_METHOD} --delete-branch` (again, drop `--delete-branch` when `LINKED_WORKTREE=1`, then run the `MERGED`-gated remote delete above once the merge is confirmed). If a required check **fails**, apply the **CI flake handling** routine (one conservative re-run on the same commit — see `~/.claude/lib/ci-flake-handling.md`): if the same SHA passes on the single re-run, treat it as a flake and proceed with the merge (logging which check flaked); if it fails again, leave the PR open and report which check failed — do not merge. (If `gh` reports no required checks exist on the branch, the required-CI gate is vacuously satisfied — merge directly.)
    - GitLab (`glab`): `glab mr merge {number} --auto-merge --yes --remove-source-branch` (merges when the pipeline succeeds). If the installed `glab` doesn't support `--auto-merge`, fall back to polling `glab ci status` until the pipeline passes, then `glab mr merge {number} --yes`.
 5. **Verify** the result: `gh pr view {number} --json state,mergedAt` (GitLab: `glab mr view {number}`). Distinguish *merged now* from *queued to auto-merge on green CI*.
-6. After a **completed** merge, switch back and sync the default branch locally: `git checkout {default_branch} && git pull --rebase --autostash`. When the merge is merely **queued** (native auto-merge, checks still running), skip the local sync — the merge hasn't happened yet — and say so.
+6. After a **completed** merge, switch back and sync the default branch locally: `git checkout {default_branch} && git pull --rebase --autostash` — **only when `LINKED_WORKTREE=0`.** In a linked worktree that checkout is doomed for the same reason `--delete-branch` is (the parent repo holds `{default_branch}`), and there is nothing to sync here anyway: skip it, say so, and let the caller's cleanup phase sync the parent repo. When the merge is merely **queued** (native auto-merge, checks still running), skip the local sync too — the merge hasn't happened yet — and say so.
 
 Never merge on `dirty`/`inconclusive`, never merge while the branch has unpushed commits, never merge before required checks pass, and never override branch protection — `--auto` respects it, and the in-session fallback waits on `gh pr checks`.
 
