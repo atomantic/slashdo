@@ -8,7 +8,7 @@ const path = require('path');
 const CONDITIONAL_CAPABILITIES = { teams: 'supportsTeams' };
 
 function parseFrontmatter(content) {
-  const lines = content.split('\n');
+  const lines = content.split(/\r?\n/);
   if (lines[0] !== '---') return { frontmatter: {}, body: content };
 
   let endIdx = -1;
