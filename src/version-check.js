@@ -12,6 +12,11 @@ const fs = require('fs');
 // hook pairs it with isUpdateAvailable(), which applies the update POLICY on top:
 // unrankable-but-different still surfaces the hint. checkForUpdate() below wants
 // the rank itself ('major'/'minor'/'patch'), so it stays on the ranking answer.
+//
+// Adopting the hook's implementation moved two answers, both pinned in
+// test/version-check.test.js: an unrankable version now returns null where the
+// old three-segment-only parse guessed a rank, and a prerelease is ranked by the
+// release it belongs to ('1.2.3' → '1.2.4-beta.1' is 'patch', not null).
 const { compareVersions } = require('../hooks/slashdo-check-update');
 
 function getInstalledVersion(versionFile) {

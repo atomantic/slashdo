@@ -182,10 +182,17 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, paths, now, pid }) {
           if (now() - fsDep.statSync(paths.lockFile).mtimeMs > LOCK_STALE_MS) {
             const staleName = paths.lockFile + '.stale.' + pid;
             fsDep.renameSync(paths.lockFile, staleName); // atomic: one winner, losers throw ENOENT
+            // The rename won: that lock is ours now and no other session holds
+            // one, so we must not defer to it if the rest of the reclaim fails.
+            lockHeldByOther = false;
             fsDep.unlinkSync(staleName);
             acquire();
           }
-        } catch (e2) {}
+        } catch (e2) {
+          // Re-acquiring can lose to a session that created a fresh lock in the
+          // gap — that one really is a holder worth deferring to.
+          if (e2.code === 'EEXIST') lockHeldByOther = true;
+        }
       }
     }
 

@@ -34,7 +34,6 @@ describe('check-update resolvePaths', () => {
 
     assert.equal(paths.cacheFile,
       path.join('/home/someone', '.claude', 'cache', 'slashdo-update-check.json'));
-    assert.ok(paths.cacheFile.endsWith('-update-check.json'));
     assert.equal(paths.versionFile, path.join('/home/someone', '.claude', '.slashdo-version'));
     assert.equal(paths.configFile, path.join('/home/someone', '.claude', '.slashdo-config.json'));
     assert.equal(paths.lockFile, path.join(paths.cacheDir, 'slashdo-update.lock'));
@@ -382,6 +381,37 @@ describe('runUpdateCheck', () => {
     assert.deepEqual(calls, [NPM_VIEW_COMMAND], 'the reclaim winner installs, not us');
     assert.equal(result.status, 'deferred');
     assert.equal(fs.existsSync(paths.cacheFile), false);
+  });
+
+  it('writes the cache when the reclaim frees the lock but cannot retake it', () => {
+    // renameSync won, so the stale lock is gone and nobody is installing. If the
+    // rest of the reclaim then fails, deferring would leave this cycle with no
+    // cache write at all — there is no holder left to write the real answer.
+    writeInstalled('1.9.0');
+    writeConfig({ autoUpdate: true });
+    fs.writeFileSync(paths.lockFile, '999', 'utf8');
+    const stale = new Date(NOW - LOCK_STALE_MS - 60000);
+    fs.utimesSync(paths.lockFile, stale, stale);
+    const brokenUnlinkFs = {
+      ...fs,
+      unlinkSync: (file) => {
+        const err = new Error('EPERM');
+        err.code = 'EPERM';
+        throw err;
+      },
+    };
+
+    const result = runUpdateCheck({
+      fs: brokenUnlinkFs,
+      execSync: makeExecSync({ latest: '1.10.0' }),
+      paths,
+      now: () => NOW,
+      pid: 4242,
+    });
+
+    assert.equal(result.status, 'written');
+    assert.deepEqual(calls, [NPM_VIEW_COMMAND], 'we never took the lock, so we must not install');
+    assert.equal(readCache().update_available, true);
   });
 
   it('does not touch the lock at all when auto-update is off', () => {
