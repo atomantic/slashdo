@@ -86,6 +86,7 @@ When compacting during this workflow, always preserve:
 - `PHASE_4C_START_SHA` (needed for FILE_OWNER_MAP update in Phase 4c.3)
 - `VACUOUS_TESTS_FIXED`, `WEAK_TESTS_STRENGTHENED`, `NEW_TEST_CASES`, `NEW_TEST_FILES`
 - `CREATED_CATEGORY_SLUGS` (list of branch slugs created in Phase 5)
+- `SPOOL_DIR` (issue mode only — the literal spool path Phase 1 created; the filer agents in Phase 2 cannot find the bodies without it, and it cannot be re-derived)
 - `GOTCHA_ENTRIES_IN_SCOPE` (list of swift-gotchas catalogue entry numbers relevant to this project, recorded in Phase 0e)
 
 
@@ -230,6 +231,42 @@ Launch 8 Explore agents in two batches. Each agent must report findings in this 
 ```
 - **[CRITICAL/HIGH/MEDIUM/LOW]** `file:line` - Description. Suggested fix: ... Complexity: Simple/Medium/Complex
 ```
+
+**Issue mode (`--issues`) changes where this format goes, not what it contains.**
+When `ISSUE_MODE=true`, create the spool directory before dispatching any agent:
+
+```bash
+SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_DIR"
+```
+
+Record the printed path as `SPOOL_DIR` in run state and pass **that literal path**
+to every agent — a shell variable does not survive between tool calls, so
+re-deriving it later would hand the filer agents an empty directory.
+
+Pass `SPOOL_DIR` to every audit agent along with the **"Bulk filing — spool the
+bodies, dedup on an index"** contract from
+[lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) (the partial Phase 2 reads
+in). Under that contract each agent writes one ready-to-file issue body per finding
+to `$SPOOL_DIR/<category-slug>.md` — using its own category slug from Phase 2's
+summary table (`security`, `code-quality`, `dry`, `architecture`, `bugs-perf`,
+`platform-swiftui`, `tests`, `ux`), so no two agents write the same file — and
+**returns only the compact index**:
+
+```
+<id> | <SEVERITY> | <category> | <file:line> | <one-line title>
+```
+
+Audit agents are `Explore` agents, which have no `Write` tool — they write their
+spool file with a quoted-heredoc `cat > "$SPOOL_DIR/<slug>.md" <<'EOF'` via Bash,
+so backticks and `$` in quoted evidence survive verbatim.
+
+A large audit surfaces hundreds of findings, and the alternative pulls every body
+through this orchestrator's context twice — once reading the agent's report, once
+re-emitting it into a `gh issue create` body. That second pass is where bodies get
+truncated and tail findings get dropped. Everything Phase 2 actually decides —
+cross-agent dedup, dedup against `EXISTING_ISSUES`, and the `FILE_OWNER_MAP` — keys
+off the index fields alone, so the bodies stay on disk until the filer agents move
+them to the tracker.
 
 **Context requirement.** Before flagging, read at least 30 lines of surrounding context to confirm the issue is real. Common false positives to watch for:
 - A force unwrap that IS inside a `guard`/`precondition`-protected path where nil is truly impossible
@@ -551,6 +588,12 @@ Wait for ALL agents to complete before proceeding.
 > Report the created **and** reused issue numbers (`#<n>`) in the Phase 2 summary
 > where you'd report slugs. Setup (VCS host + label + `EXISTING_ISSUES` fetch) is
 > covered by the partial: reuse `CLI_TOOL` from Phase 0a.
+> Phase 1 spooled the finding **bodies** to `SPOOL_DIR` and returned only the
+> **index**, so consolidate and dedup against those index lines — steps 2–4 need
+> nothing else, and you should not open a spool file. When the surviving set is
+> larger than ~20 findings, hand the ids off to per-category **filer agents** per
+> the partial's "Bulk filing — spool the bodies, dedup on an index" section rather
+> than running `gh issue create` yourself; at or below that, file them inline.
 
 1. Read the existing `PLAN.md` (create if it doesn't exist)
 2. Consolidate all findings from Phase 1, deduplicating across agents (same file:line flagged by multiple agents → keep the most specific description)
@@ -623,6 +666,22 @@ For each file touched by multiple categories, document why it was assigned to on
 **GATE: If `--scan-only` was passed, STOP HERE** — but not before doing the one thing a scan-only run in issue mode exists to do: **when `ISSUE_MODE` is also true, file every surviving finding as an issue first**, then print the summary and exit. (When `ISSUE_MODE` is false, just print the summary and exit.)
 
 **Filing every surviving finding** means all of them — not just the ones the disposition rules would defer. A scan-only run remediates nothing, so "deferred" covers the whole set; the filed issues ARE the run's output. Apply the same labels, dedup-against-`EXISTING_ISSUES`, and title/body rules the disposition partial specifies, and report the created and reused `#<number>`s in the summary. Do not open a worktree or write any code.
+
+**Hand the filing to per-category filer agents when the surviving set exceeds ~20.**
+A `--scan-only --issues` run on a real codebase is exactly the case the partial's
+"Bulk filing" section exists for: every surviving finding gets filed, so the volume
+is the whole audit. Dispatch one filer agent per category **in parallel**, giving
+each the surviving ids for its category, the `$SPOOL_DIR/<category-slug>.md` file
+those bodies live in, `CLI_TOOL`, `PLAN_LABEL`, the label rules, the `${URL##*/}`
+number-capture form, and the secondary-rate-limit retry rule. Each returns only its
+`<id> -> #<number>` map. One agent per category is the correct fan-out — your dedup
+already gave each finding exactly one category, so no two filers can collide, and
+sharding a category further only makes rate limiting more likely.
+
+Merge the returned maps for the summary. **An id a filer returned as `ERROR` was not
+filed** — report those separately with their spool path so they can be filed by hand,
+and keep `SPOOL_DIR` on disk when any error occurred. At or below ~20 surviving
+findings, skip the fan-out and file them inline; the overhead isn't worth it.
 
 ## Phase 3: Worktree Remediation
 
