@@ -454,6 +454,46 @@ describe('review-loop parse contracts', () => {
     assert.match(rpr, /\{OLLAMA_EFFORT\}/);
   });
 
+  it('derives GH_HOST from the one lib partial, never a hand-copied snippet', () => {
+    // lib/gh-host.md exists so the Enterprise-safe API host is derived ONCE, with its
+    // full 3-step fallback chain. Eight sites used to re-type a shortened 2-step copy
+    // that skipped the `gh repo view` fallback, so a repo with no parsable origin
+    // silently polled github.com instead of the Enterprise host. Assert the partial
+    // still carries the chain, that every GH_HOST-deriving command pulls it in via the
+    // runtime include, and that nobody re-types the derivation inline.
+    const partial = readLib('gh-host.md');
+    assert.match(partial, /GH_HOST=\$\(git remote get-url origin/);
+    assert.match(partial, /gh repo view --json url --jq '\.url'/);
+    assert.match(partial, /\|\| GH_HOST=github\.com/);
+
+    const GH_HOST_COMMANDS = [
+      'pr.md', 'next.md', 'review.md', 'release.md', 'rpr.md',
+      'better.md', 'better-swift.md', 'depfree.md',
+    ];
+    for (const name of GH_HOST_COMMANDS) {
+      assert.match(
+        readCommand(name),
+        /!`cat ~\/\.claude\/lib\/gh-host\.md`/,
+        `${name} must include lib/gh-host.md rather than restating the derivation`,
+      );
+    }
+
+    // The inline shortcut, in any of its drifted spellings (`GH_HOST` or rpr's old
+    // `HOST`). next.md legitimately parses the origin host once as ORIGIN_HOST to pick
+    // gh vs glab BEFORE any GH_HOST exists (gh-host.md's own `gh repo view` fallback is
+    // GitHub-only, so it cannot do that job) — that parse is allowed; assigning a bare
+    // github.com fallback outside the partial is not.
+    const DRIFTED = /\[ -n "\$(?:GH_)?HOST" \] \|\| (?:GH_)?HOST=github\.com/;
+    for (const name of [...GH_HOST_COMMANDS, 'plan-task.md']) {
+      assert.doesNotMatch(
+        readCommand(name),
+        DRIFTED,
+        `${name} must not hand-copy the GH_HOST fallback chain`,
+      );
+    }
+    assert.doesNotMatch(readLib('epic-children.md'), DRIFTED);
+  });
+
   it('keeps the empty-array rule in one partial the loops point at', () => {
     // An absent timeout binary is an environment condition, not a reviewer failure.
     // The explanation lives in ONE partial (the lib/gh-host.md convention) — five
