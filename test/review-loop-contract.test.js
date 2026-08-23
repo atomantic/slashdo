@@ -492,6 +492,23 @@ describe('review-loop parse contracts', () => {
       );
     }
     assert.doesNotMatch(readLib('epic-children.md'), DRIFTED);
+
+    // Every command that pulls in lib/epic-children.md must also pull in gh-host.md:
+    // that partial's `gh api --hostname "$GH_HOST"` calls no longer carry a derivation
+    // of their own, so a consumer that skips the include would run them with an empty
+    // host. Derived from the tree, not hardcoded, so a new consumer fails here.
+    const commandsDir = path.join(__dirname, '..', 'commands', 'do');
+    const epicConsumers = fs.readdirSync(commandsDir)
+      .filter((f) => f.endsWith('.md'))
+      .filter((f) => /!`cat ~\/\.claude\/lib\/epic-children\.md`/.test(readCommand(f)));
+    assert.ok(epicConsumers.length > 0, 'epic-children.md must have at least one consumer');
+    for (const name of epicConsumers) {
+      assert.match(
+        readCommand(name),
+        /!`cat ~\/\.claude\/lib\/gh-host\.md`/,
+        `${name} includes epic-children.md, so it must also include gh-host.md to define GH_HOST`,
+      );
+    }
   });
 
   it('keeps the empty-array rule in one partial the loops point at', () => {

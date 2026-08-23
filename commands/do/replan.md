@@ -256,7 +256,12 @@ Feed this graph to Phase 2: `blocked` issues are kept (`still-pending`, never `s
 > never closing it at all. For any issue that is an epic (carries `epic`/a repo
 > umbrella label, has native sub-issues, or task-lists other issues in its body),
 > resolve its children and compute its completeness state with the shared epic logic
-> (inlined here so it's available in every environment):
+> (inlined here so it's available in every environment). On GitHub that logic calls
+> `gh api`, which ignores the repo remote and defaults to github.com — so derive
+> `GH_HOST` with the shared snippet first and pass `--hostname "$GH_HOST"` on every
+> one of those calls:
+>
+> !`cat ~/.claude/lib/gh-host.md`
 >
 > !`cat ~/.claude/lib/epic-children.md`
 >
