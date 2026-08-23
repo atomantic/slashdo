@@ -136,94 +136,52 @@ install_claude() {
     fi
   done
 
-  # Register hooks in settings.json (requires Node.js and successful hook downloads)
+  # Register hooks in settings.json using the canonical src/settings-hooks.js —
+  # the same module the npm installer requires. Fetching it (like every other
+  # file this script installs) keeps the curl path from maintaining a second,
+  # hand-translated copy of the algorithm that silently drifts.
   if command -v node &>/dev/null && [ -f "$target_hooks/slashdo-check-update.js" ]; then
-    printf "    settings.json:          "
-    local node_result
-    if ! node_result=$(node -e '
-      const fs = require("fs");
-      const path = require("path");
-      const home = require("os").homedir();
-      const settingsPath = path.join(home, ".claude", "settings.json");
-      const hooksDir = path.join(home, ".claude", "hooks");
+    local mod_dir
+    mod_dir="$(mktemp -d)"
+    if fetch_file "src/settings-hooks.js" "$mod_dir/settings-hooks.js"; then
+      local node_result
+      if node_result=$(node -e '
+        const fs = require("fs");
+        const path = require("path");
+        const { registerHooksInSettings } = require(process.argv[1]);
+        const home = require("os").homedir();
+        const hooksDir = path.join(home, ".claude", "hooks");
 
-      // Default auto-update to enabled on first install. The curl installer
-      // is piped (no TTY to prompt), so we pick the same default the npx
-      // installer offers; re-run "npx slash-do@latest" interactively to change.
-      const configPath = path.join(home, ".claude", ".slashdo-config.json");
-      if (!fs.existsSync(configPath)) {
-        try { fs.writeFileSync(configPath, JSON.stringify({ autoUpdate: true }, null, 2) + "\n"); } catch (e) {}
-      }
-
-      let settings = {};
-      if (fs.existsSync(settingsPath)) {
-        try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch (e) {
-          process.stdout.write("skipped (settings.json parse error)");
-          process.exit(0);
+        // Default auto-update to enabled on first install. The curl installer
+        // is piped (no TTY to prompt), so we pick the same default the npx
+        // installer offers; re-run "npx slash-do@latest" interactively to change.
+        const configPath = path.join(home, ".claude", ".slashdo-config.json");
+        if (!fs.existsSync(configPath)) {
+          try { fs.writeFileSync(configPath, JSON.stringify({ autoUpdate: true }, null, 2) + "\n"); } catch (e) {}
         }
-      }
 
-      let modified = false;
-
-      // SessionStart hook (only if hook file exists)
-      const updateHookPath = path.join(hooksDir, "slashdo-check-update.js");
-      if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) settings.hooks = {};
-      if (typeof settings.hooks.SessionStart === "undefined") {
-        settings.hooks.SessionStart = [];
-      } else if (!Array.isArray(settings.hooks.SessionStart)) {
-        process.stdout.write("skipped (settings.hooks.SessionStart has unexpected shape)");
-        process.exit(0);
-      }
-
-      const hookCmd = "node \"" + updateHookPath + "\"";
-      const alreadyRegistered = settings.hooks.SessionStart.some(function(g) {
-        return g && typeof g === "object" && Array.isArray(g.hooks) && g.hooks.some(function(h) {
-          return h && typeof h === "object" && typeof h.command === "string" && h.command.indexOf("slashdo-check-update") !== -1;
-        });
-      });
-
-      if (!alreadyRegistered) {
-        if (settings.hooks.SessionStart.length > 0) {
-          var firstGroup = settings.hooks.SessionStart[0];
-          if (!firstGroup || typeof firstGroup !== "object") {
-            firstGroup = {};
-            settings.hooks.SessionStart[0] = firstGroup;
-          }
-          if (!Array.isArray(firstGroup.hooks)) firstGroup.hooks = [];
-          firstGroup.hooks.push({ type: "command", command: hookCmd });
-        } else {
-          settings.hooks.SessionStart.push({ hooks: [{ type: "command", command: hookCmd }] });
-        }
-        modified = true;
-      }
-
-      // Statusline: upgrade gsd-statusline → slashdo-statusline (superset)
-      const statuslineHookPath = path.join(hooksDir, "slashdo-statusline.js");
-      if (fs.existsSync(statuslineHookPath)) {
-        const slCmd = "node \"" + statuslineHookPath + "\"";
-        const currentCmd = (settings.statusLine && typeof settings.statusLine.command === "string") ? settings.statusLine.command : "";
-        if (!settings.statusLine) {
-          settings.statusLine = { type: "command", command: slCmd };
-          modified = true;
-        } else if (currentCmd.indexOf("gsd-statusline") !== -1) {
-          settings.statusLine = { type: "command", command: slCmd };
-          modified = true;
-        }
-        // slashdo-statusline already active or custom statusline → no change
-      }
-
-      if (modified) {
-        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
-      }
-
-      process.stdout.write(modified ? "updated" : "already configured");
-    ' 2>/dev/null); then
-      printf " %sfailed%s\n" "$YELLOW" "$RESET"
-    elif echo "$node_result" | grep -q "^skipped"; then
-      printf "%s%s%s\n" "$YELLOW" "$node_result" "$RESET"
+        const hookFiles = ["slashdo-check-update.js", "slashdo-statusline.js"]
+          .filter((name) => fs.existsSync(path.join(hooksDir, name)))
+          .map((name) => ({ name }));
+        const env = { settingsFile: path.join(home, ".claude", "settings.json"), hooksDir };
+        const actions = registerHooksInSettings(env, hookFiles, false);
+        if (actions.length === 0) actions.push({ name: "settings.json", status: "nothing to register" });
+        for (const action of actions) process.stdout.write(action.name + ": " + action.status + "\n");
+      ' "$mod_dir/settings-hooks.js" 2>/dev/null); then
+        while IFS= read -r line; do
+          [ -n "$line" ] || continue
+          case "$line" in
+            *": skipped"*) printf "    ${YELLOW}%s${RESET}\n" "$line" ;;
+            *) printf "    %s ${GREEN}ok${RESET}\n" "$line" ;;
+          esac
+        done <<< "$node_result"
+      else
+        printf "    ${YELLOW}settings.json: failed${RESET}\n"
+      fi
     else
-      printf "%s %sok%s\n" "$node_result" "$GREEN" "$RESET"
+      printf "    ${DIM}settings.json: skipped (could not fetch src/settings-hooks.js)${RESET}\n"
     fi
+    rm -rf "$mod_dir"
   elif command -v node &>/dev/null; then
     printf "    ${DIM}settings.json: skipped (hook files not found)${RESET}\n"
   else

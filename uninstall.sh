@@ -4,6 +4,29 @@
 # shellcheck disable=SC2059,SC2207
 set -euo pipefail
 
+REPO="atomantic/slashdo"
+BRANCH="main"
+BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"
+
+# Detect local repo: if this script lives alongside commands/ and lib/, use local files
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCAL_MODE=false
+if [ -d "$SCRIPT_DIR/commands/do" ] && [ -d "$SCRIPT_DIR/lib" ]; then
+  LOCAL_MODE=true
+fi
+
+# Fetch a file: local cp if available, otherwise curl from GitHub
+# Usage: fetch_file <repo_relative_path> <destination>
+fetch_file() {
+  local src_path="$1"
+  local dest="$2"
+  if [ "$LOCAL_MODE" = true ] && [ -f "$SCRIPT_DIR/$src_path" ]; then
+    cp "$SCRIPT_DIR/$src_path" "$dest" 2>/dev/null && return 0
+  fi
+  # Fallback to curl (remote mode, or local cp failed)
+  curl -fsSL "$BASE_URL/$src_path" -o "$dest" 2>/dev/null
+}
+
 CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
 GREEN='\033[0;32m'
@@ -109,70 +132,39 @@ uninstall_claude() {
     count=$((count + 1))
   fi
 
-  # Deregister from settings.json (requires Node.js)
+  # Deregister from settings.json using the canonical src/settings-hooks.js —
+  # the same module the npm uninstaller requires (see install.sh).
   if command -v node &>/dev/null; then
-    if node -e '
-      const fs = require("fs");
-      const path = require("path");
-      const home = require("os").homedir();
-      const settingsPath = path.join(home, ".claude", "settings.json");
-
-      if (!fs.existsSync(settingsPath)) process.exit(0);
-
-      let settings;
-      try {
-        settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-      } catch (e) {
-        process.stdout.write("    skipped settings.json deregistration (parse error)\n");
-        process.exit(0);
-      }
-      let modified = false;
-
-      if (settings.hooks && Array.isArray(settings.hooks.SessionStart)) {
-        var emptiedByUs = {};
-        for (var i = 0; i < settings.hooks.SessionStart.length; i++) {
-          var group = settings.hooks.SessionStart[i];
-          if (!group || typeof group !== "object") continue;
-          if (Array.isArray(group.hooks)) {
-            var before = group.hooks.length;
-            group.hooks = group.hooks.filter(function(h) {
-              if (!h || typeof h !== "object") return true;
-              return typeof h.command !== "string" || h.command.indexOf("slashdo-check-update") === -1;
-            });
-            if (group.hooks.length < before) {
-              modified = true;
-              if (group.hooks.length === 0) emptiedByUs[i] = true;
-            }
-          }
+    local mod_dir
+    mod_dir="$(mktemp -d)"
+    if fetch_file "src/settings-hooks.js" "$mod_dir/settings-hooks.js"; then
+      local node_result
+      if node_result=$(node -e '
+        const path = require("path");
+        const { deregisterHooksFromSettings } = require(process.argv[1]);
+        const home = require("os").homedir();
+        const env = {
+          settingsFile: path.join(home, ".claude", "settings.json"),
+          hooksDir: path.join(home, ".claude", "hooks"),
+        };
+        for (const action of deregisterHooksFromSettings(env, false)) {
+          process.stdout.write(action.name + ": " + action.status + "\n");
         }
-        settings.hooks.SessionStart = settings.hooks.SessionStart.filter(function(g, i) {
-          return !emptiedByUs[i];
-        });
-        if (settings.hooks.SessionStart.length === 0) delete settings.hooks.SessionStart;
-        if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
-      }
-
-      if (settings.statusLine && settings.statusLine.command &&
-          settings.statusLine.command.indexOf("slashdo-statusline") !== -1) {
-        var hooksDir = path.join(home, ".claude", "hooks");
-        var gsdHookPath = path.join(hooksDir, "gsd-statusline.js");
-        if (fs.existsSync(gsdHookPath)) {
-          settings.statusLine = { type: "command", command: "node \"" + gsdHookPath + "\"" };
-        } else {
-          delete settings.statusLine;
-        }
-        modified = true;
-      }
-
-      if (modified) {
-        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
-        process.stdout.write("    deregistered from settings.json\n");
-      }
-    '; then
-      : # deregistration handled inside node
+      ' "$mod_dir/settings-hooks.js" 2>/dev/null); then
+        while IFS= read -r line; do
+          [ -n "$line" ] || continue
+          case "$line" in
+            *": skipped"*) printf "    ${YELLOW}%s${RESET}\n" "$line" ;;
+            *) printf "    %s ${GREEN}ok${RESET}\n" "$line" ;;
+          esac
+        done <<< "$node_result"
+      else
+        printf "    ${YELLOW}settings.json deregistration failed${RESET}\n"
+      fi
     else
-      printf "    ${YELLOW}settings.json deregistration failed${RESET}\n"
+      printf "    ${YELLOW}settings.json: skipped (could not fetch src/settings-hooks.js — settings.json may still reference slashdo hooks)${RESET}\n"
     fi
+    rm -rf "$mod_dir"
   fi
 
   if [ $count -eq 0 ]; then
