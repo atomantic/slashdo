@@ -63,7 +63,7 @@ jobs:
         if: steps.release-check.outputs.exists == 'false'
         run: |
           node bin/cli.js --help
-          node -e "require('./src/environments'); require('./src/transformer'); require('./src/installer'); require('./src/version-check'); console.log('All modules load successfully')"
+          node -e "require('./src/environments'); require('./src/transformer'); require('./src/installer'); console.log('All modules load successfully')"
           node bin/cli.js --list --env claude
 
       - name: Check if version exists on npm
