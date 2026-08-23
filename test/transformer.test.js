@@ -29,6 +29,14 @@ describe('parseFrontmatter', () => {
     assert.equal(body, 'Body text');
   });
 
+  it('parses YAML frontmatter with CRLF line endings', () => {
+    const content = '---\r\ndescription: Hello world\r\nallowed-tools: foo\r\n---\r\nBody text';
+    const { frontmatter, body } = parseFrontmatter(content);
+    assert.equal(frontmatter.description, 'Hello world');
+    assert.equal(frontmatter['allowed-tools'], 'foo');
+    assert.equal(body, 'Body text');
+  });
+
   it('strips quotes from frontmatter values', () => {
     const content = '---\ndescription: "Quoted value"\nother: \'Single quoted\'\n---\nBody';
     const { frontmatter } = parseFrontmatter(content);
