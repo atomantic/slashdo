@@ -501,18 +501,28 @@ describe('review-loop parse contracts', () => {
       );
     }
 
-    // And nobody re-types the derivation inline, in either of its drifted spellings
-    // (`GH_HOST` or rpr's old `HOST`). next.md legitimately parses the origin host once
-    // as ORIGIN_HOST to pick gh vs glab BEFORE any GH_HOST exists (gh-host.md's own
-    // `gh repo view` fallback is GitHub-only, so it cannot do that job) — that parse is
-    // allowed; assigning a bare github.com fallback outside the partial is not.
-    const DRIFTED = /\[ -n "\$(?:GH_)?HOST" \] \|\| (?:GH_)?HOST=github\.com/;
-    for (const name of commands) {
-      assert.doesNotMatch(readCommand(name), DRIFTED, `${name} must not hand-copy the GH_HOST fallback chain`);
-    }
+    // And nobody re-types the derivation inline. Two bans, both derived over every file:
+    // the origin-parse `sed` itself (the copied half that matters), and a bare
+    // github.com fallback in its common spellings. next.md legitimately runs that parse
+    // once as ORIGIN_HOST to pick gh vs glab BEFORE any GH_HOST exists (gh-host.md's own
+    // `gh repo view` fallback is GitHub-only, so it cannot do that job) — that one line
+    // is the sole exemption.
+    const ORIGIN_PARSE = "sed -E 's#^[a-z]+://##";
+    const DRIFTED_FALLBACK = /\|\|\s*(?:GH_)?HOST="?github\.com/;
+    const DRIFTED_DEFAULT = /\$\{(?:GH_)?HOST:[=-]"?github\.com/;
+    const banned = (body, label) => {
+      for (const line of body.split('\n')) {
+        if (line.includes(ORIGIN_PARSE) && !line.includes('ORIGIN_HOST=')) {
+          assert.fail(`${label} re-types the gh-host.md origin parse: ${line.trim()}`);
+        }
+        assert.doesNotMatch(line, DRIFTED_FALLBACK, `${label} hand-copies the GH_HOST fallback`);
+        assert.doesNotMatch(line, DRIFTED_DEFAULT, `${label} hand-copies the GH_HOST fallback`);
+      }
+    };
+    for (const name of commands) banned(readCommand(name), name);
     const libsDir = path.join(__dirname, '..', 'lib');
     for (const name of fs.readdirSync(libsDir).filter((f) => f.endsWith('.md') && f !== 'gh-host.md')) {
-      assert.doesNotMatch(readLib(name), DRIFTED, `lib/${name} must not hand-copy the GH_HOST fallback chain`);
+      banned(readLib(name), `lib/${name}`);
     }
   });
 

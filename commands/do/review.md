@@ -43,6 +43,8 @@ If both a PR URL and a base-branch token are provided, the PR URL wins — ignor
 
 If there are no changes, inform the user and stop.
 
+**Local branch mode only.** PR mode (below) takes `{GH_HOST}` from the **PR URL**, not from `origin` — do not re-derive it from the remote there.
+
 !`cat ~/.claude/lib/gh-host.md`
 
 ### GitHub PR mode (`PR_MODE=true`)

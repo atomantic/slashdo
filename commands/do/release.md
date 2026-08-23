@@ -73,13 +73,15 @@ Before doing anything, determine the project's source and target branches for re
    ```
    This ensures the PR diff shows ALL changes since the last release, not just the version bump.
 
-!`cat ~/.claude/lib/gh-host.md`
-
 Print the detected workflow: `Detected release flow: {source} → {target}`
 
 **Default mode**: If ambiguous, use the most likely branch (prefer `release` if it exists). If the target branch does not exist, create it from the last release tag (see step 3 above). If detection still yields `target == source`, abort with an error — a release PR cannot merge a branch into itself. **Interactive mode (`--interactive`)**: Ask the user to confirm before proceeding.
 
 **Important**: The PR direction is `{source}` → `{target}` (e.g., `main` → `release`). This gives any reviewer (and the human approver) the full diff of all changes since the last release. Do NOT create a branch from source and PR back into it — that only shows the version bump commit.
+
+**GitHub only** — the shared `{GH_HOST}` derivation step 1 refers to:
+
+!`cat ~/.claude/lib/gh-host.md`
 
 ## Pre-Release Checks
 
