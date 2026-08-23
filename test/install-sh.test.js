@@ -8,17 +8,22 @@
 // same mkdtemp pattern test/installer.test.js uses for the npm path) and assert
 // on the resulting filesystem and settings.json state.
 //
-// LOCAL_MODE: install.sh copies from its sibling commands//lib/ dirs when they
-// exist (install.sh:11-16), so running the repo's own script needs no network.
-// Tests that must exercise the curl path copy install.sh to a bare directory,
-// which flips it to remote mode, and shadow `curl` via PATH.
+// Expected inventory is derived from commands/do/ and lib/ on disk, never from
+// the bash arrays under test — otherwise deleting an entry from COMMANDS would
+// silently delete its coverage too.
+//
+// Two source modes are exercised. LOCAL_MODE: install.sh copies from its
+// sibling commands//lib/ dirs when they exist (install.sh:11-16), so running the
+// repo's own script needs no network. Remote mode: install.sh is copied to a
+// bare directory, which makes it fall back to curl, and `curl` is shadowed via
+// PATH by a stub that serves the repo (or fails on demand).
 
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFile, execFileSync } = require('child_process');
+const { execFile, execFileSync, spawn } = require('child_process');
 
 const { ENVIRONMENTS } = require('../src/environments');
 const { install: npmInstall } = require('../src/installer');
@@ -26,34 +31,67 @@ const { install: npmInstall } = require('../src/installer');
 const REPO_ROOT = path.resolve(__dirname, '..');
 const INSTALL_SH = path.join(REPO_ROOT, 'install.sh');
 const UNINSTALL_SH = path.join(REPO_ROOT, 'uninstall.sh');
+const BASE_URL = 'https://raw.githubusercontent.com/atomantic/slashdo/main';
 
-// ── Helpers ─────────────────────────────────────────────────────────
+// ── Expected inventory (from the repo, not from the scripts) ────────
+
+function mdNames(...segments) {
+  return fs
+    .readdirSync(path.join(REPO_ROOT, ...segments))
+    .filter((f) => f.endsWith('.md'))
+    .map((f) => f.slice(0, -3))
+    .sort();
+}
+
+const COMMANDS = mdNames('commands', 'do');
+const LIBS = mdNames('lib');
+const HOOKS = ['slashdo-check-update', 'slashdo-statusline'];
+
+// The OpenCode install pipes every file through sed; this is the same rewrite
+// expressed in JS, so a drift in either direction fails.
+function rewriteForOpencode(text) {
+  return text
+    .split('~/.claude/lib/').join('~/.config/opencode/lib/')
+    .split('~/.claude/.slashdo-config.json').join('~/.config/opencode/.slashdo-config.json');
+}
+
+const readRepo = (...segments) => fs.readFileSync(path.join(REPO_ROOT, ...segments), 'utf8');
+
+// ── Sandbox helpers ─────────────────────────────────────────────────
 
 const tmpDirs = [];
 
-function makeHome(envDirs = ['.claude']) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-sh-'));
-  tmpDirs.push(home);
-  for (const dir of envDirs) fs.mkdirSync(path.join(home, dir), { recursive: true });
-  return home;
-}
-
-function makeTmpdir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-shtmp-'));
+function mkTmp(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tmpDirs.push(dir);
   return dir;
 }
 
-// Run a script with a sandboxed HOME. Returns { status, stdout }; a non-zero
-// exit is reported rather than thrown so tests can assert on failure paths.
-function runScript(script, { home, tmpdir, pathPrefix } = {}) {
-  const env = {
+function makeHome(envDirs = ['.claude']) {
+  const home = mkTmp('slashdo-sh-');
+  for (const dir of envDirs) fs.mkdirSync(path.join(home, dir), { recursive: true });
+  return home;
+}
+
+const makeTmpdir = () => mkTmp('slashdo-shtmp-');
+
+function childEnv({ home, tmpdir, pathPrefix }) {
+  return {
     PATH: pathPrefix ? `${pathPrefix}:${process.env.PATH}` : process.env.PATH,
     HOME: home,
     TMPDIR: tmpdir || home,
   };
+}
+
+// Run a script with a sandboxed HOME. Returns { status, stdout }; a non-zero
+// exit is reported rather than thrown so tests can assert on failure paths.
+function runScript(script, opts = {}) {
   try {
-    const stdout = execFileSync('bash', [script], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const stdout = execFileSync('bash', [script], {
+      env: childEnv(opts),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     return { status: 0, stdout };
   } catch (e) {
     return { status: e.status, stdout: (e.stdout || '') + (e.stderr || '') };
@@ -63,67 +101,70 @@ function runScript(script, { home, tmpdir, pathPrefix } = {}) {
 const runInstall = (opts) => runScript(INSTALL_SH, opts);
 const runUninstall = (opts) => runScript(UNINSTALL_SH, opts);
 
-function readSettings(home) {
-  return JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8'));
-}
-
-function writeSettings(home, settings) {
-  fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify(settings, null, 2) + '\n');
-}
-
-// The bash arrays are the installer's own allowlists; reuse them so these tests
-// stay honest when commands or libs are added.
-function parseArray(scriptPath, name) {
-  const content = fs.readFileSync(scriptPath, 'utf8');
-  const match = content.match(new RegExp(`^${name}=\\(([\\s\\S]*?)\\)`, 'm'));
-  if (!match) throw new Error(`${name}=( ... ) not found in ${scriptPath}`);
-  return match[1].replace(/#[^\n]*/g, '').split(/\s+/).map((s) => s.trim()).filter(Boolean);
-}
-
-const COMMANDS = parseArray(INSTALL_SH, 'COMMANDS');
-const LIBS = parseArray(INSTALL_SH, 'LIBS');
-const HOOKS = ['slashdo-check-update', 'slashdo-statusline'];
+const settingsPathOf = (home) => path.join(home, '.claude', 'settings.json');
+const readSettings = (home) => JSON.parse(fs.readFileSync(settingsPathOf(home), 'utf8'));
+const writeSettings = (home, settings) =>
+  fs.writeFileSync(settingsPathOf(home), JSON.stringify(settings, null, 2) + '\n');
 
 function strayTempFiles(dir) {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir).filter((f) => f.startsWith('.slashdo-tmp.'));
 }
 
-// A `curl` that writes a partial body to the -o target and then fails, standing
-// in for a transfer that dies mid-flight.
-function makeFailingCurl() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-bin-'));
-  tmpDirs.push(dir);
+const claudeSubdirs = (home) => ['commands/do', 'lib', 'hooks'].map((d) => path.join(home, '.claude', ...d.split('/')));
+
+// ── curl stubs (remote mode) ────────────────────────────────────────
+
+function makeCurlStub(body) {
+  const dir = mkTmp('slashdo-bin-');
   const stub = path.join(dir, 'curl');
   fs.writeFileSync(stub, [
     '#!/bin/sh',
-    'dest=""; prev=""',
+    '# Parse the `curl -fsSL <url> -o <dest>` call install.sh makes.',
+    'url=""; dest=""; prev=""',
     'for a in "$@"; do',
-    '  [ "$prev" = "-o" ] && dest="$a"',
+    '  if [ "$prev" = "-o" ]; then dest="$a"',
+    '  else',
+    '    case "$a" in',
+    '      -*) ;;',
+    '      *) [ -z "$url" ] && url="$a" ;;',
+    '    esac',
+    '  fi',
     '  prev="$a"',
     'done',
-    '[ -n "$dest" ] && printf TRUNCATED > "$dest"',
-    'exit 1',
+    `rel=\${url#${BASE_URL}/}`,
+    body,
     '',
   ].join('\n'));
   fs.chmodSync(stub, 0o755);
   return dir;
 }
 
+// Serves the repo over the "network" — the success path, without a network.
+const makeServingCurl = () => makeCurlStub(
+  `[ -f "${REPO_ROOT}/$rel" ] || exit 22\ncp "${REPO_ROOT}/$rel" "$dest"`
+);
+
+// Writes a partial body and then fails, standing in for a dead transfer.
+const makeFailingCurl = () => makeCurlStub('[ -n "$dest" ] && printf TRUNCATED > "$dest"\nexit 1');
+
+// Same, but hangs afterwards so a test can interrupt the install mid-write.
+const makeHangingCurl = () => makeCurlStub('[ -n "$dest" ] && printf TRUNCATED > "$dest"\nsleep 30\nexit 1');
+
 // Copy install.sh somewhere with no sibling commands//lib/, forcing remote mode.
 function remoteModeInstaller() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-remote-'));
-  tmpDirs.push(dir);
-  const dest = path.join(dir, 'install.sh');
+  const dest = path.join(mkTmp('slashdo-remote-'), 'install.sh');
   fs.copyFileSync(INSTALL_SH, dest);
   return dest;
 }
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 after(() => {
   for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-// ── install.sh: Claude Code ─────────────────────────────────────────
+// ── install.sh: Claude Code, local mode ─────────────────────────────
 
 describe('install.sh — Claude Code fresh install', () => {
   let home;
@@ -140,27 +181,27 @@ describe('install.sh — Claude Code fresh install', () => {
     assert.doesNotMatch(result.stdout, /failed/);
   });
 
-  it('installs every command in the COMMANDS allowlist', () => {
+  it('installs every command in commands/do verbatim', () => {
     for (const cmd of COMMANDS) {
       const file = path.join(home, '.claude', 'commands', 'do', `${cmd}.md`);
       assert.ok(fs.existsSync(file), `${cmd}.md should be installed`);
-      assert.equal(
-        fs.readFileSync(file, 'utf8'),
-        fs.readFileSync(path.join(REPO_ROOT, 'commands', 'do', `${cmd}.md`), 'utf8'),
-        `${cmd}.md should be copied verbatim`
-      );
+      assert.equal(fs.readFileSync(file, 'utf8'), readRepo('commands', 'do', `${cmd}.md`), `${cmd}.md content`);
     }
   });
 
-  it('installs every lib in the LIBS allowlist', () => {
+  it('installs every lib in lib/ verbatim', () => {
     for (const lib of LIBS) {
-      assert.ok(fs.existsSync(path.join(home, '.claude', 'lib', `${lib}.md`)), `${lib}.md should be installed`);
+      const file = path.join(home, '.claude', 'lib', `${lib}.md`);
+      assert.ok(fs.existsSync(file), `${lib}.md should be installed`);
+      assert.equal(fs.readFileSync(file, 'utf8'), readRepo('lib', `${lib}.md`), `${lib}.md content`);
     }
   });
 
-  it('installs the hook files', () => {
+  it('installs the hook files verbatim', () => {
     for (const hook of HOOKS) {
-      assert.ok(fs.existsSync(path.join(home, '.claude', 'hooks', `${hook}.js`)), `${hook}.js should be installed`);
+      const file = path.join(home, '.claude', 'hooks', `${hook}.js`);
+      assert.ok(fs.existsSync(file), `${hook}.js should be installed`);
+      assert.equal(fs.readFileSync(file, 'utf8'), readRepo('hooks', `${hook}.js`), `${hook}.js content`);
     }
   });
 
@@ -170,9 +211,7 @@ describe('install.sh — Claude Code fresh install', () => {
   });
 
   it('leaves no staging temp files behind', () => {
-    for (const dir of ['commands/do', 'lib', 'hooks']) {
-      assert.deepEqual(strayTempFiles(path.join(home, '.claude', ...dir.split('/'))), []);
-    }
+    for (const dir of claudeSubdirs(home)) assert.deepEqual(strayTempFiles(dir), []);
   });
 
   it('defaults auto-update to enabled in .slashdo-config.json', () => {
@@ -190,17 +229,82 @@ describe('install.sh — Claude Code fresh install', () => {
   });
 });
 
+describe('install.sh — OpenCode fresh install', () => {
+  it('installs commands and libs with the OpenCode path rewrite applied', () => {
+    const home = makeHome(['.claude', '.config/opencode']);
+    const result = runInstall({ home });
+    assert.equal(result.status, 0, result.stdout);
+
+    for (const cmd of COMMANDS) {
+      const file = path.join(home, '.config', 'opencode', 'commands', `do-${cmd}.md`);
+      assert.ok(fs.existsSync(file), `do-${cmd}.md should be installed`);
+      assert.equal(
+        fs.readFileSync(file, 'utf8'),
+        rewriteForOpencode(readRepo('commands', 'do', `${cmd}.md`)),
+        `do-${cmd}.md should have the OpenCode rewrite applied`
+      );
+    }
+    for (const lib of LIBS) {
+      const file = path.join(home, '.config', 'opencode', 'lib', `${lib}.md`);
+      assert.ok(fs.existsSync(file), `${lib}.md should be installed`);
+      assert.equal(fs.readFileSync(file, 'utf8'), rewriteForOpencode(readRepo('lib', `${lib}.md`)), `${lib}.md content`);
+    }
+    assert.ok(
+      COMMANDS.some((c) => fs.readFileSync(
+        path.join(home, '.config', 'opencode', 'commands', `do-${c}.md`), 'utf8'
+      ).includes('~/.config/opencode/lib/')),
+      'at least one command should carry a rewritten lib path (guards a no-op rewrite)'
+    );
+  });
+});
+
+// ── install.sh: remote (curl) mode ──────────────────────────────────
+
+describe('install.sh — remote mode', () => {
+  it('installs the same tree over curl as it does from a local checkout', () => {
+    const home = makeHome(['.claude', '.config/opencode']);
+    const result = runScript(remoteModeInstaller(), { home, pathPrefix: makeServingCurl() });
+
+    assert.equal(result.status, 0, result.stdout);
+    assert.match(result.stdout, /Source:.*github/);
+    assert.doesNotMatch(result.stdout, /failed/);
+
+    for (const cmd of COMMANDS) {
+      assert.equal(
+        fs.readFileSync(path.join(home, '.claude', 'commands', 'do', `${cmd}.md`), 'utf8'),
+        readRepo('commands', 'do', `${cmd}.md`),
+        `${cmd}.md should be fetched intact`
+      );
+      assert.equal(
+        fs.readFileSync(path.join(home, '.config', 'opencode', 'commands', `do-${cmd}.md`), 'utf8'),
+        rewriteForOpencode(readRepo('commands', 'do', `${cmd}.md`)),
+        `do-${cmd}.md should be fetched and rewritten`
+      );
+    }
+    for (const lib of LIBS) {
+      assert.equal(
+        fs.readFileSync(path.join(home, '.claude', 'lib', `${lib}.md`), 'utf8'),
+        readRepo('lib', `${lib}.md`),
+        `${lib}.md should be fetched intact`
+      );
+    }
+    for (const hook of HOOKS) {
+      assert.ok(fs.existsSync(path.join(home, '.claude', 'hooks', `${hook}.js`)), `${hook}.js should be fetched`);
+    }
+    assert.match(readSettings(home).statusLine.command, /slashdo-statusline\.js/);
+  });
+});
+
 describe('install.sh — Claude Code re-install', () => {
   it('is idempotent: a second run reports "already configured" and leaves settings.json byte-identical', () => {
     const home = makeHome();
     runInstall({ home });
-    const settingsPath = path.join(home, '.claude', 'settings.json');
-    const first = fs.readFileSync(settingsPath, 'utf8');
+    const first = fs.readFileSync(settingsPathOf(home), 'utf8');
 
     const second = runInstall({ home });
     assert.equal(second.status, 0, second.stdout);
     assert.match(second.stdout, /already configured/);
-    assert.equal(fs.readFileSync(settingsPath, 'utf8'), first);
+    assert.equal(fs.readFileSync(settingsPathOf(home), 'utf8'), first);
   });
 
   it('removes superseded command files from earlier versions', () => {
@@ -252,13 +356,12 @@ describe('install.sh — settings.json edge cases', () => {
 
   it('leaves an unparseable settings.json untouched', () => {
     const home = makeHome();
-    const settingsPath = path.join(home, '.claude', 'settings.json');
-    fs.writeFileSync(settingsPath, '{ not json');
+    fs.writeFileSync(settingsPathOf(home), '{ not json');
 
     const result = runInstall({ home });
     assert.equal(result.status, 0, result.stdout);
     assert.match(result.stdout, /skipped \(settings\.json parse error\)/);
-    assert.equal(fs.readFileSync(settingsPath, 'utf8'), '{ not json');
+    assert.equal(fs.readFileSync(settingsPathOf(home), 'utf8'), '{ not json');
   });
 
   it('does not clobber a settings.hooks value of an unexpected shape', () => {
@@ -273,14 +376,13 @@ describe('install.sh — settings.json edge cases', () => {
 
 describe('install.sh — no supported environment', () => {
   it('exits non-zero with guidance when nothing is detected', () => {
-    const home = makeHome([]);
-    const result = runInstall({ home });
+    const result = runInstall({ home: makeHome([]) });
     assert.equal(result.status, 1);
     assert.match(result.stdout, /No supported AI coding environments detected/);
   });
 });
 
-// ── install.sh: atomicity (bugs-perf-01) ────────────────────────────
+// ── install.sh: atomic writes ───────────────────────────────────────
 
 describe('install.sh — atomic writes', () => {
   it('leaves the previously installed file intact when a transfer fails mid-write', () => {
@@ -291,40 +393,95 @@ describe('install.sh — atomic writes', () => {
     const before = fs.readFileSync(pushPath, 'utf8');
     assert.ok(before.length > 100, 'sanity: push.md should have real content');
 
-    // Remote mode + a curl that truncates its target and then fails.
     const remote = runScript(remoteModeInstaller(), { home, pathPrefix: makeFailingCurl() });
 
+    // Current contract: a failed fetch is reported per file and the script
+    // still finishes successfully — it never aborts a partly-done install.
+    assert.equal(remote.status, 0, remote.stdout);
     assert.match(remote.stdout, /failed/, 'the stubbed curl should make fetches fail');
+    assert.match(remote.stdout, /Done!/);
+
     assert.equal(fs.readFileSync(pushPath, 'utf8'), before, 'push.md must not be truncated by a failed fetch');
-    assert.ok(!fs.readFileSync(pushPath, 'utf8').includes('TRUNCATED'));
+    assert.doesNotMatch(fs.readFileSync(pushPath, 'utf8'), /TRUNCATED/);
   });
 
-  it('cleans up its staging temp files after a failed transfer', () => {
+  it('cleans up its staging temp files after a failed transfer, in both destinations and TMPDIR', () => {
+    const home = makeHome(['.claude', '.config/opencode']);
+    const tmpdir = makeTmpdir();
+    runInstall({ home, tmpdir: makeTmpdir() });
+
+    runScript(remoteModeInstaller(), { home, tmpdir, pathPrefix: makeFailingCurl() });
+
+    for (const dir of claudeSubdirs(home)) {
+      assert.deepEqual(strayTempFiles(dir), [], `${dir} should have no leftover .slashdo-tmp.* files`);
+    }
+    for (const dir of ['commands', 'lib']) {
+      assert.deepEqual(strayTempFiles(path.join(home, '.config', 'opencode', dir)), [], `opencode/${dir} leftovers`);
+    }
+    assert.deepEqual(fs.readdirSync(tmpdir), [], 'the OpenCode staging dir should be removed even when fetches fail');
+  });
+
+  it('removes the in-flight temp file when the install is interrupted', async () => {
     const home = makeHome();
     runInstall({ home });
-    runScript(remoteModeInstaller(), { home, pathPrefix: makeFailingCurl() });
 
-    for (const dir of ['commands/do', 'lib', 'hooks']) {
-      assert.deepEqual(
-        strayTempFiles(path.join(home, '.claude', ...dir.split('/'))),
-        [],
-        `${dir} should have no leftover .slashdo-tmp.* files`
-      );
-    }
+    const cmdDir = path.join(home, '.claude', 'commands', 'do');
+    const pushPath = path.join(cmdDir, 'push.md');
+    const before = fs.readFileSync(pushPath, 'utf8');
+
+    const child = spawn('bash', [remoteModeInstaller()], {
+      env: childEnv({ home, pathPrefix: makeHangingCurl() }),
+      detached: true,
+      stdio: 'ignore',
+    });
+    const exited = new Promise((resolve) => child.on('exit', resolve));
+
+    // Wait until a staging temp file actually exists, so the signal lands while
+    // a write is genuinely in flight rather than before or after it.
+    const deadline = Date.now() + 20000;
+    while (strayTempFiles(cmdDir).length === 0 && Date.now() < deadline) await sleep(25);
+    assert.ok(strayTempFiles(cmdDir).length > 0, 'expected an in-flight staging temp file to interrupt');
+
+    process.kill(-child.pid, 'SIGTERM');
+    await exited;
+
+    assert.deepEqual(strayTempFiles(cmdDir), [], 'the interrupted temp file should be cleaned up');
+    assert.equal(fs.readFileSync(pushPath, 'utf8'), before, 'the previously installed file must survive');
   });
 });
 
-// ── install.sh: temp file safety (bugs-perf-02 / security-02) ───────
+// ── install.sh: temp file safety ────────────────────────────────────
 
 describe('install.sh — temp file safety', () => {
-  it('uses no fixed, guessable temp paths', () => {
+  it('derives every temp path from mktemp, never a literal', () => {
     // Strip comments so the rule reads the code, not the prose explaining it.
     const code = fs.readFileSync(INSTALL_SH, 'utf8')
       .split('\n')
       .filter((line) => !line.trim().startsWith('#'))
       .join('\n');
     assert.doesNotMatch(code, /\/tmp\/slashdo/, 'staging must not use a predictable /tmp/slashdo-* name');
-    assert.match(code, /mktemp -d/, 'staging directory must come from mktemp');
+    assert.match(code, /mktemp -d "\$\{TMPDIR:-\/tmp\}\/slashdo-install\.XXXXXX"/, 'staging dir must come from mktemp -d');
+    assert.match(code, /mktemp "\$\(dirname "\$dest"\)\/\.slashdo-tmp\.XXXXXX"/, 'file staging must come from mktemp');
+  });
+
+  it('never writes through a pre-existing path in TMPDIR', () => {
+    const home = makeHome(['.claude', '.config/opencode']);
+    const tmpdir = makeTmpdir();
+    // The names the installer used to hard-code, plus the current prefix.
+    const decoys = [
+      ...COMMANDS.map((c) => `slashdo-${c}.md`),
+      ...LIBS.map((l) => `slashdo-lib-${l}.md`),
+      'slashdo-install.XXXXXX',
+    ];
+    for (const name of decoys) fs.writeFileSync(path.join(tmpdir, name), 'DECOY\n');
+
+    const result = runInstall({ home, tmpdir });
+    assert.equal(result.status, 0, result.stdout);
+
+    for (const name of decoys) {
+      assert.equal(fs.readFileSync(path.join(tmpdir, name), 'utf8'), 'DECOY\n', `${name} must not be written through`);
+    }
+    assert.deepEqual(fs.readdirSync(tmpdir).sort(), decoys.slice().sort(), 'no staging leftovers beside the decoys');
   });
 
   it('removes its staging directory on exit', () => {
@@ -338,37 +495,26 @@ describe('install.sh — temp file safety', () => {
 
   it('two installs sharing one TMPDIR do not corrupt each other', async () => {
     const tmpdir = makeTmpdir();
-    const baselineHome = makeHome(['.claude', '.config/opencode']);
-    runInstall({ home: baselineHome, tmpdir: makeTmpdir() });
-    const baseline = fs.readFileSync(
-      path.join(baselineHome, '.config', 'opencode', 'commands', 'do-next.md'),
-      'utf8'
-    );
-    assert.ok(baseline.includes('~/.config/opencode/lib/'), 'sanity: OpenCode rewrite should have applied');
-
     const homes = [makeHome(['.claude', '.config/opencode']), makeHome(['.claude', '.config/opencode'])];
+
     await Promise.all(homes.map((home) => new Promise((resolve, reject) => {
-      execFile('bash', [INSTALL_SH], { env: { PATH: process.env.PATH, HOME: home, TMPDIR: tmpdir } },
-        (err) => (err ? reject(err) : resolve()));
+      execFile('bash', [INSTALL_SH], { env: childEnv({ home, tmpdir }) }, (err) => (err ? reject(err) : resolve()));
     })));
 
     for (const home of homes) {
       for (const cmd of COMMANDS) {
-        const file = path.join(home, '.config', 'opencode', 'commands', `do-${cmd}.md`);
-        assert.ok(fs.existsSync(file), `${file} should exist`);
-        assert.ok(fs.statSync(file).size > 0, `${file} should not be empty`);
+        assert.equal(
+          fs.readFileSync(path.join(home, '.config', 'opencode', 'commands', `do-${cmd}.md`), 'utf8'),
+          rewriteForOpencode(readRepo('commands', 'do', `${cmd}.md`)),
+          `do-${cmd}.md must be complete after a concurrent install`
+        );
       }
-      assert.equal(
-        fs.readFileSync(path.join(home, '.config', 'opencode', 'commands', 'do-next.md'), 'utf8'),
-        baseline,
-        'concurrent installs must produce identical output'
-      );
     }
     assert.deepEqual(fs.readdirSync(tmpdir), [], 'both staging dirs should be cleaned up');
   });
 });
 
-// ── install.sh vs src/installer.js: settings.json parity (dry-03) ───
+// ── install.sh vs src/installer.js: settings.json parity ────────────
 
 describe('install.sh / src/installer.js settings.json parity', () => {
   // install.sh embeds its own copy of the hook-merging logic because the curl
@@ -391,15 +537,17 @@ describe('install.sh / src/installer.js settings.json parity', () => {
       },
     }],
     ['settings.hooks of an unexpected shape', { hooks: ['nope'] }],
+    ['settings.hooks as a string', { hooks: 'nope' }],
+    ['settings.hooks as null', { hooks: null }],
+    ['settings.hooks as a number', { hooks: 0 }],
     ['SessionStart of an unexpected shape', { hooks: { SessionStart: { nope: true } } }],
+    ['SessionStart as null', { hooks: { SessionStart: null } }],
     ['unparseable settings.json', '{ not json'],
   ];
 
   // Both writers embed absolute hook paths; swap the sandbox root for a token
   // so only the structural result is compared.
-  function normalize(text, home) {
-    return text.split(path.join(home, '.claude')).join('<CLAUDE>');
-  }
+  const normalize = (text, home) => text.split(path.join(home, '.claude')).join('<CLAUDE>');
 
   function claudeEnvFor(home) {
     return {
@@ -407,7 +555,7 @@ describe('install.sh / src/installer.js settings.json parity', () => {
       commandsDir: path.join(home, '.claude', 'commands'),
       libDir: path.join(home, '.claude', 'lib'),
       hooksDir: path.join(home, '.claude', 'hooks'),
-      settingsFile: path.join(home, '.claude', 'settings.json'),
+      settingsFile: settingsPathOf(home),
       versionFile: path.join(home, '.claude', '.slashdo-version'),
       configFile: path.join(home, '.claude', '.slashdo-config.json'),
     };
@@ -415,8 +563,10 @@ describe('install.sh / src/installer.js settings.json parity', () => {
 
   function seed(home, initial) {
     if (initial === null) return;
-    const settingsPath = path.join(home, '.claude', 'settings.json');
-    fs.writeFileSync(settingsPath, typeof initial === 'string' ? initial : JSON.stringify(initial, null, 2) + '\n');
+    fs.writeFileSync(
+      settingsPathOf(home),
+      typeof initial === 'string' ? initial : JSON.stringify(initial, null, 2) + '\n'
+    );
   }
 
   for (const [label, initial] of SCENARIOS) {
@@ -430,14 +580,16 @@ describe('install.sh / src/installer.js settings.json parity', () => {
       seed(jsHome, initial);
       npmInstall({ env: claudeEnvFor(jsHome), packageDir: REPO_ROOT, dryRun: false, autoUpdate: true });
 
-      const shSettings = path.join(shHome, '.claude', 'settings.json');
-      const jsSettings = path.join(jsHome, '.claude', 'settings.json');
-      assert.equal(fs.existsSync(shSettings), fs.existsSync(jsSettings), 'both should agree on whether settings.json exists');
-      if (!fs.existsSync(shSettings)) return;
+      assert.equal(
+        fs.existsSync(settingsPathOf(shHome)),
+        fs.existsSync(settingsPathOf(jsHome)),
+        'both should agree on whether settings.json exists'
+      );
+      if (!fs.existsSync(settingsPathOf(shHome))) return;
 
       assert.equal(
-        normalize(fs.readFileSync(shSettings, 'utf8'), shHome),
-        normalize(fs.readFileSync(jsSettings, 'utf8'), jsHome),
+        normalize(fs.readFileSync(settingsPathOf(shHome), 'utf8'), shHome),
+        normalize(fs.readFileSync(settingsPathOf(jsHome), 'utf8'), jsHome),
         `${label}: curl installer and npm installer diverged`
       );
     });
@@ -470,8 +622,8 @@ describe('uninstall.sh — Claude Code', () => {
     const home = makeHome();
     runInstall({ home });
     const mine = path.join(home, '.claude', 'commands', 'do', 'my-own-command.md');
-    fs.writeFileSync(mine, 'mine\n');
     const myLib = path.join(home, '.claude', 'lib', 'my-own-lib.md');
+    fs.writeFileSync(mine, 'mine\n');
     fs.writeFileSync(myLib, 'mine\n');
 
     runUninstall({ home });
@@ -534,25 +686,22 @@ describe('uninstall.sh — Claude Code', () => {
   it('leaves an unparseable settings.json untouched', () => {
     const home = makeHome();
     runInstall({ home });
-    const settingsPath = path.join(home, '.claude', 'settings.json');
-    fs.writeFileSync(settingsPath, '{ not json');
+    fs.writeFileSync(settingsPathOf(home), '{ not json');
 
     const result = runUninstall({ home });
     assert.equal(result.status, 0, result.stdout);
     assert.match(result.stdout, /parse error/);
-    assert.equal(fs.readFileSync(settingsPath, 'utf8'), '{ not json');
+    assert.equal(fs.readFileSync(settingsPathOf(home), 'utf8'), '{ not json');
   });
 
   it('reports nothing to remove on a clean Claude directory', () => {
-    const home = makeHome();
-    const result = runUninstall({ home });
+    const result = runUninstall({ home: makeHome() });
     assert.equal(result.status, 0, result.stdout);
     assert.match(result.stdout, /nothing to remove/);
   });
 
   it('exits cleanly when no environment is present', () => {
-    const home = makeHome([]);
-    const result = runUninstall({ home });
+    const result = runUninstall({ home: makeHome([]) });
     assert.equal(result.status, 0, result.stdout);
     assert.match(result.stdout, /Nothing to uninstall/);
   });

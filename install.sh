@@ -19,11 +19,17 @@ fi
 # under concurrent installs and are pre-creatable by any other local user, so
 # every temp path this script touches is randomized and cleaned up on exit.
 STAGE_DIR=""
-cleanup_stage() {
+# The temp file atomic_write is currently filling, so an interrupted install
+# does not strand a .slashdo-tmp.* file next to the real command files.
+ACTIVE_TMP=""
+cleanup_temp() {
+  [ -n "$ACTIVE_TMP" ] && rm -f "$ACTIVE_TMP"
   [ -n "$STAGE_DIR" ] && rm -rf "$STAGE_DIR"
   return 0
 }
-trap cleanup_stage EXIT
+trap cleanup_temp EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Run a writer command against a temp file in the destination directory, then
 # rename it into place. Writing straight to the final path (curl -o "$dest",
@@ -36,10 +42,13 @@ atomic_write() {
   shift
   local tmp
   tmp="$(mktemp "$(dirname "$dest")/.slashdo-tmp.XXXXXX")" || return 1
+  ACTIVE_TMP="$tmp"
   if "$@" "$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$dest"; then
+    ACTIVE_TMP=""
     return 0
   fi
   rm -f "$tmp"
+  ACTIVE_TMP=""
   return 1
 }
 
