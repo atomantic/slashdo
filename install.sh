@@ -8,6 +8,15 @@ REPO="atomantic/slashdo"
 BRANCH="main"
 BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"
 
+# Claude Code supports relocating its entire config tree. Keep every installer
+# path on the same root the hooks and statusline resolve at runtime.
+CLAUDE_CONFIG_CUSTOM=false
+if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+  CLAUDE_CONFIG_CUSTOM=true
+else
+  CLAUDE_CONFIG_DIR="$HOME/.claude"
+fi
+
 # Detect local repo: if this script lives alongside commands/ and lib/, use local files
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_MODE=false
@@ -25,6 +34,25 @@ fetch_file() {
   fi
   # Fallback to curl (remote mode, or local cp failed)
   curl -fsSL "$BASE_URL/$src_path" -o "$dest" 2>/dev/null
+}
+
+# Source command/lib docs use Claude's default paths as portable tokens. A
+# custom Claude root needs those runtime references rewritten along with the
+# destination paths, just as the OpenCode installer rewrites them below.
+rewrite_claude_paths() {
+  local file="$1"
+  local escaped_root tmpfile
+  [ "$CLAUDE_CONFIG_CUSTOM" = true ] || return 0
+  escaped_root=$(printf '%s' "$CLAUDE_CONFIG_DIR" | sed 's/[&|\\]/\\&/g')
+  tmpfile="$(mktemp "${TMPDIR:-/tmp}/slashdo-claude-paths.XXXXXX")"
+  if sed -e "s|~/.claude/lib/|$escaped_root/lib/|g" \
+      -e "s|~/.claude/.slashdo-config.json|$escaped_root/.slashdo-config.json|g" \
+      "$file" > "$tmpfile"; then
+    mv "$tmpfile" "$file"
+  else
+    rm -f "$tmpfile"
+    return 1
+  fi
 }
 
 CYAN='\033[0;36m'
@@ -80,7 +108,7 @@ OLD_HOOKS=(update-check)
 
 detect_envs() {
   local envs=()
-  [ -d "$HOME/.claude" ] && envs+=(claude)
+  [ -d "$CLAUDE_CONFIG_DIR" ] && envs+=(claude)
   [ -d "$HOME/.config/opencode" ] && envs+=(opencode)
   [ -d "$HOME/.gemini/antigravity-cli" ] && envs+=(antigravity)
   [ -d "$HOME/.codex" ] && envs+=(codex)
@@ -89,16 +117,16 @@ detect_envs() {
 }
 
 install_claude() {
-  local target_cmd="$HOME/.claude/commands/do"
-  local target_lib="$HOME/.claude/lib"
-  local target_hooks="$HOME/.claude/hooks"
+  local target_cmd="$CLAUDE_CONFIG_DIR/commands/do"
+  local target_lib="$CLAUDE_CONFIG_DIR/lib"
+  local target_hooks="$CLAUDE_CONFIG_DIR/hooks"
   mkdir -p "$target_cmd" "$target_lib" "$target_hooks"
 
   printf "  Installing to ${GREEN}Claude Code${RESET}...\n"
 
   for cmd in "${COMMANDS[@]}"; do
     printf "    /do:%-20s" "$cmd"
-    if fetch_file "commands/do/$cmd.md" "$target_cmd/$cmd.md"; then
+    if fetch_file "commands/do/$cmd.md" "$target_cmd/$cmd.md" && rewrite_claude_paths "$target_cmd/$cmd.md"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
@@ -107,7 +135,7 @@ install_claude() {
 
   for lib in "${LIBS[@]}"; do
     printf "    lib/%-20s" "$lib.md"
-    if fetch_file "lib/$lib.md" "$target_lib/$lib.md"; then
+    if fetch_file "lib/$lib.md" "$target_lib/$lib.md" && rewrite_claude_paths "$target_lib/$lib.md"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
@@ -145,13 +173,14 @@ install_claude() {
       const fs = require("fs");
       const path = require("path");
       const home = require("os").homedir();
-      const settingsPath = path.join(home, ".claude", "settings.json");
-      const hooksDir = path.join(home, ".claude", "hooks");
+      const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(home, ".claude");
+      const settingsPath = path.join(claudeDir, "settings.json");
+      const hooksDir = path.join(claudeDir, "hooks");
 
       // Default auto-update to enabled on first install. The curl installer
       // is piped (no TTY to prompt), so we pick the same default the npx
       // installer offers; re-run "npx slash-do@latest" interactively to change.
-      const configPath = path.join(home, ".claude", ".slashdo-config.json");
+      const configPath = path.join(claudeDir, ".slashdo-config.json");
       if (!fs.existsSync(configPath)) {
         try { fs.writeFileSync(configPath, JSON.stringify({ autoUpdate: true }, null, 2) + "\n"); } catch (e) {}
       }
@@ -296,7 +325,7 @@ envs=($(detect_envs)) || true
 if [ ${#envs[@]} -eq 0 ]; then
   printf "  No supported AI coding environments detected.\n"
   printf "  Supported: Claude Code, OpenCode, Antigravity CLI, Codex, Grok Build\n\n"
-  printf "  Create ~/.claude/ to enable Claude Code support, then re-run.\n"
+  printf "  Create %s to enable Claude Code support, then re-run.\n" "$CLAUDE_CONFIG_DIR"
   exit 1
 fi
 

@@ -4,6 +4,8 @@
 # shellcheck disable=SC2059,SC2207
 set -euo pipefail
 
+CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
 CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
 GREEN='\033[0;32m'
@@ -52,9 +54,9 @@ HOOKS=(slashdo-check-update slashdo-statusline)
 OLD_HOOKS=(update-check)
 
 uninstall_claude() {
-  local target_cmd="$HOME/.claude/commands/do"
-  local target_lib="$HOME/.claude/lib"
-  local target_hooks="$HOME/.claude/hooks"
+  local target_cmd="$CLAUDE_CONFIG_DIR/commands/do"
+  local target_lib="$CLAUDE_CONFIG_DIR/lib"
+  local target_hooks="$CLAUDE_CONFIG_DIR/hooks"
   local count=0
 
   printf "  Uninstalling from ${GREEN}Claude Code${RESET}...\n"
@@ -92,20 +94,20 @@ uninstall_claude() {
   done
 
   # Remove cache file
-  if [ -f "$HOME/.claude/cache/slashdo-update-check.json" ]; then
-    rm -f "$HOME/.claude/cache/slashdo-update-check.json"
+  if [ -f "$CLAUDE_CONFIG_DIR/cache/slashdo-update-check.json" ]; then
+    rm -f "$CLAUDE_CONFIG_DIR/cache/slashdo-update-check.json"
     printf "    removed: cache/slashdo-update-check.json ${GREEN}ok${RESET}\n"
     count=$((count + 1))
   fi
 
-  if [ -f "$HOME/.claude/.slashdo-version" ]; then
-    rm -f "$HOME/.claude/.slashdo-version"
+  if [ -f "$CLAUDE_CONFIG_DIR/.slashdo-version" ]; then
+    rm -f "$CLAUDE_CONFIG_DIR/.slashdo-version"
     printf "    removed: .slashdo-version        ${GREEN}ok${RESET}\n"
     count=$((count + 1))
   fi
 
-  if [ -f "$HOME/.claude/.slashdo-config.json" ]; then
-    rm -f "$HOME/.claude/.slashdo-config.json"
+  if [ -f "$CLAUDE_CONFIG_DIR/.slashdo-config.json" ]; then
+    rm -f "$CLAUDE_CONFIG_DIR/.slashdo-config.json"
     printf "    removed: .slashdo-config.json    ${GREEN}ok${RESET}\n"
     count=$((count + 1))
   fi
@@ -116,7 +118,8 @@ uninstall_claude() {
       const fs = require("fs");
       const path = require("path");
       const home = require("os").homedir();
-      const settingsPath = path.join(home, ".claude", "settings.json");
+      const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(home, ".claude");
+      const settingsPath = path.join(claudeDir, "settings.json");
 
       if (!fs.existsSync(settingsPath)) process.exit(0);
 
@@ -155,7 +158,7 @@ uninstall_claude() {
 
       if (settings.statusLine && settings.statusLine.command &&
           settings.statusLine.command.indexOf("slashdo-statusline") !== -1) {
-        var hooksDir = path.join(home, ".claude", "hooks");
+        var hooksDir = path.join(claudeDir, "hooks");
         var gsdHookPath = path.join(hooksDir, "gsd-statusline.js");
         if (fs.existsSync(gsdHookPath)) {
           settings.statusLine = { type: "command", command: "node \"" + gsdHookPath + "\"" };
@@ -333,7 +336,7 @@ uninstall_gemini_legacy() {
 
 detect_envs() {
   local envs=()
-  [ -d "$HOME/.claude" ] && envs+=(claude)
+  [ -d "$CLAUDE_CONFIG_DIR" ] && envs+=(claude)
   [ -d "$HOME/.config/opencode" ] && envs+=(opencode)
   [ -d "$HOME/.gemini/antigravity-cli" ] && envs+=(antigravity)
   [ -d "$HOME/.codex" ] && envs+=(codex)

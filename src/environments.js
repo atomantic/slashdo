@@ -5,25 +5,32 @@ const path = require('path');
 const os = require('os');
 
 const HOME = os.homedir();
+const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
+const CLAUDE_CONFIG_PATH = process.env.CLAUDE_CONFIG_DIR
+  ? path.join(CLAUDE_DIR, '.slashdo-config.json')
+  : '~/.claude/.slashdo-config.json';
+const CLAUDE_LIB_PATH_PREFIX = process.env.CLAUDE_CONFIG_DIR
+  ? `${path.join(CLAUDE_DIR, 'lib')}${path.sep}`
+  : '~/.claude/lib/';
 
 const ENVIRONMENTS = {
   claude: {
     name: 'Claude Code',
-    commandsDir: path.join(HOME, '.claude', 'commands'),
-    libDir: path.join(HOME, '.claude', 'lib'),
-    hooksDir: path.join(HOME, '.claude', 'hooks'),
-    settingsFile: path.join(HOME, '.claude', 'settings.json'),
-    versionFile: path.join(HOME, '.claude', '.slashdo-version'),
-    configFile: path.join(HOME, '.claude', '.slashdo-config.json'),
-    // `~`-style form of configFile, used by the transformer to rewrite the
+    commandsDir: path.join(CLAUDE_DIR, 'commands'),
+    libDir: path.join(CLAUDE_DIR, 'lib'),
+    hooksDir: path.join(CLAUDE_DIR, 'hooks'),
+    settingsFile: path.join(CLAUDE_DIR, 'settings.json'),
+    versionFile: path.join(CLAUDE_DIR, '.slashdo-version'),
+    configFile: path.join(CLAUDE_DIR, '.slashdo-config.json'),
+    // Runtime form of configFile, used by the transformer to rewrite the
     // config-path token in command/lib text for each host CLI.
-    configPath: '~/.claude/.slashdo-config.json',
+    configPath: CLAUDE_CONFIG_PATH,
     // format: documentation only — transformCommand always emits YAML frontmatter
     // now that the legacy Gemini TOML path was removed.
     format: 'yaml-frontmatter',
     ext: '.md',
     namespacing: 'subdirectory',
-    libPathPrefix: '~/.claude/lib/',
+    libPathPrefix: CLAUDE_LIB_PATH_PREFIX,
     supportsHooks: true,
     supportsCatInclusion: true,
     supportsTeams: true,
