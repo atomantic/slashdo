@@ -7,8 +7,9 @@ extras, stack-specific CI causes) arrive through the inputs below.
 
 ### Inputs
 
-In addition to `{BRANCH_PREFIX}`, `{VERIFY_SCOPE_SUFFIX}`, and `{SIMPLIFY_ONLY}`
-(defined in `~/.claude/lib/better-verification.md`):
+In addition to `{BRANCH_PREFIX}`, `{VERIFY_SCOPE_SUFFIX}`, and `{SIMPLIFY_ONLY}`,
+which every `better-*` command defines and `~/.claude/lib/better-verification.md`
+documents:
 
 - `{PIPELINE_TITLE}` — the PR body's heading prefix (`Better Audit`,
   `Better Swift Audit`).
@@ -30,6 +31,9 @@ In addition to `{BRANCH_PREFIX}`, `{VERIFY_SCOPE_SUFFIX}`, and `{SIMPLIFY_ONLY}`
   (e.g. a "Platform Impact" section).
 - `{CI_FAILURE_CAUSES_EXTRA}` — extra bullet(s) for the CI failure-cause list, or
   empty (e.g. platform-conditional build failures, code-signing noise).
+
+An **empty** value drops the line it sits on entirely — do not emit a blank line
+in its place, or the generated PR body carries stray gaps.
 
 ## Phase 5: Per-Category PR Creation
 
@@ -144,7 +148,7 @@ After creating all PRs, verify CI passes on each one:
       ```
    b. Analyze the failure — common causes:
       - **Missing imports**: a file references a symbol that lives in another PR's branch. Fix by adding a backward-compatible {COMPAT_SHIM} or reverting the import.
-      - **Missing exports**: a {COMPAT_HOST} removed a symbol that other code still references. Fix by adding a {COMPAT_SHIM}.
+      - **Missing exports**: a {COMPAT_HOST} dropped a symbol that other code still references. Fix by restoring the symbol — or a {COMPAT_SHIM} standing in for it — in the branch that owns that {COMPAT_HOST}.
       - **Test failures**: a test depends on code changed in the PR. Fix the test or the code.
 {CI_FAILURE_CAUSES_EXTRA}
    c. Switch to the failing branch:

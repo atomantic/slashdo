@@ -5,7 +5,8 @@ The shared per-PR review-and-merge loop for every `better-*` audit pipeline.
 
 ### Inputs
 
-In addition to `{BRANCH_PREFIX}` (defined in `~/.claude/lib/better-verification.md`):
+In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines and
+`~/.claude/lib/better-verification.md` documents:
 
 - `{REVIEW_LOOP_EXTRA_INSTRUCTION}` — an extra paragraph handed to every review
   sub-agent, or empty. A multi-platform pipeline uses it to require that each

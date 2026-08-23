@@ -687,7 +687,7 @@ construction. Resolve these before Phase 4:
 - `{CI_FAILURE_CAUSES_EXTRA}` = *(empty)*
 - `{REVIEW_LOOP_EXTRA_INSTRUCTION}` = *(empty)*
 - `{REVIEW_STATUS_EXTRA}` = *(empty)*
-- `{SUMMARY_TABLE_ROWS}` / `{SUMMARY_TABLE_NOTES}` = the table and notes in the **Final Summary Table** section below
+- `{SUMMARY_TABLE_ROWS}` / `{SUMMARY_TABLE_ROW_RULES}` / `{SUMMARY_TABLE_FOOTER}` = see the **Final Summary Table** section below
 
 ### Code Review Checklist
 
@@ -726,9 +726,14 @@ The rows Phase 7 prints (`{SUMMARY_TABLE_ROWS}`):
 | TOTAL              | ...      | ...   | ...     | N PRs    |        |          |
 ```
 
-And the notes that follow it (`{SUMMARY_TABLE_NOTES}`):
+The rules for which of those rows to include (`{SUMMARY_TABLE_ROW_RULES}` — an
+instruction to you, never printed):
 
 > Omit the **UX** row when `HAS_UI=false`, the **Structural** row when `STRICT_MODE=false`, and the **Cognitive Load** row when `SIMPLIFY_ONLY=false`. When `SIMPLIFY_ONLY=true`, keep only the [`SIMPLIFY_CATEGORIES`](#the-category-set) rows and report every Test Enhancement stat below as `— (skipped: --simplify-only)`.
+
+`{SUMMARY_TABLE_FOOTER}` is empty — this pipeline prints nothing under the table.
+
+---
 
 !`cat ~/.claude/lib/better-verification.md`
 

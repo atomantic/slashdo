@@ -852,7 +852,7 @@ construction. Resolve these before Phase 4:
   > - **Code signing**: ignore code signing failures in CI if not configured — these are environment-specific.
 - `{REVIEW_LOOP_EXTRA_INSTRUCTION}` = "**Additional Swift-specific instruction for review loop agents:** After each fix, verify the code compiles on ALL platforms: `{BUILD_CMD}`. If a reviewer's suggestion would break another platform, add a platform-conditional implementation instead."
 - `{REVIEW_STATUS_EXTRA}` = `\n\nAll PRs verified on: {PLATFORMS}`
-- `{SUMMARY_TABLE_ROWS}` / `{SUMMARY_TABLE_NOTES}` = the table and notes in the **Final Summary Table** section below
+- `{SUMMARY_TABLE_ROWS}` / `{SUMMARY_TABLE_ROW_RULES}` / `{SUMMARY_TABLE_FOOTER}` = see the **Final Summary Table** section below
 
 ### Swift Code Review Checklist
 
@@ -895,10 +895,15 @@ The rows Phase 7 prints (`{SUMMARY_TABLE_ROWS}`):
 | TOTAL                  | ...      | ...   | ...     | N PRs    |        |          |
 ```
 
-And the notes that follow it (`{SUMMARY_TABLE_NOTES}`):
+Every row above is always printed, so `{SUMMARY_TABLE_ROW_RULES}` is empty. The
+lines printed under the table (`{SUMMARY_TABLE_FOOTER}`) are:
 
-> Platforms verified: {PLATFORMS}
-> Deployment targets: {DEPLOYMENT_TARGETS}
+```
+Platforms verified: {PLATFORMS}
+Deployment targets: {DEPLOYMENT_TARGETS}
+```
+
+---
 
 !`cat ~/.claude/lib/better-verification.md`
 

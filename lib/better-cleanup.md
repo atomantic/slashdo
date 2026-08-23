@@ -6,13 +6,16 @@ verbatim.
 
 ### Inputs
 
-In addition to `{BRANCH_PREFIX}` (defined in `~/.claude/lib/better-verification.md`):
+In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines and
+`~/.claude/lib/better-verification.md` documents:
 
 - `{SUMMARY_TABLE_ROWS}` — the pipeline's category rows for the final summary
   table, one `| Category | … |` line per category it can produce, TOTAL row
   included.
-- `{SUMMARY_TABLE_NOTES}` — the notes that follow the table (which rows to omit
-  in which mode, any platform/target lines), or empty.
+- `{SUMMARY_TABLE_ROW_RULES}` — instructions to the agent about which rows to
+  omit in which mode, or empty. Printed nowhere; read before building the table.
+- `{SUMMARY_TABLE_FOOTER}` — extra line(s) that belong in the printed output
+  under the table (e.g. platform / deployment-target lines), or empty.
 
 ## Phase 7: Cleanup
 
@@ -44,12 +47,11 @@ In addition to `{BRANCH_PREFIX}` (defined in `~/.claude/lib/better-verification.
    - Mark completed findings by flipping `- [ ]` → `- [x]` — **preserve the `[<slug>]` ID** on each line (only the box character changes, the slug stays). See [plan-id-format.md](./plan-id-format.md).
    - Add PR links to each category section header
    - Note any skipped findings with reasons
-6. Print the final summary table:
+6. Print the final summary table. {SUMMARY_TABLE_ROW_RULES}
 
 ```
 {SUMMARY_TABLE_ROWS}
-
-{SUMMARY_TABLE_NOTES}
+{SUMMARY_TABLE_FOOTER}
 
 Test Enhancement Stats:
 - Vacuous tests fixed: {VACUOUS_TESTS_FIXED}
