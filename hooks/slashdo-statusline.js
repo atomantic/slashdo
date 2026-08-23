@@ -13,6 +13,10 @@ let input = '';
 const stdinTimeout = setTimeout(() => process.exit(0), 3000);
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('error', () => {
+  clearTimeout(stdinTimeout);
+  process.exit(0);
+});
 process.stdin.on('end', () => {
   clearTimeout(stdinTimeout);
   try {
