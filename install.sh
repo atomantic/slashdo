@@ -244,9 +244,12 @@ install_opencode() {
     tmpfile="$(mktemp "${TMPDIR:-/tmp}/slashdo-command-${cmd}.XXXXXX")"
     if fetch_file "commands/do/$cmd.md" "$tmpfile"; then
       # Rewrite lib paths and the config-path token for OpenCode
-      sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
+      if ! sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
           -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
-          "$tmpfile" > "$target_cmd/do-$cmd.md"
+          "$tmpfile" > "$target_cmd/do-$cmd.md"; then
+        rm -f "$tmpfile"
+        return 1
+      fi
       rm -f "$tmpfile"
       printf "${GREEN}ok${RESET}\n"
     else
@@ -263,9 +266,12 @@ install_opencode() {
       # Rewrite lib-path cross-references and the config-path token so libs
       # resolve under OpenCode at runtime (mirrors the command loop and npm's
       # transformLib).
-      sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
+      if ! sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
           -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
-          "$tmpfile" > "$target_lib/$lib.md"
+          "$tmpfile" > "$target_lib/$lib.md"; then
+        rm -f "$tmpfile"
+        return 1
+      fi
       rm -f "$tmpfile"
       printf "${GREEN}ok${RESET}\n"
     else
