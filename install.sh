@@ -25,13 +25,20 @@ fetch_file() {
   temp="$(mktemp "${dest}.tmp.XXXXXX")" || return 1
   if [ "$LOCAL_MODE" = true ] && [ -f "$SCRIPT_DIR/$src_path" ]; then
     if cp "$SCRIPT_DIR/$src_path" "$temp" 2>/dev/null; then
-      mv -f "$temp" "$dest"
-      return 0
+      if mv -f "$temp" "$dest"; then
+        return 0
+      fi
+      rm -f "$temp"
+      return 1
     fi
   fi
   # Fallback to curl (remote mode, or local cp failed)
   if curl -fsSL "$BASE_URL/$src_path" -o "$temp" 2>/dev/null; then
-    mv -f "$temp" "$dest"
+    if mv -f "$temp" "$dest"; then
+      return 0
+    fi
+    rm -f "$temp"
+    return 1
   else
     rm -f "$temp"
     return 1
