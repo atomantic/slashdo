@@ -41,7 +41,14 @@ describe('bulk issue-filing spool contracts', () => {
   });
 
   it('keeps the finding bodies out of the orchestrator', () => {
-    assert.match(partial, /\*\*The orchestrator never opens a spool file\.\*\*/);
+    // "Never opens a spool file" is unsatisfiable on the =<20 inline path, which has
+    // no body to file unless it reads one — so the rule is that a body is never
+    // *rewritten*, and the inline path lifts it verbatim into --body-file.
+    assert.match(partial, /\*\*The orchestrator never \*rewrites\* a spooled\nbody\*\*/);
+    for (const body of [readCommand('better.md'), readCommand('better-swift.md')]) {
+      assert.match(body, /still lifting each id's block verbatim out of its spool file/);
+      assert.match(body, /still `--body-file`ing each block\nverbatim out of the spool/);
+    }
     assert.match(partial, /\*\*A filer never rewrites a\nbody\*\*/);
   });
 
@@ -52,6 +59,16 @@ describe('bulk issue-filing spool contracts', () => {
     assert.match(partial, /Leave\n`SPOOL_DIR` on disk when any error occurred/);
     for (const body of [readCommand('better.md'), readCommand('better-swift.md')]) {
       assert.match(body, /\*\*An id a filer returned as `ERROR` was not\nfiled\*\*/);
+    }
+  });
+
+  it('sends the spooled bodies on to the remediation workers', () => {
+    // --issues explicitly does not change what the run does, so remediation still runs.
+    // Its {FINDINGS} block is built by the orchestrator, which now holds only index
+    // lines — a worker handed those alone remediates from a bare one-line title.
+    for (const body of [readCommand('better.md'), readCommand('better-swift.md')]) {
+      assert.match(body, /\*\*In issue mode the finding bodies are on disk, not in this context\.\*\*/);
+      assert.match(body, /read the full body for each of its ids out of `\$SPOOL_DIR\/<category-slug>\.md`/);
     }
   });
 

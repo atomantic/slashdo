@@ -80,8 +80,12 @@ describe('worktree-safe merge contracts', () => {
     // Phase 7 removes the worktree first, so entering it on a queued merge
     // discards the working tree of a PR that has not landed.
     const body = readCommand('next.md');
-    assert.match(body, /\*\*Confirm the PR actually merged before touching anything\.\*\*/);
+    assert.match(body, /\*\*If this run opened and merged a PR, confirm it actually merged before touching\nanything\.\*\*/);
     assert.match(body, /run none of this phase/);
+    // ...but a run that never opened a PR has nothing to read back, and applying the
+    // gate there would skip the abandoned-claim teardown and strand the claim branch
+    // Phase 2 already published — the phantom claim this same phase verifies against.
+    assert.match(body, /has no PR to read back: skip this gate entirely/);
   });
 
   it('explains why the flag is absent so it is not "cleaned up" back in', () => {

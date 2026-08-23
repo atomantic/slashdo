@@ -269,7 +269,10 @@ When `MERGE_ENABLED=true`, gate the merge on **all three** of the review result,
        BR="$(git branch --show-current)"
        DEL_REMOTE="$(git config --get "branch.$BR.remote")"
        DEL_REF="$(git config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
-       if [ -n "$DEL_REMOTE" ] && [ "$DEL_REMOTE" != "." ]; then
+       # $DEL_REF must be non-empty too: `git push --delete ""` fails, and
+       # `ls-remote --heads <remote> ""` returns 2, so an empty ref would report
+       # the benign "already gone" for a delete that never ran.
+       if [ -n "$DEL_REMOTE" ] && [ "$DEL_REMOTE" != "." ] && [ -n "$DEL_REF" ]; then
          if ! git push "$DEL_REMOTE" --delete "$DEL_REF"; then
            # rc 2 means "no such ref" — already gone (the repo auto-deletes merged
            # heads), which is success. Any other rc is a transport/auth failure that
@@ -281,6 +284,8 @@ When `MERGE_ENABLED=true`, gate the merge on **all three** of the review result,
              echo "ERROR: could not confirm $DEL_REF is gone (ls-remote rc=$RC) — delete it manually"
            fi
          fi
+       else
+         echo "note: no upstream resolved for $BR — not deleting any remote branch"
        fi
      else
        echo "PR {number} is not MERGED — keeping its head branch"

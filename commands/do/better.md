@@ -265,273 +265,7 @@ agents write the same file — and **returns only the compact index**:
 
 Audit agents are `Explore` agents, which have no `Write` tool — they write their
 spool file with a quoted-heredoc `cat > "$SPOOL_DIR/<slug>.md" <<'EOF'` via Bash,
-so backticks and `---
-description: Unified DevSecOps audit, remediation, test enhancement, per-category PRs, CI verification, and an optional multi-reviewer review loop with worktree isolation
-argument-hint: "[--interactive] [--scan-only] [--simplify-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--strict|--nuclear] [--issues|--no-issues] [--issues-label <name>] [path filter or focus areas]"
----
-
-# Better — Unified DevSecOps Pipeline
-
-Run the full DevSecOps lifecycle: audit the codebase with up to 10 deduplicated agents (8 core, plus a UX Consistency & Responsive Layout agent for UI-bearing projects and a Structural Ambition agent in strict mode — or a narrowed five-agent roster under `--simplify-only`), consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run the requested review loop(s), and merge.
-
-**Default mode: fully autonomous.** Uses Balanced model profile, proceeds through all phases without prompting. **There is no default reviewer**: if `--review-with` is omitted, no external review runs and PRs are left open for manual review (no auto-merge). Pass `--review-with <agent>` to run a review loop and auto-merge PRs with clean reviews.
-
-**`--interactive` mode:** Pauses for model profile selection, review findings approval, guardrail decisions, and merge confirmation.
-
-Parse `$ARGUMENTS` for:
-- **`--interactive`**: pause at each decision point for user approval
-- **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation — no worktree, no code changes, no PRs. **When `ISSUE_MODE` is also true, this is the "audit and file the work, don't touch my code" combination**: every surviving finding is filed as a labelled tracker issue before the run exits, not just the deferred subset (see the Phase 2 gate). `--scan-only` is the flag that stops the pipeline; `--issues` only chooses where findings are recorded
-- **`--simplify-only`** (alias: **`--refactor-only`**): narrow the run to structural quality — refactoring, architecture, DRY, simplification, and cognitive load. Set `SIMPLIFY_ONLY=true`. The pipeline is unchanged (worktree remediation → per-category PRs → CI → review loop → merge); only the audit roster, the category set, and the remediation contract narrow. See [Simplify-Only Mode](#simplify-only-mode---simplify-only) for the exact deltas. `/do:simplify` is the shorthand for `/do:better --simplify-only`
-- **`--no-merge`**: run through PR creation (Phase 5), skip the review loop and merge
-- **`--review-with <agent[,agent,...]>`**: which reviewer(s) run the Phase 6 review loop on each PR. Accepted slugs: `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `grok`, `cursor` (alias `cursor-agent` — the Cursor Agent CLI), `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`; `codex`/`claude`/`agy`/`grok`/`cursor` likewise accept a `<agent>[<model>]` bracket — e.g. `codex[o3]`, `claude[claude-opus-4-8]`, `grok[grok-code-fast-1]` — stripped into a per-entry `REVIEW_MODEL`, empty → the reviewer's built-in default; `copilot` and `@<login>` take no model bracket), `copilot` (**legacy** — GitHub's cloud Copilot review; still supported when you name it, never selected implicitly), or an arbitrary GitHub login `@<login>` — any GitHub user or App/bot (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`); slashdo requests its review on the PR and waits for it (GitHub only, never posts an approval itself) (comma-separated, ordered list; split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, dedupe preserving first-occurrence order, with each model-taking agent's (`codex`/`claude`/`agy`/`grok`/`cursor`/`ollama`) `[<model>]` bracket suffix part of the dedup identity). Record as `REVIEW_AGENTS`. **There is no built-in default** — if omitted, leave `REVIEW_AGENTS` **unset for now**; the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (Phase 6 skipped, PRs left open without merging — see Phase 6). `copilot` is never added implicitly. Any slot may end in `~opt` (e.g. `ollama~opt`, `ollama[qwen2.5-coder:32b]~opt`) to mark that reviewer **optional/non-blocking** — still requested and its findings still fixed, but an inconclusive result from it (timeout/skipped/incomplete/no-verdict) never blocks the PR merge (a hard-error from it still does); strip `~opt` into a per-entry `{OPTIONAL}` flag before slug parsing, and it is **not** part of the dedup identity (`ollama~opt` == `ollama`, optional-wins on collapse). A slot may also end in `~max=<n>` (e.g. `claude~max=2`, `ollama~max=1`) to cap how many review → fix → re-review cycles **that one reviewer** runs, or `~effort=<level>` (e.g. `codex[gpt-5.6-luna]~effort=max~opt`, `claude~effort=high~max=2`) to specify its reasoning effort level (`low`, `medium`, `high`, `xhigh`, `max`). Strip suffixes off the right of each token in any order before slug parsing. Deduplication preserves first-occurrence order and excludes `~` suffixes (survivor takes `~opt` if any had it, and cap/effort level from the first that carried them). Reject a malformed suffix with `Invalid --review-with suffix on {entry}: ~max must be a non-negative integer and ~effort must be one of low, medium, high, xhigh, max, each appearing at most once; the only suffixes are ~opt, ~max=<n>, and ~effort=<level>.` Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, cursor, ollama, copilot, @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).` The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no reviewer (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default.
-- **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to the multi-reviewer loop for each PR; control when a per-PR reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
-- **`--review-mode <series|parallel>`**: forwarded to each PR's multi-reviewer loop. `series` (default) runs the reviewers one-at-a-time so each sees the prior's committed fixes; `parallel` runs their reviews concurrently against one baseline and applies the deduped union once (`--reviewer-applies` and the stop-modes are ignored in parallel). Set `REVIEW_MODE`; if omitted, leave it **unset for now** (saved-defaults fills it from `review-mode`; built-in default `series`). Abort with `--review-mode must be one of series, parallel (got: {value}).` on any other value.
-- **`--reviewer-applies`**: forwarded to each PR's review loop — the reviewing CLI applies fixes directly instead of the orchestrator (no effect on copilot or `@<login>` passes, which are read-only cloud-side reviews). Record `REVIEWER_APPLIES=true`/`false`.
-- **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** or **`@<login>`** pass runs per PR (Phase 6); no effect on `codex`/`agy`/`claude`/`grok`/`cursor`/`ollama` passes (their own fixed iteration caps). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass per PR, exiting early on 0 comments). `0` = loop until that reviewer returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).` To move the local-agent / `ollama` caps — or to give each reviewer a different budget in one run — use the per-entry `--review-with <agent>~max=<n>` suffix, which overrides this flag for the entry that carries it.
-
-After parsing the review flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the review flags **and** `--issues` / `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
-
-!`cat ~/.claude/lib/review-config-defaults.md`
-
-- **`--strict`** (alias: **`--nuclear`**): enable the Structural Ambition agent (10th audit agent) and promote its blocker-tier findings to CRITICAL severity for remediation. Flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications. Set `STRICT_MODE=true` when present. `--simplify-only` implies it — set `STRICT_MODE=true` whenever `SIMPLIFY_ONLY=true`, whether or not `--strict` was passed
-- **`--issues`** / **`--no-issues`** / **`--issues-label <name>`**: selects **where deferred findings are recorded** — GitHub/GitLab issues instead of PLAN.md lines (see Phase 2). **It does NOT change what the run does**: remediation, per-category PRs, CI, the review loop, and merge all proceed exactly as normal. To audit and file work *without* remediating, combine it with **`--scan-only`**. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`. If the user passes **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`.
-- **Path filter**: limit scanning scope to specific directories or files
-- **Focus areas**: e.g., "security only", "DRY and bugs"
-
-## Configuration
-
-### Default Mode (autonomous)
-
-Use the **Balanced** model profile automatically (`AUDIT_MODEL_TIER=medium`, `REMEDIATION_MODEL_TIER=medium`).
-
-### Interactive Mode (`--interactive`)
-
-Present the user with configuration options using `AskUserQuestion`:
-
-```
-AskUserQuestion([
-  {
-    question: "Which model profile for audit and remediation agents?",
-    header: "Model",
-    multiSelect: false,
-    options: [
-      { label: "Quality", description: "Strongest available model for all agents — fewest false positives, best results, highest cost" },
-      { label: "Balanced (Recommended)", description: "Workhorse model for audit and remediation — good quality at moderate cost" },
-      { label: "Budget", description: "Cheapest model for audit, workhorse for remediation — fastest and cheapest" }
-    ]
-  }
-])
-```
-
-Record the selection as `MODEL_PROFILE` and derive two **tiers** from this table:
-
-| Agent Role | Quality | Balanced | Budget |
-|------------|---------|----------|--------|
-| Audit agents (8–10 Explore agents, Phase 1) | `heavy` | `medium` | `light` |
-| Remediation agents (general-purpose, Phase 3) | `heavy` | `medium` | `medium` |
-
-- `AUDIT_MODEL_TIER`: `heavy` / `medium` / `light` based on profile
-- `REMEDIATION_MODEL_TIER`: `heavy` / `medium` / `medium` based on profile
-
-**These are tiers, not model names — resolve each against the host you're running on**, per [lib/model-tiers.md](../../lib/model-tiers.md). In particular `heavy` means **this host's strongest available model, named by its alias** (on Claude Code, `model: "opus"`) — an alias resolves to whatever version the org has configured, so it upgrades the work without going stale or overriding a pinned deployment. Never write a fully-qualified version ID. A host that can't set a per-agent model runs everything at the session default — state it and continue. If a `heavy` dispatch is rejected because the account lacks that tier, retry once with `model` omitted so the agent inherits the session, note the degrade, and continue — never block on it.
-
-### Model Profile Rationale
-
-A `heavy` model reduces false positives in audit (judgment-heavy). `medium` is the **floor for code-writing agents** (remediation) — never drop remediation to `light`, which is why the Budget profile keeps remediation at `medium`. `light` works for fast first-pass pattern scanning but produces more false positives; the `medium`+ remediation agents validate each finding before fixing.
-
-## Simplify-Only Mode (`--simplify-only`)
-
-When `SIMPLIFY_ONLY=true`, the pipeline runs end to end exactly as documented (discovery → audit → plan → worktree remediation → verification → per-category PRs → CI → review loop → merge). What narrows is *what the run looks for and touches*: *refactoring, architecture, DRY, simplification, and cognitive load*, and nothing else. Security, runtime bugs, performance, stack-specific gotchas, dependency removal, test authoring, and UX are **out of scope for this run** — findings in those areas are not audited, not remediated, and not filed.
-
-### Audit roster (Phase 1)
-
-Exactly five agents run, all dispatched in **one parallel batch** — the Batch 1 → Batch 2 ordering exists only to feed Batch 1's findings to the Test Quality agent, which does not run here.
-
-| # | Agent | In this mode |
-|---|-------|--------------|
-| 2 | Code Quality & Style | Runs, narrowed to its structural focus — the split is marked at the agent |
-| 3 | DRY & YAGNI | Runs unchanged; its whole remit is in scope |
-| 4 | Architecture & SOLID | Runs, narrowed to its structural focus — the split is marked at the agent |
-| 10 | Structural Ambition | Always on (`--simplify-only` implies `--strict`), blocker-tier findings promoted to CRITICAL as usual |
-| 11 | Cognitive Load & Readability | Runs only in this mode |
-
-Agents **1** (Security & Secrets), **5** (Bugs, Performance & Error Handling), **6** (Stack-Specific), **7** (Dependency Freedom), **8** (Test Quality & Coverage), and **9** (UX Consistency & Responsive Layout) do **not** run. Phase 0b still records `HAS_UI` (it costs nothing and stays in the state snapshot), but it no longer gates anything in this mode.
-
-Agents 10 and 11 overlap by design — structural reframings and reader-cost reductions often land on the same code. Phase 2's dedup resolves it: when both flag the same `file:line`, keep the **structural** finding (the larger reframing subsumes the local cleanup) and drop the cognitive-load duplicate.
-
-### Finding gates
-
-A refactor-only run has no bug to point at, so its findings are only as good as its filters.
-
-Gates **1, 2, and 4** are filters and go in every audit agent's instructions; because they're idempotent, Phase 2 re-applies them during consolidation as a backstop. Gate **3 is a mutation, so it is applied exactly once, by Phase 2 alone** — audit agents report their raw assessed severity and the file and do not adjust for churn themselves. Applying it at both layers would drop a cold-file finding two tiers, silently stranding HIGH findings below the remediation cut.
-
-**1. The deletion test (any finding that proposes a new module, helper, layer, or abstraction).** Ask: *would this concentrate complexity behind a smaller interface, or just spread it across callers?* Only the first qualifies. An extraction that leaves every call site passing the same arguments through one more hop, or that forces callers to learn a new vocabulary to do what they already did inline, fails the test — **drop the finding**. This is the guard against the classic failure mode of a DRY pass: deduplicating three incidental look-alikes into an abstraction that now has to serve three masters.
-
-**2. Depth, not just size.** A deep module puts a lot of behavior behind a small, stable interface; a shallow one leaks its implementation, so its interface costs about as much to learn as the body costs to read. Judge a module by that ratio, not by line count alone — a 400-line module behind three obvious functions is fine, and a 40-line one requiring six parameters and knowledge of call ordering is not. Prefer findings that make an interface smaller over findings that only make a file shorter.
-
-**3. Churn bias — refactor what people actually touch** _(Phase 2 only)_. A simplification in code nobody edits is a payoff that never gets cashed. Rank findings against `HOT_FILES` (Phase 0e): a finding in a hot file keeps its assessed severity, and a finding in a file with no commits in the churn window drops **one tier** (which pushes marginal ones to LOW, i.e. tracked but not auto-remediated). Never promote on churn alone — a hot file does not make a weak finding strong. Exception: a finding that spans many files (a canonical-helper duplication, a boundary leak) is ranked by its hottest file.
-
-**4. Don't re-litigate settled rejections.** Before filing, check `PRIOR_REJECTIONS` (Phase 0e) and do not re-propose a reframing that has already been tried and rejected.
-
-**This is the only place the recording rule is written** — Phases 2, 3c, and 4b point here rather than restating it. When any phase rejects a reframing (infeasible after investigation, or reverted in 4b for changing behavior), record it so the next run inherits the decision:
-- **Default**: append to the `### Rejected reframings` subsection of the run's PLAN.md audit section — `- ~~{description}~~ — rejected {YYYY-MM-DD}: {one-line reason}`
-- **Under `--issues`** (where PLAN.md is not written at all): file an issue titled with the reframing, labeled `{PLAN_LABEL}` **and `rejected-reframing`**, then immediately close it with the reason as a closing comment. File-then-close is required because a rejection can arise in Phase 3c or 4b from a finding that was remediated rather than deferred, so there is no existing issue to close. The extra label is what keeps Phase 0e's read bounded — without it a rejection is indistinguishable from a completed item.
-
-Findings also inherit the standard evidence bar from the Structural Ambition agent: quoted code, and a named concrete transformation. "This could be cleaner" without a named transformation is not a finding.
-
-### Behavior preservation (hard constraint)
-
-Every fix in this mode must be **observably behavior-preserving**. Give each remediation agent this rule verbatim on top of the standard template:
-
-> This is a refactor-only run. Your changes must not alter observable behavior: same return values, same side effects, same error types and messages, same public API shape. Do not fix bugs you notice, do not add features, do not change validation, do not "improve" an output format — if you find a real bug, leave the code alone and report it as a deferred finding instead. Public exports you move must keep a backward-compatible re-export at the original path.
->
-> The existing test suite is the safety net, so it must keep passing **unmodified**. Mechanical updates are allowed (an import path, a renamed symbol, a moved fixture); anything beyond that — changing an assertion, relaxing an expectation, deleting a case — means your refactor changed behavior. Revert it rather than editing the test to match.
-
-A finding whose only available fix would change behavior is **deferred**, not remediated: it goes to PLAN.md (or a tracker issue under `--issues`) per the normal disposition rules, with a one-line note that it was out of scope for a simplify-only run.
-
-### The category set
-
-`SIMPLIFY_CATEGORIES` is the in-scope set for the whole run, in Phase 2's short-label → slug form:
-
-| Short label | Full category | Slug |
-|---|---|---|
-| Code Quality | Code Quality & Style | `code-quality` |
-| DRY & YAGNI | DRY & YAGNI | `dry` |
-| Architecture | Architecture & SOLID | `architecture` |
-| Structural | Structural Ambition | `structural` |
-| Cognitive Load | Cognitive Load & Readability | `cognitive-load` |
-
-Every phase that enumerates categories — Phase 2's plan sections and summary table, Phase 3c's worker spawn, Phase 5's branch slugs, Phase 7's summary rows — is restricted to this set and refers to it by name. **This table is the only place the set is written down**; change it here, not at the individual phases.
-
-Every remaining deviation is written at the phase it applies to, the same way `HAS_UI` and `STRICT_MODE` are — Phase 0e computes this mode's inputs, and Phases 2, 3c, 4, 4b, 4c, 5, and 7 each carry their own `When SIMPLIFY_ONLY=true` clause. `--simplify-only` composes with every other flag: `--scan-only` stops after the narrowed plan, `--interactive` still prompts at each gate, `--issues` still files deferred findings as issues, and the review flags drive Phase 6 as usual.
-
-## Compaction Guidance
-
-When compacting during this workflow, always preserve:
-- The `FILE_OWNER_MAP` (complete, not summarized)
-- All CRITICAL/HIGH findings with file:line references
-- The current phase number and what phases remain
-- All PR numbers and URLs created so far
-- `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR`, `REPO_DIR` values
-- `VCS_HOST`, `CLI_TOOL`, `GH_HOST`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
-- `STRICT_MODE` (true/false — determines whether the Structural Ambition agent runs and whether structural findings are promoted to CRITICAL)
-- `SIMPLIFY_ONLY` (true/false — determines the narrowed audit roster, the five-category set, the behavior-preservation contract, and the Phase 4c skip)
-- `HOT_FILES` and `PRIOR_REJECTIONS` when `SIMPLIFY_ONLY=true` (the churn ranking and do-not-re-propose list — both feed the finding gates and are expensive to re-derive)
-- `HAS_UI` (true/false — determines whether the UX Consistency & Responsive Layout agent runs and whether the `ux` category exists downstream)
-- `PHASE_4C_START_SHA` (needed for FILE_OWNER_MAP update in Phase 4c.3)
-- `VACUOUS_TESTS_FIXED`, `WEAK_TESTS_STRENGTHENED`, `NEW_TEST_CASES`, `NEW_TEST_FILES`
-- `SPOOL_DIR` (issue mode only — the literal spool path Phase 1 created; the filer agents in Phase 2 cannot find the bodies without it, and it cannot be re-derived)
-- `CREATED_CATEGORY_SLUGS` (list of branch slugs created in Phase 5)
-
-
-## Phase 0: Discovery & Setup
-
-Detect the project environment before any scanning or remediation.
-
-### 0a: VCS Host Detection
-Run `gh auth status --active` to check GitHub CLI (`--active` scopes the check to the active account, so a stale token on another configured account doesn't falsely fail it). If it fails, run `glab auth status` for GitLab.
-- Set `VCS_HOST` to `github` or `gitlab`
-- Set `CLI_TOOL` to `gh` or `glab`
-- If neither is authenticated, warn the user and halt
-- **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state: `GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"; [ -n "$GH_HOST" ] || GH_HOST=github.com`. The Phase 6 GitHub-side reviewer loops use `gh api`, which ignores the repo remote and defaults to github.com — so on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out (see `~/.claude/lib/gh-host.md`).
-
-### 0b: Project Type Detection
-Check for project manifests to determine the tech stack:
-- `package.json` → Node.js (check for `next`, `react`, `vue`, `express`, etc.)
-- `Cargo.toml` → Rust
-- `pyproject.toml` / `requirements.txt` → Python
-- `go.mod` → Go
-- `pom.xml` / `build.gradle` → Java/Kotlin
-- `Gemfile` → Ruby
-- `*.csproj` / `*.sln` → .NET
-
-Record the detected stack as `PROJECT_TYPE` for agent context.
-
-Additionally, detect whether the project ships a user-facing UI:
-- Web frontend dependencies (`react`, `vue`, `svelte`, `next`, `nuxt`, `astro`, `angular`, `solid-js`) or UI source files (`*.html`, `*.css`/`*.scss`, JSX/TSX, `*.vue`, `*.svelte`)
-- Desktop shells (Electron, Tauri) or mobile UI code (React Native, Flutter)
-- Server-rendered templates (ERB, Jinja, Blade, Razor, Go templates) that emit HTML
-
-Record `HAS_UI=true`/`false` — this gates the UX Consistency & Responsive Layout audit agent (Phase 1, agent 9) and its `ux` category downstream.
-
-### 0c: Build & Test Command Detection
-Derive build and test commands from the project type:
-- Node.js: check `package.json` scripts for `build`, `test`, `typecheck`, `lint`
-- Rust: `cargo build`, `cargo test`
-- Python: `pytest`, `python -m pytest`
-- Go: `go build ./...`, `go test ./...`
-- If ambiguous, check project conventions already in context for documented commands
-
-Record as `BUILD_CMD` and `TEST_CMD`.
-
-### 0d: State Snapshot
-- Record `REPO_DIR` via `git rev-parse --show-toplevel`
-- Record `CURRENT_BRANCH` via `git rev-parse --abbrev-ref HEAD`
-- Record `DEFAULT_BRANCH` via `gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'` (or `glab` equivalent)
-- Record `IS_DIRTY` via `git status --porcelain`
-- Resolve how this project logs changes (stated convention in CLAUDE.md/AGENT.md/CONTRIBUTING.md first, else whatever changelog artifacts already exist — a rolling `CHANGELOG.md`, a per-release directory, a fragment tool, or nothing because the notes come from commit messages). Record the target as `CHANGELOG_TARGET` (empty when there is none) and `HAS_CHANGELOG` accordingly
-- Check for existing `../better-*` worktrees: `git worktree list`. If found, inform the user and ask whether to resume (use existing worktree) or clean up (remove it and start fresh)
-
-### 0e: Simplify-Only Inputs _(only when `SIMPLIFY_ONLY=true`)_
-
-Three cheap reads: two gate inputs plus the project's vocabulary. Skip this step entirely in a normal run.
-
-1. **`HOT_FILES`** (gate 3) — the files worth refactoring, because they're the ones people edit:
-   ```bash
-   git -C {REPO_DIR} log --since="6 months ago" --format= --name-only \
-     | grep -Fxf <(git -C {REPO_DIR} ls-files) \
-     | sort | uniq -c | sort -rn | head -40
-   ```
-   The `ls-files` filter drops paths that no longer exist, so deleted files can't crowd out live ones. Record the paths with their commit counts. If the repo is younger than the window or the list comes back near-empty, re-run **the same pipeline** with `--since` dropped rather than treating every file as cold — a young repo has no dormant code to deprioritize. Never run a bare `git log --name-only` without the `sort | uniq -c | head` aggregation: on a mid-size repo that is tens of thousands of lines straight into context.
-2. **`PRIOR_REJECTIONS`** (gate 4) — reframings earlier runs tried and rejected, as a do-not-re-propose list for the audit agents. Default: the `### Rejected reframings` subsections of PLAN.md. Under `--issues`: issues carrying **both** `{PLAN_LABEL}` and `rejected-reframing`, which is what makes this a bounded read rather than a scan of every closed plan issue —
-   ```bash
-   {CLI_TOOL} issue list --state closed --label "{PLAN_LABEL}" --label rejected-reframing \
-     --limit 200 --json number,title,body
-   ```
-3. **`DOMAIN_DOCS`** — whichever of `CONTEXT.md`, `GOALS.md`, `docs/adr/`, and `docs/decisions/` exist (read the index or the most recent handful of ADRs, not the whole directory). **Distill them here, once**, into a short glossary of domain terms plus a list of reframings the ADRs already ruled out, and pass *that* to the audit agents — not the documents. Fanning 20–50 KB of docs out to five agents buys nothing the glossary doesn't. Its purpose is that proposed modules, seams, and names use the project's own vocabulary instead of invented ones.
-
-
-<audit_instructions>
-
-## Phase 1: Unified Audit
-
-Project conventions are already in your context. Pass relevant conventions to each agent.
-
-Launch the Explore agents in two batches (8 core agents; agent 9 runs only when `HAS_UI=true`, agent 10 only when `STRICT_MODE=true`).
-
-**When `SIMPLIFY_ONLY=true`, ignore the batching below** and dispatch exactly agents **2, 3, 4, 10, and 11** in a single parallel batch, with the narrowed per-agent scopes from [Simplify-Only Mode](#simplify-only-mode---simplify-only). Agents 1, 5, 6, 7, 8, and 9 do not run. Give every one of the five [gates 1, 2, and 4](#finding-gates) verbatim (gate 3 is Phase 2's, not theirs), plus the two Phase 0e inputs they consume: `PRIOR_REJECTIONS` (the do-not-re-propose list) and the distilled `DOMAIN_DOCS` glossary — the glossary, not the documents. Agent 11 also gets `HOT_FILES` as a where-to-look-first list; that is a search priority, not a severity input.
-
-Each agent must report findings in this format:
-```
-- **[CRITICAL/HIGH/MEDIUM/LOW]** `file:line` - Description. Suggested fix: ... Complexity: Simple/Medium/Complex
-```
-
-**Issue mode (`--issues`) changes where this format goes, not what it contains.**
-When `ISSUE_MODE=true`, create the spool directory before dispatching any agent:
-
-```bash
-SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_DIR"
-```
-
-Record the printed path as `SPOOL_DIR` in run state and pass **that literal path**
-to every agent — a shell variable does not survive between tool calls, so
-re-deriving it later would hand the filer agents an empty directory.
-
-Pass `SPOOL_DIR` to every audit agent along with the **"Bulk filing — spool the
-bodies, dedup on an index"** contract from
-[lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) (the partial Phase 2 reads
-in). Under that contract each agent writes one ready-to-file issue body per finding
-to `$SPOOL_DIR/<category-slug>.md` — using its own category slug from Phase 2's
-summary table (`security`, `code-quality`, `dry`, `architecture`, `bugs-perf`,
-`stack-specific`, `deps`, `tests`, `ux`, `structural`, `cognitive-load`), so no two
-agents write the same file — and **returns only the compact index**:
-
-```
-<id> | <SEVERITY> | <category> | <file:line> | <one-line title>
-```
-
-Audit agents are `Explore` agents, which have no `Write` tool — they write their
- in quoted evidence survive verbatim. **Only the first write
+so backticks and `$` in quoted evidence survive verbatim. **Only the first write
 uses `>`; every later one must use `>>`** — an agent that spools findings across more
 than one Bash call and reaches for `cat >` a second time truncates everything it has
 already written, which is the tail-dropping this whole path exists to prevent.
@@ -720,7 +454,9 @@ Wait for ALL agents to complete before proceeding.
 > nothing else, and you should not open a spool file. When the surviving set is
 > larger than ~20 findings, hand the ids off to per-category **filer agents** per
 > the partial's "Bulk filing — spool the bodies, dedup on an index" section rather
-> than running `gh issue create` yourself; at or below that, file them inline.
+> than running `gh issue create` yourself; at or below that, file them inline —
+> still lifting each id's block verbatim out of its spool file into a `--body-file`,
+> never retyping it from the index line.
 
 1. Read the existing `PLAN.md` (create if it doesn't exist)
 2. Consolidate all findings from Phase 1, deduplicating across agents (same file:line flagged by multiple agents → keep the most specific description)
@@ -820,7 +556,9 @@ sharding a category further only makes rate limiting more likely.
 Merge the returned maps for the summary. **An id a filer returned as `ERROR` was not
 filed** — report those separately with their spool path so they can be filed by hand,
 and keep `SPOOL_DIR` on disk when any error occurred. At or below ~20 surviving
-findings, skip the fan-out and file them inline; the overhead isn't worth it.
+findings, skip the fan-out and file them inline — still `--body-file`ing each block
+verbatim out of the spool, never retyped from the index line; only the fan-out overhead
+isn't worth it at that size.
 
 ## Phase 3: Worktree Remediation
 
@@ -884,6 +622,14 @@ Remediation runs in parallel, one worker per category that has CRITICAL, HIGH, o
 1. Spawn up to 5 general-purpose `Agent` sub-agents — one per category above that has actionable findings. **Resolve `REMEDIATION_MODEL_TIER` to this host's model per [lib/model-tiers.md](../../lib/model-tiers.md) and pass it as the `model` parameter on each `Agent` call.** If `REMEDIATION_MODEL_TIER` is `heavy`, pass this host's strongest alias (`model: "opus"` on Claude Code).
 2. Launch all `Agent` calls **in parallel** (multiple tool calls in a single response) and wait for all to return. Each sub-agent returns its results directly — no task board or shutdown step is needed.
 <!-- /if:teams -->
+
+**In issue mode the finding bodies are on disk, not in this context.** Phase 1 spooled
+them and returned only index lines, so a `{FINDINGS}` block built from those lines alone
+hands the worker a one-line title with no evidence and no suggested fix. Build `{FINDINGS}`
+from each worker's index lines **plus the literal `SPOOL_DIR` path**, and instruct the
+worker to read the full body for each of its ids out of `$SPOOL_DIR/<category-slug>.md`
+before fixing it. "The orchestrator never rewrites a spooled body" keeps the bodies out of
+*this* context — it does not license remediating from titles.
 
 ### Agent instructions template:
 

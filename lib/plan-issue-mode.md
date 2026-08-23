@@ -228,7 +228,10 @@ Everything only the orchestrator can see happens here, against the index:
 This is the step that makes per-agent filing wrong: an agent that files its own
 findings as it goes cannot dedup against agents that have not returned yet, and
 overlapping audit agents are a design feature, not an accident. The output here is a
-surviving id list grouped by category. **The orchestrator never opens a spool file.**
+surviving id list grouped by category. **The orchestrator never *rewrites* a spooled
+body** — on the fan-out path it never opens the spool files at all, and on the small-run
+inline path it may only lift a block out verbatim into a `--body-file`, never retype or
+summarize it from the index line.
 
 ### 4. Filer agents file, in parallel, one per category
 

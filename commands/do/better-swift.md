@@ -258,266 +258,7 @@ summary table (`security`, `code-quality`, `dry`, `architecture`, `bugs-perf`,
 
 Audit agents are `Explore` agents, which have no `Write` tool — they write their
 spool file with a quoted-heredoc `cat > "$SPOOL_DIR/<slug>.md" <<'EOF'` via Bash,
-so backticks and `---
-description: SwiftUI DevSecOps audit, remediation, test enhancement, per-category PRs, CI verification, and an optional multi-reviewer review loop with worktree isolation — optimized for multi-platform Swift/SwiftUI apps (iOS, macOS, watchOS, tvOS, visionOS)
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues|--no-issues] [--issues-label <name>] [path filter or focus areas]"
----
-
-# Better Swift — Unified DevSecOps Pipeline for SwiftUI Apps
-
-Run the full DevSecOps lifecycle optimized for Swift/SwiftUI multi-platform projects: audit the codebase with 8 deduplicated agents (including a UX Consistency & Responsive Layout agent — SwiftUI apps ship a user-facing UI by definition), consolidate findings, remediate in an isolated worktree, create **separate PRs per category** with SemVer bump, verify CI, run the requested review loop(s), and merge.
-
-**Default mode: fully autonomous.** Uses Balanced model profile, proceeds through all phases without prompting. **There is no default reviewer**: if `--review-with` is omitted, no external review runs and PRs are left open for manual review (no auto-merge). Pass `--review-with <agent>` to run a review loop and auto-merge PRs with clean reviews.
-
-**`--interactive` mode:** Pauses for model profile selection, review findings approval, guardrail decisions, and merge confirmation.
-
-Parse `$ARGUMENTS` for:
-- **`--interactive`**: pause at each decision point for user approval
-- **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation — no worktree, no code changes, no PRs. **When `ISSUE_MODE` is also true, this is the "audit and file the work, don't touch my code" combination**: every surviving finding is filed as a labelled tracker issue before the run exits, not just the deferred subset (see the Phase 2 gate). `--scan-only` is the flag that stops the pipeline; `--issues` only chooses where findings are recorded
-- **`--no-merge`**: run through PR creation (Phase 5), skip the review loop and merge
-- **`--review-with <agent[,agent,...]>`**: which reviewer(s) run the Phase 6 review loop on each PR. Accepted slugs: `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `grok`, `cursor` (alias `cursor-agent` — the Cursor Agent CLI), `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`; `codex`/`claude`/`agy`/`grok`/`cursor` likewise accept a `<agent>[<model>]` bracket — e.g. `codex[o3]`, `claude[claude-opus-4-8]`, `grok[grok-code-fast-1]` — stripped into a per-entry `REVIEW_MODEL`, empty → the reviewer's built-in default; `copilot` and `@<login>` take no model bracket), `copilot` (**legacy** — GitHub's cloud Copilot review; still supported when you name it, never selected implicitly), or an arbitrary GitHub login `@<login>` — any GitHub user or App/bot (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`); slashdo requests its review on the PR and waits for it (GitHub only, never posts an approval itself) (comma-separated, ordered list; split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, dedupe preserving first-occurrence order, with each model-taking agent's (`codex`/`claude`/`agy`/`grok`/`cursor`/`ollama`) `[<model>]` bracket suffix part of the dedup identity). Record as `REVIEW_AGENTS`. **There is no built-in default** — if omitted, leave `REVIEW_AGENTS` **unset for now**; the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (Phase 6 skipped, PRs left open without merging — see Phase 6). `copilot` is never added implicitly. Any slot may end in `~opt` (e.g. `ollama~opt`, `ollama[qwen2.5-coder:32b]~opt`) to mark that reviewer **optional/non-blocking** — still requested and its findings still fixed, but an inconclusive result from it (timeout/skipped/incomplete/no-verdict) never blocks the PR merge (a hard-error from it still does); strip `~opt` into a per-entry `{OPTIONAL}` flag before slug parsing, and it is **not** part of the dedup identity (`ollama~opt` == `ollama`, optional-wins on collapse). A slot may also end in `~max=<n>` (e.g. `claude~max=2`, `ollama~max=1`) to cap how many review → fix → re-review cycles **that one reviewer** runs, or `~effort=<level>` (e.g. `codex[gpt-5.6-luna]~effort=max~opt`, `claude~effort=high~max=2`) to specify its reasoning effort level (`low`, `medium`, `high`, `xhigh`, `max`). Strip suffixes off the right of each token in any order before slug parsing. Deduplication preserves first-occurrence order and excludes `~` suffixes (survivor takes `~opt` if any had it, and cap/effort level from the first that carried them). Reject a malformed suffix with `Invalid --review-with suffix on {entry}: ~max must be a non-negative integer and ~effort must be one of low, medium, high, xhigh, max, each appearing at most once; the only suffixes are ~opt, ~max=<n>, and ~effort=<level>.` Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, cursor, ollama, copilot, @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).` The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no reviewer (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default.
-- **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to the multi-reviewer loop for each PR; control when a per-PR reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
-- **`--review-mode <series|parallel>`**: forwarded to each PR's multi-reviewer loop. `series` (default) runs the reviewers one-at-a-time so each sees the prior's committed fixes; `parallel` runs their reviews concurrently against one baseline and applies the deduped union once (`--reviewer-applies` and the stop-modes are ignored in parallel). Set `REVIEW_MODE`; if omitted, leave it **unset for now** (saved-defaults fills it from `review-mode`; built-in default `series`). Abort with `--review-mode must be one of series, parallel (got: {value}).` on any other value.
-- **`--reviewer-applies`**: forwarded to each PR's review loop — the reviewing CLI applies fixes directly instead of the orchestrator (no effect on copilot or `@<login>` passes, which are read-only cloud-side reviews). Record `REVIEWER_APPLIES=true`/`false`.
-- **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** or **`@<login>`** pass runs per PR (Phase 6); no effect on `codex`/`agy`/`claude`/`grok`/`cursor`/`ollama` passes (their own fixed iteration caps). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass per PR, exiting early on 0 comments). `0` = loop until that reviewer returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).` To move the local-agent / `ollama` caps — or to give each reviewer a different budget in one run — use the per-entry `--review-with <agent>~max=<n>` suffix, which overrides this flag for the entry that carries it.
-
-After parsing the review flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the review flags **and** `--issues` / `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
-
-!`cat ~/.claude/lib/review-config-defaults.md`
-
-- **`--issues`** / **`--no-issues`** / **`--issues-label <name>`**: selects **where deferred findings are recorded** — GitHub/GitLab issues instead of PLAN.md lines (see Phase 2). **It does NOT change what the run does**: remediation, PRs, CI, the review loop, and merge all proceed exactly as normal. To audit and file work *without* remediating, combine it with **`--scan-only`**. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`. If the user passes **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`.
-- **Path filter**: limit scanning scope to specific directories or files
-- **Focus areas**: e.g., "security only", "platform coverage and accessibility"
-
-## Configuration
-
-### Default Mode (autonomous)
-
-Use the **Balanced** model profile automatically (`AUDIT_MODEL_TIER=medium`, `REMEDIATION_MODEL_TIER=medium`).
-
-### Interactive Mode (`--interactive`)
-
-Present the user with configuration options using `AskUserQuestion`:
-
-```
-AskUserQuestion([
-  {
-    question: "Which model profile for audit and remediation agents?",
-    header: "Model",
-    multiSelect: false,
-    options: [
-      { label: "Quality", description: "Strongest available model for all agents — fewest false positives, best results, highest cost" },
-      { label: "Balanced (Recommended)", description: "Workhorse model for audit and remediation — good quality at moderate cost" },
-      { label: "Budget", description: "Cheapest model for audit, workhorse for remediation — fastest and cheapest" }
-    ]
-  }
-])
-```
-
-Record the selection as `MODEL_PROFILE` and derive two **tiers** from this table:
-
-| Agent Role | Quality | Balanced | Budget |
-|------------|---------|----------|--------|
-| Audit agents (8 Explore agents, Phase 1) | `heavy` | `medium` | `light` |
-| Remediation agents (general-purpose, Phase 3) | `heavy` | `medium` | `medium` |
-
-- `AUDIT_MODEL_TIER`: `heavy` / `medium` / `light` based on profile
-- `REMEDIATION_MODEL_TIER`: `heavy` / `medium` / `medium` based on profile
-
-**These are tiers, not model names — resolve each against the host you're running on**, per [lib/model-tiers.md](../../lib/model-tiers.md). In particular `heavy` means **this host's strongest available model, named by its alias** (on Claude Code, `model: "opus"`) — an alias resolves to whatever version the org has configured, so it upgrades the work without going stale or overriding a pinned deployment. Never write a fully-qualified version ID. A host that can't set a per-agent model runs everything at the session default — state it and continue. If a `heavy` dispatch is rejected because the account lacks that tier, retry once with `model` omitted so the agent inherits the session, note the degrade, and continue — never block on it.
-
-### Model Profile Rationale
-
-A `heavy` model reduces false positives in audit (judgment-heavy). `medium` is the **floor for code-writing agents** (remediation) — never drop remediation to `light`, which is why the Budget profile keeps remediation at `medium`. `light` works for fast first-pass pattern scanning but produces more false positives; the `medium`+ remediation agents validate each finding before fixing.
-
-## Compaction Guidance
-
-When compacting during this workflow, always preserve:
-- The `FILE_OWNER_MAP` (complete, not summarized)
-- All CRITICAL/HIGH findings with file:line references
-- The current phase number and what phases remain
-- All PR numbers and URLs created so far
-- `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR`, `REPO_DIR` values
-- `VCS_HOST`, `CLI_TOOL`, `GH_HOST`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
-- `PLATFORMS` (list of supported platforms: iOS, macOS, etc.)
-- `DEPLOYMENT_TARGETS` (minimum OS versions per platform)
-- `BUILD_SYSTEM` (xcodebuild / swift build / xcodegen / tuist)
-- `SCHEME`, `WORKSPACE_OR_PROJECT` (Xcode build identifiers)
-- `PHASE_4C_START_SHA` (needed for FILE_OWNER_MAP update in Phase 4c.3)
-- `VACUOUS_TESTS_FIXED`, `WEAK_TESTS_STRENGTHENED`, `NEW_TEST_CASES`, `NEW_TEST_FILES`
-- `CREATED_CATEGORY_SLUGS` (list of branch slugs created in Phase 5)
-- `SPOOL_DIR` (issue mode only — the literal spool path Phase 1 created; the filer agents in Phase 2 cannot find the bodies without it, and it cannot be re-derived)
-- `GOTCHA_ENTRIES_IN_SCOPE` (list of swift-gotchas catalogue entry numbers relevant to this project, recorded in Phase 0e)
-
-
-## Phase 0: Discovery & Setup
-
-Detect the project environment before any scanning or remediation.
-
-### 0a: VCS Host Detection
-Run `gh auth status --active` to check GitHub CLI (`--active` scopes the check to the active account, so a stale token on another configured account doesn't falsely fail it). If it fails, run `glab auth status` for GitLab.
-- Set `VCS_HOST` to `github` or `gitlab`
-- Set `CLI_TOOL` to `gh` or `glab`
-- If neither is authenticated, warn the user and halt
-- **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state: `GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"; [ -n "$GH_HOST" ] || GH_HOST=github.com`. The Phase 6 GitHub-side reviewer loops use `gh api`, which ignores the repo remote and defaults to github.com — so on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out (see `~/.claude/lib/gh-host.md`).
-
-### 0b: Swift Project Type Detection
-Check for Swift project manifests and determine the build system:
-- `Package.swift` → Swift Package Manager (SPM)
-- `*.xcodeproj` → Xcode project (check for SwiftUI, UIKit, AppKit usage)
-- `*.xcworkspace` → Xcode workspace (check for CocoaPods or multi-project)
-- `project.yml` → XcodeGen
-- `Project.swift` → Tuist
-
-Record the detected system as `BUILD_SYSTEM`.
-
-Determine supported platforms by scanning:
-1. **SPM**: Read `Package.swift` for `.iOS`, `.macOS`, `.watchOS`, `.tvOS`, `.visionOS` platform declarations
-2. **Xcode project**: Run `xcodebuild -list` to get schemes and targets; then `xcodebuild -showBuildSettings -scheme {SCHEME}` to read `SUPPORTED_PLATFORMS` and `IPHONEOS_DEPLOYMENT_TARGET` / `MACOSX_DEPLOYMENT_TARGET` / etc.
-3. **XcodeGen/Tuist**: Read `project.yml` / `Project.swift` for platform declarations
-
-Record:
-- `PLATFORMS`: list of supported platforms (e.g., `["iOS", "macOS"]`)
-- `DEPLOYMENT_TARGETS`: map of platform → minimum version (e.g., `{"iOS": "16.0", "macOS": "13.0"}`)
-- `SCHEME`: primary scheme name
-- `WORKSPACE_OR_PROJECT`: path to `.xcworkspace` or `.xcodeproj`
-
-Detect additional Swift project characteristics:
-- SwiftUI vs UIKit/AppKit (check imports in source files)
-- Core Data / SwiftData usage (`.xcdatamodeld` files or `@Model` declarations)
-- Combine usage (`import Combine`, `@Published`, `AnyPublisher`)
-- Swift concurrency adoption (`async`, `await`, `actor`, `@MainActor`)
-- Widget extensions, App Intents, or other extension targets
-- **CloudKit usage** (`import CloudKit`, `CKContainer`, `cloudKitDatabase:` in `ModelConfiguration`) — flag for Agent 5 lazy-init audit
-- **iCloud entitlements** (`com.apple.developer.icloud-container-identifiers` in `.entitlements`) — flag for Agent 6 ubiquity container audit
-- **Localization** (`Localizable.xcstrings` file present, `String(localized:)` calls, `LocalizedStringKey` parameters) — flag for Agent 6 localization audit
-- **StoreKit / IAPs** (`import StoreKit`, `.storekit` config file, `Product.products(for:)`) — flag for Agent 6 IAP audit
-- **CI/CD release path** (`.github/workflows/*.yml` referencing `apple-actions/upload-testflight-build` or `xcrun altool`) — flag for Agent 6 TestFlight upload validation audit
-- **Code signing in CI** (CI workflow uses `CODE_SIGNING_ALLOWED=NO` for tests) — Agent 5 must aggressively check CloudKit eager-init crash patterns
-
-Record as `PROJECT_TYPE` = "SwiftUI" with characteristics map.
-
-### 0c: Build & Test Command Detection
-Derive build and test commands from the build system:
-
-**SPM project:**
-```bash
-BUILD_CMD="swift build"
-TEST_CMD="swift test"
-```
-
-**Xcode project (single platform):**
-
-First, derive an available simulator dynamically:
-```bash
-SIM_DEST=$(xcrun simctl list devices available -j | python3 -c "
-import json, sys
-devices = json.load(sys.stdin)['devices']
-# Pick the first available iPhone from the latest runtime to avoid ambiguity
-for rt in sorted(devices.keys(), reverse=True):
-    for d in devices[rt]:
-        if d['isAvailable'] and 'iPhone' in d['name']:
-            print(f\"{d['name']},OS={rt.split('.')[-3].replace('SimRuntime-iOS-','').replace('-','.')}\")
-            sys.exit(0)
-print('iPhone 16')
-")
-```
-
-Then construct the build and test commands. Execute these directly (not via shell variable expansion) to avoid quoting issues:
-```bash
-xcodebuild -scheme {SCHEME} -destination "generic/platform=iOS Simulator" build
-xcodebuild -scheme {SCHEME} -destination "platform=iOS Simulator,name=$SIM_DEST" test
-```
-
-**Xcode project (multi-platform) — build and test for each platform in `PLATFORMS`:**
-For each platform in `PLATFORMS`, derive the build and test commands:
-- **iOS**: `BUILD_CMD_IOS="xcodebuild -scheme {SCHEME} -destination 'generic/platform=iOS Simulator' build"` / `TEST_CMD_IOS="xcodebuild -scheme {SCHEME} -destination 'platform=iOS Simulator,name=$SIM_DEST' test"`
-- **macOS**: `BUILD_CMD_MACOS="xcodebuild -scheme {SCHEME} -destination 'platform=macOS' build"` / `TEST_CMD_MACOS="xcodebuild ... test"`
-- **watchOS**: `BUILD_CMD_WATCHOS="xcodebuild -scheme {SCHEME} -destination 'generic/platform=watchOS Simulator' build"`
-- **tvOS**: `BUILD_CMD_TVOS="xcodebuild -scheme {SCHEME} -destination 'generic/platform=tvOS Simulator' build"`
-- **visionOS**: `BUILD_CMD_VISIONOS="xcodebuild -scheme {SCHEME} -destination 'generic/platform=visionOS Simulator' build"`
-
-Only generate commands for platforms declared in `PLATFORMS`. Set `BUILD_CMD` to run all platform builds sequentially (joined with `&&`). Set `TEST_CMD` to run all platform tests. This ensures changes don't break any supported platform.
-
-If the project has a `Makefile` or `fastlane/Fastfile`, check for custom build/test lanes and prefer those if they already handle multi-platform builds.
-
-Record as `BUILD_CMD` and `TEST_CMD`.
-
-### 0d: State Snapshot
-- Record `REPO_DIR` via `git rev-parse --show-toplevel`
-- Record `CURRENT_BRANCH` via `git rev-parse --abbrev-ref HEAD`
-- Record `DEFAULT_BRANCH` via `gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'` (or `glab` equivalent)
-- Record `IS_DIRTY` via `git status --porcelain`
-- Resolve how this project logs changes (stated convention in CLAUDE.md/AGENT.md/CONTRIBUTING.md first, else whatever changelog artifacts already exist — a rolling `CHANGELOG.md`, a per-release directory, a fragment tool, or nothing because the notes come from commit messages). Record the target as `CHANGELOG_TARGET` (empty when there is none) and `HAS_CHANGELOG` accordingly
-- Check for existing `../better-*` worktrees: `git worktree list`. If found, inform the user and ask whether to resume (use existing worktree) or clean up (remove it and start fresh)
-
-### 0e: Known Gotchas Catalogue
-
-This command ships with a catalogue of real-world Swift / iOS / macOS failure modes at `~/.claude/lib/swift-gotchas.md`. Each entry documents trigger conditions, root cause, the verified fix, and verification steps for a bug that has shipped to production at least once.
-
-Before launching audit agents in Phase 1, scan the project for these signals and record which catalogue entries are in scope. Pass this list to each downstream audit agent so they know which entries to consult.
-
-| Entry | Catalogue # | Triggers when project has | Audit agent that uses it |
-|-------|-------------|---------------------------|--------------------------|
-| CKContainer eager-init crash | 1 | CloudKit + CI runs `xcodebuild test ... CODE_SIGNING_ALLOWED=NO` | Agent 5 (Bugs) |
-| SwiftData missing inverse relationship | 2 | `@Model` with `@Relationship` properties | Agent 5 (Bugs) + Agent 7 (Tests) |
-| SwiftData CloudKit cross-Apple-ID sharing gap | 3 | SwiftData + `cloudKitDatabase: .automatic` + household/team/share keywords | Agent 4 (Architecture) + Agent 5 (Bugs) |
-| iCloud ubiquity container silent failure | 4 | iCloud entitlement + `url(forUbiquityContainerIdentifier:)` | Agent 5 (Bugs) + Agent 6 (Platform) |
-| iCloud symlink content corruption | 5 | Code mirrors content into `~/Library/Mobile Documents/` paths | Agent 5 (Bugs) |
-| SwiftUI xcstrings localization | 6 | `Localizable.xcstrings` OR `String(localized:)` calls | Agent 6 (Platform) |
-| XcodeGen project generation | 7 | `project.yml` present | Agent 6 (Platform) |
-| TestFlight upload validation | 8 | CI workflow uses `apple-actions/upload-testflight-build` or `xcrun altool` | Agent 6 (Platform) |
-| App Group provisioning auth failure | 9 | App Groups, Push, or extension targets in `.entitlements` | Agent 6 (Platform) |
-| iOS first-IAP submission rejection | 10 | `import StoreKit` AND `Product.products(for:)` calls | Agent 6 (Platform) |
-| `.foregroundStyle(.accentColor)` compile failure | 11 | SwiftUI code using `.foregroundStyle(.accentColor)` | Agent 5 (Bugs) |
-| Keychain test failures (CryptoKit) | 12 | `SecItemAdd`/`SecItemCopyMatching` + symmetric key generation | Agent 5 (Bugs) |
-
-Record the matching entry numbers as `GOTCHA_ENTRIES_IN_SCOPE` (e.g., `[1, 2, 6, 7, 8, 11]`). Audit agents in Phase 1 will be instructed to `Read ~/.claude/lib/swift-gotchas.md` once and check each in-scope entry's trigger conditions against the codebase.
-
-
-<audit_instructions>
-
-## Phase 1: Unified Audit
-
-Project conventions are already in your context. Pass relevant conventions to each agent.
-
-Before launching audit agents, load the gotcha catalogue into your context so you can pass relevant entries to each agent:
-
-!`cat ~/.claude/lib/swift-gotchas.md`
-
-Use `GOTCHA_ENTRIES_IN_SCOPE` (recorded in Phase 0e) to filter which entries are relevant for this project. Pass each downstream agent ONLY the entries that match its category (per the table in Phase 0e), not the whole catalogue.
-
-Launch 8 Explore agents in two batches. Each agent must report findings in this format:
-```
-- **[CRITICAL/HIGH/MEDIUM/LOW]** `file:line` - Description. Suggested fix: ... Complexity: Simple/Medium/Complex
-```
-
-**Issue mode (`--issues`) changes where this format goes, not what it contains.**
-When `ISSUE_MODE=true`, create the spool directory before dispatching any agent:
-
-```bash
-SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_DIR"
-```
-
-Record the printed path as `SPOOL_DIR` in run state and pass **that literal path**
-to every agent — a shell variable does not survive between tool calls, so
-re-deriving it later would hand the filer agents an empty directory.
-
-Pass `SPOOL_DIR` to every audit agent along with the **"Bulk filing — spool the
-bodies, dedup on an index"** contract from
-[lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) (the partial Phase 2 reads
-in). Under that contract each agent writes one ready-to-file issue body per finding
-to `$SPOOL_DIR/<category-slug>.md` — using its own category slug from Phase 2's
-summary table (`security`, `code-quality`, `dry`, `architecture`, `bugs-perf`,
-`platform-swiftui`, `tests`, `ux`), so no two agents write the same file — and
-**returns only the compact index**:
-
-```
-<id> | <SEVERITY> | <category> | <file:line> | <one-line title>
-```
-
-Audit agents are `Explore` agents, which have no `Write` tool — they write their
- in quoted evidence survive verbatim. **Only the first write
+so backticks and `$` in quoted evidence survive verbatim. **Only the first write
 uses `>`; every later one must use `>>`** — an agent that spools findings across more
 than one Bash call and reaches for `cat >` a second time truncates everything it has
 already written, which is the tail-dropping this whole path exists to prevent.
@@ -855,7 +596,9 @@ Wait for ALL agents to complete before proceeding.
 > nothing else, and you should not open a spool file. When the surviving set is
 > larger than ~20 findings, hand the ids off to per-category **filer agents** per
 > the partial's "Bulk filing — spool the bodies, dedup on an index" section rather
-> than running `gh issue create` yourself; at or below that, file them inline.
+> than running `gh issue create` yourself; at or below that, file them inline —
+> still lifting each id's block verbatim out of its spool file into a `--body-file`,
+> never retyping it from the index line.
 
 1. Read the existing `PLAN.md` (create if it doesn't exist)
 2. Consolidate all findings from Phase 1, deduplicating across agents (same file:line flagged by multiple agents → keep the most specific description)
@@ -943,7 +686,9 @@ sharding a category further only makes rate limiting more likely.
 Merge the returned maps for the summary. **An id a filer returned as `ERROR` was not
 filed** — report those separately with their spool path so they can be filed by hand,
 and keep `SPOOL_DIR` on disk when any error occurred. At or below ~20 surviving
-findings, skip the fan-out and file them inline; the overhead isn't worth it.
+findings, skip the fan-out and file them inline — still `--body-file`ing each block
+verbatim out of the spool, never retyped from the index line; only the fan-out overhead
+isn't worth it at that size.
 
 ## Phase 3: Worktree Remediation
 
@@ -1008,6 +753,14 @@ Remediation runs in parallel, one worker per category that has CRITICAL, HIGH, o
 1. Spawn up to 5 general-purpose `Agent` sub-agents — one per category above that has actionable findings. **Resolve `REMEDIATION_MODEL_TIER` to this host's model per [lib/model-tiers.md](../../lib/model-tiers.md) and pass it as the `model` parameter on each `Agent` call.** If `REMEDIATION_MODEL_TIER` is `heavy`, pass this host's strongest alias (`model: "opus"` on Claude Code).
 2. Launch all `Agent` calls **in parallel** (multiple tool calls in a single response) and wait for all to return. Each sub-agent returns its results directly — no task board or shutdown step is needed.
 <!-- /if:teams -->
+
+**In issue mode the finding bodies are on disk, not in this context.** Phase 1 spooled
+them and returned only index lines, so a `{FINDINGS}` block built from those lines alone
+hands the worker a one-line title with no evidence and no suggested fix. Build `{FINDINGS}`
+from each worker's index lines **plus the literal `SPOOL_DIR` path**, and instruct the
+worker to read the full body for each of its ids out of `$SPOOL_DIR/<category-slug>.md`
+before fixing it. "The orchestrator never rewrites a spooled body" keeps the bodies out of
+*this* context — it does not license remediating from titles.
 
 ### Agent instructions template:
 

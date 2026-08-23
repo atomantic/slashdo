@@ -589,7 +589,12 @@ glab mr merge <num> --auto-merge --yes --remove-source-branch
 
 ## Phase 7: Clean up
 
-**Confirm the PR actually merged before touching anything.** `gh pr merge` exits zero on a repo with a **merge queue** while the PR is still open, and this phase removes the worktree first — so an unverified entry discards the working tree of a PR that has not landed. Read it back (GitHub: `gh pr view <num> --json state -q .state`, expect `MERGED`; GitLab: `glab mr view <num>`, expect `merged`); on anything else, **run none of this phase** — leave the worktree, branch, issue, and `in-progress` marker exactly as they are, and report the PR as queued/left-open.
+**If this run opened and merged a PR, confirm it actually merged before touching
+anything.** (A run that never opened one — a Phase 2 race hard-stop, a Phase 3 skip, or a
+Phase 3.5 reject — has no PR to read back: skip this gate entirely and go straight to the
+**Abandoned a claim** teardown below, which is what returns the item to the queue. Applying
+the gate there would strand the claim branch Phase 2 already published, which is the
+phantom claim this same phase verifies against.) `gh pr merge` exits zero on a repo with a **merge queue** while the PR is still open, and this phase removes the worktree first — so an unverified entry discards the working tree of a PR that has not landed. Read it back (GitHub: `gh pr view <num> --json state -q .state`, expect `MERGED`; GitLab: `glab mr view <num>`, expect `merged`); on anything else, **run none of this phase** — leave the worktree, branch, issue, and `in-progress` marker exactly as they are, and report the PR as queued/left-open.
 
 From the **main repo** (not the worktree), as a single Bash invocation, re-substituting the slug and worktree path stashed in Phase 2:
 
