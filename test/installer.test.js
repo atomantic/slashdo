@@ -1,6 +1,6 @@
 'use strict';
 
-const { describe, it, beforeEach } = require('node:test');
+const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
@@ -13,11 +13,13 @@ const { install, collectCommands, list } = require('../src/installer');
 // For registerHooksInSettings / deregisterHooksFromSettings, we test indirectly through install/uninstall
 
 const PACKAGE_DIR = path.resolve(__dirname, '..');
+const tempDirs = new Set();
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
 function makeTmpEnv(opts = {}) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-inst-'));
+  tempDirs.add(tmpDir);
   const env = {
     name: 'Test Env',
     commandsDir: path.join(tmpDir, 'commands'),
@@ -38,7 +40,12 @@ function makeTmpEnv(opts = {}) {
 
 function cleanup(tmpDir) {
   fs.rmSync(tmpDir, { recursive: true, force: true });
+  tempDirs.delete(tmpDir);
 }
+
+afterEach(() => {
+  for (const tmpDir of tempDirs) cleanup(tmpDir);
+});
 
 // ── collectCommands ─────────────────────────────────────────────────
 
@@ -444,6 +451,8 @@ describe('hook registration via install', () => {
     assert.ok(settings.hooks, 'hooks should exist');
     assert.ok(Array.isArray(settings.hooks.SessionStart), 'SessionStart should be array');
     assert.ok(settings.statusLine, 'statusLine should be configured');
+
+    cleanup(tmpDir);
   });
 
   it('skips registration on corrupted settings.json', () => {
