@@ -659,83 +659,78 @@ The Dependency Freedom remediation agent has a unique task: for each removable d
 
 <verification_and_pr>
 
-## Phase 4: Verification
+## Shared Pipeline Inputs
 
-After all agents complete:
+Phases 4, 4b, 5, 5d, 6, and 7 below are the **shared `better-*` pipeline** — the
+platform-agnostic mechanics this command runs verbatim with `/do:better-swift`
+via `lib/better-*.md`. Everything that differs between the two commands arrives
+through the inputs below, so a change to the pipeline lands in both by
+construction. Resolve these before Phase 4:
 
-1. Run the full build in the worktree:
-   ```bash
-   cd {WORKTREE_DIR} && {BUILD_CMD}
-   ```
-2. Run tests in the worktree:
-   ```bash
-   cd {WORKTREE_DIR} && {TEST_CMD}
-   ```
-3. If build or tests fail:
-   - Identify which commits caused the failure via `git bisect` or manual review
-   - Attempt to fix in a new commit: `fix: resolve build/test failure from {category} changes`
-   - If unfixable, revert the problematic commit(s): `git -C {WORKTREE_DIR} revert <sha>` and note which findings were skipped
-   - **When `SIMPLIFY_ONLY=true`**, a failing test is a regression by definition — the run promised identical behavior. Fix the refactor or revert it; do not edit the test to match the new behavior
-<!-- if:teams -->
-4. Shut down all agents via `SendMessage` with `type: "shutdown_request"`
-5. Clean up team via `TeamDelete`
-<!-- else -->
-4. No teardown needed — the parallel sub-agents from Phase 3c have already returned.
-<!-- /if:teams -->
+- `{BRANCH_PREFIX}` = `better` (staging branch `better/{DATE}`, category branches `better/{CATEGORY_SLUG}`)
+- `{PIPELINE_LABEL}` = `better audit`
+- `{PIPELINE_TITLE}` = `Better Audit`
+- `{VERIFY_SCOPE_SUFFIX}` = *(empty — single build target)*
+- `{VERIFY_SCOPE_NOTE}` = *(empty)*
+- `{VERIFY_STATUS_CLAUSE}` = *(empty)*
+- `{REVIEW_CHECKLIST}` = `Code Review Checklist` (the section below)
+- `{VERSION_BUMP_SECTION}` = `Version Bump Procedure` (the section below)
+- `{SIMPLIFY_ONLY}` — `true` when `--simplify-only` / `--refactor-only` was passed, else `false`
+- `{COMPAT_SHIM}` = `re-export`, `{COMPAT_HOST}` = `module`
+- `{MULTI_CATEGORY_FILE_EXAMPLE}` = ``server/index.js`` with both security and stack-specific changes
+- `{CATEGORY_SLUGS}` =
+  > `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`, `ux` (UI projects only), `structural` (strict mode only), and `cognitive-load` (simplify-only mode)
+  >
+  > When `SIMPLIFY_ONLY=true`, the only possible slugs are the [`SIMPLIFY_CATEGORIES`](#the-category-set) ones, and the per-category commit plus its PR title take the `refactor:` prefix. This does not touch the pipeline's other mandated messages — the version bump stays `chore:`, and build/review/CI fixes stay `fix:`
+- `{PR_BODY_SUMMARY_EXTRA}` = *(empty)*
+- `{PR_BODY_EXTRA_SECTIONS}` = *(empty)*
+- `{CI_FAILURE_CAUSES_EXTRA}` = *(empty)*
+- `{REVIEW_LOOP_EXTRA_INSTRUCTION}` = *(empty)*
+- `{REVIEW_STATUS_EXTRA}` = *(empty)*
+- `{SUMMARY_TABLE_ROWS}` / `{SUMMARY_TABLE_NOTES}` = the table and notes in the **Final Summary Table** section below
 
-## Phase 4b: Internal Code Review
+### Code Review Checklist
 
-Before creating PRs, run a deep code review on all remediation changes to catch issues that automated agents may have introduced.
+The checklist Phase 4b reviews the remediation diff against:
 
-1. Generate the diff of all changes in the worktree:
-   ```bash
-   cd {WORKTREE_DIR} && git diff {DEFAULT_BRANCH}...HEAD
-   ```
-2. Review the diff against the code review checklist:
-   ```
-   !`cat ~/.claude/lib/code-review-checklist.md`
-   ```
-   **When `SIMPLIFY_ONLY=true`**, carry one extra question through this same pass: *does any hunk change what this program does?* — different return value, different side effect, different error type or message, changed validation, changed output format, changed public API without a re-export. Every such hunk is reverted, not fixed. Then dispose of the finding behind it: if the improvement is still worth making in a run that's allowed to change behavior, **defer** it (an open PLAN.md item / tracker issue noting it needs behavior review); if the transformation cannot be done at all without changing behavior it must not change, record it as a rejection per [gate 4](#finding-gates).
-3. For each issue found:
-   - Fix in a new commit: `fix: {description of review finding}`
-   - Re-run `{BUILD_CMD}` and `{TEST_CMD}` to verify
-4. **Default mode**: Print a brief summary of findings and fixes, then proceed to PR creation automatically.
-   **Interactive mode (`--interactive`)**: Present a summary to the user via `AskUserQuestion`:
-   ```
-   AskUserQuestion([{
-     question: "Code review complete. {N} issues found and fixed. {list}. Proceed to PR creation?",
-     options: [
-       { label: "Proceed", description: "Create per-category PRs" },
-       { label: "Commit directly", description: "Merge worktree changes into {CURRENT_BRANCH} — no PRs, no review loops" },
-       { label: "Show diff", description: "Show the full diff for manual review before proceeding" },
-       { label: "Abort", description: "Stop here — I'll review manually" }
-     ]
-   }])
-   ```
-5. (Interactive only) If "Show diff" selected, print the diff and re-ask. If "Abort", stop and print the worktree path.
-6. If "Commit directly" selected:
-   - All remediation and review fixes are already committed incrementally in the worktree branch `better/{DATE}`. If any uncommitted changes remain, stage and commit them now:
-     ```bash
-     cd {WORKTREE_DIR}
-     git diff --quiet && git diff --cached --quiet || {
-       git add <list of remaining changed files>
-       git commit -m "fix: better audit remediation — remaining changes"
-     }
-     ```
-   - Return to the main repo checkout, merge the worktree branch, and clean up on success:
-     ```bash
-     cd {REPO_DIR}
-     git checkout {CURRENT_BRANCH}
-     if git merge better/{DATE}; then
-       git worktree remove {WORKTREE_DIR}
-       git branch -D better/{DATE}
-     else
-       echo "Merge conflict — resolve in {REPO_DIR}, then run:"
-       echo "  git worktree remove {WORKTREE_DIR}"
-       echo "  git branch -D better/{DATE}"
-     fi
-     ```
-   - Restore stash if needed (`git stash pop`), update PLAN.md, print final summary, then **stop** — this completes the workflow (Phases 5, 6, and 7 are skipped entirely since no PRs or category branches were created)
+!`cat ~/.claude/lib/code-review-checklist.md`
+
+### Version Bump Procedure
+
+The stack-specific half of Phase 5b — run on `better/{FIRST_CATEGORY}` once the
+aggregate SemVer `{LEVEL}` has been determined:
+
+```bash
+npm version {LEVEL} --no-git-tag-version
+git add package.json package-lock.json
+```
+
+### Final Summary Table
+
+The rows Phase 7 prints (`{SUMMARY_TABLE_ROWS}`):
+
+```
+| Category           | Findings | Fixed | Skipped | PR       | CI     | Review   |
+|--------------------|----------|-------|---------|----------|--------|----------|
+| Security & Secrets | ...      | ...   | ...     | #number  | pass   | approved |
+| Code Quality       | ...      | ...   | ...     | #number  | pass   | approved |
+| DRY & YAGNI        | ...      | ...   | ...     | #number  | pass   | approved |
+| Architecture       | ...      | ...   | ...     | #number  | pass   | approved |
+| Bugs & Perf        | ...      | ...   | ...     | #number  | pass   | approved |
+| Stack-Specific     | ...      | ...   | ...     | #number  | pass   | approved |
+| Dep Freedom        | ...      | ...   | ...     | #number  | pass   | approved |
+| Tests              | ...      | ...   | ...     | #number  | pass   | approved |
+| UX                 | ...      | ...   | ...     | #number  | pass   | approved |
+| Structural         | ...      | ...   | ...     | #number  | pass   | approved |
+| Cognitive Load     | ...      | ...   | ...     | #number  | pass   | approved |
+| TOTAL              | ...      | ...   | ...     | N PRs    |        |          |
+```
+
+And the notes that follow it (`{SUMMARY_TABLE_NOTES}`):
+
+> Omit the **UX** row when `HAS_UI=false`, the **Structural** row when `STRICT_MODE=false`, and the **Cognitive Load** row when `SIMPLIFY_ONLY=false`. When `SIMPLIFY_ONLY=true`, keep only the [`SIMPLIFY_CATEGORIES`](#the-category-set) rows and report every Test Enhancement stat below as `— (skipped: --simplify-only)`.
+
+!`cat ~/.claude/lib/better-verification.md`
 
 ## Phase 4c: Test Enhancement
 
@@ -849,151 +844,13 @@ After the test agent completes:
    - For each file not already in `FILE_OWNER_MAP`, assign it to the `tests` category
    - For each file already owned by another category, leave it in that category (co-located test changes ship with the code they test — the `tests` branch only contains standalone test files not owned by other categories)
 
-## Phase 5: Per-Category PR Creation
+!`cat ~/.claude/lib/better-pr-and-ci.md`
 
-Instead of one mega PR, create **separate branches and PRs for each category**. This enables independent review, targeted CI, and granular merge decisions.
+!`cat ~/.claude/lib/better-review-loop.md`
 
-### 5a: Build the Category Branches
+### Review loop libraries
 
-Using the `FILE_OWNER_MAP` from Phase 2 (updated in Phase 4c.3), create one branch per category.
-
-Initialize `CREATED_CATEGORY_SLUGS=""` (empty space-delimited string). After each category branch is successfully created and pushed below, append its slug: `CREATED_CATEGORY_SLUGS="$CREATED_CATEGORY_SLUGS {CATEGORY_SLUG}"`. Phase 7 uses this as the set of candidate branches for cleanup; when deleting branches, either run cleanup only after all desired merges are complete or explicitly verify that each branch in `CREATED_CATEGORY_SLUGS` has been merged before deleting it.
-
-For each category that has findings:
-1. Switch to `{DEFAULT_BRANCH}`: `git checkout {DEFAULT_BRANCH}`
-2. Create a category branch: `git checkout -b better/{CATEGORY_SLUG}`
-   - Use slugs: `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`, `ux` (UI projects only), `structural` (strict mode only), and `cognitive-load` (simplify-only mode)
-   - When `SIMPLIFY_ONLY=true`, the only possible slugs are the [`SIMPLIFY_CATEGORIES`](#the-category-set) ones, and the per-category commit in step 4 below plus its PR title take the `refactor:` prefix. This does not touch the pipeline's other mandated messages — the version bump stays `chore:`, and build/review/CI fixes stay `fix:`
-3. For each file assigned to this category in `FILE_OWNER_MAP`:
-   - **Modified files**: `git checkout better/{DATE} -- {file_path}`
-   - **New files (Added)**: `git checkout better/{DATE} -- {file_path}`
-   - **Deleted files**: `git rm {file_path}`
-4. Commit all staged changes with a descriptive message:
-   ```bash
-   git commit -m "{prefix}: {category summary}"
-   ```
-5. Push the branch: `git push -u origin better/{CATEGORY_SLUG}`
-
-**File isolation rule** (one file per branch) — each file must appear in exactly ONE branch. If a file has changes from multiple categories (e.g., `server/index.js` with both security and stack-specific changes), assign the whole file to one category based on the file ownership map. Do not split file-level changes across PRs.
-
-**Cross-PR dependency check** — verify each branch builds independently:
-```bash
-git checkout better/{CATEGORY_SLUG} && {BUILD_CMD}
-```
-If a branch fails because it imports from a new module created in another branch:
-- Add a backward-compatible re-export in the original module (in the branch that has the original module)
-- Or move the new module file to the branch that needs it
-- Or revert the import change to use the original module path
-
-### 5b: Version Bump
-
-Only if ALL category branches pass build:
-1. Set `FIRST_CATEGORY` to the first category slug that has a branch (e.g., `security` if it exists, otherwise the next in order)
-2. Analyze all commits across ALL category branches to determine the aggregate SemVer bump:
-   - Any `breaking:` or `BREAKING CHANGE` → **major**
-   - Any `feat:` → **minor**
-   - Otherwise (fix:, refactor:, security:, chore:) → **patch**
-3. Bump the version on that branch:
-   ```bash
-   git checkout better/{FIRST_CATEGORY}
-   npm version {LEVEL} --no-git-tag-version
-   git add package.json package-lock.json
-   git commit -m "chore: bump version to {NEW_VERSION}"
-   git push
-   ```
-4. If `HAS_CHANGELOG`, add an entry to `CHANGELOG_TARGET` in that project's established format and include it in the commit. Otherwise the commit message carries the change.
-
-### 5c: Create PRs
-
-For each category branch, create a PR:
-
-**GitHub:**
-```bash
-gh pr create --head better/{CATEGORY_SLUG} --base {DEFAULT_BRANCH} \
-  --title "{prefix}: {short description}" \
-  --body "$(cat <<'EOF'
-## Better Audit — {Category Name}
-
-### Summary
-{count} findings addressed across {files} files.
-
-### Changes
-{bulleted list of changes with severity levels}
-
-### Files Modified
-{list of files}
-
-### Merge Order
-{dependency info if applicable, e.g., "Depends on Security PR for shared helper exports" or "Independent — can be merged in any order"}
-EOF
-)"
-```
-
-**GitLab:**
-```bash
-glab mr create --source-branch better/{CATEGORY_SLUG} --target-branch {DEFAULT_BRANCH} \
-  --title "{prefix}: {short description}" --description "..."
-```
-
-When `SIMPLIFY_ONLY=true`, add a line to each PR/MR body stating that the change is behavior-preserving and naming the safety net that verified it:
-
-```markdown
-Behavior-preserving refactor: no observable change to return values, side
-effects, errors, or public API. Verified by `{TEST_CMD}` passing unmodified.
-```
-
-Record all `PR_NUMBERS` and `PR_URLS` in a map: `{category: {number, url}}`.
-
-**GATE: If `--no-merge` was passed, STOP HERE.** Print all PR URLs and summary.
-
-**GATE: If `VCS_HOST` is `gitlab`, STOP HERE.** Print all MR URLs and summary. The automated Phase 6 review loop + auto-merge run on GitHub PRs only; GitLab MRs are left open for manual review and merge.
-
-## Phase 5d: CI Verification
-
-After creating all PRs, verify CI passes on each one:
-
-1. Wait 30 seconds for CI to start
-2. For each PR, poll CI status:
-   ```bash
-   gh pr checks {PR_NUMBER}
-   ```
-   Poll every 30 seconds, max 10 minutes per PR.
-
-3. If CI **passes** on all PRs → proceed to Phase 6
-
-4. If CI **fails** on any PR:
-   a. Fetch the failure logs:
-      ```bash
-      gh run view {RUN_ID} --job {JOB_ID} --log-failed
-      ```
-   b. Analyze the failure — common causes:
-      - **Missing imports**: a file imports from a module in another PR's branch. Fix by adding a backward-compatible re-export or reverting the import.
-      - **Missing exports**: a module removed an export that other code still references. Fix by adding a re-export.
-      - **Test failures**: a test depends on code changed in the PR. Fix the test or the code.
-   c. Switch to the failing branch:
-      ```bash
-      git checkout better/{CATEGORY_SLUG}
-      ```
-   d. Make the fix, commit, and push:
-      ```bash
-      git add <specific files>
-      git commit -m "fix: resolve CI failure - {description}"
-      git push
-      ```
-   e. Re-poll CI until it passes or max retries (3) are exhausted
-   f. If CI still fails after 3 fix attempts, inform the user and continue with other PRs
-
-## Phase 6: Review Loop (GitHub only)
-
-**GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this entire phase AND the Phase 6.4 merge.** There is no default reviewer. Leave every PR open for manual review, print the PR URLs and summary (mark the Review column `none — left open`), then proceed to Phase 7 cleanup. PRs are merged only after a clean review loop, which requires an explicit `--review-with`.
-
-Otherwise, run each PR through the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (series default — reviewers run one-at-a-time within a PR so each sees the prior's fixes; `parallel` collects reviews concurrently then applies the union once), `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot and `@<login>` passes only; local-agent and ollama passes use their own fixed iteration caps). A copilot or `@<login>` pass with the default `--review-iterations 1` runs a single review-and-fix cycle and returns `capped` (clean-equivalent / ready-to-merge). `0` lets that pass loop until 0 comments, bounded by its own loop's 10-iteration guardrail. **Default mode**: auto-stop at the guardrail. **Interactive mode (`--interactive`)**: prompt the parent agent to ask the user whether to continue or stop.
-
-**Sub-agent delegation** (prevents context exhaustion): delegate each PR's review loop to a **separate general-purpose sub-agent** via the Agent tool. Launch sub-agents in parallel (one per PR). Each sub-agent runs the multi-reviewer loop (which dispatches each listed agent to the copilot loop or the local-agent loop) autonomously against its PR's branch and returns only the final aggregate status.
-
-### 6.1: Launch parallel sub-agents (one per PR)
-
-For each PR, spawn a general-purpose sub-agent that runs the **multi-reviewer wrapper** below over `REVIEW_AGENTS` for that PR. The wrapper `!cat`s the inner loop bodies it dispatches to:
+The wrapper and inner loop bodies Phase 6.1 dispatches to:
 
 !`cat ~/.claude/lib/multi-reviewer-loop.md`
 
@@ -1005,123 +862,9 @@ For each PR, spawn a general-purpose sub-agent that runs the **multi-reviewer wr
 
 !`cat ~/.claude/lib/ollama-review-loop.md`
 
-Pass each sub-agent the PR-specific variables: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the GitHub-side loops' `gh api` calls hit the right host on GitHub Enterprise), `better/{CATEGORY_SLUG}` (the branch the local-agent loop checks out and reviews), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the copilot/`@<login>` iteration cap; default 1).
-
-Launch all PR sub-agents in parallel. Wait for all to complete.
-
-### 6.2: Handle sub-agent results
-
-Each sub-agent returns the multi-reviewer wrapper's `{OVERALL_STATUS}` for its PR:
-- **clean**: every executed pass returned clean (copilot `too-large`, plus `capped` from any of the four loops — an explicitly configured cap, `~max=<n>` or `--review-iterations`, reached after applying every fix — count as clean; a *built-in* cap is `guardrail`, which is inconclusive) — mark PR as ready to merge
-- **partial**: a stop-mode flag short-circuited the list and every executed pass was clean-equivalent (`clean`, copilot `too-large`, or `capped`) — mark PR as ready to merge (the user opted into the short-circuit)
-- **inconclusive**: at least one requested pass timed out, errored, hit its guardrail, or was skipped (e.g. a missing CLI binary, or copilot when no PR review could be produced). **Default mode**: leave the PR open for manual review. **Interactive mode**: inform the user and ask whether to merge anyway, re-run, or skip
-- **dirty**: a pass left the branch with a broken build / failed tests / explicit reject. **Default mode**: leave the PR open. **Interactive mode**: ask whether to fix-and-retry or skip
-
-### 6.3: Merge Gate (MANDATORY)
-
-**Do NOT merge any PR whose aggregate review status is not `clean` (or `partial` under an explicit stop-mode).** A missing or inconclusive review is NOT a clean review.
-
-### Default Mode (autonomous)
-
-Print the review status summary, then auto-merge all PRs whose reviews completed cleanly. PRs that timed out, hit guardrails, or still have unresolved comments are left open for manual review. Print which PRs were merged and which were left open.
-
-### Interactive Mode (`--interactive`)
-
-Present the review status summary to the user via `AskUserQuestion`:
-```
-AskUserQuestion([{
-  question: "Review status ({REVIEW_AGENTS}):\n{for each PR: #number - aggregate status (clean/partial/inconclusive/dirty)}\n\nHow would you like to proceed?",
-  options: [
-    { label: "Merge approved PRs", description: "Merge only PRs with passing review" },
-    { label: "Merge all", description: "Merge all PRs regardless of review status" },
-    { label: "Wait", description: "Wait longer for pending reviews" },
-    { label: "Don't merge", description: "Leave PRs open for manual review" }
-  ]
-}])
-```
-
-Only proceed with merging based on the user's selection.
-
-### 6.4: Merge
-
-For each PR approved for merge (in dependency order if applicable):
-```bash
-gh pr merge {PR_NUMBER} --merge
-```
-
-Verify each merge:
-```bash
-gh pr view {PR_NUMBER} --json state,mergedAt
-```
-
-If merge fails (e.g., branch protection, merge conflicts from a prior PR):
-- If merge conflict: rebase the branch and retry
-  ```bash
-  git checkout better/{CATEGORY_SLUG}
-  git pull --rebase origin {DEFAULT_BRANCH}
-  git push --force-with-lease
-  ```
-  Then re-run CI check before merging.
-- If branch protection: inform the user and suggest manual merge
-
 </verification_and_pr>
 
-## Phase 7: Cleanup
-
-1. Remove the worktree:
-   ```bash
-   git worktree remove {WORKTREE_DIR}
-   ```
-2. Delete the local staging branch and per-category branches (local + remote). Use the tracked list of branches from Phase 5 rather than a fixed list:
-   ```bash
-   git checkout {DEFAULT_BRANCH}
-   git branch -D better/{DATE}
-   # CREATED_CATEGORY_SLUGS is a space-delimited string, e.g. "security code-quality tests"
-   for slug in $CREATED_CATEGORY_SLUGS; do
-     git branch -d "better/$slug" || echo "warning: local branch better/$slug not found or not fully merged — skipping (use -D to force)"
-     git push origin --delete "better/$slug" || echo "warning: remote branch better/$slug not found or already deleted"
-   done
-   ```
-   `-D` (force delete) is used only for the staging branch `better/{DATE}` because it is intentionally unmerged — its file contents are cherry-picked into category branches. Category branches use `-d` (safe delete) so that unmerged work is not accidentally lost; if a category branch was not merged, the warning will surface it. The guards prevent errors from interrupting cleanup.
-3. **Issue mode — remove the spool.** Phase 4c was the last reader of `SPOOL_DIR`, so remove it using the literal path from run state:
-   ```bash
-   rm -rf "$SPOOL_DIR"
-   ```
-   **Unless any filer returned `ERROR`** — those findings were never filed, and their bodies exist nowhere else. Leave the directory and print its path so they can be filed by hand.
-4. Restore stashed changes (if stashed in Phase 3a):
-   ```bash
-   git stash pop
-   ```
-4. Update PLAN.md:
-   - Mark completed findings by flipping `- [ ]` → `- [x]` — **preserve the `[<slug>]` ID** on each line (only the box character changes, the slug stays). See [lib/plan-id-format.md](../../lib/plan-id-format.md).
-   - Add PR links to each category section header
-   - Note any skipped findings with reasons
-5. Print the final summary table:
-
-```
-| Category           | Findings | Fixed | Skipped | PR       | CI     | Review   |
-|--------------------|----------|-------|---------|----------|--------|----------|
-| Security & Secrets | ...      | ...   | ...     | #number  | pass   | approved |
-| Code Quality       | ...      | ...   | ...     | #number  | pass   | approved |
-| DRY & YAGNI        | ...      | ...   | ...     | #number  | pass   | approved |
-| Architecture       | ...      | ...   | ...     | #number  | pass   | approved |
-| Bugs & Perf        | ...      | ...   | ...     | #number  | pass   | approved |
-| Stack-Specific     | ...      | ...   | ...     | #number  | pass   | approved |
-| Dep Freedom        | ...      | ...   | ...     | #number  | pass   | approved |
-| Tests              | ...      | ...   | ...     | #number  | pass   | approved |
-| UX                 | ...      | ...   | ...     | #number  | pass   | approved |
-| Structural         | ...      | ...   | ...     | #number  | pass   | approved |
-| Cognitive Load     | ...      | ...   | ...     | #number  | pass   | approved |
-| TOTAL              | ...      | ...   | ...     | N PRs    |        |          |
-
-Omit the **UX** row when `HAS_UI=false`, the **Structural** row when `STRICT_MODE=false`, and the **Cognitive Load** row when `SIMPLIFY_ONLY=false`. When `SIMPLIFY_ONLY=true`, keep only the [`SIMPLIFY_CATEGORIES`](#the-category-set) rows and report every Test Enhancement stat below as `— (skipped: --simplify-only)`.
-
-Test Enhancement Stats:
-- Vacuous tests fixed: {VACUOUS_TESTS_FIXED}
-- Weak tests strengthened: {WEAK_TESTS_STRENGTHENED}
-- New test cases added: {NEW_TEST_CASES}
-- New test files created: {NEW_TEST_FILES}
-```
+!`cat ~/.claude/lib/better-cleanup.md`
 
 ## Error Recovery
 
