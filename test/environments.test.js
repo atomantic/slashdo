@@ -125,6 +125,8 @@ describe('environment shape', () => {
       if (env.supportsHooks) {
         assert.ok(env.hooksDir, `${name} supports hooks but missing hooksDir`);
         assert.ok(env.settingsFile, `${name} supports hooks but missing settingsFile`);
+        assert.equal(typeof env.registerHooks, 'function', `${name} supports hooks but has no settings adapter`);
+        assert.equal(typeof env.deregisterHooks, 'function', `${name} supports hooks but has no settings cleanup adapter`);
       }
     }
   });

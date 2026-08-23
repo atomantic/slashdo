@@ -7,6 +7,7 @@ const path = require('path');
 const os = require('os');
 
 const { install, collectCommands, list } = require('../src/installer');
+const { ENVIRONMENTS } = require('../src/environments');
 
 // Reach into internals we need to test directly
 // These are not exported, so we require the file and test via the install() entrypoint
@@ -32,6 +33,8 @@ function makeTmpEnv(opts = {}) {
     libPathPrefix: opts.libPathPrefix !== undefined ? opts.libPathPrefix : '~/.claude/lib/',
     supportsHooks: opts.supportsHooks !== undefined ? opts.supportsHooks : true,
     supportsCatInclusion: opts.supportsCatInclusion !== undefined ? opts.supportsCatInclusion : true,
+    registerHooks: opts.registerHooks !== undefined ? opts.registerHooks : ENVIRONMENTS.claude.registerHooks,
+    deregisterHooks: opts.deregisterHooks !== undefined ? opts.deregisterHooks : ENVIRONMENTS.claude.deregisterHooks,
   };
   return { tmpDir, env };
 }
@@ -141,6 +144,17 @@ describe('install', () => {
     const hookFiles = fs.readdirSync(env.hooksDir);
     assert.ok(hookFiles.length > 0, 'Should install hook files');
 
+    cleanup(tmpDir);
+  });
+
+  it('does not apply Claude settings to a hook-capable environment without an adapter', () => {
+    const { tmpDir, env } = makeTmpEnv({ registerHooks: null, deregisterHooks: null });
+    const originalSettings = { lifecycle: { onStart: ['future-tool-hook'] } };
+    fs.writeFileSync(env.settingsFile, JSON.stringify(originalSettings), 'utf8');
+
+    install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+
+    assert.deepEqual(JSON.parse(fs.readFileSync(env.settingsFile, 'utf8')), originalSettings);
     cleanup(tmpDir);
   });
 
