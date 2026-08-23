@@ -6,7 +6,18 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const readCommand = (name) => fs.readFileSync(path.join(root, 'commands', 'do', name), 'utf8');
+// The spool contract is on the command as an agent actually reads it, which now
+// includes the shared `lib/better-*.md` pipeline partials the audit commands
+// `!cat`. Resolve those includes so a contract keeps holding wherever the prose
+// lives — inline in the command, or in a partial both commands share.
+const resolveIncludes = (text) =>
+  text.replace(/!`cat ~\/\.claude\/lib\/(.+?)`/g, (match, lib) => {
+    const file = path.join(root, 'lib', lib);
+    return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim() : match;
+  });
+
+const readCommand = (name) =>
+  resolveIncludes(fs.readFileSync(path.join(root, 'commands', 'do', name), 'utf8'));
 const partial = fs.readFileSync(path.join(root, 'lib', 'plan-issue-mode.md'), 'utf8');
 
 // `--issues` at audit scale spools each finding's ready-to-file body to disk and

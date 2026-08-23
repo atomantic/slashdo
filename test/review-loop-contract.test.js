@@ -454,6 +454,88 @@ describe('review-loop parse contracts', () => {
     assert.match(rpr, /\{OLLAMA_EFFORT\}/);
   });
 
+  it('derives GH_HOST from the one lib partial, never a hand-copied snippet', () => {
+    // lib/gh-host.md exists so the Enterprise-safe API host is derived ONCE, with its
+    // full 3-step fallback chain. Eight sites used to re-type a shortened 2-step copy
+    // that skipped the `gh repo view` fallback, so a repo with no parsable origin
+    // silently polled github.com instead of the Enterprise host. Assert the partial
+    // still carries the chain, that every command whose `gh api` calls need the host
+    // pulls it in via the runtime include, and that nobody re-types the derivation.
+    const partial = readLib('gh-host.md');
+    assert.match(partial, /GH_HOST=\$\(git remote get-url origin/);
+    assert.match(partial, /gh repo view --json url --jq '\.url'/);
+    assert.match(partial, /\|\| GH_HOST=github\.com/);
+
+    const GH_HOST_INCLUDE = /!`cat ~\/\.claude\/lib\/gh-host\.md`/;
+    const CAT_INCLUDE = /!`cat ~\/\.claude\/lib\/([A-Za-z0-9._-]+\.md)`/g;
+    const HOSTNAME_USE = /gh api --hostname/;
+
+    // A file needs GH_HOST if it calls `gh api --hostname` itself or inlines a lib
+    // that does (gh-host.md itself only documents the flag, so it doesn't count).
+    const libNeedsHost = (name, seen = new Set()) => {
+      if (name === 'gh-host.md' || seen.has(name)) return false;
+      seen.add(name);
+      const body = readLib(name);
+      if (HOSTNAME_USE.test(body)) return true;
+      return [...body.matchAll(CAT_INCLUDE)].some(([, dep]) => libNeedsHost(dep, seen));
+    };
+
+    // Derived from the tree, never hardcoded: a new command (or a newly-included lib)
+    // that reaches a `gh api --hostname` call must carry the include or fail here.
+    const commandsDir = path.join(__dirname, '..', 'commands', 'do');
+    const commands = fs.readdirSync(commandsDir).filter((f) => f.endsWith('.md'));
+    const needsHost = commands.filter((name) => {
+      const body = readCommand(name);
+      return HOSTNAME_USE.test(body)
+        || [...body.matchAll(CAT_INCLUDE)].some(([, dep]) => libNeedsHost(dep));
+    });
+    assert.ok(
+      needsHost.length >= 8,
+      `expected the GH_HOST-dependent command set to stay broad, got ${needsHost.join(', ')}`,
+    );
+    for (const name of needsHost) {
+      assert.match(
+        readCommand(name),
+        GH_HOST_INCLUDE,
+        `${name} reaches a \`gh api --hostname\` call, so it must include lib/gh-host.md`,
+      );
+    }
+
+    // And nobody re-types the derivation inline. Two bans, both derived over every file:
+    // the origin-parse `sed` itself (the copied half that matters), and a bare
+    // github.com fallback in its common spellings. next.md legitimately runs that parse
+    // once as ORIGIN_HOST to pick gh vs glab BEFORE any GH_HOST exists (gh-host.md's own
+    // `gh repo view` fallback is GitHub-only, so it cannot do that job) — that one line
+    // is the sole exemption.
+    const ORIGIN_PARSE = "sed -E 's#^[a-z]+://##";
+    const DRIFTED_FALLBACK = /\|\|\s*(?:GH_)?HOST="?github\.com/;
+    const DRIFTED_DEFAULT = /\$\{(?:GH_)?HOST:[=-]"?github\.com/;
+    const banned = (body, label) => {
+      for (const line of body.split('\n')) {
+        if (line.includes(ORIGIN_PARSE) && !line.includes('ORIGIN_HOST=')) {
+          assert.fail(`${label} re-types the gh-host.md origin parse: ${line.trim()}`);
+        }
+        assert.doesNotMatch(line, DRIFTED_FALLBACK, `${label} hand-copies the GH_HOST fallback`);
+        assert.doesNotMatch(line, DRIFTED_DEFAULT, `${label} hand-copies the GH_HOST fallback`);
+      }
+    };
+    for (const name of commands) banned(readCommand(name), name);
+    const libsDir = path.join(__dirname, '..', 'lib');
+    for (const name of fs.readdirSync(libsDir).filter((f) => f.endsWith('.md') && f !== 'gh-host.md')) {
+      banned(readLib(name), `lib/${name}`);
+    }
+    // The repo's own .claude/commands/ specs too — a copy hid there once, outside a
+    // sweep that only walked the shipped tree.
+    const localDir = path.join(__dirname, '..', '.claude', 'commands');
+    const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(path.join(dir, e.name)) : (e.name.endsWith('.md') ? [path.join(dir, e.name)] : []));
+    if (fs.existsSync(localDir)) {
+      for (const file of walk(localDir)) {
+        banned(fs.readFileSync(file, 'utf8'), path.relative(path.join(__dirname, '..'), file));
+      }
+    }
+  });
+
   it('keeps the empty-array rule in one partial the loops point at', () => {
     // An absent timeout binary is an environment condition, not a reviewer failure.
     // The explanation lives in ONE partial (the lib/gh-host.md convention) — five
