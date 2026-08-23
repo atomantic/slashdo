@@ -69,8 +69,11 @@ describe('worktree-safe merge contracts', () => {
     }
     assert.match(body, /git ls-remote --exit-code --heads origin "<branch>"/);
     assert.match(body, /git ls-remote --exit-code --heads origin "next\/\$\{SLUG\}"/);
-    // ...and a survivor fails Phase 7's cleanup chain rather than being logged away.
-    assert.match(body, /remote claim branch next\/\$\{SLUG\} still exists[^\n]*"; false/);
+    // ...an unconfirmed branch fails Phase 7's cleanup chain rather than being
+    // logged away, and only rc 2 ("no such ref") counts as already-gone — a
+    // transport or auth failure proves nothing about whether the branch survived.
+    assert.match(body, /could not confirm next\/\$\{SLUG\} is gone \(ls-remote rc=\$RC\)[^\n]*"; false/);
+    assert.match(body, /\[ "\$RC" -eq 2 \]/);
   });
 
   it('explains why the flag is absent so it is not "cleaned up" back in', () => {
@@ -119,6 +122,15 @@ describe('worktree-safe merge contracts', () => {
   it('gates /do:pr\'s remote delete on a read-back MERGED state too', () => {
     const body = readCommand('pr.md');
     assert.match(body, /if \[ "\$\(gh pr view \{number\} --json state -q \.state\)" = "MERGED" \]; then/);
+  });
+
+  it('reports /do:pr\'s delete result without inverting the exit status', () => {
+    // `ls-remote && echo ERROR` exits 0 on a real failure (echo is last) and
+    // non-zero on the benign already-gone case — the very "non-zero after a
+    // successful merge" symptom this branch exists to remove.
+    const body = readCommand('pr.md');
+    assert.match(body, /git ls-remote --exit-code --heads "\$DEL_REMOTE" "\$DEL_REF" >\/dev\/null 2>&1; RC=\$\?/);
+    assert.doesNotMatch(body, /git ls-remote[^\n]*"\$DEL_REF" >\/dev\/null 2>&1 &&/);
   });
 
   it('skips /do:pr step 6\'s default-branch sync inside a linked worktree', () => {

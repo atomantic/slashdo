@@ -128,10 +128,10 @@ After the barrier, merge the wave's returned PRs **one at a time, never concurre
      # Delete the head branch ONLY once the PR really reads MERGED.
      if [ "$(gh pr view <pr_number> --json state -q .state)" = "MERGED" ]; then
        if ! git push origin --delete "<branch>"; then
-         # Already gone (repo auto-deletes merged heads) is fine; still there is not.
-         if git ls-remote --exit-code --heads origin "<branch>" >/dev/null 2>&1; then
-           echo "ERROR: remote branch <branch> still exists and could not be deleted — record this PR for follow-up"
-         fi
+         # rc 2 means "no such ref" — already gone, which is success. Any other rc is
+         # a transport/auth failure that proves nothing about the branch.
+         git ls-remote --exit-code --heads origin "<branch>" >/dev/null 2>&1; RC=$?
+         [ "$RC" -eq 2 ] || echo "ERROR: could not confirm <branch> is gone (ls-remote rc=$RC) — record this PR for follow-up"
        fi
      else
        echo "PR <pr_number> is not MERGED — keeping <branch>"
@@ -606,21 +606,34 @@ git checkout "${DEFAULT_BRANCH}" && \
 git pull --rebase --autostash && \
 git branch -d "next/${SLUG}" && \
 if ! git push origin --delete "next/${SLUG}"; then
-  # A branch that is already gone is success; one that survives the failed delete
-  # is not — it keeps reading as an in-flight claim to every other machine.
-  if git ls-remote --exit-code --heads origin "next/${SLUG}" >/dev/null 2>&1; then
-    echo "ERROR: remote claim branch next/${SLUG} still exists — delete it manually"; false
-  else
+  # A branch that is already gone is success; anything else is not — a surviving
+  # claim branch keeps reading as in-flight to every other machine. rc 2 is
+  # "no such ref"; every other rc is a transport/auth failure that proves nothing.
+  git ls-remote --exit-code --heads origin "next/${SLUG}" >/dev/null 2>&1; RC=$?
+  if [ "$RC" -eq 2 ]; then
     echo "note: remote branch next/${SLUG} was already gone"
+  else
+    echo "ERROR: could not confirm next/${SLUG} is gone (ls-remote rc=$RC) — delete it manually"; false
   fi
 fi
 ```
 
 (Order matters: remove the worktree, **sync the default branch, delete the local claim branch, and only THEN touch the remote** — every step is `&&`-gated so the chain short-circuits on the first failure. Three invariants hold: (1) a `git branch -d` failure ("not fully merged") can't skip the sync, because the sync already ran; (2) any earlier failure (worktree-remove, fetch, checkout, rebase conflict) stops the chain *before* the local delete, so the claim branch is never removed while the default branch is stale; and (3) **the remote-delete is the LAST link**, so a failed/partial cleanup — which may still hold unmerged work in the worktree — never retracts the remote claim and re-exposes the item to other machines. On GitHub the merge deliberately does **not** pass `--delete-branch` (it would fail from inside the worktree), so this trailing delete is the real remote deletion — and because it is now load-bearing rather than a no-op, a failure must be **distinguished, not swallowed**. A blanket `|| true` would report a clean sweep while the claim branch survives on the remote, where Phase 1's in-flight scan keeps reading the issue as claimed on every machine, forever. So the delete falls back to `git ls-remote`: a branch that is already gone (GitLab's `--remove-source-branch`, or a repo that auto-deletes merged heads) is success, and one that is still there after a failed delete — network, branch protection, revoked push rights — prints and fails the chain.)
 
-**Abandoned a claim (Phase 3 skip / Phase 3.5 reject — no PR, work discarded)?** The branch is unmerged, so `git branch -d` won't remove it. Retract the claim explicitly instead (force-delete local, delete remote) so the item returns to the queue: from the main repo, `git worktree remove --force "${WORKTREE}"; git branch -D "next/${SLUG}"; git push origin --delete "next/${SLUG}" 2>/dev/null || true`. (Issues-mode abort branches in Phase 2 already do this inline.)
+**Abandoned a claim (Phase 3 skip / Phase 3.5 reject — no PR, work discarded)?** The branch is unmerged, so `git branch -d` won't remove it. Retract the claim explicitly instead (force-delete local, delete remote) so the item returns to the queue — and **verify the remote retract landed**, because Phase 2 published this branch to origin the moment it was created: a silently failed delete leaves a phantom claim that Phase 1's in-flight scan honours forever, on every machine, with no local artifact left to hint at it. From the main repo:
 
-**Issues mode — confirm closed, then clear the marker.** A `Closes #<num>` in the PR body auto-closes on merge to the **default branch**. Verify state (GitHub: `gh issue view <num> --json state -q .state`, expect `CLOSED`; GitLab: `glab issue view <num> --output json --jq .state`, expect `closed`); if still open, close explicitly (GitHub: `gh issue close <num> --comment "Shipped in PR #<PR_NUM>."`; GitLab: `glab issue note <num> -m "Shipped in PR #<PR_NUM>." && glab issue close <num>`). Then drop the stale label (GitHub: `gh issue edit "$ISSUE_NUM" --remove-label in-progress 2>/dev/null || true`; GitLab: `glab issue update "$ISSUE_NUM" --unlabel in-progress 2>/dev/null || true`). (Leave the assignee — it records who shipped it; a closed issue is never a Phase 1 candidate anyway.)
+```bash
+git worktree remove --force "${WORKTREE}"
+git branch -D "next/${SLUG}"
+if ! git push origin --delete "next/${SLUG}"; then
+  git ls-remote --exit-code --heads origin "next/${SLUG}" >/dev/null 2>&1; RC=$?
+  [ "$RC" -eq 2 ] || echo "ERROR: claim NOT retracted — delete next/${SLUG} manually (ls-remote rc=$RC)"
+fi
+```
+
+(Issues-mode abort branches in Phase 2 do the same teardown inline, before any branch is published.)
+
+**Issues mode — confirm closed, then clear the marker — but only for a PR that actually merged.** On a repo with a merge queue `gh pr merge` exits zero while the PR is still open, so read the PR back first (`gh pr view <num> --json state -q .state`; GitLab: `glab mr view <num>`): anything other than `MERGED` means nothing shipped — leave the issue open, keep its `in-progress` label and assignee, and report the PR as queued/left-open instead of running this step. For a genuinely merged PR, a `Closes #<num>` in the PR body auto-closes the issue on merge to the **default branch**. Verify state (GitHub: `gh issue view <num> --json state -q .state`, expect `CLOSED`; GitLab: `glab issue view <num> --output json --jq .state`, expect `closed`); if still open, close explicitly (GitHub: `gh issue close <num> --comment "Shipped in PR #<PR_NUM>."`; GitLab: `glab issue note <num> -m "Shipped in PR #<PR_NUM>." && glab issue close <num>`). Then drop the stale label (GitHub: `gh issue edit "$ISSUE_NUM" --remove-label in-progress 2>/dev/null || true`; GitLab: `glab issue update "$ISSUE_NUM" --unlabel in-progress 2>/dev/null || true`). (Leave the assignee — it records who shipped it; a closed issue is never a Phase 1 candidate anyway.)
 
 **Issues mode — re-evaluate the parent epic (the shipped issue may have been an epic's last child).** Once the issue is confirmed closed, resolve its parent epic with the shared epic logic ("Resolving a child's parent epic" in [lib/epic-children.md](../../lib/epic-children.md), inlined in Phase 1). If a parent epic `#P` exists, re-classify it:
 - `epic-done` (this was the last open child and `#P` has no remaining wrap-up tasks) → **close the epic** with an evidence comment (GitHub: `gh issue close "$P" --comment "All children closed (incl. #<num>) — closing epic. (slashdo)"`; GitLab: `glab issue note "$P" -m "All children closed (incl. #<num>) — closing epic. (slashdo)" && glab issue close "$P"`).

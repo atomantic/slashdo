@@ -84,7 +84,7 @@ Print: `PR flow: {current_branch} → {default_branch}`
 - Commit all changes to the current branch
 - Keep commit message concise and do not use co-author information
 - **Sync the branch onto the latest `origin/{default_branch}` first.** Reviewers below diff the branch against the **local** `{default_branch}` ref (`git diff {default_branch}...HEAD`), anchored on the merge-base. If `origin/{default_branch}` moved forward since this branch was cut and the branch was never rebased, reviewers evaluate against a stale base and flag unrelated changes that landed on the default branch outside this branch's work. Rebase to eliminate that noise:
-  - `git fetch origin {default_branch}:{default_branch}` to fast-forward the **local** `{default_branch}` ref (and its remote-tracking ref) to match origin. A plain `git fetch origin {default_branch}` only moves the remote-tracking ref — the reviewers diff against the *local* ref, so it must be the one advanced, or the merge-base stays stale and the noise remains. This works because the flow already moved you to a feature branch (Detect Branches step 3), so the default branch isn't checked out. If your local `{default_branch}` has diverged from origin and the fetch can't fast-forward it (unusual), surface that and stop rather than forcing it.
+  - `git fetch origin {default_branch}:{default_branch}` to fast-forward the **local** `{default_branch}` ref (and its remote-tracking ref) to match origin. A plain `git fetch origin {default_branch}` only moves the remote-tracking ref — the reviewers diff against the *local* ref, so it must be the one advanced, or the merge-base stays stale and the noise remains. This works because the flow already moved you to a feature branch (Detect Branches step 3), so the default branch isn't checked out **here**. **In a linked worktree it can still fail** — git's refusal is repo-wide, so `fatal: refusing to fetch into branch 'refs/heads/{default_branch}' checked out at …` means the *parent* repo holds it, which is the normal state when `/do:next` or a claim flow invoked `/do:pr`. That is not a divergence and not a reason to stop: fall back to `git fetch origin {default_branch}` and rebase onto the remote-tracking ref (`git rebase origin/{default_branch}`), and have the reviewers diff `origin/{default_branch}...HEAD` — the local ref is the parent repo's to advance, and its cleanup phase does that. If your local `{default_branch}` has diverged from origin and the fetch can't fast-forward it (unusual), surface that and stop rather than forcing it.
   - `git rebase {default_branch}` to replay this branch's commits on top of the now-current default branch.
   - If the rebase hits conflicts, **abort** (`git rebase --abort`) and stop — print the conflicting files and ask the user to resolve them, rather than guessing at a merge. Do not proceed to review against a half-rebased tree.
   - After a clean rebase the branch's merge-base with the refreshed local `{default_branch}` is current, so `git diff {default_branch}...HEAD` shows only this branch's own changes.
@@ -271,9 +271,15 @@ When `MERGE_ENABLED=true`, gate the merge on **all three** of the review result,
        DEL_REF="$(git config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
        if [ -n "$DEL_REMOTE" ] && [ "$DEL_REMOTE" != "." ]; then
          if ! git push "$DEL_REMOTE" --delete "$DEL_REF"; then
-           # Already gone (the repo auto-deletes merged heads) is fine; still there is not.
-           git ls-remote --exit-code --heads "$DEL_REMOTE" "$DEL_REF" >/dev/null 2>&1 &&
-             echo "ERROR: remote branch $DEL_REF still exists and could not be deleted — delete it manually"
+           # rc 2 means "no such ref" — already gone (the repo auto-deletes merged
+           # heads), which is success. Any other rc is a transport/auth failure that
+           # proves nothing, so do NOT report the branch as deleted.
+           git ls-remote --exit-code --heads "$DEL_REMOTE" "$DEL_REF" >/dev/null 2>&1; RC=$?
+           if [ "$RC" -eq 2 ]; then
+             echo "note: remote branch $DEL_REF was already gone"
+           else
+             echo "ERROR: could not confirm $DEL_REF is gone (ls-remote rc=$RC) — delete it manually"
+           fi
          fi
        fi
      else
