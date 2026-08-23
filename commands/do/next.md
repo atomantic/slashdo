@@ -124,8 +124,10 @@ After the barrier, merge the wave's returned PRs **one at a time, never concurre
      ```bash
      git -C "<worktree>" push
      gh pr checks <pr_number> --required --watch --fail-fast
-     gh pr merge <pr_number> --merge --delete-branch
+     gh pr merge <pr_number> --merge
+     git push origin --delete "next/issue-<num>" 2>/dev/null || true
      ```
+     **No `--delete-branch`** — it deletes the *local* branch too, and `next/issue-<num>` is checked out in the agent's worktree, so git refuses (`cannot delete branch 'next/issue-<num>' used by worktree at …`) and **`gh` exits non-zero after the merge already succeeded**. That reads as a merge failure and fires any `||` fallback wrapped around the merge. Delete the remote branch with the explicit `git push origin --delete` above — it needs no local checkout — and let Phase D remove the worktree and the local branch from the main repo, where that works.
    - GitLab (`glab`) — there's no discrete "required checks" list to scope to; the project's own merge/pipeline-success requirement governs, and `--auto-merge` (the default) already waits for the pipeline before merging:
      ```bash
      git -C "<worktree>" push
@@ -566,12 +568,14 @@ cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit 
 ```bash
 git push
 # Only reached when the review gate passed AND the tree is conflict-free.
-# GitHub:
-gh pr merge <num> --merge --delete-branch
+# GitHub — no `--delete-branch` (see below); Phase 7 deletes both branches:
+gh pr merge <num> --merge
 # GitLab (`--auto-merge` is the default and, unlike the gh command above, makes
 # this wait for the pipeline to succeed before merging rather than merging outright):
 glab mr merge <num> --auto-merge --yes --remove-source-branch
 ```
+
+**Why no `--delete-branch` on the `gh` merge:** you are inside the linked worktree, and `--delete-branch` deletes the *local* branch too — for which `gh` first checks out the default branch. That fails in a linked worktree (`fatal: '<default>' is already used by worktree at …`, because the parent repo has it checked out) and **`gh` exits non-zero even though the merge itself succeeded**. Any `||` fallback chain wrapped around the merge then fires on a merge that already landed. Without the flag the exit status means what it says, and Phase 7 owns both branches: it removes the worktree, deletes the local branch from the main repo, and deletes the remote branch explicitly.
 
 ## Phase 7: Clean up
 
@@ -591,10 +595,10 @@ git fetch origin "${DEFAULT_BRANCH}" && \
 git checkout "${DEFAULT_BRANCH}" && \
 git pull --rebase --autostash && \
 git branch -d "next/${SLUG}" && \
-{ git push origin --delete "next/${SLUG}" 2>/dev/null || true; }   # remote no-op after --delete-branch merge
+{ git push origin --delete "next/${SLUG}" 2>/dev/null || true; }   # deletes the remote claim branch
 ```
 
-(Order matters: remove the worktree, **sync the default branch, delete the local claim branch, and only THEN touch the remote** — every step is `&&`-gated so the chain short-circuits on the first failure. Three invariants hold: (1) a `git branch -d` failure ("not fully merged") can't skip the sync, because the sync already ran; (2) any earlier failure (worktree-remove, fetch, checkout, rebase conflict) stops the chain *before* the local delete, so the claim branch is never removed while the default branch is stale; and (3) **the remote-delete is the LAST link**, so a failed/partial cleanup — which may still hold unmerged work in the worktree — never retracts the remote claim and re-exposes the item to other machines. On the happy path `gh pr merge --delete-branch` (GitHub) / `glab mr merge --remove-source-branch` (GitLab) already removed the remote branch, so the trailing delete is a harmless no-op.)
+(Order matters: remove the worktree, **sync the default branch, delete the local claim branch, and only THEN touch the remote** — every step is `&&`-gated so the chain short-circuits on the first failure. Three invariants hold: (1) a `git branch -d` failure ("not fully merged") can't skip the sync, because the sync already ran; (2) any earlier failure (worktree-remove, fetch, checkout, rebase conflict) stops the chain *before* the local delete, so the claim branch is never removed while the default branch is stale; and (3) **the remote-delete is the LAST link**, so a failed/partial cleanup — which may still hold unmerged work in the worktree — never retracts the remote claim and re-exposes the item to other machines. On GitHub the merge deliberately does **not** pass `--delete-branch` (it would fail from inside the worktree), so this trailing delete is the real remote deletion — `|| true` keeps an already-deleted branch (GitLab's `--remove-source-branch`, or a repo that auto-deletes merged heads) from failing the chain.)
 
 **Abandoned a claim (Phase 3 skip / Phase 3.5 reject — no PR, work discarded)?** The branch is unmerged, so `git branch -d` won't remove it. Retract the claim explicitly instead (force-delete local, delete remote) so the item returns to the queue: from the main repo, `git worktree remove --force "${WORKTREE}"; git branch -D "next/${SLUG}"; git push origin --delete "next/${SLUG}" 2>/dev/null || true`. (Issues-mode abort branches in Phase 2 already do this inline.)
 
