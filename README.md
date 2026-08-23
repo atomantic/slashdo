@@ -412,7 +412,7 @@ Effective (project overrides global):
   merge-method       = (repo default)
 ```
 
-Defaults are stored per host CLI (the one you run `/do:config` in) under a `defaults` key, alongside settings like `autoUpdate`. `/do:config` never mirrors defaults into other installed environments.
+Defaults are stored per host CLI (the one you run `/do:config` in) under a `defaults` key. `/do:config` never mirrors defaults into other installed environments.
 
 ## Supported Environments
 
@@ -472,7 +472,7 @@ npx slash-do@latest push pr release           # install specific commands only
 
 ## Updating
 
-On install, slashdo asks whether to **auto-update** (default: yes, Claude Code only). When enabled, the SessionStart hook silently runs `npx slash-do@latest` whenever it detects a newer version — no manual step needed. When disabled, the statusline shows a `⬆ /do:update` hint instead, and you update manually:
+The SessionStart hook checks for updates and shows a `⬆ /do:update` hint when one is available. It never installs a newly published package automatically; update manually when you are ready:
 
 ```bash
 npx slash-do@latest        # from your terminal
@@ -482,14 +482,7 @@ npx slash-do@latest        # from your terminal
 /do:update                # from inside your AI coding assistant
 ```
 
-The preference lives in `~/.claude/.slashdo-config.json` (`{ "autoUpdate": true }`). Change it any time without the prompt:
-
-```bash
-npx slash-do@latest --auto-update      # enable
-npx slash-do@latest --no-auto-update   # disable
-```
-
-Existing installs from before this feature get asked on their next `npx slash-do@latest` run.
+Existing `autoUpdate` preferences are ignored and can be removed from the configuration file.
 
 ## Contributing
 

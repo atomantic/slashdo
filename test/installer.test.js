@@ -202,109 +202,12 @@ describe('install', () => {
   });
 });
 
-// ── auto-update preference ──────────────────────────────────────────
-
-describe('auto-update preference', () => {
-  it('writes autoUpdate: true to config when enabled', () => {
-    const { tmpDir, env } = makeTmpEnv();
-
-    const results = install({ env, packageDir: PACKAGE_DIR, dryRun: false, autoUpdate: true });
-
-    assert.ok(fs.existsSync(env.configFile), 'config file should exist');
-    const config = JSON.parse(fs.readFileSync(env.configFile, 'utf8'));
-    assert.equal(config.autoUpdate, true);
-    assert.ok(results.actions.some(a => a.name === '.slashdo-config.json' && a.status === 'auto-update enabled'));
-
-    cleanup(tmpDir);
-  });
-
-  it('does not write autoUpdate for non-hook envs (config reserved for /do:config defaults)', () => {
-    // Non-hook envs (codex/antigravity/opencode) now define configFile so
-    // /do:config can store defaults, but autoUpdate is consumed only by the
-    // Claude SessionStart hook — installing must not write it there.
-    const { tmpDir, env } = makeTmpEnv({ supportsHooks: false });
-
-    install({ env, packageDir: PACKAGE_DIR, dryRun: false, autoUpdate: true });
-
-    assert.ok(!fs.existsSync(env.configFile), 'no autoUpdate config written for non-hook env');
-
-    cleanup(tmpDir);
-  });
-
-  it('writes autoUpdate: false to config when disabled', () => {
-    const { tmpDir, env } = makeTmpEnv();
-
-    install({ env, packageDir: PACKAGE_DIR, dryRun: false, autoUpdate: false });
-
-    const config = JSON.parse(fs.readFileSync(env.configFile, 'utf8'));
-    assert.equal(config.autoUpdate, false);
-
-    cleanup(tmpDir);
-  });
-
-  it('does not write config when autoUpdate is undefined', () => {
-    const { tmpDir, env } = makeTmpEnv();
-
-    install({ env, packageDir: PACKAGE_DIR, dryRun: false });
-
-    assert.ok(!fs.existsSync(env.configFile), 'config file should not be created without a choice');
-
-    cleanup(tmpDir);
-  });
-
-  it('preserves other config keys when updating autoUpdate', () => {
-    const { tmpDir, env } = makeTmpEnv();
-    fs.writeFileSync(env.configFile, JSON.stringify({ somethingElse: 42 }), 'utf8');
-
-    install({ env, packageDir: PACKAGE_DIR, dryRun: false, autoUpdate: true });
-
-    const config = JSON.parse(fs.readFileSync(env.configFile, 'utf8'));
-    assert.equal(config.autoUpdate, true);
-    assert.equal(config.somethingElse, 42);
-
-    cleanup(tmpDir);
-  });
-
-  it('is idempotent — no action when choice is unchanged', () => {
-    const { tmpDir, env } = makeTmpEnv();
-
-    install({ env, packageDir: PACKAGE_DIR, dryRun: false, autoUpdate: true });
-    const results2 = install({ env, packageDir: PACKAGE_DIR, dryRun: false, autoUpdate: true });
-
-    assert.ok(!results2.actions.some(a => a.name === '.slashdo-config.json'),
-      'should not report a config change when value is unchanged');
-
-    cleanup(tmpDir);
-  });
-
-  it('dryRun does not write config', () => {
-    const { tmpDir, env } = makeTmpEnv();
-
-    install({ env, packageDir: PACKAGE_DIR, dryRun: true, autoUpdate: true });
-
-    assert.ok(!fs.existsSync(env.configFile), 'config should not be written in dry run');
-
-    cleanup(tmpDir);
-  });
-
-  it('removes config file on uninstall', () => {
-    const { tmpDir, env } = makeTmpEnv();
-
-    install({ env, packageDir: PACKAGE_DIR, dryRun: false, autoUpdate: true });
-    assert.ok(fs.existsSync(env.configFile));
-
-    install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false });
-    assert.ok(!fs.existsSync(env.configFile), 'config file should be removed on uninstall');
-
-    cleanup(tmpDir);
-  });
-
+describe('configuration lifecycle', () => {
   it('preserves config file on a filtered (command-scoped) uninstall', () => {
     // A filtered uninstall (e.g. removing just one command) must not delete
     // saved /do:config defaults the remaining commands still rely on.
     const { tmpDir, env } = makeTmpEnv();
 
-    install({ env, packageDir: PACKAGE_DIR, dryRun: false, autoUpdate: true });
     fs.writeFileSync(env.configFile, JSON.stringify({ autoUpdate: true, defaults: { 'review-with': 'codex' } }), 'utf8');
 
     install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false, filterNames: ['config'] });

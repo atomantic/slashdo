@@ -3,7 +3,6 @@
 const fs = require('fs');
 const path = require('path');
 const { getTargetFilename, transformCommand, transformLib } = require('./transformer');
-const { readConfig, writeConfig } = require('./config');
 
 function collectCommands(commandsDir) {
   const commands = [];
@@ -280,7 +279,7 @@ function deregisterHooksFromSettings(env, dryRun) {
   return actions;
 }
 
-function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }) {
+function install({ env, packageDir, filterNames, dryRun, uninstall }) {
   const commandsDir = path.join(packageDir, 'commands');
   const libDir = path.join(packageDir, 'lib');
   const hooksDir = path.join(packageDir, 'hooks');
@@ -359,20 +358,6 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
         }
         results.removed++;
       }
-    }
-  }
-
-  // Persist the auto-update preference (only when explicitly provided, so a
-  // filtered/command-only install doesn't clobber an existing choice). Gated on
-  // supportsHooks: auto-update is only consumed by the SessionStart hook (Claude
-  // only), so non-hook envs — which now also define configFile for /do:config
-  // defaults — must not get an unused autoUpdate key written at install time.
-  if (!dryRun && env.configFile && env.supportsHooks && typeof autoUpdate === 'boolean') {
-    const config = readConfig(env.configFile);
-    if (config.autoUpdate !== autoUpdate) {
-      config.autoUpdate = autoUpdate;
-      writeConfig(env.configFile, config);
-      results.actions.push({ name: '.slashdo-config.json', status: autoUpdate ? 'auto-update enabled' : 'auto-update disabled' });
     }
   }
 

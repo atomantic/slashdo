@@ -81,19 +81,10 @@ describe('parseArgs', () => {
     assert.deepEqual(args.commands, ['push']);
   });
 
-  it('--auto-update sets autoUpdate true', () => {
-    const args = parseArgs(['--auto-update']);
-    assert.equal(args.autoUpdate, true);
-  });
-
-  it('--no-auto-update sets autoUpdate false', () => {
-    const args = parseArgs(['--no-auto-update']);
-    assert.equal(args.autoUpdate, false);
-  });
-
-  it('autoUpdate is undefined when neither flag is passed', () => {
-    const args = parseArgs(['--env', 'claude']);
-    assert.equal(args.autoUpdate, undefined);
+  it('does not expose automatic update flags', () => {
+    const args = parseArgs(['--auto-update', '--no-auto-update']);
+    assert.deepEqual(args.commands, []);
+    assert.equal(Object.hasOwn(args, 'autoUpdate'), false);
   });
 
   it('empty argv returns defaults', () => {
@@ -103,7 +94,6 @@ describe('parseArgs', () => {
     assert.equal(args.dryRun, false);
     assert.equal(args.uninstall, false);
     assert.equal(args.help, false);
-    assert.equal(args.autoUpdate, undefined);
     assert.deepEqual(args.commands, []);
   });
 
