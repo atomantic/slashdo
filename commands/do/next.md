@@ -589,6 +589,8 @@ glab mr merge <num> --auto-merge --yes --remove-source-branch
 
 ## Phase 7: Clean up
 
+**Confirm the PR actually merged before touching anything.** `gh pr merge` exits zero on a repo with a **merge queue** while the PR is still open, and this phase removes the worktree first — so an unverified entry discards the working tree of a PR that has not landed. Read it back (GitHub: `gh pr view <num> --json state -q .state`, expect `MERGED`; GitLab: `glab mr view <num>`, expect `merged`); on anything else, **run none of this phase** — leave the worktree, branch, issue, and `in-progress` marker exactly as they are, and report the PR as queued/left-open.
+
 From the **main repo** (not the worktree), as a single Bash invocation, re-substituting the slug and worktree path stashed in Phase 2:
 
 ```bash

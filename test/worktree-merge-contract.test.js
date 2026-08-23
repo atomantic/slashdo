@@ -76,6 +76,14 @@ describe('worktree-safe merge contracts', () => {
     assert.match(body, /\[ "\$RC" -eq 2 \]/);
   });
 
+  it('will not enter Phase 7 cleanup on a PR that only queued', () => {
+    // Phase 7 removes the worktree first, so entering it on a queued merge
+    // discards the working tree of a PR that has not landed.
+    const body = readCommand('next.md');
+    assert.match(body, /\*\*Confirm the PR actually merged before touching anything\.\*\*/);
+    assert.match(body, /run none of this phase/);
+  });
+
   it('explains why the flag is absent so it is not "cleaned up" back in', () => {
     const body = readCommand('next.md');
     assert.match(body, /No `--delete-branch`/);
