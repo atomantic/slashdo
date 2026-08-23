@@ -86,7 +86,35 @@ describe('bulk issue-filing spool contracts', () => {
     assert.match(partial, /only once nothing\ndownstream still needs the bodies/);
     assert.match(partial, /a `--scan-only` run may remove it as soon as the report\nis printed/);
     for (const body of [readCommand('better.md'), readCommand('better-swift.md')]) {
-      assert.match(body, /must not be removed until Phase 4c has returned/);
+      assert.match(body, /the bodies are read four times/);
+      assert.match(body, /is removed in Phase 7, not before/);
+      // ...and something must actually remove it: the partial delegates removal to the
+      // command, so with no removal step every --issues run leaks a directory holding
+      // the full text of every finding.
+      assert.match(body, /\*\*Issue mode — remove the spool\.\*\*/);
+      assert.match(body, /rm -rf "\$SPOOL_DIR"/);
+      assert.match(body, /\*\*Unless any filer returned `ERROR`\*\*/);
+      // A scan-only run has no Phase 3c/4c, so filing is its last read.
+      assert.match(body, /a scan-only run has no Phase 3c or 4c to read the bodies/);
+    }
+  });
+
+  it('names what delimits a spooled block', () => {
+    // A body's quoted evidence can legitimately contain "## " lines inside a fence, so
+    // a filer splitting on a bare ^## truncates the body and files a partial issue —
+    // the exact truncation the spool path exists to prevent.
+    assert.match(partial, /A \*\*block\*\* runs from a line matching/);
+    assert.match(partial, /\*\*not a bare `\^## `\*\*/);
+    assert.match(partial, /No line inside a body may begin with `## \[` at\ncolumn 0/);
+  });
+
+  it('reads the DRY bodies for the Foundation grouping', () => {
+    // Phase 2 step 3 groups shared-utility extractions, which needs duplication counts
+    // and call-site lists that exist only in the bodies — and Phase 3b, which builds
+    // from that list, is run by the orchestrator itself.
+    for (const body of [readCommand('better.md'), readCommand('better-swift.md')]) {
+      assert.match(body, /\*\*Step 3 is the exception\*\*/);
+      assert.match(body, /read `\$SPOOL_DIR\/dry\.md`/);
     }
   });
 

@@ -182,7 +182,9 @@ Each agent writes its findings to `$SPOOL_DIR/<agent-slug>.md` — one file per 
 so no two agents write the same path. An agent that spools across more than one call
 **appends** after the first write (`cat >` once, `cat >>` thereafter); a second `cat >`
 silently truncates the findings already spooled. Each finding is a **ready-to-file issue body**
-under an id heading, not raw notes: whoever files it must be able to lift the block
+under an id heading, not raw notes. **No line inside a body may begin with `## [` at
+column 0** — indent any such quoted line by one space, so it cannot be mistaken for the
+next block's heading: whoever files it must be able to lift the block
 out and hand it straight to `--body-file` without rewriting a word.
 
 ```markdown
@@ -240,6 +242,12 @@ Dispatch one filer agent per category, in parallel, giving each:
 - the surviving ids for its category, and the spool file each id lives in,
 - `CLI_TOOL`, `PLAN_LABEL`, and the label rules from "Labels, not title brackets",
 - the `URL` / `${URL##*/}` number-capture form from "Recording a plan item".
+
+A **block** runs from a line matching `^## \[<id>\] ` to the next line matching `^## \[`
+(or EOF). That bracketed form is the delimiter, **not a bare `^## `**: a body's quoted
+evidence may legitimately contain `## ` lines inside a fence, and a filer that split on
+those would truncate the body and file a partial issue — the very truncation this path
+exists to prevent.
 
 For each id the filer extracts that block from the spool file into its own
 `--body-file` temp file, creates any missing labels, creates the issue, and captures

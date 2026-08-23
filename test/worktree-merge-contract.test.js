@@ -64,7 +64,13 @@ describe('worktree-safe merge contracts', () => {
     // tracking issue off that answer.
     const body = readCommand('next.md');
     assert.match(body, /glab mr view <pr_number> --output json --jq \.state\)" = "merged" \]; then/);
-    assert.match(body, /\*\*`--auto-merge` returning is not "merged"\*\*/);
+    // ...and the merge must WAIT, or the read-back is always "opened" and the guard
+    // against closing unlanded work becomes a guard against closing anything.
+    assert.match(body, /\*\*Why `glab ci status --wait` and not `--auto-merge`:\*\*/);
+    for (const line of fencedLines(body).filter((l) => l.includes('glab mr merge'))) {
+      assert.match(line, /glab ci status --wait &&/, `GitLab merge must wait: ${line.trim()}`);
+      assert.doesNotMatch(line, /--auto-merge/, `--auto-merge does not wait: ${line.trim()}`);
+    }
   });
 
   it('distinguishes an already-gone branch from a failed remote delete', () => {

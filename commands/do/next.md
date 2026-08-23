@@ -138,10 +138,10 @@ After the barrier, merge the wave's returned PRs **one at a time, never concurre
      fi
      ```
      **No `--delete-branch`** — it deletes the *local* branch too, and `<branch>` (the `branch` field the worker returned, normally `next/issue-<num>`) is checked out in the agent's worktree, so git refuses (`cannot delete branch 'next/issue-<num>' used by worktree at …`) and **`gh` exits non-zero after the merge already succeeded**. That reads as a merge failure and fires any `||` fallback wrapped around the merge. Delete the remote branch with the explicit `git push origin --delete` above — it needs no local checkout — and let Phase D remove the worktree and the local branch from the main repo, where that works. **The `MERGED` read-back is load-bearing**: `--delete-branch` only ever deleted the head branch *because* the merge had happened, and an ungated delete would retract the head of a PR that is still open — either the merge failed (unmergeable, branch protection, a lost race) or, on a repo with a **merge queue**, `gh pr merge` returned success having merely *queued* it. GitHub auto-closes a PR whose head branch disappears, which destroys both the "leave that PR open, record it, and move to the next" outcome step 3 requires and the queued merge itself. Read the state back rather than trusting the merge command's exit status.
-   - GitLab (`glab`) — there's no discrete "required checks" list to scope to; the project's own merge/pipeline-success requirement governs, and `--auto-merge` (the default) already waits for the pipeline before merging:
+   - GitLab (`glab`) — there's no discrete "required checks" list to scope to; the project's own merge/pipeline-success requirement governs, so wait on the pipeline explicitly and merge only then:
      ```bash
      git -C "<worktree>" push
-     glab mr merge <pr_number> --auto-merge --yes --remove-source-branch
+     glab ci status --wait && glab mr merge <pr_number> --yes --remove-source-branch
      # Read the state back for the same reason the gh path does: --auto-merge returns
      # while the MR is still queued behind the pipeline, and step 4 gates issue closure
      # on this answer.
@@ -151,7 +151,7 @@ After the barrier, merge the wave's returned PRs **one at a time, never concurre
        echo "MR <pr_number> is not merged (queued on the pipeline) — leaving its issue open and keeping <branch>"
      fi
      ```
-     If the installed `glab` doesn't support `--auto-merge`, fall back to `glab ci status --wait` then `glab mr merge <pr_number> --yes --remove-source-branch` — and read the state back either way. **`--auto-merge` returning is not "merged"**: it hands the MR to the pipeline and returns, so an unread status closes the tracking issue for work that has not landed, which is exactly what the GitHub side above was fixed for.
+**Why `glab ci status --wait` and not `--auto-merge`:** `--auto-merge` does not wait — it sets merge-when-pipeline-succeeds server-side and returns while the MR is still `opened`. The read-back above would then be `opened` on every run, so step 4 would never close an issue and Phase D would never reclaim a worktree: the guard against closing unlanded work would become a guard against closing anything. Waiting first makes one read authoritative. If you must use `--auto-merge` (a very long pipeline, say), replace the single read with a bounded poll of `glab mr view <pr_number> --output json --jq .state` and treat "still `opened` at the deadline" as queued, not merged.
 4. **Close out the issue — only when step 3 read back `MERGED`.** A PR the merge left open or queued has shipped nothing, so closing its issue would drop live work out of the queue: record it as left-open with the reason instead, and let Phase D keep its worktree and branch. For a genuinely merged PR, apply single-issue Phase 7's closure step: confirm `Closes #<num>` auto-closed it on merge to the default branch; if still open, close it explicitly (GitHub: `gh issue close <num> --comment "Shipped in PR #<pr_number>."`; GitLab: `glab issue note <num> -m "Shipped in PR #<pr_number>." && glab issue close <num>`). Drop the `in-progress` label.
 
 ### Swarm Phase D — Reconcile, clean up, report
@@ -588,9 +588,11 @@ git push
 # Only reached when the review gate passed AND the tree is conflict-free.
 # GitHub — no `--delete-branch` (see below); Phase 7 deletes both branches:
 gh pr merge <num> --merge
-# GitLab (`--auto-merge` is the default and, unlike the gh command above, makes
-# this wait for the pipeline to succeed before merging rather than merging outright):
-glab mr merge <num> --auto-merge --yes --remove-source-branch
+# GitLab — wait for the pipeline HERE rather than handing the MR to `--auto-merge`:
+# that flag sets merge-when-pipeline-succeeds server-side and returns while the MR is
+# still `opened`, so Phase 7's state read-back below would never see `merged` and the
+# worktree, claim branch, issue, and in-progress label would be stranded on every run.
+glab ci status --wait && glab mr merge <num> --yes --remove-source-branch
 ```
 
 **Why no `--delete-branch` on the `gh` merge:** you are inside the linked worktree, and `--delete-branch` deletes the *local* branch too — for which `gh` first checks out the default branch. That fails in a linked worktree (`fatal: '<default>' is already used by worktree at …`, because the parent repo has it checked out) and **`gh` exits non-zero even though the merge itself succeeded**. Any `||` fallback chain wrapped around the merge then fires on a merge that already landed. Without the flag the exit status means what it says, and Phase 7 owns both branches: it removes the worktree, deletes the local branch from the main repo, and deletes the remote branch explicitly.
@@ -602,7 +604,7 @@ anything.** (A run that never opened one — a Phase 2 race hard-stop, a Phase 3
 Phase 3.5 reject — has no PR to read back: skip this gate entirely and go straight to the
 **Abandoned a claim** teardown below, which is what returns the item to the queue. Applying
 the gate there would strand the claim branch Phase 2 already published, which is the
-phantom claim this same phase verifies against.) `gh pr merge` exits zero on a repo with a **merge queue** while the PR is still open, and this phase removes the worktree first — so an unverified entry discards the working tree of a PR that has not landed. Read it back (GitHub: `gh pr view <num> --json state -q .state`, expect `MERGED`; GitLab: `glab mr view <num>`, expect `merged`); on anything else, **run none of this phase** — leave the worktree, branch, issue, and `in-progress` marker exactly as they are, and report the PR as queued/left-open.
+phantom claim this same phase verifies against.) `gh pr merge` exits zero on a repo with a **merge queue** while the PR is still open, and this phase removes the worktree first — so an unverified entry discards the working tree of a PR that has not landed. Read it back (GitHub: `gh pr view <num> --json state -q .state`, expect `MERGED`; GitLab: `glab mr view <num> --output json --jq .state`, expect `merged` — the merge step above waits on the pipeline precisely so this single read is meaningful; if you nonetheless merged with `--auto-merge`, an immediate read is *always* `opened`, so poll every 30s for up to 30 minutes before concluding it is queued); on anything else, **run none of this phase** — leave the worktree, branch, issue, and `in-progress` marker exactly as they are, and report the PR as queued/left-open.
 
 From the **main repo** (not the worktree), as a single Bash invocation, re-substituting the slug and worktree path stashed in Phase 2:
 

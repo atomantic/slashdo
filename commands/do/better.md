@@ -153,7 +153,7 @@ When compacting during this workflow, always preserve:
 - `HAS_UI` (true/false — determines whether the UX Consistency & Responsive Layout agent runs and whether the `ux` category exists downstream)
 - `PHASE_4C_START_SHA` (needed for FILE_OWNER_MAP update in Phase 4c.3)
 - `VACUOUS_TESTS_FIXED`, `WEAK_TESTS_STRENGTHENED`, `NEW_TEST_CASES`, `NEW_TEST_FILES`
-- `SPOOL_DIR` (issue mode only — the literal spool path Phase 1 created; it cannot be re-derived, and the bodies are read three times: the Phase 2 filer agents, the Phase 3c remediation workers, and the Phase 4c.1 triage — so it outlives filing and must not be removed until Phase 4c has returned)
+- `SPOOL_DIR` (issue mode only — the literal spool path Phase 1 created; it cannot be re-derived, and the bodies are read four times: Phase 2 step 3's Foundation grouping, the Phase 2 filer agents, the Phase 3c remediation workers, and the Phase 4c.1 triage — so it outlives filing and is removed in Phase 7, not before)
 - `CREATED_CATEGORY_SLUGS` (list of branch slugs created in Phase 5)
 
 
@@ -451,8 +451,12 @@ Wait for ALL agents to complete before proceeding.
 > partial: reuse `CLI_TOOL` from Phase 0a.
 > Phase 1 spooled the finding **bodies** to `SPOOL_DIR` and returned only the
 > **index**, so consolidate and dedup against those index lines — steps 2–4 need
-> nothing else, so do not open a spool file **for them**. The only reason to open one is to
-> lift a block verbatim into a `--body-file` on the inline path below. When the surviving set is
+> nothing else, so do not open a spool file **for them**. **Step 3 is the exception**:
+> grouping the Foundation extractions needs the duplication counts and call-site lists that
+> live only in the bodies, so read `$SPOOL_DIR/dry.md` for the ids step 2 kept in the `dry`
+> category before writing the Foundation list Phase 3b builds from. Beyond that, the only
+> reason to open a spool file is to lift a block verbatim into a `--body-file` on the
+> inline path below. When the surviving set is
 > larger than ~20 findings, hand the ids off to per-category **filer agents** per
 > the partial's "Bulk filing — spool the bodies, dedup on an index" section rather
 > than running `gh issue create` yourself; at or below that, file them inline —
@@ -541,7 +545,7 @@ Omit the **UX** row when `HAS_UI=false`, the **Structural** row when `STRICT_MOD
 
 **GATE: If `--scan-only` was passed, STOP HERE** — but not before doing the one thing a scan-only run in issue mode exists to do: **when `ISSUE_MODE` is also true, file every surviving finding as an issue first**, then print the summary and exit. (When `ISSUE_MODE` is false, just print the summary and exit.)
 
-**Filing every surviving finding** means all of them — not just the ones the disposition rules would defer. A scan-only run remediates nothing, so "deferred" covers the whole set; the filed issues ARE the run's output. Apply the same labels, dedup-against-`EXISTING_ISSUES`, and title/body rules the disposition partial specifies, and report the created and reused `#<number>`s in the summary. Do not open a worktree or write any code.
+**Filing every surviving finding** means all of them — not just the ones the disposition rules would defer. A scan-only run remediates nothing, so "deferred" covers the whole set; the filed issues ARE the run's output. Apply the same labels, dedup-against-`EXISTING_ISSUES`, and title/body rules the disposition partial specifies, and report the created and reused `#<number>`s in the summary. Do not open a worktree or write any code. **Then remove `SPOOL_DIR`** (`rm -rf "$SPOOL_DIR"`, same errored-filer exception) — a scan-only run has no Phase 3c or 4c to read the bodies, so filing is the last read.
 
 **Hand the filing to per-category filer agents when the surviving set exceeds ~20.**
 A `--scan-only --issues` run on a real codebase is exactly the case the partial's
@@ -1075,7 +1079,12 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
    done
    ```
    `-D` (force delete) is used only for the staging branch `better/{DATE}` because it is intentionally unmerged — its file contents are cherry-picked into category branches. Category branches use `-d` (safe delete) so that unmerged work is not accidentally lost; if a category branch was not merged, the warning will surface it. The guards prevent errors from interrupting cleanup.
-3. Restore stashed changes (if stashed in Phase 3a):
+3. **Issue mode — remove the spool.** Phase 4c was the last reader of `SPOOL_DIR`, so remove it using the literal path from run state:
+   ```bash
+   rm -rf "$SPOOL_DIR"
+   ```
+   **Unless any filer returned `ERROR`** — those findings were never filed, and their bodies exist nowhere else. Leave the directory and print its path so they can be filed by hand.
+4. Restore stashed changes (if stashed in Phase 3a):
    ```bash
    git stash pop
    ```
