@@ -45,7 +45,11 @@ function mdNames(...segments) {
 
 const COMMANDS = mdNames('commands', 'do');
 const LIBS = mdNames('lib');
-const HOOKS = ['slashdo-check-update', 'slashdo-statusline'];
+const HOOKS = fs
+  .readdirSync(path.join(REPO_ROOT, 'hooks'))
+  .filter((f) => f.endsWith('.js'))
+  .map((f) => f.slice(0, -3))
+  .sort();
 
 // The OpenCode install pipes every file through sed; this is the same rewrite
 // expressed in JS, so a drift in either direction fails.
@@ -179,6 +183,9 @@ describe('install.sh — Claude Code fresh install', () => {
     assert.equal(result.status, 0, result.stdout);
     assert.match(result.stdout, /Source:.*local/);
     assert.doesNotMatch(result.stdout, /failed/);
+    // Colors belong in the printf format string; passed through %s they reach
+    // the terminal as the literal text \033[0;32m.
+    assert.ok(!result.stdout.includes('\\033'), 'no uninterpreted escape sequences in the output');
   });
 
   it('installs every command in commands/do verbatim', () => {
@@ -205,9 +212,13 @@ describe('install.sh — Claude Code fresh install', () => {
     }
   });
 
-  it('installs world-readable files, not mktemp-private ones', () => {
-    const mode = fs.statSync(path.join(home, '.claude', 'commands', 'do', 'push.md')).mode & 0o777;
-    assert.equal(mode, 0o644);
+  it('installs files with the mode the umask implies, not mktemp-private 0600', () => {
+    const umask = parseInt(execFileSync('sh', ['-c', 'umask'], { encoding: 'utf8' }).trim(), 8);
+    const expected = 0o666 & ~umask;
+    for (const file of ['commands/do/push.md', 'lib/model-tiers.md', 'hooks/slashdo-statusline.js']) {
+      const mode = fs.statSync(path.join(home, '.claude', ...file.split('/'))).mode & 0o777;
+      assert.equal(mode, expected, `${file} should be ${expected.toString(8)}, not mktemp-private`);
+    }
   });
 
   it('leaves no staging temp files behind', () => {
@@ -287,9 +298,18 @@ describe('install.sh — remote mode', () => {
         readRepo('lib', `${lib}.md`),
         `${lib}.md should be fetched intact`
       );
+      assert.equal(
+        fs.readFileSync(path.join(home, '.config', 'opencode', 'lib', `${lib}.md`), 'utf8'),
+        rewriteForOpencode(readRepo('lib', `${lib}.md`)),
+        `opencode lib/${lib}.md should be fetched and rewritten`
+      );
     }
     for (const hook of HOOKS) {
-      assert.ok(fs.existsSync(path.join(home, '.claude', 'hooks', `${hook}.js`)), `${hook}.js should be fetched`);
+      assert.equal(
+        fs.readFileSync(path.join(home, '.claude', 'hooks', `${hook}.js`), 'utf8'),
+        readRepo('hooks', `${hook}.js`),
+        `${hook}.js should be fetched intact`
+      );
     }
     assert.match(readSettings(home).statusLine.command, /slashdo-statusline\.js/);
   });
@@ -421,7 +441,7 @@ describe('install.sh — atomic writes', () => {
     assert.deepEqual(fs.readdirSync(tmpdir), [], 'the OpenCode staging dir should be removed even when fetches fail');
   });
 
-  it('removes the in-flight temp file when the install is interrupted', async () => {
+  it('removes the in-flight temp file when the install is interrupted', { timeout: 60000 }, async () => {
     const home = makeHome();
     runInstall({ home });
 
@@ -436,14 +456,20 @@ describe('install.sh — atomic writes', () => {
     });
     const exited = new Promise((resolve) => child.on('exit', resolve));
 
-    // Wait until a staging temp file actually exists, so the signal lands while
-    // a write is genuinely in flight rather than before or after it.
-    const deadline = Date.now() + 20000;
-    while (strayTempFiles(cmdDir).length === 0 && Date.now() < deadline) await sleep(25);
-    assert.ok(strayTempFiles(cmdDir).length > 0, 'expected an in-flight staging temp file to interrupt');
+    try {
+      // Wait until a staging temp file actually exists, so the signal lands
+      // while a write is genuinely in flight rather than before or after it.
+      const deadline = Date.now() + 20000;
+      while (strayTempFiles(cmdDir).length === 0 && Date.now() < deadline) await sleep(25);
+      assert.ok(strayTempFiles(cmdDir).length > 0, 'expected an in-flight staging temp file to interrupt');
 
-    process.kill(-child.pid, 'SIGTERM');
-    await exited;
+      process.kill(-child.pid, 'SIGTERM');
+      await Promise.race([exited, sleep(20000)]);
+    } finally {
+      // Never leave a detached installer (or its hanging curl) behind holding
+      // the sandbox open past the after() hook.
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ }
+    }
 
     assert.deepEqual(strayTempFiles(cmdDir), [], 'the interrupted temp file should be cleaned up');
     assert.equal(fs.readFileSync(pushPath, 'utf8'), before, 'the previously installed file must survive');

@@ -57,6 +57,14 @@ function commandDirEntries() {
   return dirEntries('commands', 'do');
 }
 
+function hookDirEntries() {
+  return fs
+    .readdirSync(path.join(REPO_ROOT, 'hooks'))
+    .filter((f) => f.endsWith('.js'))
+    .map((f) => f.replace(/\.js$/, ''))
+    .sort();
+}
+
 describe('curl-installer LIBS allowlist', () => {
   const expected = libDirEntries();
 
@@ -75,6 +83,20 @@ describe('curl-installer LIBS allowlist', () => {
       `  In lib/ but not LIBS: ${expected.filter((x) => !actual.includes(x)).join(', ') || '(none)'}\n` +
       `  In LIBS but not lib/: ${actual.filter((x) => !expected.includes(x)).join(', ') || '(none)'}`);
   });
+});
+
+describe('curl-installer HOOKS allowlist', () => {
+  const expected = hookDirEntries();
+
+  for (const script of ['install.sh', 'uninstall.sh']) {
+    it(`${script} HOOKS matches hooks/*.js exactly`, () => {
+      const actual = parseArray(path.join(REPO_ROOT, script), 'HOOKS').sort();
+      assert.deepEqual(actual, expected,
+        `${script} HOOKS drift — a hook missing here is never delivered to curl-installed users.\n` +
+        `  In hooks/ but not HOOKS: ${expected.filter((x) => !actual.includes(x)).join(', ') || '(none)'}\n` +
+        `  In HOOKS but not hooks/: ${actual.filter((x) => !expected.includes(x)).join(', ') || '(none)'}`);
+    });
+  }
 });
 
 describe('curl-installer COMMANDS allowlist', () => {

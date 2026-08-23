@@ -40,10 +40,14 @@ trap 'exit 143' TERM
 atomic_write() {
   local dest="$1"
   shift
-  local tmp
+  local tmp mode
   tmp="$(mktemp "$(dirname "$dest")/.slashdo-tmp.XXXXXX")" || return 1
   ACTIVE_TMP="$tmp"
-  if "$@" "$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$dest"; then
+  # mktemp creates the file 0600; restore the mode a plain create would have
+  # produced under the user's umask, so staging neither loosens nor tightens
+  # what curl -o / cp used to write directly.
+  mode="$(printf '%04o' "$(( 0666 & ~0$(umask) ))")"
+  if "$@" "$tmp" && chmod "$mode" "$tmp" && mv -f "$tmp" "$dest"; then
     ACTIVE_TMP=""
     return 0
   fi
@@ -282,16 +286,19 @@ install_claude() {
       }
 
       if (!sessionStartUsable) {
-        process.stdout.write("skipped (settings.hooks.SessionStart has unexpected shape)");
+        // The statusline step still runs, so do not claim nothing happened.
+        process.stdout.write(modified
+          ? "updated (SessionStart left alone: unexpected shape)"
+          : "skipped (settings.hooks.SessionStart has unexpected shape)");
       } else {
         process.stdout.write(modified ? "updated" : "already configured");
       }
     ' 2>/dev/null); then
-      printf " %sfailed%s\n" "$YELLOW" "$RESET"
+      printf " ${YELLOW}failed${RESET}\n"
     elif echo "$node_result" | grep -q "^skipped"; then
-      printf "%s%s%s\n" "$YELLOW" "$node_result" "$RESET"
+      printf "${YELLOW}%s${RESET}\n" "$node_result"
     else
-      printf "%s %sok%s\n" "$node_result" "$GREEN" "$RESET"
+      printf "%s ${GREEN}ok${RESET}\n" "$node_result"
     fi
   elif command -v node &>/dev/null; then
     printf "    ${DIM}settings.json: skipped (hook files not found)${RESET}\n"
