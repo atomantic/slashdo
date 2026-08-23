@@ -38,7 +38,7 @@ describe('worktree-safe merge contracts', () => {
   it('deletes the remote claim branch explicitly instead', () => {
     const body = readCommand('next.md');
     // Swarm Phase C merges from the orchestrator; Phase D owns the local branch.
-    assert.match(body, /git push origin --delete "next\/issue-<num>"/);
+    assert.match(body, /git push origin --delete "<branch>"/);
     // Single-issue Phase 7 keeps its own trailing remote delete as the real deletion.
     // Anchor on Phase 7's own cleanup chain — the bare command also appears in the
     // Phase 2 abort branches and the abandoned-claim paragraph, so matching it alone
@@ -54,7 +54,7 @@ describe('worktree-safe merge contracts', () => {
     const body = readCommand('next.md');
     assert.match(
       body,
-      /if \[ "\$\(gh pr view <pr_number> --json state -q \.state\)" = "MERGED" \]; then\n\s+git push origin --delete "next\/issue-<num>"/,
+      /if \[ "\$\(gh pr view <pr_number> --json state -q \.state\)" = "MERGED" \]; then\n\s+git push origin --delete "<branch>"/,
     );
   });
 
@@ -62,7 +62,7 @@ describe('worktree-safe merge contracts', () => {
     // Both deletes are now the real deletion, not a post-`--delete-branch` no-op,
     // so a genuine failure must surface instead of vanishing into 2>/dev/null.
     const body = readCommand('next.md');
-    for (const line of fencedLines(body).filter((l) => l.includes('git push origin --delete "next/issue-<num>"'))) {
+    for (const line of fencedLines(body).filter((l) => l.includes('git push origin --delete "<branch>"'))) {
       assert.doesNotMatch(line, /2>\/dev\/null/, line.trim());
     }
     const phase7 = body.split('\n').find((l) => l.includes('git push origin --delete "next/${SLUG}"') && l.includes('warning:'));
@@ -98,8 +98,23 @@ describe('worktree-safe merge contracts', () => {
     // an upstream of upstream/feature-x or origin/pr-123-head must not be resolved
     // to origin/<local name>, which would delete an unrelated remote branch.
     const body = readCommand('pr.md');
-    assert.match(body, /git push "\$PUSH_REMOTE" --delete "\$PUSH_BRANCH"/);
-    assert.doesNotMatch(body, /git push origin --delete \{branch\}/);
+    assert.match(body, /DEL_REMOTE="\$\(git config --get "branch\.\$BR\.remote"\)"/);
+    assert.match(body, /git push "\$DEL_REMOTE" --delete "\$DEL_REF"/);
+    // Any hardcoded-origin regression, however it is spelled, fails here.
+    assert.doesNotMatch(body, /git push origin --delete/);
+  });
+
+  it('prints the LINKED_WORKTREE result instead of stranding it in a shell var', () => {
+    // Shell variables do not survive from one Bash call to the next, so a probe
+    // that only assigns leaves every later step re-expanding an empty string —
+    // which silently takes the not-a-worktree path.
+    const body = readCommand('pr.md');
+    assert.match(body, /echo "LINKED_WORKTREE=\$LINKED_WORKTREE"/);
+  });
+
+  it('gates /do:pr\'s remote delete on a read-back MERGED state too', () => {
+    const body = readCommand('pr.md');
+    assert.match(body, /if \[ "\$\(gh pr view \{number\} --json state -q \.state\)" = "MERGED" \]; then/);
   });
 
   it('skips /do:pr step 6\'s default-branch sync inside a linked worktree', () => {

@@ -127,19 +127,19 @@ After the barrier, merge the wave's returned PRs **one at a time, never concurre
      gh pr merge <pr_number> --merge
      # Delete the head branch ONLY once the PR really reads MERGED.
      if [ "$(gh pr view <pr_number> --json state -q .state)" = "MERGED" ]; then
-       git push origin --delete "next/issue-<num>" || echo "warning: remote branch next/issue-<num> not deleted"
+       git push origin --delete "<branch>" || echo "warning: remote branch <branch> not deleted"
      else
-       echo "PR <pr_number> is not MERGED — keeping next/issue-<num>"
+       echo "PR <pr_number> is not MERGED — keeping <branch>"
      fi
      ```
-     **No `--delete-branch`** — it deletes the *local* branch too, and `next/issue-<num>` is checked out in the agent's worktree, so git refuses (`cannot delete branch 'next/issue-<num>' used by worktree at …`) and **`gh` exits non-zero after the merge already succeeded**. That reads as a merge failure and fires any `||` fallback wrapped around the merge. Delete the remote branch with the explicit `git push origin --delete` above — it needs no local checkout — and let Phase D remove the worktree and the local branch from the main repo, where that works. **The `MERGED` read-back is load-bearing**: `--delete-branch` only ever deleted the head branch *because* the merge had happened, and an ungated delete would retract the head of a PR that is still open — either the merge failed (unmergeable, branch protection, a lost race) or, on a repo with a **merge queue**, `gh pr merge` returned success having merely *queued* it. GitHub auto-closes a PR whose head branch disappears, which destroys both the "leave that PR open, record it, and move to the next" outcome step 3 requires and the queued merge itself. Read the state back rather than trusting the merge command's exit status.
+     **No `--delete-branch`** — it deletes the *local* branch too, and `<branch>` (the `branch` field the worker returned, normally `next/issue-<num>`) is checked out in the agent's worktree, so git refuses (`cannot delete branch 'next/issue-<num>' used by worktree at …`) and **`gh` exits non-zero after the merge already succeeded**. That reads as a merge failure and fires any `||` fallback wrapped around the merge. Delete the remote branch with the explicit `git push origin --delete` above — it needs no local checkout — and let Phase D remove the worktree and the local branch from the main repo, where that works. **The `MERGED` read-back is load-bearing**: `--delete-branch` only ever deleted the head branch *because* the merge had happened, and an ungated delete would retract the head of a PR that is still open — either the merge failed (unmergeable, branch protection, a lost race) or, on a repo with a **merge queue**, `gh pr merge` returned success having merely *queued* it. GitHub auto-closes a PR whose head branch disappears, which destroys both the "leave that PR open, record it, and move to the next" outcome step 3 requires and the queued merge itself. Read the state back rather than trusting the merge command's exit status.
    - GitLab (`glab`) — there's no discrete "required checks" list to scope to; the project's own merge/pipeline-success requirement governs, and `--auto-merge` (the default) already waits for the pipeline before merging:
      ```bash
      git -C "<worktree>" push
      glab mr merge <pr_number> --auto-merge --yes --remove-source-branch
      ```
      If the installed `glab` doesn't support `--auto-merge`, fall back to `glab ci status --wait` then `glab mr merge <pr_number> --yes --remove-source-branch`.
-4. **Close out the issue** — single-issue Phase 7's closure step applied per merged PR: confirm `Closes #<num>` auto-closed it on merge to the default branch; if still open, close it explicitly (GitHub: `gh issue close <num> --comment "Shipped in PR #<pr_number>."`; GitLab: `glab issue note <num> -m "Shipped in PR #<pr_number>." && glab issue close <num>`). Drop the `in-progress` label.
+4. **Close out the issue — only when step 3 read back `MERGED`.** A PR the merge left open or queued has shipped nothing, so closing its issue would drop live work out of the queue: record it as left-open with the reason instead, and let Phase D keep its worktree and branch. For a genuinely merged PR, apply single-issue Phase 7's closure step: confirm `Closes #<num>` auto-closed it on merge to the default branch; if still open, close it explicitly (GitHub: `gh issue close <num> --comment "Shipped in PR #<pr_number>."`; GitLab: `glab issue note <num> -m "Shipped in PR #<pr_number>." && glab issue close <num>`). Drop the `in-progress` label.
 
 ### Swarm Phase D — Reconcile, clean up, report
 
