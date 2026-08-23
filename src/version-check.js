@@ -2,6 +2,11 @@
 
 const { execSync } = require('child_process');
 const fs = require('fs');
+// Single source of truth for the semver comparison. It lives in the hook rather
+// than here because the hook is deployed standalone into ~/.claude/hooks/, where
+// src/ does not exist — so the hook cannot require us, but we can require it.
+// Re-exported below so this module's public surface is unchanged.
+const { compareVersions } = require('../hooks/slashdo-check-update');
 
 function getInstalledVersion(versionFile) {
   if (!versionFile || !fs.existsSync(versionFile)) return null;
@@ -16,19 +21,6 @@ function getLatestVersion(timeoutMs) {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   return result.trim();
-}
-
-function compareVersions(installed, latest) {
-  if (!installed || !latest) return null;
-
-  const parse = (v) => v.replace(/^v/, '').split('.').map(Number);
-  const [iMajor, iMinor, iPatch] = parse(installed);
-  const [lMajor, lMinor, lPatch] = parse(latest);
-
-  if (lMajor > iMajor) return 'major';
-  if (lMajor === iMajor && lMinor > iMinor) return 'minor';
-  if (lMajor === iMajor && lMinor === iMinor && lPatch > iPatch) return 'patch';
-  return null;
 }
 
 function checkForUpdate(versionFile) {
