@@ -23,7 +23,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFile, execFileSync, spawn } = require('child_process');
+const { execFile, execFileSync, spawn, spawnSync } = require('child_process');
 
 const { ENVIRONMENTS } = require('../src/environments');
 const { install: npmInstall } = require('../src/installer');
@@ -87,19 +87,19 @@ function childEnv({ home, tmpdir, pathPrefix }) {
   };
 }
 
-// Run a script with a sandboxed HOME. Returns { status, stdout }; a non-zero
-// exit is reported rather than thrown so tests can assert on failure paths.
+// Run a script with a sandboxed HOME. Returns { status, stdout } with stderr
+// folded in, so tests can assert on failure paths and on shell diagnostics.
+// `stdin: true` pipes the script the way the documented `curl ... | bash`
+// install does, which leaves BASH_SOURCE unset.
 function runScript(script, opts = {}) {
-  try {
-    const stdout = execFileSync('bash', [script], {
-      env: childEnv(opts),
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return { status: 0, stdout };
-  } catch (e) {
-    return { status: e.status, stdout: (e.stdout || '') + (e.stderr || '') };
-  }
+  const { stdin = false, cwd } = opts;
+  const result = spawnSync('bash', stdin ? [] : [script], {
+    env: childEnv(opts),
+    cwd,
+    encoding: 'utf8',
+    input: stdin ? fs.readFileSync(script, 'utf8') : undefined,
+  });
+  return { status: result.status, stdout: (result.stdout || '') + (result.stderr || '') };
 }
 
 const runInstall = (opts) => runScript(INSTALL_SH, opts);
@@ -315,6 +315,35 @@ describe('install.sh — remote mode', () => {
   });
 });
 
+describe('install.sh — piped from stdin (curl | bash)', () => {
+  it('fetches from GitHub, not from the caller directory', () => {
+    const home = makeHome();
+    // A directory that merely looks like a checkout. BASH_SOURCE is unset for a
+    // piped script, so a SCRIPT_DIR that silently falls back to CWD would
+    // install these files — from any repo that happens to have those dir names.
+    const decoy = mkTmp('slashdo-decoy-');
+    fs.mkdirSync(path.join(decoy, 'commands', 'do'), { recursive: true });
+    fs.mkdirSync(path.join(decoy, 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(decoy, 'commands', 'do', 'push.md'), 'DECOY\n');
+
+    const result = runScript(INSTALL_SH, {
+      home,
+      cwd: decoy,
+      stdin: true,
+      pathPrefix: makeServingCurl(),
+    });
+
+    assert.equal(result.status, 0, result.stdout);
+    assert.doesNotMatch(result.stdout, /unbound variable/, 'set -u must not trip on an unset BASH_SOURCE');
+    assert.match(result.stdout, /Source:.*github/);
+    assert.equal(
+      fs.readFileSync(path.join(home, '.claude', 'commands', 'do', 'push.md'), 'utf8'),
+      readRepo('commands', 'do', 'push.md'),
+      'a piped install must fetch from GitHub, not from whatever the CWD holds'
+    );
+  });
+});
+
 describe('install.sh — Claude Code re-install', () => {
   it('is idempotent: a second run reports "already configured" and leaves settings.json byte-identical', () => {
     const home = makeHome();
@@ -508,6 +537,19 @@ describe('install.sh — temp file safety', () => {
       assert.equal(fs.readFileSync(path.join(tmpdir, name), 'utf8'), 'DECOY\n', `${name} must not be written through`);
     }
     assert.deepEqual(fs.readdirSync(tmpdir).sort(), decoys.slice().sort(), 'no staging leftovers beside the decoys');
+  });
+
+  it('does not claim success when the staging directory cannot be created', { skip: process.getuid && process.getuid() === 0 ? 'root ignores directory permissions' : false }, () => {
+    const home = makeHome(['.config/opencode']);
+    const tmpdir = makeTmpdir();
+    fs.chmodSync(tmpdir, 0o500); // readable and traversable, but not writable
+    try {
+      const result = runScript(INSTALL_SH, { home, tmpdir });
+      assert.match(result.stdout, /could not create a temp directory/);
+      assert.doesNotMatch(result.stdout, /Done!/, 'a zero-file install must not report success');
+    } finally {
+      fs.chmodSync(tmpdir, 0o700);
+    }
   });
 
   it('removes its staging directory on exit', () => {

@@ -8,10 +8,18 @@ REPO="atomantic/slashdo"
 BRANCH="main"
 BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"
 
-# Detect local repo: if this script lives alongside commands/ and lib/, use local files
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Detect local repo: if this script lives alongside commands/ and lib/, use local
+# files. BASH_SOURCE is unset when the script is piped (`curl ... | bash`, the
+# documented install path): under `set -u` that kills the command substitution
+# and leaves SCRIPT_DIR pointing at the caller's CWD, so a piped install run
+# from any directory that happens to hold commands/do/ and lib/ would install
+# those files instead of fetching from GitHub.
+SCRIPT_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 LOCAL_MODE=false
-if [ -d "$SCRIPT_DIR/commands/do" ] && [ -d "$SCRIPT_DIR/lib" ]; then
+if [ -n "$SCRIPT_DIR" ] && [ -d "$SCRIPT_DIR/commands/do" ] && [ -d "$SCRIPT_DIR/lib" ]; then
   LOCAL_MODE=true
 fi
 
@@ -312,15 +320,15 @@ install_opencode() {
   local target_lib="$HOME/.config/opencode/lib"
   mkdir -p "$target_cmd" "$target_lib"
 
+  printf "  Installing to ${GREEN}OpenCode${RESET}...\n"
+
   # Stage downloads in a private, randomized directory (removed by the EXIT
   # trap) rather than fixed /tmp/slashdo-* names another local user could
   # pre-create or a concurrent install could clobber.
   if ! STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-install.XXXXXX")"; then
     printf "    ${YELLOW}skipped (could not create a temp directory)${RESET}\n"
-    return 0
+    return 1
   fi
-
-  printf "  Installing to ${GREEN}OpenCode${RESET}...\n"
 
   for cmd in "${COMMANDS[@]}"; do
     printf "    /do-%-20s" "$cmd"
@@ -375,7 +383,7 @@ curl_installed=false
 for env in "${envs[@]}"; do
   case "$env" in
     claude)      install_claude; curl_installed=true ;;
-    opencode)    install_opencode; curl_installed=true ;;
+    opencode)    if install_opencode; then curl_installed=true; fi ;;
     antigravity) printf "  ${DIM}Antigravity CLI: use 'npx slash-do@latest --env antigravity' (Agent Skills require Node.js for content inlining)${RESET}\n"; npx_needed=true ;;
     codex)       printf "  ${DIM}Codex: use 'npx slash-do@latest --env codex' (requires Node.js for content inlining)${RESET}\n"; npx_needed=true ;;
     grok)        printf "  ${DIM}Grok Build: use 'npx slash-do@latest --env grok' (requires Node.js for content inlining)${RESET}\n"; npx_needed=true ;;
