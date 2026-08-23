@@ -137,6 +137,10 @@ try {
     const npxAvailable = updateAvailable ? hasCommand('npx') : true;
     if (updateAvailable && !npxAvailable) {
       updateCheck = 'npx-unavailable';
+      // Suppress the ⬆ /do:update badge: that command is itself an npx wrapper,
+      // so pointing at it here would just be a second dead end. The notice below
+      // still tells the user an update exists and how to get it.
+      updateAvailable = false;
     }
     if (updateAvailable && autoUpdate && npxAvailable) {
       // wx = create-exclusive: succeeds for exactly one racer, throws EEXIST for
@@ -206,10 +210,14 @@ try {
       result.update_check = updateCheck;
       const notices = {
         'npm-unavailable': 'slashdo update check needs npm on PATH — update with install.sh',
-        'npx-unavailable': 'slashdo auto-update needs npx on PATH — re-run install.sh'
+        'npx-unavailable': 'slashdo update available but npx is missing — update with install.sh'
       };
+      // Keyed on the stamp alone, not on the state matching: a transient
+      // 'lookup-failed' run in between must not drop the stamp and re-open the
+      // window hours after the last warning. A healthy check writes no stamp at
+      // all, so npm going missing again later warns immediately.
+      const lastNotice = Number(previous && previous.notice_at) || 0;
       if (notices[updateCheck]) {
-        const lastNotice = (previous && previous.update_check === updateCheck && Number(previous.notice_at)) || 0;
         const now = Math.floor(Date.now() / 1000);
         if (!lastNotice || now - lastNotice >= NOTICE_REPEAT_S) {
           result.notice = notices[updateCheck];
@@ -217,6 +225,8 @@ try {
         } else {
           result.notice_at = lastNotice;
         }
+      } else if (lastNotice) {
+        result.notice_at = lastNotice;
       }
     }
 
