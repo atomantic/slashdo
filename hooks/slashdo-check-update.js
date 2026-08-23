@@ -2,6 +2,12 @@
 // Check for slashdo updates in background, write result to cache.
 // Called by SessionStart hook - runs once per session.
 //
+// The curl installer (install.sh) is explicitly npm-free, so this hook can run
+// on a machine with no npm/npx on PATH. In that case there is no way to learn the
+// latest version, so the cache records `update_check: 'npm-unavailable'` plus a
+// one-shot `notice` for the statusline instead of a bare `update_available: false`
+// that would be indistinguishable from "you're already on the latest version".
+//
 // When the user opted into auto-update (~/.claude/.slashdo-config.json:
 // { "autoUpdate": true }), a detected update is applied automatically by
 // running `npx -y slash-do@latest` instead of surfacing the ⬆ /do:update
@@ -41,6 +47,13 @@ try {
     // live install is never stolen out from under itself.
     const LOCK_STALE_MS = 10 * 60 * 1000;
 
+    // Previous cache state — used to make the npm/npx notice one-shot: we warn
+    // when the state first appears, not on every session for the rest of time.
+    let previous = null;
+    try {
+      previous = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+    } catch (e) {}
+
     let installed = '0.0.0';
     try {
       if (fs.existsSync(versionFile)) {
@@ -61,10 +74,33 @@ try {
       }
     } catch (e) {}
 
+    // Probe PATH before shelling out: without this, a missing npm throws ENOENT
+    // into the catch below, leaving latest === null and writing a cache that reads
+    // exactly like "up to date" — the user never learns the check is dead.
+    const hasCommand = (cmd) => {
+      try {
+        execSync((process.platform === 'win32' ? 'where ' : 'command -v ') + cmd, { stdio: 'ignore', timeout: 5000, windowsHide: true });
+        return true;
+      } catch (e) {
+        return false;
+      }
+    };
+
+    // Distinct, machine-readable reason the check could not complete (null = it did).
+    let updateCheck = null;
+
     let latest = null;
-    try {
-      latest = execSync('npm view slash-do version', { encoding: 'utf8', timeout: 5000, windowsHide: true }).trim();
-    } catch (e) {}
+    if (hasCommand('npm')) {
+      try {
+        latest = execSync('npm view slash-do version', { encoding: 'utf8', timeout: 5000, windowsHide: true }).trim();
+      } catch (e) {
+        // Offline / registry error / timeout: transient, so no user-facing notice,
+        // but the cache still says the check failed rather than implying "current".
+        updateCheck = 'lookup-failed';
+      }
+    } else {
+      updateCheck = 'npm-unavailable';
+    }
 
     // Simple semver comparison: only flag update when latest > installed
     let updateAvailable = false;
@@ -87,7 +123,12 @@ try {
     // deferring session must NOT write its own (stale update_available:true) result
     // and clobber the holder's update_available:false once the install completes.
     let deferred = false;
-    if (updateAvailable && autoUpdate) {
+    // npm can be present while npx is not (npx is a separate shim on some
+    // distro-packaged Node builds). Without npx there is nothing to auto-update
+    // with, so record why and fall through to the manual /do:update hint.
+    if (updateAvailable && autoUpdate && !hasCommand('npx')) {
+      updateCheck = 'npx-unavailable';
+    } else if (updateAvailable && autoUpdate) {
       // wx = create-exclusive: succeeds for exactly one racer, throws EEXIST for
       // the rest. In the common case (no lock yet, several sessions starting at
       // once) this gives EXACT mutual exclusion — exactly one installs.
@@ -150,6 +191,19 @@ try {
       latest: latest || 'unknown',
       checked: Math.floor(Date.now() / 1000)
     };
+
+    if (updateCheck) {
+      result.update_check = updateCheck;
+      // One-shot: only surface the notice when this state is new, so a machine
+      // that deliberately has no npm doesn't carry a permanent statusline warning.
+      const notices = {
+        'npm-unavailable': 'slashdo update check needs npm on PATH',
+        'npx-unavailable': 'slashdo auto-update needs npx on PATH — run /do:update'
+      };
+      if (notices[updateCheck] && (!previous || previous.update_check !== updateCheck)) {
+        result.notice = notices[updateCheck];
+      }
+    }
 
     if (!deferred) {
       fs.writeFileSync(cacheFile, JSON.stringify(result));

@@ -8,7 +8,27 @@ function getInstalledVersion(versionFile) {
   return fs.readFileSync(versionFile, 'utf8').trim();
 }
 
+// slashdo also installs via the npm-free curl installer, so npm is not guaranteed
+// to be on PATH. Probing first turns an opaque ENOENT into a state callers can name.
+function hasNpm() {
+  try {
+    execSync(process.platform === 'win32' ? 'where npm' : 'command -v npm', {
+      timeout: 3000,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getLatestVersion(timeoutMs) {
+  if (!hasNpm()) {
+    const err = new Error('npm is not on PATH — cannot look up the latest slash-do version');
+    err.code = 'NPM_UNAVAILABLE';
+    throw err;
+  }
   const timeout = timeoutMs || 3000;
   const result = execSync('npm view slash-do version 2>/dev/null', {
     timeout,
@@ -48,4 +68,4 @@ function checkForUpdate(versionFile) {
   return { installed, latest, diff };
 }
 
-module.exports = { getInstalledVersion, getLatestVersion, compareVersions, checkForUpdate };
+module.exports = { getInstalledVersion, hasNpm, getLatestVersion, compareVersions, checkForUpdate };

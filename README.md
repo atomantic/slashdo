@@ -482,6 +482,8 @@ npx slash-do@latest        # from your terminal
 /do:update                # from inside your AI coding assistant
 ```
 
+Both paths need `npm`/`npx` on your `PATH`. If you installed with the npm-free `install.sh` and never installed npm, the statusline says so once (`⚠ slashdo update check needs npm on PATH`) rather than silently implying you are current — re-run the curl installer to update in place.
+
 The preference lives in `~/.claude/.slashdo-config.json` (`{ "autoUpdate": true }`). Change it any time without the prompt:
 
 ```bash

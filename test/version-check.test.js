@@ -6,7 +6,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const { getInstalledVersion, compareVersions } = require('../src/version-check');
+const { spawnSync } = require('node:child_process');
+
+const { getInstalledVersion, compareVersions, hasNpm } = require('../src/version-check');
 
 // ── getInstalledVersion ─────────────────────────────────────────────
 
@@ -73,5 +75,33 @@ describe('compareVersions', () => {
 
   it('handles mixed v prefix', () => {
     assert.equal(compareVersions('v1.0.0', '2.0.0'), 'major');
+  });
+});
+
+// ── hasNpm / getLatestVersion ───────────────────────────────────────
+
+describe('hasNpm', () => {
+  it('reports true when npm resolves on PATH', () => {
+    // slashdo's own test run happens on a machine with npm, so this holds here.
+    assert.equal(hasNpm(), true);
+  });
+
+  it('reports false and getLatestVersion throws NPM_UNAVAILABLE with npm off PATH', () => {
+    // Run in a child so the stripped PATH cannot leak into the other tests.
+    const modulePath = path.resolve(__dirname, '../src/version-check');
+    const script = [
+      'const { hasNpm, getLatestVersion } = require(' + JSON.stringify(modulePath) + ');',
+      'let code = null;',
+      'try { getLatestVersion(1000); } catch (e) { code = e.code; }',
+      'process.stdout.write(JSON.stringify({ hasNpm: hasNpm(), code }));',
+    ].join('\n');
+    const result = spawnSync(process.execPath, ['-e', script], {
+      encoding: 'utf8',
+      timeout: 10000,
+      env: { PATH: '/nonexistent-slashdo-bin' },
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), { hasNpm: false, code: 'NPM_UNAVAILABLE' });
   });
 });
