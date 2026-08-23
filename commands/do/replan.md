@@ -256,7 +256,14 @@ Feed this graph to Phase 2: `blocked` issues are kept (`still-pending`, never `s
 > never closing it at all. For any issue that is an epic (carries `epic`/a repo
 > umbrella label, has native sub-issues, or task-lists other issues in its body),
 > resolve its children and compute its completeness state with the shared epic logic
-> (inlined here so it's available in every environment):
+> (inlined here so it's available in every environment).
+>
+> **GitHub only — derive `GH_HOST` first with the shared snippet below** (skip it entirely
+> on GitLab, whose `glab` calls resolve the host from the remote themselves and where the
+> snippet's `gh auth` precheck would abort the run). That logic's `gh api` calls ignore the
+> repo remote and default to github.com, so pass `--hostname "$GH_HOST"` on every one:
+>
+> !`cat ~/.claude/lib/gh-host.md`
 >
 > !`cat ~/.claude/lib/epic-children.md`
 >

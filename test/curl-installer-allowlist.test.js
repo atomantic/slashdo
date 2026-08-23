@@ -92,3 +92,13 @@ describe('curl-installer COMMANDS allowlist', () => {
       `  In COMMANDS but not commands/do/: ${actual.filter((x) => !expected.includes(x)).join(', ') || '(none)'}`);
   });
 });
+
+describe('curl-installer OpenCode temporary files', () => {
+  it('uses unique mktemp paths while transforming downloaded commands and libs', () => {
+    const installer = fs.readFileSync(path.join(REPO_ROOT, 'install.sh'), 'utf8');
+
+    assert.match(installer, /mktemp "\$\{TMPDIR:-\/tmp\}\/slashdo-command-\$\{cmd\}\.XXXXXX"/);
+    assert.match(installer, /mktemp "\$\{TMPDIR:-\/tmp\}\/slashdo-lib-\$\{lib\}\.XXXXXX"/);
+    assert.doesNotMatch(installer, /\/tmp\/slashdo-(?:\$cmd|lib-\$lib)\.md/);
+  });
+});

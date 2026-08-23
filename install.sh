@@ -59,6 +59,7 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 # it and the command will fail at runtime. The npm installer (src/installer.js)
 # enumerates lib/ dynamically, so it doesn't need updating.
 LIBS=(
+  better-cleanup better-pr-and-ci better-review-loop better-verification
   ci-flake-handling code-review-checklist copilot-review-loop
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
@@ -239,31 +240,43 @@ install_opencode() {
   printf "  Installing to ${GREEN}OpenCode${RESET}...\n"
 
   for cmd in "${COMMANDS[@]}"; do
+    local tmpfile
     printf "    /do-%-20s" "$cmd"
-    if fetch_file "commands/do/$cmd.md" "/tmp/slashdo-$cmd.md"; then
+    tmpfile="$(mktemp "${TMPDIR:-/tmp}/slashdo-command-${cmd}.XXXXXX")"
+    if fetch_file "commands/do/$cmd.md" "$tmpfile"; then
       # Rewrite lib paths and the config-path token for OpenCode
-      sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
+      if ! sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
           -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
-          "/tmp/slashdo-$cmd.md" > "$target_cmd/do-$cmd.md"
-      rm -f "/tmp/slashdo-$cmd.md"
+          "$tmpfile" > "$target_cmd/do-$cmd.md"; then
+        rm -f "$tmpfile"
+        return 1
+      fi
+      rm -f "$tmpfile"
       printf "${GREEN}ok${RESET}\n"
     else
+      rm -f "$tmpfile"
       printf "failed\n"
     fi
   done
 
   for lib in "${LIBS[@]}"; do
+    local tmpfile
     printf "    lib/%-20s" "$lib.md"
-    if fetch_file "lib/$lib.md" "/tmp/slashdo-lib-$lib.md"; then
+    tmpfile="$(mktemp "${TMPDIR:-/tmp}/slashdo-lib-${lib}.XXXXXX")"
+    if fetch_file "lib/$lib.md" "$tmpfile"; then
       # Rewrite lib-path cross-references and the config-path token so libs
       # resolve under OpenCode at runtime (mirrors the command loop and npm's
       # transformLib).
-      sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
+      if ! sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
           -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
-          "/tmp/slashdo-lib-$lib.md" > "$target_lib/$lib.md"
-      rm -f "/tmp/slashdo-lib-$lib.md"
+          "$tmpfile" > "$target_lib/$lib.md"; then
+        rm -f "$tmpfile"
+        return 1
+      fi
+      rm -f "$tmpfile"
       printf "${GREEN}ok${RESET}\n"
     else
+      rm -f "$tmpfile"
       printf "failed\n"
     fi
   done
