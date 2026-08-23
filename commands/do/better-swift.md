@@ -826,31 +826,37 @@ Phases 4, 4b, 5, 5d, 6, and 7 below are the **shared `better-*` pipeline** — t
 platform-agnostic mechanics this command runs verbatim with `/do:better` via
 `lib/better-*.md`. Everything Swift-specific about them arrives through the
 inputs below, so a change to the pipeline lands in both commands by
-construction. Resolve these before Phase 4:
+construction. The substitution rules for them all (empty values drop their line;
+indented values keep their indent) are in `~/.claude/lib/better-verification.md`.
+Resolve these before Phase 4:
 
 - `{BRANCH_PREFIX}` = `better-swift` (staging branch `better-swift/{DATE}`, category branches `better-swift/{CATEGORY_SLUG}`)
 - `{PIPELINE_LABEL}` = `better-swift audit`
 - `{PIPELINE_TITLE}` = `Better Swift Audit`
 - `{VERIFY_SCOPE_SUFFIX}` = ` on ALL supported platforms`
-- `{VERIFY_SCOPE_NOTE}` = "This must succeed for every platform in `PLATFORMS`. A fix that works on iOS but breaks macOS is not acceptable."
-- `{VERIFY_STATUS_CLAUSE}` = "All {PLATFORMS} platforms build and test successfully. "
+- `{VERIFY_SCOPE_NOTE}` = This must succeed for every platform in `PLATFORMS`. A fix that works on iOS but breaks macOS is not acceptable.
+- `{VERIFY_FAILURE_SCOPE}` = ` on any platform`
+- `{VERIFY_FAILURE_COMMIT_SLOT}` = `{platform} ` — the failing platform is a required field in the commit subject, not an afterthought
+- `{VERIFY_STATUS_CLAUSE}` = `All {PLATFORMS} platforms build and test successfully. `
 - `{REVIEW_CHECKLIST}` = `Swift Code Review Checklist` (the section below)
 - `{VERSION_BUMP_SECTION}` = `Version Bump Procedure` (the section below)
 - `{SIMPLIFY_ONLY}` = `false` — this command has no refactor-only mode, so every clause in the shared partials gated on it is inert
 - `{COMPAT_SHIM}` = `typealias`, `{COMPAT_HOST}` = `file`
 - `{MULTI_CATEGORY_FILE_EXAMPLE}` = ``ContentView.swift`` with both platform and architecture changes
-- `{CATEGORY_SLUGS}` =
-  > `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `platform-swiftui`, `tests`, `ux`
+- `{CATEGORY_SLUGS}` = `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `platform-swiftui`, `tests`, `ux`
+- `{COMMIT_PREFIX_RULE}` = *(empty — this command has no mode that changes the prefix)*
 - `{PR_BODY_SUMMARY_EXTRA}` = `Platforms verified: {PLATFORMS}`
-- `{PR_BODY_EXTRA_SECTIONS}` =
-  > ```
-  > ### Platform Impact
-  > {which platforms are affected by these changes, any platform-specific notes}
-  > ```
-- `{CI_FAILURE_CAUSES_EXTRA}` =
-  > - **Platform build failure**: a change compiles on iOS but not macOS (or vice versa). Add `#if os(...)` guard.
-  > - **Code signing**: ignore code signing failures in CI if not configured — these are environment-specific.
-- `{REVIEW_LOOP_EXTRA_INSTRUCTION}` = "**Additional Swift-specific instruction for review loop agents:** After each fix, verify the code compiles on ALL platforms: `{BUILD_CMD}`. If a reviewer's suggestion would break another platform, add a platform-conditional implementation instead."
+- `{PR_BODY_EXTRA_SECTIONS}` = one extra section, at column 0 like the sections around it, and ending with a blank line:
+
+      ### Platform Impact
+      {which platforms are affected by these changes, any platform-specific notes}
+
+- `{CI_FAILURE_CAUSES_EXTRA}` = two bullets, indented to match the ones above them:
+
+      - **Platform build failure**: a change compiles on iOS but not macOS (or vice versa). Add `#if os(...)` guard.
+      - **Code signing**: ignore code signing failures in CI if not configured — these are environment-specific.
+
+- `{REVIEW_LOOP_EXTRA_INSTRUCTION}` = **Additional Swift-specific instruction for review loop agents:** After each fix, verify the code compiles on ALL platforms: `{BUILD_CMD}`. If a reviewer's suggestion would break another platform, add a platform-conditional implementation instead.
 - `{REVIEW_STATUS_EXTRA}` = `\n\nAll PRs verified on: {PLATFORMS}`
 - `{SUMMARY_TABLE_ROWS}` / `{SUMMARY_TABLE_ROW_RULES}` / `{SUMMARY_TABLE_FOOTER}` = see the **Final Summary Table** section below
 

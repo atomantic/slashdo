@@ -665,26 +665,31 @@ Phases 4, 4b, 5, 5d, 6, and 7 below are the **shared `better-*` pipeline** — t
 platform-agnostic mechanics this command runs verbatim with `/do:better-swift`
 via `lib/better-*.md`. Everything that differs between the two commands arrives
 through the inputs below, so a change to the pipeline lands in both by
-construction. Resolve these before Phase 4:
+construction. The substitution rules for them all (empty values drop their line;
+indented values keep their indent) are in `~/.claude/lib/better-verification.md`.
+Resolve these before Phase 4:
 
 - `{BRANCH_PREFIX}` = `better` (staging branch `better/{DATE}`, category branches `better/{CATEGORY_SLUG}`)
 - `{PIPELINE_LABEL}` = `better audit`
 - `{PIPELINE_TITLE}` = `Better Audit`
 - `{VERIFY_SCOPE_SUFFIX}` = *(empty — single build target)*
 - `{VERIFY_SCOPE_NOTE}` = *(empty)*
+- `{VERIFY_FAILURE_SCOPE}` = *(empty)*
+- `{VERIFY_FAILURE_COMMIT_SLOT}` = *(empty)*
 - `{VERIFY_STATUS_CLAUSE}` = *(empty)*
 - `{REVIEW_CHECKLIST}` = `Code Review Checklist` (the section below)
 - `{VERSION_BUMP_SECTION}` = `Version Bump Procedure` (the section below)
 - `{SIMPLIFY_ONLY}` — `true` when `--simplify-only` / `--refactor-only` was passed, else `false`
 - `{COMPAT_SHIM}` = `re-export`, `{COMPAT_HOST}` = `module`
 - `{MULTI_CATEGORY_FILE_EXAMPLE}` = ``server/index.js`` with both security and stack-specific changes
-- `{CATEGORY_SLUGS}` =
-  > `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`, `ux` (UI projects only), `structural` (strict mode only), and `cognitive-load` (simplify-only mode)
-  >
-  > When `SIMPLIFY_ONLY=true`, the only possible slugs are the [`SIMPLIFY_CATEGORIES`](#the-category-set) ones, and the per-category commit plus its PR title take the `refactor:` prefix. This does not touch the pipeline's other mandated messages — the version bump stays `chore:`, and build/review/CI fixes stay `fix:`
+- `{CATEGORY_SLUGS}` = `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`, `ux` (UI projects only), `structural` (strict mode only), and `cognitive-load` (simplify-only mode)
+- `{COMMIT_PREFIX_RULE}` = **When `SIMPLIFY_ONLY=true`**, the only possible slugs are the [`SIMPLIFY_CATEGORIES`](#the-category-set) ones, and the per-category commit plus its PR title take the `refactor:` prefix. This does not touch the pipeline's other mandated messages — the version bump stays `chore:`, and build/review/CI fixes stay `fix:`
 - `{PR_BODY_SUMMARY_EXTRA}` = *(empty)*
 - `{PR_BODY_EXTRA_SECTIONS}` = *(empty)*
-- `{CI_FAILURE_CAUSES_EXTRA}` = *(empty)*
+- `{CI_FAILURE_CAUSES_EXTRA}` = a single bullet, indented to match the ones above it:
+
+      - **Missing exports**: a module removed an export that other code still references. Fix by adding a re-export.
+
 - `{REVIEW_LOOP_EXTRA_INSTRUCTION}` = *(empty)*
 - `{REVIEW_STATUS_EXTRA}` = *(empty)*
 - `{SUMMARY_TABLE_ROWS}` / `{SUMMARY_TABLE_ROW_RULES}` / `{SUMMARY_TABLE_FOOTER}` = see the **Final Summary Table** section below

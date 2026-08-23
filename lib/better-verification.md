@@ -18,12 +18,17 @@ The calling command must have resolved these before reaching Phase 4:
 - `{VERIFY_SCOPE_SUFFIX}` — a prose phrase appended to every build/test
   instruction to widen its scope, or **empty** for a single-target project. A
   multi-platform pipeline sets it to ` on ALL supported platforms` (leading
-  space included). The PR/CI and cleanup partials read it too, so define it once
-  for the whole run.
+  space included). The PR/CI partial reads it too, so define it once for the
+  whole run.
 - `{VERIFY_SCOPE_NOTE}` — one extra sentence spelling out that scope
   requirement, or empty. A multi-platform pipeline names its platform set here
   (e.g. "This must succeed for every platform in `PLATFORMS`. A fix that works
   on iOS but breaks macOS is not acceptable.").
+- `{VERIFY_FAILURE_SCOPE}` — how a failure is scoped in the "if the build
+  fails" branch, or **empty** for a single target (e.g. ` on any platform`).
+- `{VERIFY_FAILURE_COMMIT_SLOT}` — the leading slot in the build-failure commit
+  subject, or **empty** (a multi-platform pipeline sets it to `{platform} ` so
+  the failing platform is a required field, not an afterthought).
 - `{VERIFY_STATUS_CLAUSE}` — an extra sentence (trailing space included)
   appended to the interactive review summary, or empty (e.g. "All {PLATFORMS}
   platforms build and test successfully. ").
@@ -35,6 +40,13 @@ The calling command must have resolved these before reaching Phase 4:
   clause below gated on it inert.
 - Plus the pipeline's own `{WORKTREE_DIR}`, `{REPO_DIR}`, `{CURRENT_BRANCH}`,
   `{DEFAULT_BRANCH}`, `{DATE}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
+
+**Substitution rules for every input above, and for the other `better-*`
+partials.** An **empty** value drops the line it sits on entirely — never emit a
+blank line, a stray space, or an empty bullet in its place. A value that lands
+inside an indented list keeps that list's indentation on every one of its lines;
+a value dropped at column 0 inside a lettered or numbered sub-list terminates
+that list and orphans the steps after it.
 
 ## Phase 4: Verification
 
@@ -50,9 +62,9 @@ After all agents complete:
    ```bash
    cd {WORKTREE_DIR} && {TEST_CMD}
    ```
-3. If build or tests fail (on any target, when more than one is verified):
+3. If build or tests fail{VERIFY_FAILURE_SCOPE}:
    - Identify which commits caused the failure via `git bisect` or manual review
-   - Attempt to fix in a new commit: `fix: resolve build/test failure from {category} changes` — name the failing platform in the subject when the build covers more than one
+   - Attempt to fix in a new commit: `fix: resolve {VERIFY_FAILURE_COMMIT_SLOT}build/test failure from {category} changes`
    - If unfixable, revert the problematic commit(s): `git -C {WORKTREE_DIR} revert <sha>` and note which findings were skipped
    - **When `SIMPLIFY_ONLY=true`**, a failing test is a regression by definition — the run promised identical behavior. Fix the refactor or revert it; do not edit the test to match the new behavior
 <!-- if:teams -->

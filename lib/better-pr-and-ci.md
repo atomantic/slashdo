@@ -14,8 +14,10 @@ documents:
 - `{PIPELINE_TITLE}` — the PR body's heading prefix (`Better Audit`,
   `Better Swift Audit`).
 - `{CATEGORY_SLUGS}` — the pipeline's branch-slug set, as the prose line step 2
-  prints (e.g. `` `security`, `code-quality`, … ``, with any conditional-mode
-  notes).
+  prints (e.g. `` `security`, `code-quality`, … ``).
+- `{COMMIT_PREFIX_RULE}` — a mode-dependent rule about the conventional prefix
+  the per-category commit and its PR title take, or **empty**. It is repeated at
+  both use sites (5a step 4 and 5c) because it governs both.
 - `{MULTI_CATEGORY_FILE_EXAMPLE}` — a representative file from this stack that
   could pick up changes from two categories, used in the file-isolation rule
   (e.g. "`server/index.js` with both security and stack-specific changes").
@@ -30,10 +32,12 @@ documents:
 - `{PR_BODY_EXTRA_SECTIONS}` — extra `###` section(s) for the PR body, or empty
   (e.g. a "Platform Impact" section).
 - `{CI_FAILURE_CAUSES_EXTRA}` — extra bullet(s) for the CI failure-cause list, or
-  empty (e.g. platform-conditional build failures, code-signing noise).
+  empty (e.g. a JS-only "missing exports" cause, platform-conditional build
+  failures, code-signing noise). Its placeholder sits six spaces deep inside the
+  lettered sub-list, so every line of the value must carry that indent.
 
-An **empty** value drops the line it sits on entirely — do not emit a blank line
-in its place, or the generated PR body carries stray gaps.
+The substitution rules in `~/.claude/lib/better-verification.md` — empty values
+drop their line, indented values keep their indent — apply to all of these.
 
 ## Phase 5: Per-Category PR Creation
 
@@ -57,6 +61,7 @@ For each category that has findings:
    ```bash
    git commit -m "{prefix}: {category summary}"
    ```
+   {COMMIT_PREFIX_RULE}
 5. Push the branch: `git push -u origin {BRANCH_PREFIX}/{CATEGORY_SLUG}`
 
 **File isolation rule** (one file per branch) — each file must appear in exactly ONE branch. If a file has changes from multiple categories (e.g., {MULTI_CATEGORY_FILE_EXAMPLE}), assign the whole file to one category based on the file ownership map. Do not split file-level changes across PRs.
@@ -83,7 +88,7 @@ Only if ALL category branches pass build{VERIFY_SCOPE_SUFFIX}:
 
 ### 5c: Create PRs
 
-For each category branch, create a PR:
+For each category branch, create a PR. {COMMIT_PREFIX_RULE}
 
 **GitHub:**
 ```bash
@@ -101,8 +106,8 @@ gh pr create --head {BRANCH_PREFIX}/{CATEGORY_SLUG} --base {DEFAULT_BRANCH} \
 
 ### Files Modified
 {list of files}
-{PR_BODY_EXTRA_SECTIONS}
 
+{PR_BODY_EXTRA_SECTIONS}
 ### Merge Order
 {dependency info if applicable, e.g., "Depends on Security PR for shared helper exports" or "Independent — can be merged in any order"}
 EOF
@@ -148,9 +153,8 @@ After creating all PRs, verify CI passes on each one:
       ```
    b. Analyze the failure — common causes:
       - **Missing imports**: a file references a symbol that lives in another PR's branch. Fix by adding a backward-compatible {COMPAT_SHIM} or reverting the import.
-      - **Missing exports**: a {COMPAT_HOST} dropped a symbol that other code still references. Fix by restoring the symbol — or a {COMPAT_SHIM} standing in for it — in the branch that owns that {COMPAT_HOST}.
       - **Test failures**: a test depends on code changed in the PR. Fix the test or the code.
-{CI_FAILURE_CAUSES_EXTRA}
+      {CI_FAILURE_CAUSES_EXTRA}
    c. Switch to the failing branch:
       ```bash
       git checkout {BRANCH_PREFIX}/{CATEGORY_SLUG}

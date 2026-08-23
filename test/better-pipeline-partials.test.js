@@ -12,7 +12,7 @@ const readCommand = (name) => fs.readFileSync(path.join(root, 'commands', 'do', 
 // That used to be ~800 byte-identical lines maintained by hand in both files, and
 // they had already drifted. The phases now live in lib/better-*.md, which only
 // keeps them in lockstep for as long as both commands actually include the
-// partials and both define every input the partials read.
+// partials, in pipeline order, and define every input the partials read.
 const AUDIT_COMMANDS = ['better.md', 'better-swift.md'];
 const PIPELINE_LIBS = [
   'better-verification',
@@ -46,6 +46,30 @@ const REVIEWER_LOOP_LIBS = [
   'ollama-review-loop',
 ];
 
+const includeIndex = (body, lib) => body.indexOf('!`cat ~/.claude/lib/' + lib + '.md`');
+
+// A partial documents its inputs in a `### Inputs` block and then USES them in the
+// phase text below it. Only the phase text is a substitution point: a token that
+// survives as a doc bullet alone has lost the line it was meant to fill.
+const partialBody = (lib) => {
+  const text = fs.readFileSync(path.join(root, 'lib', `${lib}.md`), 'utf8');
+  const parts = text.split('### Inputs');
+  assert.equal(parts.length, 2, `lib/${lib}.md must have exactly one ### Inputs block`);
+  const start = parts[1].indexOf('\n## ');
+  assert.ok(start > -1, `lib/${lib}.md has no phase section after its ### Inputs block`);
+  return parts[1].slice(start);
+};
+
+const tokensIn = (text) => new Set([...text.matchAll(/\{([A-Z][A-Z0-9_]+)\}/g)].map((m) => m[1]));
+
+// Not every input is substituted as {TOKEN}: a run-state FLAG is read as a
+// condition the partial branches on (`SIMPLIFY_ONLY=true`). Count both forms, or
+// the unused-input check reports a flag the partials very much do use.
+const readIn = (text) => new Set([
+  ...tokensIn(text),
+  ...[...text.matchAll(/`([A-Z][A-Z0-9_]+)=/g)].map((m) => m[1]),
+]);
+
 const inputTokens = (body) => {
   const section = body.split('## Shared Pipeline Inputs')[1];
   assert.ok(section, 'no Shared Pipeline Inputs section');
@@ -57,16 +81,22 @@ const inputTokens = (body) => {
 };
 
 describe('shared better-* pipeline partials', () => {
-  it('is included by both audit commands', () => {
+  it('is included by both audit commands, in pipeline order', () => {
     // Re-inlining one command's copy of a phase leaves every other test green and
-    // silently restores the drift the extraction removed.
+    // silently restores the drift the extraction removed. Order matters just as
+    // much: cleanup ahead of PR creation would tell the agent to delete the
+    // staging branch and the spool before Phase 5 cherry-picks files out of them.
     for (const name of AUDIT_COMMANDS) {
       const body = readCommand(name);
-      for (const lib of PIPELINE_LIBS) {
-        assert.match(
-          body,
-          new RegExp('!`cat ~/\\.claude/lib/' + lib + '\\.md`'),
-          `${name} must include lib/${lib}.md`,
+      const at = PIPELINE_LIBS.map((lib) => {
+        const i = includeIndex(body, lib);
+        assert.notEqual(i, -1, `${name} must include lib/${lib}.md`);
+        return i;
+      });
+      for (let i = 1; i < at.length; i++) {
+        assert.ok(
+          at[i] > at[i - 1],
+          `${name}: lib/${PIPELINE_LIBS[i]}.md must come after lib/${PIPELINE_LIBS[i - 1]}.md`,
         );
       }
     }
@@ -79,11 +109,10 @@ describe('shared better-* pipeline partials', () => {
     assert.deepEqual([...a].sort(), [...b].sort());
   });
 
-  it('has every token its partials read defined by both commands', () => {
+  it('has every token its partials substitute defined by both commands', () => {
     const defined = AUDIT_COMMANDS.map((name) => inputTokens(readCommand(name)));
     for (const lib of PIPELINE_LIBS) {
-      const text = fs.readFileSync(path.join(root, 'lib', `${lib}.md`), 'utf8');
-      for (const [, token] of text.matchAll(/\{([A-Z][A-Z0-9_]+)\}/g)) {
+      for (const token of tokensIn(partialBody(lib))) {
         if (RUNTIME_TOKENS.has(token)) continue;
         for (let i = 0; i < AUDIT_COMMANDS.length; i++) {
           assert.ok(
@@ -95,17 +124,16 @@ describe('shared better-* pipeline partials', () => {
     }
   });
 
-  it('defines no input no partial reads', () => {
-    // A stale definition is a maintenance trap: it reads as load-bearing and gets
-    // updated alongside the ones that are.
+  it('defines no input no partial substitutes', () => {
+    // A definition with no use site is drift waiting to happen: it reads as
+    // load-bearing, so it gets maintained, while the phase text has moved on.
     const read = new Set();
     for (const lib of PIPELINE_LIBS) {
-      const text = fs.readFileSync(path.join(root, 'lib', `${lib}.md`), 'utf8');
-      for (const [, token] of text.matchAll(/\{([A-Z][A-Z0-9_]+)\}/g)) read.add(token);
+      for (const token of readIn(partialBody(lib))) read.add(token);
     }
     for (const name of AUDIT_COMMANDS) {
       for (const token of inputTokens(readCommand(name))) {
-        assert.ok(read.has(token), `${name} defines {${token}}, which no partial reads`);
+        assert.ok(read.has(token), `${name} defines {${token}}, which no partial substitutes`);
       }
     }
   });
