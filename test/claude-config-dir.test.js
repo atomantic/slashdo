@@ -22,10 +22,25 @@ function waitForJson(file, timeout = 8000) {
   throw new Error(`Timed out waiting for ${file}`);
 }
 
+function assertInstalledDocsUseCustomRoot(configDir) {
+  const quotedRoot = `'${configDir.replace(/'/g, `'\\''`)}'`;
+  const installedDocs = [
+    ...fs.readdirSync(path.join(configDir, 'commands', 'do')).map((name) =>
+      path.join(configDir, 'commands', 'do', name)),
+    ...fs.readdirSync(path.join(configDir, 'lib')).map((name) =>
+      path.join(configDir, 'lib', name)),
+  ];
+  for (const file of installedDocs) {
+    assert.ok(!fs.readFileSync(file, 'utf8').includes('~/.claude/'), file);
+  }
+  const command = fs.readFileSync(path.join(configDir, 'commands', 'do', 'next.md'), 'utf8');
+  assert.ok(command.includes(`!\`cat ${quotedRoot}/lib/gh-host.md\``));
+}
+
 describe('curl installer CLAUDE_CONFIG_DIR support', () => {
   it('installs, registers, and uninstalls entirely within the custom root', { timeout: 30000 }, () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-custom-home-'));
-    const configDir = path.join(home, 'claude-work');
+    const configDir = path.join(home, 'claude profile');
     const env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: configDir };
 
     try {
@@ -43,13 +58,14 @@ describe('curl installer CLAUDE_CONFIG_DIR support', () => {
       assert.ok(fs.existsSync(path.join(configDir, 'hooks', 'slashdo-check-update.js')));
       assert.ok(fs.existsSync(path.join(configDir, '.slashdo-config.json')));
       const settings = JSON.parse(fs.readFileSync(path.join(configDir, 'settings.json'), 'utf8'));
-      assert.match(settings.hooks.SessionStart[0].hooks[0].command, new RegExp(configDir));
-      assert.match(settings.statusLine.command, new RegExp(configDir));
+      assert.ok(settings.hooks.SessionStart[0].hooks[0].command.includes(configDir));
+      assert.ok(settings.statusLine.command.includes(configDir));
       assert.equal(fs.existsSync(path.join(home, '.claude')), false);
 
       const command = fs.readFileSync(path.join(configDir, 'commands', 'do', 'next.md'), 'utf8');
-      assert.ok(command.includes(path.join(configDir, 'lib')));
+      assert.ok(command.includes(`'${configDir}'/lib`));
       assert.ok(!command.includes('~/.claude/lib/'));
+      assertInstalledDocsUseCustomRoot(configDir);
 
       // The hook deliberately exits when no installed-version marker exists.
       // Seed it here so this test can focus on the shared config-root handoff.
@@ -99,6 +115,27 @@ describe('curl installer CLAUDE_CONFIG_DIR support', () => {
       const cleanedSettings = JSON.parse(fs.readFileSync(path.join(configDir, 'settings.json'), 'utf8'));
       assert.equal(cleanedSettings.hooks, undefined);
       assert.equal(cleanedSettings.statusLine, undefined);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rewrites and quotes the custom root through the npm installer', { timeout: 30000 }, () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-custom-home-'));
+    const configDir = path.join(home, "claude's profile");
+    const env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: configDir };
+
+    try {
+      fs.mkdirSync(configDir);
+      const installed = spawnSync(process.execPath, [path.join(repoRoot, 'bin', 'cli.js'),
+        '--env', 'claude', '--no-auto-update'], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env,
+        timeout: 20000,
+      });
+      assert.equal(installed.status, 0, installed.stderr || installed.stdout);
+      assertInstalledDocsUseCustomRoot(configDir);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

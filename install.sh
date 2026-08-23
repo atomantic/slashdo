@@ -41,13 +41,13 @@ fetch_file() {
 # destination paths, just as the OpenCode installer rewrites them below.
 rewrite_claude_paths() {
   local file="$1"
-  local escaped_root tmpfile
+  local quoted_root escaped_root tmpfile
   [ "$CLAUDE_CONFIG_CUSTOM" = true ] || return 0
-  escaped_root=$(printf '%s' "$CLAUDE_CONFIG_DIR" | sed 's/[&|\\]/\\&/g')
+  quoted_root=$(printf '%s' "$CLAUDE_CONFIG_DIR" | sed "s/'/'\\\\''/g")
+  quoted_root="'$quoted_root'"
+  escaped_root=$(printf '%s' "$quoted_root" | sed 's/[&|\\]/\\&/g')
   tmpfile="$(mktemp "${TMPDIR:-/tmp}/slashdo-claude-paths.XXXXXX")"
-  if sed -e "s|~/.claude/lib/|$escaped_root/lib/|g" \
-      -e "s|~/.claude/.slashdo-config.json|$escaped_root/.slashdo-config.json|g" \
-      "$file" > "$tmpfile"; then
+  if sed "s|~/.claude/|$escaped_root/|g" "$file" > "$tmpfile"; then
     mv "$tmpfile" "$file"
   else
     rm -f "$tmpfile"

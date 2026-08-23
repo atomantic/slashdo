@@ -6,6 +6,10 @@ const os = require('os');
 
 const HOME = os.homedir();
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
+const shellQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+const CLAUDE_ROOT_PATH_PREFIX = process.env.CLAUDE_CONFIG_DIR
+  ? `${shellQuote(CLAUDE_DIR)}${path.sep}`
+  : null;
 const CLAUDE_CONFIG_PATH = process.env.CLAUDE_CONFIG_DIR
   ? path.join(CLAUDE_DIR, '.slashdo-config.json')
   : '~/.claude/.slashdo-config.json';
@@ -25,6 +29,7 @@ const ENVIRONMENTS = {
     // Runtime form of configFile, used by the transformer to rewrite the
     // config-path token in command/lib text for each host CLI.
     configPath: CLAUDE_CONFIG_PATH,
+    claudeRootPathPrefix: CLAUDE_ROOT_PATH_PREFIX,
     // format: documentation only — transformCommand always emits YAML frontmatter
     // now that the legacy Gemini TOML path was removed.
     format: 'yaml-frontmatter',
