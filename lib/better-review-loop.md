@@ -1,9 +1,9 @@
-# Better pipeline — Review Loop (Phase 6, GitHub only)
+## Better pipeline — Review Loop (Phase 6, GitHub only)
 
 The shared per-PR review-and-merge loop for every `better-*` audit pipeline.
 `/do:better` and `/do:better-swift` include this file verbatim.
 
-## Inputs
+### Inputs
 
 In addition to `{BRANCH_PREFIX}` (defined in `~/.claude/lib/better-verification.md`):
 

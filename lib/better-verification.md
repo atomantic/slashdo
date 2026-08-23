@@ -1,4 +1,4 @@
-# Better pipeline — Verification & Internal Code Review (Phases 4 / 4b)
+## Better pipeline — Verification & Internal Code Review (Phases 4 / 4b)
 
 The shared build-and-review gate every `better-*` audit pipeline runs after its
 remediation agents finish and before it creates any PR. `/do:better` and
@@ -6,7 +6,7 @@ remediation agents finish and before it creates any PR. `/do:better` and
 carried entirely by the inputs below, so a change to the gate applies to both by
 construction.
 
-## Inputs
+### Inputs
 
 The calling command must have resolved these before reaching Phase 4:
 

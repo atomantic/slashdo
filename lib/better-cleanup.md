@@ -1,10 +1,10 @@
-# Better pipeline — Cleanup & Final Summary (Phase 7)
+## Better pipeline — Cleanup & Final Summary (Phase 7)
 
 The shared teardown every `better-*` audit pipeline runs after its PRs are
 merged or left open. `/do:better` and `/do:better-swift` include this file
 verbatim.
 
-## Inputs
+### Inputs
 
 In addition to `{BRANCH_PREFIX}` (defined in `~/.claude/lib/better-verification.md`):
 

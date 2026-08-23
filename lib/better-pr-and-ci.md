@@ -1,11 +1,11 @@
-# Better pipeline — Per-Category PR Creation & CI Verification (Phases 5 / 5d)
+## Better pipeline — Per-Category PR Creation & CI Verification (Phases 5 / 5d)
 
 The shared branch-splitting, PR-creation, and CI-green gate for every `better-*`
 audit pipeline. `/do:better` and `/do:better-swift` include this file verbatim;
 the pipeline-specific bits (category slugs, version-bump mechanics, PR body
 extras, stack-specific CI causes) arrive through the inputs below.
 
-## Inputs
+### Inputs
 
 In addition to `{BRANCH_PREFIX}`, `{VERIFY_SCOPE_SUFFIX}`, and `{SIMPLIFY_ONLY}`
 (defined in `~/.claude/lib/better-verification.md`):
