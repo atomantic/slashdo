@@ -153,6 +153,7 @@ When compacting during this workflow, always preserve:
 - `HAS_UI` (true/false — determines whether the UX Consistency & Responsive Layout agent runs and whether the `ux` category exists downstream)
 - `PHASE_4C_START_SHA` (needed for FILE_OWNER_MAP update in Phase 4c.3)
 - `VACUOUS_TESTS_FIXED`, `WEAK_TESTS_STRENGTHENED`, `NEW_TEST_CASES`, `NEW_TEST_FILES`
+- `SPOOL_DIR` (issue mode only — the literal spool path Phase 1 created; it cannot be re-derived, and the bodies are read four times: Phase 2 step 3's Foundation grouping, the Phase 2 filer agents, the Phase 3c remediation workers, and the Phase 4c.1 triage — so it outlives filing and is removed in Phase 7, not before)
 - `CREATED_CATEGORY_SLUGS` (list of branch slugs created in Phase 5)
 
 
@@ -237,6 +238,45 @@ Each agent must report findings in this format:
 ```
 - **[CRITICAL/HIGH/MEDIUM/LOW]** `file:line` - Description. Suggested fix: ... Complexity: Simple/Medium/Complex
 ```
+
+**Issue mode (`--issues`) changes where this format goes, not what it contains.**
+When `ISSUE_MODE=true`, create the spool directory before dispatching any agent:
+
+```bash
+SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_DIR"
+```
+
+Record the printed path as `SPOOL_DIR` in run state and pass **that literal path**
+to every agent — a shell variable does not survive between tool calls, so
+re-deriving it later would hand the filer agents an empty directory.
+
+Pass `SPOOL_DIR` to every audit agent along with the **"Bulk filing — spool the
+bodies, dedup on an index"** contract from
+[lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) (the partial Phase 2 reads
+in). Under that contract each agent writes one ready-to-file issue body per finding
+to `$SPOOL_DIR/<category-slug>.md` — using its own category slug from Phase 2's
+summary table (`security`, `code-quality`, `dry`, `architecture`, `bugs-perf`,
+`stack-specific`, `deps`, `tests`, `ux`, `structural`, `cognitive-load`), so no two
+agents write the same file — and **returns only the compact index**:
+
+```
+<id> | <SEVERITY> | <category> | <file:line> | <one-line title>
+```
+
+Audit agents are `Explore` agents, which have no `Write` tool — they write their
+spool file with a quoted-heredoc `cat > "$SPOOL_DIR/<slug>.md" <<'EOF'` via Bash,
+so backticks and `$` in quoted evidence survive verbatim. **Only the first write
+uses `>`; every later one must use `>>`** — an agent that spools findings across more
+than one Bash call and reaches for `cat >` a second time truncates everything it has
+already written, which is the tail-dropping this whole path exists to prevent.
+
+A large audit surfaces hundreds of findings, and the alternative pulls every body
+through this orchestrator's context twice — once reading the agent's report, once
+re-emitting it into a `gh issue create` body. That second pass is where bodies get
+truncated and tail findings get dropped. Everything Phase 2 actually decides —
+cross-agent dedup, dedup against `EXISTING_ISSUES`, [gate 3](#finding-gates)'s churn
+adjustment, and the `FILE_OWNER_MAP` — keys off the index fields alone, so the
+bodies stay on disk until the filer agents move them to the tracker.
 
 **Context requirement.** Before flagging, read at least 30 lines of surrounding context to confirm the issue is real. Common false positives to watch for:
 - A Promise `.then()` chain that appears "unawaited" but IS collected into an array and awaited via `Promise.all` downstream
@@ -409,6 +449,19 @@ Wait for ALL agents to complete before proceeding.
 > created **and** reused issue numbers (`#<n>`) in the Phase 2 summary where you'd
 > report slugs. Setup (VCS host + label + `EXISTING_ISSUES` fetch) is covered by the
 > partial: reuse `CLI_TOOL` from Phase 0a.
+> Phase 1 spooled the finding **bodies** to `SPOOL_DIR` and returned only the
+> **index**, so consolidate and dedup against those index lines — steps 2–4 need
+> nothing else, so do not open a spool file **for them**. **Step 3 is the exception**:
+> grouping the Foundation extractions needs the duplication counts and call-site lists that
+> live only in the bodies, so read `$SPOOL_DIR/dry.md` for the ids step 2 kept in the `dry`
+> category before writing the Foundation list Phase 3b builds from. Beyond that, the only
+> reason to open a spool file is to lift a block verbatim into a `--body-file` on the
+> inline path below. When the surviving set is
+> larger than ~20 findings, hand the ids off to per-category **filer agents** per
+> the partial's "Bulk filing — spool the bodies, dedup on an index" section rather
+> than running `gh issue create` yourself; at or below that, file them inline —
+> still lifting each id's block verbatim out of its spool file into a `--body-file`,
+> never retyping it from the index line.
 
 1. Read the existing `PLAN.md` (create if it doesn't exist)
 2. Consolidate all findings from Phase 1, deduplicating across agents (same file:line flagged by multiple agents → keep the most specific description)
@@ -492,7 +545,25 @@ Omit the **UX** row when `HAS_UI=false`, the **Structural** row when `STRICT_MOD
 
 **GATE: If `--scan-only` was passed, STOP HERE** — but not before doing the one thing a scan-only run in issue mode exists to do: **when `ISSUE_MODE` is also true, file every surviving finding as an issue first**, then print the summary and exit. (When `ISSUE_MODE` is false, just print the summary and exit.)
 
-**Filing every surviving finding** means all of them — not just the ones the disposition rules would defer. A scan-only run remediates nothing, so "deferred" covers the whole set; the filed issues ARE the run's output. Apply the same labels, dedup-against-`EXISTING_ISSUES`, and title/body rules the disposition partial specifies, and report the created and reused `#<number>`s in the summary. Do not open a worktree or write any code.
+**Filing every surviving finding** means all of them — not just the ones the disposition rules would defer. A scan-only run remediates nothing, so "deferred" covers the whole set; the filed issues ARE the run's output. Apply the same labels, dedup-against-`EXISTING_ISSUES`, and title/body rules the disposition partial specifies, and report the created and reused `#<number>`s in the summary. Do not open a worktree or write any code. **Then remove `SPOOL_DIR`** (`rm -rf "$SPOOL_DIR"`, same errored-filer exception) — a scan-only run has no Phase 3c or 4c to read the bodies, so filing is the last read.
+
+**Hand the filing to per-category filer agents when the surviving set exceeds ~20.**
+A `--scan-only --issues` run on a real codebase is exactly the case the partial's
+"Bulk filing" section exists for: every surviving finding gets filed, so the volume
+is the whole audit. Dispatch one filer agent per category **in parallel**, giving
+each the surviving ids for its category, the `$SPOOL_DIR/<category-slug>.md` file
+those bodies live in, `CLI_TOOL`, `PLAN_LABEL`, the label rules, the `${URL##*/}`
+number-capture form, and the secondary-rate-limit retry rule. Each returns only its
+`<id> -> #<number>` map. One agent per category is the correct fan-out — your dedup
+already gave each finding exactly one category, so no two filers can collide, and
+sharding a category further only makes rate limiting more likely.
+
+Merge the returned maps for the summary. **An id a filer returned as `ERROR` was not
+filed** — report those separately with their spool path so they can be filed by hand,
+and keep `SPOOL_DIR` on disk when any error occurred. At or below ~20 surviving
+findings, skip the fan-out and file them inline — still `--body-file`ing each block
+verbatim out of the spool, never retyped from the index line; only the fan-out overhead
+isn't worth it at that size.
 
 ## Phase 3: Worktree Remediation
 
@@ -556,6 +627,17 @@ Remediation runs in parallel, one worker per category that has CRITICAL, HIGH, o
 1. Spawn up to 5 general-purpose `Agent` sub-agents — one per category above that has actionable findings. **Resolve `REMEDIATION_MODEL_TIER` to this host's model per [lib/model-tiers.md](../../lib/model-tiers.md) and pass it as the `model` parameter on each `Agent` call.** If `REMEDIATION_MODEL_TIER` is `heavy`, pass this host's strongest alias (`model: "opus"` on Claude Code).
 2. Launch all `Agent` calls **in parallel** (multiple tool calls in a single response) and wait for all to return. Each sub-agent returns its results directly — no task board or shutdown step is needed.
 <!-- /if:teams -->
+
+**In issue mode the finding bodies are on disk, not in this context.** Phase 1 spooled
+them and returned only index lines, so a `{FINDINGS}` block built from those lines alone
+hands the worker a one-line title with no evidence and no suggested fix. Build `{FINDINGS}`
+from each worker's index lines **plus the literal `SPOOL_DIR` path**, and instruct the
+worker to read the full body for each of its ids out of `$SPOOL_DIR/<slug>.md`, where
+`<slug>` is the category on **that id's own index line** — **Conflict avoidance** below
+merges two categories' findings into one worker when they touch the same file, so such a
+worker must open every spool file its ids name, not just the one matching its own category.
+Read the bodies before fixing. "The orchestrator never rewrites a spooled body" keeps the bodies out of
+*this* context — it does not license remediating from titles.
 
 ### Agent instructions template:
 
@@ -666,6 +748,13 @@ PHASE_4C_START_SHA="$(git rev-parse HEAD)"
 ```
 
 ### 4c.1: Test Audit Triage
+
+**In issue mode Agent 8's findings are on disk, not in this context.** Phase 1 returned
+only index lines, and the index (`<id> | <SEVERITY> | <category> | <file:line> | <title>`)
+carries no `[VACUOUS]`/`[WEAK]`/`[MISSING]` tag at all — triaging off it is not merely
+lossy, it is impossible. Read `$SPOOL_DIR/tests.md` (the literal path from run state) and
+triage off each finding's full body, then populate `{VACUOUS_AND_WEAK_FINDINGS}` /
+`{MISSING_FINDINGS}` from those bodies, never from the index titles.
 
 Review Agent 8 (Test Quality & Coverage) findings from Phase 1 and categorize them:
 
@@ -990,7 +1079,12 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
    done
    ```
    `-D` (force delete) is used only for the staging branch `better/{DATE}` because it is intentionally unmerged — its file contents are cherry-picked into category branches. Category branches use `-d` (safe delete) so that unmerged work is not accidentally lost; if a category branch was not merged, the warning will surface it. The guards prevent errors from interrupting cleanup.
-3. Restore stashed changes (if stashed in Phase 3a):
+3. **Issue mode — remove the spool.** Phase 4c was the last reader of `SPOOL_DIR`, so remove it using the literal path from run state:
+   ```bash
+   rm -rf "$SPOOL_DIR"
+   ```
+   **Unless any filer returned `ERROR`** — those findings were never filed, and their bodies exist nowhere else. Leave the directory and print its path so they can be filed by hand.
+4. Restore stashed changes (if stashed in Phase 3a):
    ```bash
    git stash pop
    ```
