@@ -174,13 +174,16 @@ install_claude() {
   # hand-translated copy of the algorithm that silently drifts. Deriving the
   # paths and hook list there too is deliberate: doing it here would just move
   # the drift onto the arguments.
-  if command -v node &>/dev/null && [ -f "$target_hooks/slashdo-check-update.js" ]; then
+  if command -v node &>/dev/null &&
+     { [ -f "$target_hooks/slashdo-check-update.js" ] || [ -f "$target_hooks/slashdo-statusline.js" ]; }; then
     if fetch_file "src/settings-hooks.js" "$MOD_DIR/settings-hooks.js"; then
       # Keep a copy next to the hooks: uninstall.sh needs this module to
       # deregister, and a machine that is offline (or behind a proxy that has
       # since started blocking raw.githubusercontent.com) must still be able to
       # uninstall cleanly. uninstall.sh removes it along with the hooks.
-      cp "$MOD_DIR/settings-hooks.js" "$target_hooks/$SETTINGS_HOOKS_CACHE" 2>/dev/null || true
+      if ! cp "$MOD_DIR/settings-hooks.js" "$target_hooks/$SETTINGS_HOOKS_CACHE" 2>/dev/null; then
+        printf "    ${YELLOW}note: could not cache settings-hooks.js — uninstall will need network access${RESET}\n"
+      fi
       local node_result
       if node_result=$(node -e '
         const settingsHooks = require(process.argv[1]);
@@ -204,7 +207,8 @@ install_claude() {
     printf "    ${YELLOW}settings.json: skipped (hook files not found)${RESET}\n"
     install_incomplete=true
   else
-    printf "    ${DIM}settings.json: skipped (node not found — hooks installed but not registered)${RESET}\n"
+    printf "    ${YELLOW}settings.json: skipped (node not found — hooks installed but not registered)${RESET}\n"
+    install_incomplete=true
   fi
 }
 

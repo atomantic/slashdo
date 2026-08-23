@@ -302,6 +302,12 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
   }
 
   if (env.supportsHooks && env.hooksDir && !filterNames?.length) {
+    // Deregister BEFORE deleting the hook files, for the same reason
+    // uninstall.sh does: if the settings write fails, settings.json must not be
+    // left pointing at files that are already gone.
+    const settingsActions = deregisterHooksFromSettings(env, dryRun);
+    results.actions.push(...settingsActions);
+
     for (const hook of hookFiles) {
       const targetPath = path.join(env.hooksDir, hook.relPath);
       if (!fs.existsSync(targetPath)) continue;
@@ -328,10 +334,6 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
         results.removed++;
       }
     }
-
-    // Deregister hooks and clean up cache
-    const settingsActions = deregisterHooksFromSettings(env, dryRun);
-    results.actions.push(...settingsActions);
 
     // install.sh leaves a copy of settings-hooks.js here so an offline
     // uninstall still works. An npm uninstall must not orphan it.

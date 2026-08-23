@@ -39,6 +39,9 @@ fetch_file() {
 # The copy install.sh left in the hooks dir, preferred over any network fetch.
 SETTINGS_HOOKS_CACHE=".slashdo-settings-hooks.js"
 
+# Set by uninstall_claude when it refuses to remove files it could not deregister.
+claude_incomplete=false
+
 # Scratch space for src/settings-hooks.js, cleaned up however we exit.
 MOD_DIR="$(mktemp -d)"
 trap 'rm -rf "$MOD_DIR"' EXIT
@@ -117,8 +120,11 @@ uninstall_claude() {
   if [ ! -f "$HOME/.claude/settings.json" ]; then
     : # Nothing to deregister — do not make a missing file a reason to fail.
   elif ! command -v node &>/dev/null; then
-    printf "    ${YELLOW}settings.json: Node.js not found, so slashdo's entries cannot be removed${RESET}\n"
-    printf "    ${DIM}(delete the SessionStart hook and statusLine lines mentioning slashdo- by hand)${RESET}\n"
+    printf "    ${YELLOW}settings.json: Node.js not found — nothing was removed${RESET}\n"
+    printf "    ${DIM}(install Node.js and re-run, or delete ~/.claude/commands/do, ~/.claude/lib,${RESET}\n"
+    printf "    ${DIM} ~/.claude/hooks/slashdo-* and the settings.json lines mentioning slashdo- by hand)${RESET}\n"
+    claude_incomplete=true
+    return 0
   elif cp "$target_hooks/$SETTINGS_HOOKS_CACHE" "$MOD_DIR/settings-hooks.js" 2>/dev/null ||
        fetch_file "src/settings-hooks.js" "$MOD_DIR/settings-hooks.js"; then
     local node_result
@@ -129,15 +135,26 @@ uninstall_claude() {
       }
     ' "$MOD_DIR/settings-hooks.js" 2>"$MOD_DIR/node.err"); then
       print_settings_actions "$node_result"
+      # A warn line means the module declined to touch settings.json — removing
+      # the files it still references is exactly what this ordering prevents.
+      case "$node_result" in
+        *"warn "*)
+          printf "    ${YELLOW}settings.json was left as-is — nothing was removed${RESET}\n"
+          claude_incomplete=true
+          return 0
+          ;;
+      esac
     else
       printf "    ${YELLOW}settings.json deregistration failed — nothing was removed${RESET}\n"
       sed -e 's/^/      /' "$MOD_DIR/node.err" >&2
-      return 1
+      claude_incomplete=true
+      return 0
     fi
   else
     printf "    ${YELLOW}settings.json: could not read src/settings-hooks.js — nothing was removed${RESET}\n"
     printf "    ${DIM}(re-run with network access, or from a checkout of the repo)${RESET}\n"
-    return 1
+    claude_incomplete=true
+    return 0
   fi
 
   for cmd in "${COMMANDS[@]}" "${OLD_COMMANDS[@]}"; do
@@ -375,11 +392,9 @@ fi
 
 printf "  Detected: ${GREEN}%s${RESET}\n\n" "${envs[*]}"
 
-claude_incomplete=false
-
 for env in "${envs[@]}"; do
   case "$env" in
-    claude)        uninstall_claude || claude_incomplete=true ;;
+    claude)        uninstall_claude ;;
     opencode)      uninstall_opencode ;;
     antigravity)   uninstall_antigravity ;;
     codex)         uninstall_agent_skills "Codex" "$HOME/.codex" ;;

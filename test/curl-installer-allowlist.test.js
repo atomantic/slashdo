@@ -169,13 +169,33 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
 
   const ANSI = new RegExp('\\u001b\\[[0-9;]*m', 'g');
 
+  // Returns { stdout, status } so a test can assert on the exit code rather
+  // than silently accepting whatever the script did.
+  function run(script, home, extraEnv = {}) {
+    try {
+      const stdout = execFileSync('bash', [path.join(REPO_ROOT, script)], {
+        cwd: REPO_ROOT,
+        env: { ...process.env, HOME: home, ...extraEnv },
+        encoding: 'utf8',
+        timeout: 120000,
+      });
+      return { stdout: stdout.replace(ANSI, ''), status: 0 };
+    } catch (e) {
+      return { stdout: (e.stdout || '').replace(ANSI, ''), status: e.status ?? 1 };
+    }
+  }
+
   function runScript(script, home) {
-    return execFileSync('bash', [path.join(REPO_ROOT, script)], {
-      cwd: REPO_ROOT,
-      env: { ...process.env, HOME: home },
-      encoding: 'utf8',
-      timeout: 120000,
-    }).replace(ANSI, '');
+    const { stdout, status } = run(script, home);
+    assert.equal(status, 0, `${script} exited ${status}:\n${stdout}`);
+    return stdout;
+  }
+
+  // A PATH whose curl always fails, so nothing can be fetched from the network.
+  function offlinePath() {
+    const stubDir = fs.mkdtempSync(path.join(TMP_ROOT, 'stub-'));
+    fs.writeFileSync(path.join(stubDir, 'curl'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    return `${stubDir}${path.delimiter}${process.env.PATH}`;
   }
 
   // One temp root per run — see test/settings-hooks.test.js.
@@ -229,6 +249,49 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
     assert.deepEqual(settingsOf(home), { statusLine: { type: 'command', command: 'my-own-statusline' } });
   });
 
+  it('caches the module so a later uninstall needs no network', () => {
+    const home = makeHome({});
+    runScript('install.sh', home);
+
+    const { SETTINGS_HOOKS_CACHE } = require('../src/settings-hooks');
+    assert.ok(fs.existsSync(path.join(home, '.claude', 'hooks', SETTINGS_HOOKS_CACHE)),
+      'install.sh must leave a copy of the module for uninstall.sh');
+
+    // Offline: the cached copy is the only way to deregister, and uninstall
+    // must still complete and remove the cache along with everything else.
+    const { stdout, status } = run('uninstall.sh', home, { PATH: offlinePath() });
+    assert.equal(status, 0, stdout);
+    assert.match(stdout, /settings\/SessionStart hook: deregistered/);
+    assert.deepEqual(settingsOf(home), {});
+    assert.equal(fs.existsSync(path.join(home, '.claude', 'hooks', SETTINGS_HOOKS_CACHE)), false);
+  });
+
+  it('removes nothing when it cannot deregister, and says so', () => {
+    // An unparseable settings.json makes the module decline to touch it. The
+    // files it still references must survive, or the user is left with hooks
+    // configured in settings.json that point at deleted files.
+    const home = makeHome({});
+    runScript('install.sh', home);
+    fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{ not json');
+
+    const { stdout, status } = run('uninstall.sh', home);
+    assert.equal(status, 1, stdout);
+    assert.match(stdout, /nothing was removed/);
+    assert.equal(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8'), '{ not json');
+    assert.ok(fs.existsSync(path.join(home, '.claude', 'hooks', 'slashdo-check-update.js')),
+      'hooks referenced by a settings.json we could not edit must not be deleted');
+  });
+
+  it('an empty ~/.claude uninstalls cleanly even offline', () => {
+    // Nothing installed is not a failure: there is nothing to deregister, so
+    // an unreachable module must not turn this into a non-zero exit.
+    const home = fs.mkdtempSync(path.join(TMP_ROOT, 'empty-'));
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+
+    const { stdout, status } = run('uninstall.sh', home, { PATH: offlinePath() });
+    assert.equal(status, 0, stdout);
+  });
+
   // The documented usage is `curl ... | bash`, where BASH_SOURCE[0] is unset.
   // An unguarded expansion resolves SCRIPT_DIR to the caller's cwd, so a repo
   // the user merely happens to be standing in would supply the files these
@@ -253,15 +316,13 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
 
       // No network in CI: a curl stub makes every remote fetch fail, so the
       // only way the script can obtain the file is the cwd it must not trust.
-      const stubDir = fs.mkdtempSync(path.join(TMP_ROOT, 'stub-'));
-      fs.writeFileSync(path.join(stubDir, 'curl'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 
       let stdout;
       try {
         stdout = execFileSync('bash', ['-s'], {
           cwd,
           input: fs.readFileSync(path.join(REPO_ROOT, script), 'utf8'),
-          env: { ...process.env, HOME: home, PATH: `${stubDir}${path.delimiter}${process.env.PATH}` },
+          env: { ...process.env, HOME: home, PATH: offlinePath() },
           encoding: 'utf8',
           timeout: 120000,
         });
