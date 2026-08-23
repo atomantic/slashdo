@@ -9,6 +9,7 @@ const { spawnSync } = require('node:child_process');
 
 const repoRoot = path.resolve(__dirname, '..');
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const shellQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
 
 function waitForJson(file, timeout = 8000) {
   const deadline = Date.now() + timeout;
@@ -23,7 +24,7 @@ function waitForJson(file, timeout = 8000) {
 }
 
 function assertInstalledDocsUseCustomRoot(configDir) {
-  const quotedRoot = `'${configDir.replace(/'/g, `'\\''`)}'`;
+  const quotedRoot = shellQuote(configDir);
   const installedDocs = [
     ...fs.readdirSync(path.join(configDir, 'commands', 'do')).map((name) =>
       path.join(configDir, 'commands', 'do', name)),
@@ -37,10 +38,18 @@ function assertInstalledDocsUseCustomRoot(configDir) {
   assert.ok(command.includes(`!\`cat ${quotedRoot}/lib/gh-host.md\``));
 }
 
+function assertRegisteredCommandsRun(configDir, env) {
+  const settings = JSON.parse(fs.readFileSync(path.join(configDir, 'settings.json'), 'utf8'));
+  for (const command of [settings.hooks.SessionStart[0].hooks[0].command, settings.statusLine.command]) {
+    const run = spawnSync('sh', ['-c', command], { encoding: 'utf8', env, input: '{}', timeout: 5000 });
+    assert.equal(run.status, 0, run.stderr);
+  }
+}
+
 describe('curl installer CLAUDE_CONFIG_DIR support', () => {
   it('installs, registers, and uninstalls entirely within the custom root', { timeout: 30000 }, () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-custom-home-'));
-    const configDir = path.join(home, 'claude profile');
+    const configDir = path.join(home, "claude's profile");
     const env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: configDir };
 
     try {
@@ -58,14 +67,17 @@ describe('curl installer CLAUDE_CONFIG_DIR support', () => {
       assert.ok(fs.existsSync(path.join(configDir, 'hooks', 'slashdo-check-update.js')));
       assert.ok(fs.existsSync(path.join(configDir, '.slashdo-config.json')));
       const settings = JSON.parse(fs.readFileSync(path.join(configDir, 'settings.json'), 'utf8'));
-      assert.ok(settings.hooks.SessionStart[0].hooks[0].command.includes(configDir));
-      assert.ok(settings.statusLine.command.includes(configDir));
+      assert.equal(settings.hooks.SessionStart[0].hooks[0].command,
+        `node ${shellQuote(path.join(configDir, 'hooks', 'slashdo-check-update.js'))}`);
+      assert.equal(settings.statusLine.command,
+        `node ${shellQuote(path.join(configDir, 'hooks', 'slashdo-statusline.js'))}`);
       assert.equal(fs.existsSync(path.join(home, '.claude')), false);
 
       const command = fs.readFileSync(path.join(configDir, 'commands', 'do', 'next.md'), 'utf8');
-      assert.ok(command.includes(`'${configDir}'/lib`));
+      assert.ok(command.includes(`${shellQuote(configDir)}/lib`));
       assert.ok(!command.includes('~/.claude/lib/'));
       assertInstalledDocsUseCustomRoot(configDir);
+      assertRegisteredCommandsRun(configDir, env);
 
       // The hook deliberately exits when no installed-version marker exists.
       // Seed it here so this test can focus on the shared config-root handoff.
@@ -136,6 +148,7 @@ describe('curl installer CLAUDE_CONFIG_DIR support', () => {
       });
       assert.equal(installed.status, 0, installed.stderr || installed.stdout);
       assertInstalledDocsUseCustomRoot(configDir);
+      assertRegisteredCommandsRun(configDir, env);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

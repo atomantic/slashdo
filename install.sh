@@ -176,6 +176,8 @@ install_claude() {
       const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(home, ".claude");
       const settingsPath = path.join(claudeDir, "settings.json");
       const hooksDir = path.join(claudeDir, "hooks");
+      const quote = String.fromCharCode(39);
+      const shellQuote = value => quote + value.split(quote).join(quote + "\\" + quote + quote) + quote;
 
       // Default auto-update to enabled on first install. The curl installer
       // is piped (no TTY to prompt), so we pick the same default the npx
@@ -205,7 +207,7 @@ install_claude() {
         process.exit(0);
       }
 
-      const hookCmd = "node \"" + updateHookPath + "\"";
+      const hookCmd = "node " + shellQuote(updateHookPath);
       const alreadyRegistered = settings.hooks.SessionStart.some(function(g) {
         return g && typeof g === "object" && Array.isArray(g.hooks) && g.hooks.some(function(h) {
           return h && typeof h === "object" && typeof h.command === "string" && h.command.indexOf("slashdo-check-update") !== -1;
@@ -230,7 +232,7 @@ install_claude() {
       // Statusline: upgrade gsd-statusline → slashdo-statusline (superset)
       const statuslineHookPath = path.join(hooksDir, "slashdo-statusline.js");
       if (fs.existsSync(statuslineHookPath)) {
-        const slCmd = "node \"" + statuslineHookPath + "\"";
+        const slCmd = "node " + shellQuote(statuslineHookPath);
         const currentCmd = (settings.statusLine && typeof settings.statusLine.command === "string") ? settings.statusLine.command : "";
         if (!settings.statusLine) {
           settings.statusLine = { type: "command", command: slCmd };
