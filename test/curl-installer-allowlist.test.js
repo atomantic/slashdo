@@ -8,6 +8,10 @@
 // a command spec's `!cat ~/.claude/lib/<name>.md` fails at runtime, or the
 // command itself is absent). The npm installer (src/installer.js) enumerates
 // both dirs dynamically, so it doesn't catch this drift — only this test does.
+//
+// Scope: this file only diffs the bash array literals as text. The scripts'
+// actual runtime behavior (files written, settings.json merged, uninstall
+// removal) is covered end-to-end in test/install-sh.test.js.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
@@ -53,6 +57,14 @@ function commandDirEntries() {
   return dirEntries('commands', 'do');
 }
 
+function hookDirEntries() {
+  return fs
+    .readdirSync(path.join(REPO_ROOT, 'hooks'))
+    .filter((f) => f.endsWith('.js'))
+    .map((f) => f.replace(/\.js$/, ''))
+    .sort();
+}
+
 describe('curl-installer LIBS allowlist', () => {
   const expected = libDirEntries();
 
@@ -71,6 +83,20 @@ describe('curl-installer LIBS allowlist', () => {
       `  In lib/ but not LIBS: ${expected.filter((x) => !actual.includes(x)).join(', ') || '(none)'}\n` +
       `  In LIBS but not lib/: ${actual.filter((x) => !expected.includes(x)).join(', ') || '(none)'}`);
   });
+});
+
+describe('curl-installer HOOKS allowlist', () => {
+  const expected = hookDirEntries();
+
+  for (const script of ['install.sh', 'uninstall.sh']) {
+    it(`${script} HOOKS matches hooks/*.js exactly`, () => {
+      const actual = parseArray(path.join(REPO_ROOT, script), 'HOOKS').sort();
+      assert.deepEqual(actual, expected,
+        `${script} HOOKS drift — a hook missing here is never delivered to curl-installed users.\n` +
+        `  In hooks/ but not HOOKS: ${expected.filter((x) => !actual.includes(x)).join(', ') || '(none)'}\n` +
+        `  In HOOKS but not hooks/: ${actual.filter((x) => !expected.includes(x)).join(', ') || '(none)'}`);
+    });
+  }
 });
 
 describe('curl-installer COMMANDS allowlist', () => {
@@ -94,11 +120,20 @@ describe('curl-installer COMMANDS allowlist', () => {
 });
 
 describe('curl-installer OpenCode temporary files', () => {
-  it('uses unique mktemp paths while transforming downloaded commands and libs', () => {
+  // The OpenCode rewrite stages every download before writing the target. The
+  // behavioral coverage — cleanup, concurrent installs, and never writing
+  // through a pre-existing TMPDIR path — lives in test/install-sh.test.js;
+  // this keeps the cheap source-level guard against a predictable name
+  // creeping back in.
+  it('derives its temporary paths from mktemp, never from a literal', () => {
     const installer = fs.readFileSync(path.join(REPO_ROOT, 'install.sh'), 'utf8');
+    // Ignore comments so the rule reads the code, not the prose about it.
+    const code = installer.split('\n').filter((line) => !line.trim().startsWith('#')).join('\n');
 
-    assert.match(installer, /mktemp "\$\{TMPDIR:-\/tmp\}\/slashdo-command-\$\{cmd\}\.XXXXXX"/);
-    assert.match(installer, /mktemp "\$\{TMPDIR:-\/tmp\}\/slashdo-lib-\$\{lib\}\.XXXXXX"/);
-    assert.doesNotMatch(installer, /\/tmp\/slashdo-(?:\$cmd|lib-\$lib)\.md/);
+    assert.match(code, /mktemp -d "\$\{TMPDIR:-\/tmp\}\/slashdo-install\.XXXXXX"/,
+      'the OpenCode staging directory must come from mktemp -d');
+    assert.match(code, /mktemp "\$\(dirname "\$dest"\)\/\.slashdo-tmp\.XXXXXX"/,
+      'destination writes must stage through mktemp in the destination directory');
+    assert.doesNotMatch(code, /\/tmp\/slashdo/, 'no predictable /tmp/slashdo-* path');
   });
 });
