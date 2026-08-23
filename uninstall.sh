@@ -52,6 +52,16 @@ GREEN='\033[0;32m'
 DIM='\033[2m'
 RESET='\033[0m'
 
+# Run the deregistration through whichever copy of the module is in MOD_DIR.
+run_deregister() {
+  node -e '
+    const settingsHooks = require(process.argv[1]);
+    for (const action of settingsHooks.removeDefaultHooks(false)) {
+      process.stdout.write(settingsHooks.formatAction(action) + "\n");
+    }
+  ' "$MOD_DIR/settings-hooks.js" 2>"$MOD_DIR/node.err"
+}
+
 # Print one line per action src/settings-hooks.js reported. The severity is a
 # token the module emits, so this never re-infers it from the message text.
 print_settings_actions() {
@@ -125,36 +135,38 @@ uninstall_claude() {
     printf "    ${DIM} ~/.claude/hooks/slashdo-* and the settings.json lines mentioning slashdo- by hand)${RESET}\n"
     claude_incomplete=true
     return 0
-  elif cp "$target_hooks/$SETTINGS_HOOKS_CACHE" "$MOD_DIR/settings-hooks.js" 2>/dev/null ||
-       fetch_file "src/settings-hooks.js" "$MOD_DIR/settings-hooks.js"; then
-    local node_result
-    if node_result=$(node -e '
-      const settingsHooks = require(process.argv[1]);
-      for (const action of settingsHooks.removeDefaultHooks(false)) {
-        process.stdout.write(settingsHooks.formatAction(action) + "\n");
-      }
-    ' "$MOD_DIR/settings-hooks.js" 2>"$MOD_DIR/node.err"); then
-      print_settings_actions "$node_result"
-      # A warn line means the module declined to touch settings.json — removing
-      # the files it still references is exactly what this ordering prevents.
-      case "$node_result" in
-        *"warn "*)
-          printf "    ${YELLOW}settings.json was left as-is — nothing was removed${RESET}\n"
-          claude_incomplete=true
-          return 0
-          ;;
-      esac
-    else
-      printf "    ${YELLOW}settings.json deregistration failed — nothing was removed${RESET}\n"
-      sed -e 's/^/      /' "$MOD_DIR/node.err" >&2
+  else
+    # Prefer the copy install.sh cached (so an offline machine can uninstall),
+    # but fall back to the network if that copy is corrupt or predates a rename
+    # in this module — otherwise a bad cache would block uninstall forever.
+    local node_result deregistered=false
+    if cp "$target_hooks/$SETTINGS_HOOKS_CACHE" "$MOD_DIR/settings-hooks.js" 2>/dev/null &&
+       node_result=$(run_deregister); then
+      deregistered=true
+    elif fetch_file "src/settings-hooks.js" "$MOD_DIR/settings-hooks.js" &&
+         node_result=$(run_deregister); then
+      deregistered=true
+    fi
+
+    if [ "$deregistered" = false ]; then
+      printf "    ${YELLOW}settings.json: could not deregister — nothing was removed${RESET}\n"
+      printf "    ${DIM}(re-run with network access or from a checkout; if it persists, delete${RESET}\n"
+      printf "    ${DIM} $target_hooks/$SETTINGS_HOOKS_CACHE and try again)${RESET}\n"
+      if [ -s "$MOD_DIR/node.err" ]; then sed -e 's/^/      /' "$MOD_DIR/node.err" >&2; fi
       claude_incomplete=true
       return 0
     fi
-  else
-    printf "    ${YELLOW}settings.json: could not read src/settings-hooks.js — nothing was removed${RESET}\n"
-    printf "    ${DIM}(re-run with network access, or from a checkout of the repo)${RESET}\n"
-    claude_incomplete=true
-    return 0
+
+    print_settings_actions "$node_result"
+    # A warn line means the module declined to touch settings.json — removing
+    # the files it still references is exactly what this ordering prevents.
+    case "$node_result" in
+      *"warn "*)
+        printf "    ${YELLOW}settings.json was left as-is — nothing was removed${RESET}\n"
+        claude_incomplete=true
+        return 0
+        ;;
+    esac
   fi
 
   for cmd in "${COMMANDS[@]}" "${OLD_COMMANDS[@]}"; do

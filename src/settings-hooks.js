@@ -22,6 +22,15 @@ const SLASHDO_HOOKS = ['slashdo-check-update.js', 'slashdo-statusline.js'];
 // install.sh caches this module here so uninstall.sh can deregister offline.
 const SETTINGS_HOOKS_CACHE = '.slashdo-settings-hooks.js';
 
+// Read settings.json, or null when it cannot be trusted. An empty or
+// whitespace-only file reads as {}: it provably holds nothing to lose, and
+// treating it as corruption would block both install and uninstall.
+function readSettings(settingsPath) {
+  const raw = fs.readFileSync(settingsPath, 'utf8');
+  if (raw.trim() === '') return {};
+  return JSON.parse(raw);
+}
+
 function registerHooksInSettings(env, hookFiles, dryRun) {
   if (!env.settingsFile) return [];
 
@@ -31,7 +40,7 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
   let settings = {};
   if (fs.existsSync(settingsPath)) {
     try {
-      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      settings = readSettings(settingsPath);
     } catch (e) {
       // Corrupted settings.json — skip registration to avoid data loss
       actions.push({ name: 'settings.json', status: 'skipped (parse error)' });
@@ -141,7 +150,7 @@ function deregisterHooksFromSettings(env, dryRun) {
   const actions = [];
   let settings;
   try {
-    settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    settings = readSettings(settingsPath);
   } catch (e) {
     // Corrupted settings.json — skip deregistration to avoid data loss
     actions.push({ name: 'settings.json', status: 'skipped (parse error)' });

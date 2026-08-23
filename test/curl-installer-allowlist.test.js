@@ -198,6 +198,25 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
     return `${stubDir}${path.delimiter}${process.env.PATH}`;
   }
 
+  // A PATH holding only the external commands these scripts use — node
+  // deliberately absent. Built by resolving each one, so it does not depend on
+  // where the runner keeps its binaries.
+  const SCRIPT_BINARIES = ['bash', 'sh', 'mktemp', 'cp', 'rm', 'sed', 'mkdir', 'dirname', 'uname'];
+
+  function nodelessPath() {
+    const binDir = fs.mkdtempSync(path.join(TMP_ROOT, 'nonode-'));
+    for (const bin of SCRIPT_BINARIES) {
+      try {
+        const resolved = execFileSync('command', ['-v', bin], { shell: '/bin/bash', encoding: 'utf8' }).trim();
+        if (resolved) fs.symlinkSync(resolved, path.join(binDir, bin));
+      } catch {
+        // Not present on this runner — the scripts guard their own use of it.
+      }
+    }
+    fs.writeFileSync(path.join(binDir, 'curl'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    return binDir;
+  }
+
   // One temp root per run — see test/settings-hooks.test.js.
   const TMP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-curl-'));
 
@@ -282,6 +301,59 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
       'hooks referenced by a settings.json we could not edit must not be deleted');
   });
 
+  it('recovers from a corrupt cached module by refetching it', () => {
+    // A cache that predates a rename in the module, or a truncated write, must
+    // not lock the user out of uninstalling forever.
+    const home = makeHome({});
+    runScript('install.sh', home);
+    const { SETTINGS_HOOKS_CACHE } = require('../src/settings-hooks');
+    fs.writeFileSync(path.join(home, '.claude', 'hooks', SETTINGS_HOOKS_CACHE), 'not a module(');
+
+    const { stdout, status } = run('uninstall.sh', home);
+    assert.equal(status, 0, stdout);
+    assert.match(stdout, /settings\/SessionStart hook: deregistered/);
+    assert.deepEqual(settingsOf(home), {});
+  });
+
+  it('does not treat an empty settings.json as corruption', () => {
+    // An empty file provably holds nothing to lose. Reading it as a parse error
+    // would block registration and then refuse the whole uninstall.
+    const home = makeHome({});
+    fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '');
+
+    const out = runScript('install.sh', home);
+    assert.match(out, /settings\/SessionStart hook: registered/);
+
+    const { status } = run('uninstall.sh', home);
+    assert.equal(status, 0);
+  });
+
+  it('reports an incomplete install instead of Done, and exits non-zero', () => {
+    // settings.json the module refuses to touch means nothing was registered —
+    // a scripted `curl ... | bash && next-step` must not read that as success.
+    const home = makeHome({});
+    fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{ not json');
+
+    const { stdout, status } = run('install.sh', home);
+    assert.equal(status, 1, stdout);
+    assert.match(stdout, /settings\.json: skipped \(parse error\)/);
+    assert.match(stdout, /Partly done/);
+    assert.doesNotMatch(stdout, /Done!/);
+  });
+
+  it('without node, uninstall removes nothing rather than stranding settings.json', () => {
+    // settings.json can only be edited by node. Deleting the hooks it names
+    // while unable to remove those names is the one outcome to avoid.
+    const home = makeHome({});
+    runScript('install.sh', home);
+
+    const { stdout, status } = run('uninstall.sh', home, { PATH: nodelessPath() });
+    assert.equal(status, 1, stdout);
+    assert.match(stdout, /Node\.js not found — nothing was removed/);
+    assert.ok(fs.existsSync(path.join(home, '.claude', 'hooks', 'slashdo-check-update.js')));
+    assert.match(settingsOf(home).hooks.SessionStart[0].hooks[0].command, /slashdo-check-update/);
+  });
+
   it('an empty ~/.claude uninstalls cleanly even offline', () => {
     // Nothing installed is not a failure: there is nothing to deregister, so
     // an unreachable module must not turn this into a non-zero exit.
@@ -335,7 +407,7 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
       // it was willing to use there — without this, a script that died on line
       // 3 would pass. install.sh reports the hooks it could not fetch either;
       // uninstall.sh names the module directly.
-      assert.match(stdout, /settings\.json: (skipped \(hook files not found\)|could not read src\/settings-hooks\.js)/);
+      assert.match(stdout, /settings\.json: (skipped \(hook files not found\)|could not deregister)/);
       assert.equal(fs.existsSync(marker), false,
         `${script} executed src/settings-hooks.js from the caller's cwd when piped into bash`);
     });

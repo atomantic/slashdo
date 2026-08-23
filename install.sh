@@ -133,6 +133,7 @@ install_claude() {
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
+      install_incomplete=true
     fi
   done
 
@@ -142,6 +143,7 @@ install_claude() {
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
+      install_incomplete=true
     fi
   done
 
@@ -151,6 +153,7 @@ install_claude() {
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
+      install_incomplete=true
     fi
   done
 
@@ -192,6 +195,13 @@ install_claude() {
         }
       ' "$MOD_DIR/settings-hooks.js" 2>"$MOD_DIR/node.err"); then
         print_settings_actions "$node_result"
+        # "settings.json: skipped (...)" means nothing was written at all —
+        # that is not a completed install, so do not sign off on it. A
+        # narrower skip (a malformed hooks key, say) still configures the
+        # statusline, so those stay a successful install.
+        case "$node_result" in
+          *"warn settings.json: skipped"*) install_incomplete=true ;;
+        esac
       else
         printf "    ${YELLOW}settings.json: failed — hooks installed but not registered${RESET}\n"
         # Surface why — an opaque "failed" on a permission or syntax error is
@@ -230,6 +240,7 @@ install_opencode() {
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
+      install_incomplete=true
     fi
   done
 
@@ -246,6 +257,7 @@ install_opencode() {
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
+      install_incomplete=true
     fi
   done
 
@@ -291,9 +303,9 @@ done
 if [ "$curl_installed" = true ] && [ "$install_incomplete" = false ]; then
   printf "  ${GREEN}Done!${RESET} Commands are available as /do:<name> in your AI coding assistant.\n"
 elif [ "$curl_installed" = true ]; then
-  printf "  ${YELLOW}Partly done.${RESET} Commands are installed, but settings.json was not updated,\n"
-  printf "  so the update-check hook and statusline are not active. Re-run this script once\n"
-  printf "  Node.js and the source are reachable to finish.\n"
+  printf "  ${YELLOW}Partly done.${RESET} Some files did not download, or settings.json was not\n"
+  printf "  updated — see the warnings above. Re-run this script once Node.js and the\n"
+  printf "  source are reachable to finish.\n"
 fi
 if [ "$npx_needed" = true ]; then
   printf "  ${DIM}(Antigravity / Codex / Grok Build users: run the npx command above to complete installation.)${RESET}\n"
