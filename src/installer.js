@@ -88,6 +88,18 @@ function syncFile({ label, content, targetPath, dryRun, results }) {
   else results.updated++;
 }
 
+function syncFileSet(items, { getContent, getTargetPath, getLabel, dryRun, results }) {
+  for (const item of items) {
+    syncFile({
+      label: getLabel(item),
+      content: getContent(item),
+      targetPath: getTargetPath(item),
+      dryRun,
+      results,
+    });
+  }
+}
+
 function removeFile({ label, targetPath, dryRun, results }) {
   if (!fs.existsSync(targetPath)) return;
 
@@ -98,6 +110,17 @@ function removeFile({ label, targetPath, dryRun, results }) {
     results.actions.push({ name: label, status: 'removed', target: targetPath });
   }
   results.removed++;
+}
+
+function removeFileSet(items, { getTargetPath, getLabel, dryRun, results }) {
+  for (const item of items) {
+    removeFile({
+      label: getLabel(item),
+      targetPath: getTargetPath(item),
+      dryRun,
+      results,
+    });
+  }
 }
 
 const RENAMED_COMMANDS = {
@@ -280,6 +303,85 @@ function deregisterHooksFromSettings(env, dryRun) {
   return actions;
 }
 
+function migrateRenamedCommands(env, dryRun, results) {
+  for (const [oldName, newName] of Object.entries(RENAMED_COMMANDS)) {
+    const oldRelPath = path.join('do', oldName + '.md');
+    const oldTargetRel = getTargetFilename(oldRelPath, env);
+    const oldTargetPath = path.join(env.commandsDir, oldTargetRel);
+
+    if (!fs.existsSync(oldTargetPath)) continue;
+
+    if (dryRun) {
+      results.actions.push({ name: `/do:${oldName}`, status: `would migrate → /do:${newName}` });
+    } else {
+      fs.unlinkSync(oldTargetPath);
+      results.actions.push({ name: `/do:${oldName}`, status: `migrated → /do:${newName}` });
+    }
+  }
+}
+
+function removeObsoleteHooks(env, dryRun, results) {
+  if (!env.supportsHooks || !env.hooksDir) return;
+
+  for (const oldName of OBSOLETE_HOOKS) {
+    const oldTargetPath = path.join(env.hooksDir, oldName);
+    if (!fs.existsSync(oldTargetPath)) continue;
+
+    if (dryRun) {
+      results.actions.push({ name: `hook/${oldName}`, status: 'would remove (obsolete)' });
+    } else {
+      fs.unlinkSync(oldTargetPath);
+      results.actions.push({ name: `hook/${oldName}`, status: 'removed (obsolete)' });
+    }
+    results.removed++;
+  }
+}
+
+function persistAutoUpdate(env, dryRun, autoUpdate, results) {
+  if (dryRun || !env.configFile || !env.supportsHooks || typeof autoUpdate !== 'boolean') return;
+
+  const config = readConfig(env.configFile);
+  if (config.autoUpdate === autoUpdate) return;
+
+  config.autoUpdate = autoUpdate;
+  writeConfig(env.configFile, config);
+  results.actions.push({ name: '.slashdo-config.json', status: autoUpdate ? 'auto-update enabled' : 'auto-update disabled' });
+}
+
+function writeVersionAndRefreshCache(env, packageDir, dryRun) {
+  if (dryRun || !env.versionFile) return;
+
+  const pkg = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
+  fs.writeFileSync(env.versionFile, pkg.version, 'utf8');
+
+  if (!env.supportsHooks || !env.hooksDir) return;
+
+  try {
+    const cacheDir = path.join(path.dirname(env.hooksDir), 'cache');
+    const cacheFile = path.join(cacheDir, 'slashdo-update-check.json');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(cacheFile, JSON.stringify({
+      update_available: false,
+      installed: pkg.version,
+      latest: pkg.version,
+      checked: Math.floor(Date.now() / 1000),
+    }));
+  } catch (e) {
+    // Best-effort: never fail the install over cache bookkeeping
+  }
+}
+
+function finalizeInstall(env, hookFiles, packageDir, dryRun, filterNames, autoUpdate, results) {
+  if (env.supportsHooks && env.hooksDir && !filterNames?.length) {
+    results.actions.push(...registerHooksInSettings(env, hookFiles, dryRun));
+  }
+
+  migrateRenamedCommands(env, dryRun, results);
+  removeObsoleteHooks(env, dryRun, results);
+  persistAutoUpdate(env, dryRun, autoUpdate, results);
+  writeVersionAndRefreshCache(env, packageDir, dryRun);
+}
+
 function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }) {
   const commandsDir = path.join(packageDir, 'commands');
   const libDir = path.join(packageDir, 'lib');
@@ -298,144 +400,66 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
     return doUninstall(filtered, libFiles, hookFiles, env, results, dryRun, filterNames);
   }
 
-  for (const cmd of filtered) {
-    const content = fs.readFileSync(cmd.absPath, 'utf8');
-    const transformed = transformCommand(content, env, libDir, cmd.relPath);
-    const targetRel = getTargetFilename(cmd.relPath, env);
-    const targetPath = path.join(env.commandsDir, targetRel);
-    syncFile({ label: `/do:${cmd.name}`, content: transformed, targetPath, dryRun, results });
-  }
+  syncFileSet(filtered, {
+    getContent: cmd => transformCommand(fs.readFileSync(cmd.absPath, 'utf8'), env, libDir, cmd.relPath),
+    getTargetPath: cmd => path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)),
+    getLabel: cmd => `/do:${cmd.name}`,
+    dryRun,
+    results,
+  });
 
   if (env.libDir) {
-    for (const lib of libFiles) {
-      const content = fs.readFileSync(lib.absPath, 'utf8');
-      const transformed = transformLib(content, env);
-      const targetPath = path.join(env.libDir, lib.relPath);
-      syncFile({ label: `lib/${lib.name}`, content: transformed, targetPath, dryRun, results });
-    }
+    syncFileSet(libFiles, {
+      getContent: lib => transformLib(fs.readFileSync(lib.absPath, 'utf8'), env),
+      getTargetPath: lib => path.join(env.libDir, lib.relPath),
+      getLabel: lib => `lib/${lib.name}`,
+      dryRun,
+      results,
+    });
   }
 
   if (env.supportsHooks && env.hooksDir) {
-    for (const hook of hookFiles) {
-      const content = fs.readFileSync(hook.absPath, 'utf8');
-      const targetPath = path.join(env.hooksDir, hook.relPath);
-      syncFile({ label: `hook/${hook.name}`, content, targetPath, dryRun, results });
-    }
-
-    // Register hooks in settings.json (only for full installs, not filtered command installs)
-    if (!filterNames?.length) {
-      const settingsActions = registerHooksInSettings(env, hookFiles, dryRun);
-      results.actions.push(...settingsActions);
-    }
+    syncFileSet(hookFiles, {
+      getContent: hook => fs.readFileSync(hook.absPath, 'utf8'),
+      getTargetPath: hook => path.join(env.hooksDir, hook.relPath),
+      getLabel: hook => `hook/${hook.name}`,
+      dryRun,
+      results,
+    });
   }
 
-  // Clean up renamed commands
-  for (const [oldName, newName] of Object.entries(RENAMED_COMMANDS)) {
-    const oldRelPath = path.join('do', oldName + '.md');
-    const oldTargetRel = getTargetFilename(oldRelPath, env);
-    const oldTargetPath = path.join(env.commandsDir, oldTargetRel);
-
-    if (fs.existsSync(oldTargetPath)) {
-      if (dryRun) {
-        results.actions.push({ name: `/do:${oldName}`, status: `would migrate → /do:${newName}` });
-      } else {
-        fs.unlinkSync(oldTargetPath);
-        results.actions.push({ name: `/do:${oldName}`, status: `migrated → /do:${newName}` });
-      }
-    }
-  }
-
-  // Clean up obsolete hooks from prior versions
-  if (env.supportsHooks && env.hooksDir) {
-    for (const oldName of OBSOLETE_HOOKS) {
-      const oldTargetPath = path.join(env.hooksDir, oldName);
-
-      if (fs.existsSync(oldTargetPath)) {
-        if (dryRun) {
-          results.actions.push({ name: `hook/${oldName}`, status: 'would remove (obsolete)' });
-        } else {
-          fs.unlinkSync(oldTargetPath);
-          results.actions.push({ name: `hook/${oldName}`, status: 'removed (obsolete)' });
-        }
-        results.removed++;
-      }
-    }
-  }
-
-  // Persist the auto-update preference (only when explicitly provided, so a
-  // filtered/command-only install doesn't clobber an existing choice). Gated on
-  // supportsHooks: auto-update is only consumed by the SessionStart hook (Claude
-  // only), so non-hook envs — which now also define configFile for /do:config
-  // defaults — must not get an unused autoUpdate key written at install time.
-  if (!dryRun && env.configFile && env.supportsHooks && typeof autoUpdate === 'boolean') {
-    const config = readConfig(env.configFile);
-    if (config.autoUpdate !== autoUpdate) {
-      config.autoUpdate = autoUpdate;
-      writeConfig(env.configFile, config);
-      results.actions.push({ name: '.slashdo-config.json', status: autoUpdate ? 'auto-update enabled' : 'auto-update disabled' });
-    }
-  }
-
-  if (!dryRun && env.versionFile) {
-    const pkg = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
-    fs.writeFileSync(env.versionFile, pkg.version, 'utf8');
-
-    // Refresh the update-check cache so the statusline drops the ⬆ /do:update badge
-    // immediately, instead of waiting for the next SessionStart background check to
-    // overwrite it (which races with statusline render on the following session).
-    if (env.supportsHooks && env.hooksDir) {
-      try {
-        const cacheDir = path.join(path.dirname(env.hooksDir), 'cache');
-        const cacheFile = path.join(cacheDir, 'slashdo-update-check.json');
-        fs.mkdirSync(cacheDir, { recursive: true });
-        fs.writeFileSync(cacheFile, JSON.stringify({
-          update_available: false,
-          installed: pkg.version,
-          latest: pkg.version,
-          checked: Math.floor(Date.now() / 1000),
-        }));
-      } catch (e) {
-        // Best-effort: never fail the install over cache bookkeeping
-      }
-    }
-  }
+  finalizeInstall(env, hookFiles, packageDir, dryRun, filterNames, autoUpdate, results);
 
   return results;
 }
 
 function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filterNames) {
-  for (const cmd of commands) {
-    const targetRel = getTargetFilename(cmd.relPath, env);
-    const targetPath = path.join(env.commandsDir, targetRel);
-    removeFile({ label: `/do:${cmd.name}`, targetPath, dryRun, results });
-  }
+  removeFileSet(commands, {
+    getTargetPath: cmd => path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)),
+    getLabel: cmd => `/do:${cmd.name}`,
+    dryRun,
+    results,
+  });
 
   if (env.libDir) {
-    for (const lib of libFiles) {
-      const targetPath = path.join(env.libDir, lib.relPath);
-      removeFile({ label: `lib/${lib.name}`, targetPath, dryRun, results });
-    }
+    removeFileSet(libFiles, {
+      getTargetPath: lib => path.join(env.libDir, lib.relPath),
+      getLabel: lib => `lib/${lib.name}`,
+      dryRun,
+      results,
+    });
   }
 
   if (env.supportsHooks && env.hooksDir && !filterNames?.length) {
-    for (const hook of hookFiles) {
-      const targetPath = path.join(env.hooksDir, hook.relPath);
-      removeFile({ label: `hook/${hook.name}`, targetPath, dryRun, results });
-    }
+    removeFileSet(hookFiles, {
+      getTargetPath: hook => path.join(env.hooksDir, hook.relPath),
+      getLabel: hook => `hook/${hook.name}`,
+      dryRun,
+      results,
+    });
 
-    // Clean up obsolete hooks that may have been installed by prior versions
-    for (const oldName of OBSOLETE_HOOKS) {
-      const oldPath = path.join(env.hooksDir, oldName);
-      if (fs.existsSync(oldPath)) {
-        if (dryRun) {
-          results.actions.push({ name: `hook/${oldName}`, status: 'would remove (obsolete)' });
-        } else {
-          fs.unlinkSync(oldPath);
-          results.actions.push({ name: `hook/${oldName}`, status: 'removed (obsolete)' });
-        }
-        results.removed++;
-      }
-    }
+    // Clean up obsolete hooks that may have been installed by prior versions.
+    removeObsoleteHooks(env, dryRun, results);
 
     // Deregister hooks and clean up cache
     const settingsActions = deregisterHooksFromSettings(env, dryRun);
