@@ -49,16 +49,6 @@ function rewriteConfigPath(body, env) {
   return body.replace(/~\/\.claude\/\.slashdo-config\.json/g, env.configPath);
 }
 
-function inlineLibContent(body, libDir) {
-  return body.replace(/!`cat ~\/\.claude\/lib\/(.+?)`/g, (match, filename) => {
-    const libFile = path.join(libDir, filename);
-    if (fs.existsSync(libFile)) {
-      return fs.readFileSync(libFile, 'utf8').trim();
-    }
-    return match;
-  });
-}
-
 // Matches a top-level `!cat ~/.claude/lib/<name>.md` runtime include.
 const LIB_CAT_RE = /!`cat ~\/\.claude\/lib\/(.+?)`/g;
 // Matches an in-PROSE citation of a lib doc, e.g. `~/.claude/lib/gh-host.md` —
@@ -276,7 +266,6 @@ module.exports = {
   parseFrontmatter,
   rewriteLibPaths,
   rewriteConfigPath,
-  inlineLibContent,
   inlineLibReferences,
   applyConditionalBlocks,
   getSkillName,
