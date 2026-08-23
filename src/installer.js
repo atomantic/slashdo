@@ -5,6 +5,8 @@ const path = require('path');
 const { getTargetFilename, transformCommand, transformLib } = require('./transformer');
 const { readConfig, writeConfig } = require('./config');
 
+const shellQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+
 function collectCommands(commandsDir) {
   const commands = [];
   const doDir = path.join(commandsDir, 'do');
@@ -135,7 +137,7 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
   // Register SessionStart hook for slashdo-check-update.js
   const updateCheckHook = hookFiles.find(h => h.name === 'slashdo-check-update.js');
   if (updateCheckHook) {
-    const hookCommand = `node "${path.join(env.hooksDir, updateCheckHook.name)}"`;
+    const hookCommand = `node ${shellQuote(path.join(env.hooksDir, updateCheckHook.name))}`;
 
     if (!settings.hooks) {
       settings.hooks = {};
@@ -189,7 +191,7 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
   // Configure statusline: upgrade gsd-statusline → slashdo-statusline (superset)
   const statuslineHook = hookFiles.find(h => h.name === 'slashdo-statusline.js');
   if (statuslineHook) {
-    const statuslineCommand = `node "${path.join(env.hooksDir, statuslineHook.name)}"`;
+    const statuslineCommand = `node ${shellQuote(path.join(env.hooksDir, statuslineHook.name))}`;
     const currentCmd = typeof settings.statusLine?.command === 'string' ? settings.statusLine.command : '';
 
     if (!settings.statusLine) {
@@ -264,7 +266,7 @@ function deregisterHooksFromSettings(env, dryRun) {
     // Restore gsd-statusline if its hook file still exists
     const gsdHookPath = path.join(env.hooksDir, 'gsd-statusline.js');
     if (fs.existsSync(gsdHookPath)) {
-      settings.statusLine = { type: 'command', command: `node "${gsdHookPath}"` };
+      settings.statusLine = { type: 'command', command: `node ${shellQuote(gsdHookPath)}` };
       actions.push({ name: 'settings/statusLine', status: dryRun ? 'would downgrade (slashdo→gsd)' : 'downgraded (slashdo→gsd)' });
     } else {
       delete settings.statusLine;

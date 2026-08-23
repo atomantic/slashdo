@@ -64,9 +64,11 @@ function probeCommand(cmd) {
 
 // Every path the check reads or writes, derived from a home directory. Taking
 // homeDir as an argument (rather than calling os.homedir() inline) is what lets
-// tests point the whole check at a temp dir.
-function resolvePaths(homeDir) {
-  const claudeDir = path.join(homeDir, '.claude');
+// tests point the whole check at a temp dir. configDir overrides it wholesale,
+// mirroring CLAUDE_CONFIG_DIR — the entrypoints pass process.env, so the
+// resolution itself stays a pure function of its arguments.
+function resolvePaths(homeDir, configDir) {
+  const claudeDir = configDir || path.join(homeDir, '.claude');
   const cacheDir = path.join(claudeDir, 'cache');
   return {
     cacheDir,
@@ -245,9 +247,9 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, paths, now, pid }) {
   // Auto-update: apply the update instead of surfacing the statusline hint.
   // Guard it with an exclusive lock file so that when several Claude sessions
   // start at once, only one spawns "npx slash-do@latest" against the shared
-  // ~/.claude/ — the installer's writes are idempotent today, but serializing
-  // keeps that assumption from being load-bearing if the install logic ever
-  // stops being safe to run concurrently.
+  // the Claude config directory — the installer's writes are idempotent today,
+  // but serializing keeps that assumption from being load-bearing if the
+  // install logic ever stops being safe to run concurrently.
   // `deferred` is set when this session sees an available auto-update but
   // yields the lock to another session: the lock holder owns the cache write
   // for this cycle, so a deferring session must NOT write its own (stale
@@ -354,7 +356,7 @@ function runWorker() {
   return runUpdateCheck({
     fs,
     execSync,
-    paths: resolvePaths(os.homedir()),
+    paths: resolvePaths(os.homedir(), process.env.CLAUDE_CONFIG_DIR),
     now: Date.now,
     pid: process.pid,
   });
@@ -362,7 +364,7 @@ function runWorker() {
 
 // SessionStart entrypoint: spawn the worker detached so we never block startup.
 function spawnWorker() {
-  const { cacheDir } = resolvePaths(os.homedir());
+  const { cacheDir } = resolvePaths(os.homedir(), process.env.CLAUDE_CONFIG_DIR);
   if (!fs.existsSync(cacheDir)) {
     fs.mkdirSync(cacheDir, { recursive: true });
   }

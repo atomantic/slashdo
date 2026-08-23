@@ -8,16 +8,74 @@ REPO="atomantic/slashdo"
 BRANCH="main"
 BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"
 
-# Detect local repo: if this script lives alongside commands/ and lib/, use local files
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Claude Code supports relocating its entire config tree. Keep every installer
+# path on the same root the hooks and statusline resolve at runtime.
+CLAUDE_CONFIG_CUSTOM=false
+if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+  CLAUDE_CONFIG_CUSTOM=true
+else
+  CLAUDE_CONFIG_DIR="$HOME/.claude"
+fi
+
+# Detect local repo: if this script lives alongside commands/ and lib/, use local
+# files. BASH_SOURCE is unset when the script is piped (`curl ... | bash`, the
+# documented install path): under `set -u` that kills the command substitution
+# and leaves SCRIPT_DIR pointing at the caller's CWD, so a piped install run
+# from any directory that happens to hold commands/do/ and lib/ would install
+# those files instead of fetching from GitHub.
+SCRIPT_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 LOCAL_MODE=false
-if [ -d "$SCRIPT_DIR/commands/do" ] && [ -d "$SCRIPT_DIR/lib" ]; then
+if [ -n "$SCRIPT_DIR" ] && [ -d "$SCRIPT_DIR/commands/do" ] && [ -d "$SCRIPT_DIR/lib" ]; then
   LOCAL_MODE=true
 fi
 
-# Fetch a file: local cp if available, otherwise curl from GitHub
-# Usage: fetch_file <repo_relative_path> <destination>
-fetch_file() {
+# Private staging area for the OpenCode rewrite step. Fixed /tmp names race
+# under concurrent installs and are pre-creatable by any other local user, so
+# every temp path this script touches is randomized and cleaned up on exit.
+STAGE_DIR=""
+# The temp file atomic_write is currently filling, so an interrupted install
+# does not strand a .slashdo-tmp.* file next to the real command files.
+ACTIVE_TMP=""
+cleanup_temp() {
+  [ -n "$ACTIVE_TMP" ] && rm -f "$ACTIVE_TMP"
+  [ -n "$STAGE_DIR" ] && rm -rf "$STAGE_DIR"
+  return 0
+}
+trap cleanup_temp EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Run a writer command against a temp file in the destination directory, then
+# rename it into place. Writing straight to the final path (curl -o "$dest",
+# sed > "$dest") truncates it up front, so a failed or interrupted transfer
+# would leave a broken file installed over a previously working one.
+# Usage: atomic_write <destination> <writer> [args...]   (the writer receives
+# the temp path as its final argument)
+atomic_write() {
+  local dest="$1"
+  shift
+  local tmp mode
+  tmp="$(mktemp "$(dirname "$dest")/.slashdo-tmp.XXXXXX")" || return 1
+  ACTIVE_TMP="$tmp"
+  # mktemp creates the file 0600; restore the mode a plain create would have
+  # produced under the user's umask, so staging neither loosens nor tightens
+  # what curl -o / cp used to write directly.
+  mode="$(printf '%04o' "$(( 0666 & ~0$(umask) ))")"
+  if "$@" "$tmp" && chmod "$mode" "$tmp" && mv -f "$tmp" "$dest"; then
+    ACTIVE_TMP=""
+    return 0
+  fi
+  rm -f "$tmp"
+  ACTIVE_TMP=""
+  return 1
+}
+
+# Copy a repo file locally, or download it from GitHub, into <destination>.
+# Usage: fetch_into <repo_relative_path> <destination>
+fetch_into() {
   local src_path="$1"
   local dest="$2"
   if [ "$LOCAL_MODE" = true ] && [ -f "$SCRIPT_DIR/$src_path" ]; then
@@ -25,6 +83,37 @@ fetch_file() {
   fi
   # Fallback to curl (remote mode, or local cp failed)
   curl -fsSL "$BASE_URL/$src_path" -o "$dest" 2>/dev/null
+}
+
+# Fetch a file: local cp if available, otherwise curl from GitHub
+# Usage: fetch_file <repo_relative_path> <destination>
+fetch_file() {
+  atomic_write "$2" fetch_into "$1"
+}
+
+# Source command/lib docs use Claude's default root as a portable token. For a
+# custom root, rewrite every runtime reference and shell-quote the root so the
+# generated snippets handle whitespace and metacharacters.
+# Usage: rewrite_for_claude <source> <destination>
+rewrite_for_claude() {
+  local quoted_root escaped_root
+  if [ "$CLAUDE_CONFIG_CUSTOM" != true ]; then
+    cp "$1" "$2"
+    return
+  fi
+  quoted_root=$(printf '%s' "$CLAUDE_CONFIG_DIR" | sed "s/'/'\\\\''/g")
+  quoted_root="'$quoted_root'"
+  escaped_root=$(printf '%s' "$quoted_root" | sed 's/[&|\\]/\\&/g')
+  sed "s|~/.claude/|$escaped_root/|g" "$1" > "$2"
+}
+
+# Rewrite lib-path cross-references and the config-path token so commands and
+# libs resolve under OpenCode at runtime (mirrors npm's transformLib).
+# Usage: rewrite_for_opencode <source> <destination>
+rewrite_for_opencode() {
+  sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
+      -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
+      "$1" > "$2"
 }
 
 CYAN='\033[0;36m'
@@ -80,7 +169,7 @@ OLD_HOOKS=(update-check)
 
 detect_envs() {
   local envs=()
-  [ -d "$HOME/.claude" ] && envs+=(claude)
+  [ -d "$CLAUDE_CONFIG_DIR" ] && envs+=(claude)
   [ -d "$HOME/.config/opencode" ] && envs+=(opencode)
   [ -d "$HOME/.gemini/antigravity-cli" ] && envs+=(antigravity)
   [ -d "$HOME/.codex" ] && envs+=(codex)
@@ -89,16 +178,17 @@ detect_envs() {
 }
 
 install_claude() {
-  local target_cmd="$HOME/.claude/commands/do"
-  local target_lib="$HOME/.claude/lib"
-  local target_hooks="$HOME/.claude/hooks"
+  local target_cmd="$CLAUDE_CONFIG_DIR/commands/do"
+  local target_lib="$CLAUDE_CONFIG_DIR/lib"
+  local target_hooks="$CLAUDE_CONFIG_DIR/hooks"
   mkdir -p "$target_cmd" "$target_lib" "$target_hooks"
 
   printf "  Installing to ${GREEN}Claude Code${RESET}...\n"
 
   for cmd in "${COMMANDS[@]}"; do
     printf "    /do:%-20s" "$cmd"
-    if fetch_file "commands/do/$cmd.md" "$target_cmd/$cmd.md"; then
+    if fetch_file "commands/do/$cmd.md" "$target_cmd/$cmd.md" &&
+        atomic_write "$target_cmd/$cmd.md" rewrite_for_claude "$target_cmd/$cmd.md"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
@@ -107,7 +197,8 @@ install_claude() {
 
   for lib in "${LIBS[@]}"; do
     printf "    lib/%-20s" "$lib.md"
-    if fetch_file "lib/$lib.md" "$target_lib/$lib.md"; then
+    if fetch_file "lib/$lib.md" "$target_lib/$lib.md" &&
+        atomic_write "$target_lib/$lib.md" rewrite_for_claude "$target_lib/$lib.md"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
@@ -145,13 +236,16 @@ install_claude() {
       const fs = require("fs");
       const path = require("path");
       const home = require("os").homedir();
-      const settingsPath = path.join(home, ".claude", "settings.json");
-      const hooksDir = path.join(home, ".claude", "hooks");
+      const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(home, ".claude");
+      const settingsPath = path.join(claudeDir, "settings.json");
+      const hooksDir = path.join(claudeDir, "hooks");
+      const quote = String.fromCharCode(39);
+      const shellQuote = value => quote + value.split(quote).join(quote + "\\" + quote + quote) + quote;
 
       // Default auto-update to enabled on first install. The curl installer
       // is piped (no TTY to prompt), so we pick the same default the npx
       // installer offers; re-run "npx slash-do@latest" interactively to change.
-      const configPath = path.join(home, ".claude", ".slashdo-config.json");
+      const configPath = path.join(claudeDir, ".slashdo-config.json");
       if (!fs.existsSync(configPath)) {
         try { fs.writeFileSync(configPath, JSON.stringify({ autoUpdate: true }, null, 2) + "\n"); } catch (e) {}
       }
@@ -166,42 +260,55 @@ install_claude() {
 
       let modified = false;
 
-      // SessionStart hook (only if hook file exists)
+      // SessionStart hook (only if hook file exists). This mirrors
+      // registerHooksInSettings() in src/installer.js — keep the two in sync.
+      // In particular: an unrecognized settings.hooks shape is left untouched
+      // rather than clobbered, and an unrecognized SessionStart shape still
+      // lets the statusLine step below run.
       const updateHookPath = path.join(hooksDir, "slashdo-check-update.js");
-      if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) settings.hooks = {};
-      if (typeof settings.hooks.SessionStart === "undefined") {
-        settings.hooks.SessionStart = [];
-      } else if (!Array.isArray(settings.hooks.SessionStart)) {
-        process.stdout.write("skipped (settings.hooks.SessionStart has unexpected shape)");
+      if (!settings.hooks) {
+        settings.hooks = {};
+      } else if (typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) {
+        process.stdout.write("skipped (settings.hooks has unexpected shape)");
         process.exit(0);
       }
 
-      const hookCmd = "node \"" + updateHookPath + "\"";
-      const alreadyRegistered = settings.hooks.SessionStart.some(function(g) {
-        return g && typeof g === "object" && Array.isArray(g.hooks) && g.hooks.some(function(h) {
-          return h && typeof h === "object" && typeof h.command === "string" && h.command.indexOf("slashdo-check-update") !== -1;
-        });
-      });
+      var sessionStartUsable = true;
+      if (Object.prototype.hasOwnProperty.call(settings.hooks, "SessionStart") &&
+          !Array.isArray(settings.hooks.SessionStart)) {
+        sessionStartUsable = false;
+      } else if (!Array.isArray(settings.hooks.SessionStart)) {
+        settings.hooks.SessionStart = [];
+      }
 
-      if (!alreadyRegistered) {
-        if (settings.hooks.SessionStart.length > 0) {
-          var firstGroup = settings.hooks.SessionStart[0];
-          if (!firstGroup || typeof firstGroup !== "object") {
-            firstGroup = {};
-            settings.hooks.SessionStart[0] = firstGroup;
+      if (sessionStartUsable) {
+        const hookCmd = "node " + shellQuote(updateHookPath);
+        const alreadyRegistered = settings.hooks.SessionStart.some(function(g) {
+          return g && typeof g === "object" && Array.isArray(g.hooks) && g.hooks.some(function(h) {
+            return h && typeof h === "object" && typeof h.command === "string" && h.command.indexOf("slashdo-check-update") !== -1;
+          });
+        });
+
+        if (!alreadyRegistered) {
+          if (settings.hooks.SessionStart.length > 0) {
+            var firstGroup = settings.hooks.SessionStart[0];
+            if (!firstGroup || typeof firstGroup !== "object") {
+              firstGroup = {};
+              settings.hooks.SessionStart[0] = firstGroup;
+            }
+            if (!Array.isArray(firstGroup.hooks)) firstGroup.hooks = [];
+            firstGroup.hooks.push({ type: "command", command: hookCmd });
+          } else {
+            settings.hooks.SessionStart.push({ hooks: [{ type: "command", command: hookCmd }] });
           }
-          if (!Array.isArray(firstGroup.hooks)) firstGroup.hooks = [];
-          firstGroup.hooks.push({ type: "command", command: hookCmd });
-        } else {
-          settings.hooks.SessionStart.push({ hooks: [{ type: "command", command: hookCmd }] });
+          modified = true;
         }
-        modified = true;
       }
 
       // Statusline: upgrade gsd-statusline → slashdo-statusline (superset)
       const statuslineHookPath = path.join(hooksDir, "slashdo-statusline.js");
       if (fs.existsSync(statuslineHookPath)) {
-        const slCmd = "node \"" + statuslineHookPath + "\"";
+        const slCmd = "node " + shellQuote(statuslineHookPath);
         const currentCmd = (settings.statusLine && typeof settings.statusLine.command === "string") ? settings.statusLine.command : "";
         if (!settings.statusLine) {
           settings.statusLine = { type: "command", command: slCmd };
@@ -217,13 +324,20 @@ install_claude() {
         fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
       }
 
-      process.stdout.write(modified ? "updated" : "already configured");
+      if (!sessionStartUsable) {
+        // The statusline step still runs, so do not claim nothing happened.
+        process.stdout.write(modified
+          ? "updated (SessionStart left alone: unexpected shape)"
+          : "skipped (settings.hooks.SessionStart has unexpected shape)");
+      } else {
+        process.stdout.write(modified ? "updated" : "already configured");
+      }
     ' 2>/dev/null); then
-      printf " %sfailed%s\n" "$YELLOW" "$RESET"
+      printf " ${YELLOW}failed${RESET}\n"
     elif echo "$node_result" | grep -q "^skipped"; then
-      printf "%s%s%s\n" "$YELLOW" "$node_result" "$RESET"
+      printf "${YELLOW}%s${RESET}\n" "$node_result"
     else
-      printf "%s %sok%s\n" "$node_result" "$GREEN" "$RESET"
+      printf "%s ${GREEN}ok${RESET}\n" "$node_result"
     fi
   elif command -v node &>/dev/null; then
     printf "    ${DIM}settings.json: skipped (hook files not found)${RESET}\n"
@@ -239,46 +353,40 @@ install_opencode() {
 
   printf "  Installing to ${GREEN}OpenCode${RESET}...\n"
 
+  # Stage downloads in a private, randomized directory (removed by the EXIT
+  # trap) rather than fixed /tmp/slashdo-* names another local user could
+  # pre-create or a concurrent install could clobber.
+  if ! STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-install.XXXXXX")"; then
+    printf "    ${YELLOW}skipped (could not create a temp directory)${RESET}\n"
+    return 1
+  fi
+
   for cmd in "${COMMANDS[@]}"; do
-    local tmpfile
     printf "    /do-%-20s" "$cmd"
-    tmpfile="$(mktemp "${TMPDIR:-/tmp}/slashdo-command-${cmd}.XXXXXX")"
-    if fetch_file "commands/do/$cmd.md" "$tmpfile"; then
-      # Rewrite lib paths and the config-path token for OpenCode
-      if ! sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
-          -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
-          "$tmpfile" > "$target_cmd/do-$cmd.md"; then
-        rm -f "$tmpfile"
+    if fetch_file "commands/do/$cmd.md" "$STAGE_DIR/$cmd.md"; then
+      if ! atomic_write "$target_cmd/do-$cmd.md" rewrite_for_opencode "$STAGE_DIR/$cmd.md"; then
+        rm -f "$STAGE_DIR/$cmd.md"
         return 1
       fi
-      rm -f "$tmpfile"
       printf "${GREEN}ok${RESET}\n"
     else
-      rm -f "$tmpfile"
       printf "failed\n"
     fi
+    rm -f "$STAGE_DIR/$cmd.md"
   done
 
   for lib in "${LIBS[@]}"; do
-    local tmpfile
     printf "    lib/%-20s" "$lib.md"
-    tmpfile="$(mktemp "${TMPDIR:-/tmp}/slashdo-lib-${lib}.XXXXXX")"
-    if fetch_file "lib/$lib.md" "$tmpfile"; then
-      # Rewrite lib-path cross-references and the config-path token so libs
-      # resolve under OpenCode at runtime (mirrors the command loop and npm's
-      # transformLib).
-      if ! sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
-          -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
-          "$tmpfile" > "$target_lib/$lib.md"; then
-        rm -f "$tmpfile"
+    if fetch_file "lib/$lib.md" "$STAGE_DIR/lib-$lib.md"; then
+      if ! atomic_write "$target_lib/$lib.md" rewrite_for_opencode "$STAGE_DIR/lib-$lib.md"; then
+        rm -f "$STAGE_DIR/lib-$lib.md"
         return 1
       fi
-      rm -f "$tmpfile"
       printf "${GREEN}ok${RESET}\n"
     else
-      rm -f "$tmpfile"
       printf "failed\n"
     fi
+    rm -f "$STAGE_DIR/lib-$lib.md"
   done
 
   for old in "${OLD_COMMANDS[@]}"; do
@@ -296,7 +404,7 @@ envs=($(detect_envs)) || true
 if [ ${#envs[@]} -eq 0 ]; then
   printf "  No supported AI coding environments detected.\n"
   printf "  Supported: Claude Code, OpenCode, Antigravity CLI, Codex, Grok Build\n\n"
-  printf "  Create ~/.claude/ to enable Claude Code support, then re-run.\n"
+  printf "  Create %s to enable Claude Code support, then re-run.\n" "$CLAUDE_CONFIG_DIR"
   exit 1
 fi
 
@@ -312,7 +420,7 @@ curl_installed=false
 for env in "${envs[@]}"; do
   case "$env" in
     claude)      install_claude; curl_installed=true ;;
-    opencode)    install_opencode; curl_installed=true ;;
+    opencode)    if install_opencode; then curl_installed=true; fi ;;
     antigravity) printf "  ${DIM}Antigravity CLI: use 'npx slash-do@latest --env antigravity' (Agent Skills require Node.js for content inlining)${RESET}\n"; npx_needed=true ;;
     codex)       printf "  ${DIM}Codex: use 'npx slash-do@latest --env codex' (requires Node.js for content inlining)${RESET}\n"; npx_needed=true ;;
     grok)        printf "  ${DIM}Grok Build: use 'npx slash-do@latest --env grok' (requires Node.js for content inlining)${RESET}\n"; npx_needed=true ;;

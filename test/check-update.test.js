@@ -41,6 +41,14 @@ describe('check-update resolvePaths', () => {
     assert.equal(paths.configFile, path.join('/home/someone', '.claude', '.slashdo-config.json'));
     assert.equal(paths.lockFile, path.join(paths.cacheDir, 'slashdo-update.lock'));
   });
+
+  it('puts everything under CLAUDE_CONFIG_DIR when one is set', () => {
+    const paths = resolvePaths('/home/someone', '/elsewhere/claude');
+
+    assert.equal(paths.cacheFile, path.join('/elsewhere/claude', 'cache', 'slashdo-update-check.json'));
+    assert.equal(paths.versionFile, path.join('/elsewhere/claude', '.slashdo-version'));
+    assert.equal(paths.configFile, path.join('/elsewhere/claude', '.slashdo-config.json'));
+  });
 });
 
 // ── semver comparison ───────────────────────────────────────────────
