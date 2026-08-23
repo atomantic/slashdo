@@ -524,6 +524,16 @@ describe('review-loop parse contracts', () => {
     for (const name of fs.readdirSync(libsDir).filter((f) => f.endsWith('.md') && f !== 'gh-host.md')) {
       banned(readLib(name), `lib/${name}`);
     }
+    // The repo's own .claude/commands/ specs too — a copy hid there once, outside a
+    // sweep that only walked the shipped tree.
+    const localDir = path.join(__dirname, '..', '.claude', 'commands');
+    const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(path.join(dir, e.name)) : (e.name.endsWith('.md') ? [path.join(dir, e.name)] : []));
+    if (fs.existsSync(localDir)) {
+      for (const file of walk(localDir)) {
+        banned(fs.readFileSync(file, 'utf8'), path.relative(path.join(__dirname, '..'), file));
+      }
+    }
   });
 
   it('keeps the empty-array rule in one partial the loops point at', () => {

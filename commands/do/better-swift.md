@@ -101,6 +101,8 @@ Run `gh auth status --active` to check GitHub CLI (`--active` scopes the check t
 - If neither is authenticated, warn the user and halt
 - **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state, following the shared derivation (and its per-host auth precheck) included below. The Phase 6 GitHub-side reviewer loops use `gh api`, which ignores the repo remote and defaults to github.com — so on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out.
 
+**GitHub only — skip the snippet below entirely on GitLab**, whose `glab` calls resolve the host from the remote themselves and where its `gh auth` precheck would abort the run.
+
 !`cat ~/.claude/lib/gh-host.md`
 
 ### 0b: Swift Project Type Detection
