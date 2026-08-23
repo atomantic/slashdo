@@ -80,28 +80,41 @@ describe('compareVersions', () => {
 
 // ── hasNpm / getLatestVersion ───────────────────────────────────────
 
+// Probe hasNpm() in a child with a PATH we control, so the result depends on the
+// fixture rather than on whether the machine running the tests happens to have npm.
+function probeWithPath(pathValue) {
+  const modulePath = path.resolve(__dirname, '../src/version-check');
+  const script = [
+    'const { hasNpm, getLatestVersion } = require(' + JSON.stringify(modulePath) + ');',
+    'let code = null;',
+    'try { getLatestVersion(1000); } catch (e) { code = e.code; }',
+    'process.stdout.write(JSON.stringify({ hasNpm: hasNpm(), code }));',
+  ].join('\n');
+  const result = spawnSync(process.execPath, ['-e', script], {
+    encoding: 'utf8',
+    timeout: 10000,
+    env: { PATH: pathValue },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout);
+}
+
 describe('hasNpm', () => {
-  it('reports true when npm resolves on PATH', () => {
-    // slashdo's own test run happens on a machine with npm, so this holds here.
-    assert.equal(hasNpm(), true);
+  it('reports true when npm resolves on PATH', { skip: process.platform === 'win32' }, () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-fake-npm-'));
+    const fakeNpm = path.join(binDir, 'npm');
+    // Stub stands in for a real npm: hasNpm only asks whether PATH resolves it.
+    fs.writeFileSync(fakeNpm, '#!/bin/sh\necho 9.9.9\n', 'utf8');
+    fs.chmodSync(fakeNpm, 0o755);
+
+    try {
+      assert.equal(probeWithPath(binDir).hasNpm, true);
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
   });
 
   it('reports false and getLatestVersion throws NPM_UNAVAILABLE with npm off PATH', () => {
-    // Run in a child so the stripped PATH cannot leak into the other tests.
-    const modulePath = path.resolve(__dirname, '../src/version-check');
-    const script = [
-      'const { hasNpm, getLatestVersion } = require(' + JSON.stringify(modulePath) + ');',
-      'let code = null;',
-      'try { getLatestVersion(1000); } catch (e) { code = e.code; }',
-      'process.stdout.write(JSON.stringify({ hasNpm: hasNpm(), code }));',
-    ].join('\n');
-    const result = spawnSync(process.execPath, ['-e', script], {
-      encoding: 'utf8',
-      timeout: 10000,
-      env: { PATH: '/nonexistent-slashdo-bin' },
-    });
-
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), { hasNpm: false, code: 'NPM_UNAVAILABLE' });
+    assert.deepEqual(probeWithPath('/nonexistent-slashdo-bin'), { hasNpm: false, code: 'NPM_UNAVAILABLE' });
   });
 });

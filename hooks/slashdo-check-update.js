@@ -46,9 +46,15 @@ try {
     // and reclaimed. Kept well above the 120s install timeout below so a slow-but-
     // live install is never stolen out from under itself.
     const LOCK_STALE_MS = 10 * 60 * 1000;
+    // How long a surfaced npm/npx notice stays suppressed. It shows for the session
+    // that wrote it and then goes quiet for a week: the hook cannot know whether a
+    // statusline ever rendered it (the user may have a custom statusline, or a second
+    // session may have rewritten the cache first), so it repeats on this cadence
+    // rather than firing exactly once and risking being lost.
+    const NOTICE_REPEAT_S = 7 * 24 * 60 * 60;
 
-    // Previous cache state — used to make the npm/npx notice one-shot: we warn
-    // when the state first appears, not on every session for the rest of time.
+    // Previous cache state — carries the last notice timestamp so we warn on a
+    // slow cadence instead of on every session for the rest of time.
     let previous = null;
     try {
       previous = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
@@ -124,11 +130,15 @@ try {
     // and clobber the holder's update_available:false once the install completes.
     let deferred = false;
     // npm can be present while npx is not (npx is a separate shim on some
-    // distro-packaged Node builds). Without npx there is nothing to auto-update
-    // with, so record why and fall through to the manual /do:update hint.
-    if (updateAvailable && autoUpdate && !hasCommand('npx')) {
+    // distro-packaged Node builds). Both the auto-updater below and the manual
+    // /do:update hint shell out to npx, so probe whenever there is an update to
+    // apply — not just on the auto-update path, or a user with auto-update off
+    // would be pointed at a /do:update that cannot run.
+    const npxAvailable = updateAvailable ? hasCommand('npx') : true;
+    if (updateAvailable && !npxAvailable) {
       updateCheck = 'npx-unavailable';
-    } else if (updateAvailable && autoUpdate) {
+    }
+    if (updateAvailable && autoUpdate && npxAvailable) {
       // wx = create-exclusive: succeeds for exactly one racer, throws EEXIST for
       // the rest. In the common case (no lock yet, several sessions starting at
       // once) this gives EXACT mutual exclusion — exactly one installs.
@@ -194,14 +204,19 @@ try {
 
     if (updateCheck) {
       result.update_check = updateCheck;
-      // One-shot: only surface the notice when this state is new, so a machine
-      // that deliberately has no npm doesn't carry a permanent statusline warning.
       const notices = {
-        'npm-unavailable': 'slashdo update check needs npm on PATH',
-        'npx-unavailable': 'slashdo auto-update needs npx on PATH — run /do:update'
+        'npm-unavailable': 'slashdo update check needs npm on PATH — update with install.sh',
+        'npx-unavailable': 'slashdo auto-update needs npx on PATH — re-run install.sh'
       };
-      if (notices[updateCheck] && (!previous || previous.update_check !== updateCheck)) {
-        result.notice = notices[updateCheck];
+      if (notices[updateCheck]) {
+        const lastNotice = (previous && previous.update_check === updateCheck && Number(previous.notice_at)) || 0;
+        const now = Math.floor(Date.now() / 1000);
+        if (!lastNotice || now - lastNotice >= NOTICE_REPEAT_S) {
+          result.notice = notices[updateCheck];
+          result.notice_at = now;
+        } else {
+          result.notice_at = lastNotice;
+        }
       }
     }
 

@@ -10,6 +10,8 @@ function getInstalledVersion(versionFile) {
 
 // slashdo also installs via the npm-free curl installer, so npm is not guaranteed
 // to be on PATH. Probing first turns an opaque ENOENT into a state callers can name.
+// hooks/slashdo-check-update.js repeats this probe rather than importing it: hooks
+// are installed standalone into ~/.claude/hooks/ with no src/ beside them.
 function hasNpm() {
   try {
     execSync(process.platform === 'win32' ? 'where npm' : 'command -v npm', {
@@ -59,6 +61,9 @@ function checkForUpdate(versionFile) {
   try {
     latest = getLatestVersion(3000);
   } catch {
+    // Includes err.code === 'NPM_UNAVAILABLE'. This function's contract is "an
+    // update worth telling the user about, or null" — a broken lookup is not one.
+    // Callers that need to distinguish should call hasNpm() themselves.
     return null;
   }
 

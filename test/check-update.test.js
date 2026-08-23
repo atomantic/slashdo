@@ -30,12 +30,12 @@ function cacheFileFor(home) {
 
 // The hook spawns a detached background child, so the cache lands after the
 // parent exits. Poll for it rather than guessing at a sleep duration.
-function runHookAndReadCache(home, { expectAfter = 0 } = {}) {
+function runHookAndReadCache(home, { expectAfter = 0, pathValue } = {}) {
   const result = spawnSync(process.execPath, [hook], {
     encoding: 'utf8',
     timeout: 10000,
-    // PATH resolves nothing: no npm, no npx. node is spawned by absolute path.
-    env: { HOME: home, USERPROFILE: home, PATH: path.join(home, 'no-such-bin') },
+    // Default PATH resolves nothing: no npm, no npx. node is spawned by absolute path.
+    env: { HOME: home, USERPROFILE: home, PATH: pathValue || path.join(home, 'no-such-bin') },
   });
   assert.equal(result.status, 0, 'hook must never fail the session start');
 
@@ -68,17 +68,58 @@ describe('slashdo update check without npm', () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  it('surfaces the notice once, not on every session', () => {
+  it('does not repeat the notice on the next session', () => {
     const home = makeHome('1.0.0');
 
     const first = runHookAndReadCache(home);
     assert.ok(first.notice, 'first run should warn');
+    assert.ok(first.notice_at > 0, 'first run should stamp when it warned');
 
     const second = runHookAndReadCache(home, { expectAfter: fs.statSync(cacheFileFor(home)).mtimeMs });
     assert.equal(second.update_check, 'npm-unavailable', 'state stays readable for /do:help');
-    assert.equal(second.notice, undefined, 'already warned — no permanent statusline nag');
+    assert.equal(second.notice, undefined, 'already warned — no per-session statusline nag');
+    assert.equal(second.notice_at, first.notice_at, 'suppression window carries forward');
 
     fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('warns again once the suppression window has passed', () => {
+    // A notice can be written and never rendered (custom statusline, or a second
+    // session rewrites the cache first), so suppression has to expire.
+    const home = makeHome('1.0.0');
+    const cacheFile = cacheFileFor(home);
+
+    const first = runHookAndReadCache(home);
+    const stale = { ...first, notice_at: first.notice_at - 8 * 24 * 60 * 60 };
+    delete stale.notice;
+    fs.writeFileSync(cacheFile, JSON.stringify(stale));
+
+    const again = runHookAndReadCache(home, { expectAfter: fs.statSync(cacheFile).mtimeMs });
+    assert.match(again.notice, /npm/, 'a week-old notice should fire again');
+    assert.ok(again.notice_at > stale.notice_at, 'and re-stamp the window');
+
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('flags npx-unavailable when an update exists but npx is missing', { skip: process.platform === 'win32' }, () => {
+    // Auto-update is OFF here: the ⬆ /do:update hint the user is shown also runs
+    // npx, so the missing shim has to be reported on this path too.
+    const home = makeHome('1.0.0');
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-fake-npm-'));
+    const fakeNpm = path.join(binDir, 'npm');
+    fs.writeFileSync(fakeNpm, '#!/bin/sh\necho 99.0.0\n', 'utf8');
+    fs.chmodSync(fakeNpm, 0o755);
+
+    try {
+      const cache = runHookAndReadCache(home, { pathValue: binDir });
+
+      assert.equal(cache.update_available, true, 'the update itself is still real');
+      assert.equal(cache.update_check, 'npx-unavailable');
+      assert.match(cache.notice, /npx/);
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('stays silent when slashdo is not installed', () => {
