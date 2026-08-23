@@ -212,21 +212,32 @@ try {
         'npm-unavailable': 'slashdo update check needs npm on PATH — update with install.sh',
         'npx-unavailable': 'slashdo update available but npx is missing — update with install.sh'
       };
-      // Keyed on the stamp alone, not on the state matching: a transient
-      // 'lookup-failed' run in between must not drop the stamp and re-open the
-      // window hours after the last warning. A healthy check writes no stamp at
-      // all, so npm going missing again later warns immediately.
+      // States that carry a pending update the user cannot apply: there is nothing
+      // else on the statusline for them (the ⬆ badge is suppressed above), so this
+      // one repeats every session until it is resolved rather than being rate-limited.
+      const persistent = { 'npx-unavailable': true };
+      // The stamp and the state it belongs to are tracked separately from
+      // update_check: a transient 'lookup-failed' run in between must not drop the
+      // stamp and re-open the window hours after the last warning, but a change to a
+      // genuinely different message must still get through. A healthy check writes
+      // neither, so npm going missing again later warns immediately.
       const lastNotice = Number(previous && previous.notice_at) || 0;
+      const lastState = (previous && previous.notice_state) || null;
       if (notices[updateCheck]) {
         const now = Math.floor(Date.now() / 1000);
-        if (!lastNotice || now - lastNotice >= NOTICE_REPEAT_S) {
+        const windowElapsed = !lastNotice || now - lastNotice >= NOTICE_REPEAT_S;
+        if (persistent[updateCheck] || windowElapsed || lastState !== updateCheck) {
           result.notice = notices[updateCheck];
           result.notice_at = now;
         } else {
           result.notice_at = lastNotice;
         }
+        result.notice_state = updateCheck;
       } else if (lastNotice) {
         result.notice_at = lastNotice;
+        if (lastState) {
+          result.notice_state = lastState;
+        }
       }
     }
 

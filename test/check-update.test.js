@@ -28,6 +28,15 @@ function cacheFileFor(home) {
   return path.join(home, '.claude', 'cache', 'slashdo-update-check.json');
 }
 
+// A stub npm that reports a newer version, so the hook sees a real pending update.
+function makeFakeNpmBin() {
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-fake-npm-'));
+  const fakeNpm = path.join(binDir, 'npm');
+  fs.writeFileSync(fakeNpm, '#!/bin/sh\necho 99.0.0\n', 'utf8');
+  fs.chmodSync(fakeNpm, 0o755);
+  return binDir;
+}
+
 function readCacheRaw(home) {
   try {
     return fs.readFileSync(cacheFileFor(home), 'utf8');
@@ -38,7 +47,7 @@ function readCacheRaw(home) {
 
 // The hook spawns a detached background child, so the cache lands after the
 // parent exits. Poll for it rather than guessing at a sleep duration.
-function runHookAndReadCache(home, { pathValue } = {}) {
+function runHookAndReadCache(home, { pathValue, settleMs = 3000 } = {}) {
   const before = readCacheRaw(home);
   const result = spawnSync(process.execPath, [hook], {
     encoding: 'utf8',
@@ -49,9 +58,14 @@ function runHookAndReadCache(home, { pathValue } = {}) {
   assert.equal(result.status, 0, 'hook must never fail the session start');
 
   const deadline = Date.now() + 8000;
+  const settleUntil = Date.now() + settleMs;
   while (Date.now() < deadline) {
     const now = readCacheRaw(home);
-    if (now !== null && now !== before) {
+    // A changed body proves the child ran. An unchanged one is also a legitimate
+    // outcome (a re-run can write the same bytes), so accept it once the child has
+    // had time to finish rather than polling mtime, whose filesystem granularity
+    // could hide the second write entirely.
+    if (now !== null && (now !== before || Date.now() >= settleUntil)) {
       try {
         return JSON.parse(now);
       } catch (e) {} // mid-write, try again
@@ -118,10 +132,7 @@ describe('slashdo update check without npm', () => {
     // Auto-update is OFF here: the ⬆ /do:update hint the user would otherwise be
     // shown also runs npx, so the missing shim has to be reported on this path too.
     const home = makeHome('1.0.0');
-    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-fake-npm-'));
-    const fakeNpm = path.join(binDir, 'npm');
-    fs.writeFileSync(fakeNpm, '#!/bin/sh\necho 99.0.0\n', 'utf8');
-    fs.chmodSync(fakeNpm, 0o755);
+    const binDir = makeFakeNpmBin();
 
     try {
       const cache = runHookAndReadCache(home, { pathValue: binDir });
@@ -131,6 +142,29 @@ describe('slashdo update check without npm', () => {
       assert.match(cache.notice, /npx/);
       // No ⬆ badge: /do:update wraps npx, so it would be a second dead end.
       assert.equal(cache.update_available, false);
+
+      // With the badge suppressed, the notice is the only signal left — it has to
+      // survive into later sessions instead of being rate-limited into silence.
+      const next = runHookAndReadCache(home, { pathValue: binDir });
+      assert.match(next.notice, /npx/, 'a pending, unappliable update keeps warning');
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('warns again when the reason changes, without waiting out the window', { skip: process.platform === 'win32' }, () => {
+    const home = makeHome('1.0.0');
+    const binDir = makeFakeNpmBin();
+
+    try {
+      const withNpm = runHookAndReadCache(home, { pathValue: binDir });
+      assert.equal(withNpm.notice_state, 'npx-unavailable');
+
+      // npm disappears too: a different, newly-true message the user has not seen.
+      const withoutNpm = runHookAndReadCache(home);
+      assert.equal(withoutNpm.update_check, 'npm-unavailable');
+      assert.match(withoutNpm.notice, /npm/, 'a new reason is not swallowed by the window');
     } finally {
       fs.rmSync(binDir, { recursive: true, force: true });
       fs.rmSync(home, { recursive: true, force: true });
