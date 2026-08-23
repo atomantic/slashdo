@@ -394,7 +394,7 @@ describe('runUpdateCheck', () => {
     fs.utimesSync(paths.lockFile, stale, stale);
     const brokenUnlinkFs = {
       ...fs,
-      unlinkSync: (file) => {
+      unlinkSync: () => {
         const err = new Error('EPERM');
         err.code = 'EPERM';
         throw err;
@@ -412,6 +412,43 @@ describe('runUpdateCheck', () => {
     assert.equal(result.status, 'written');
     assert.deepEqual(calls, [NPM_VIEW_COMMAND], 'we never took the lock, so we must not install');
     assert.equal(readCache().update_available, true);
+  });
+
+  it('defers when a new session takes the freed slot before we can retake it', () => {
+    // Mirror of the case above: the reclaim frees the lock, but another session
+    // creates a fresh one in the gap. That session installs and writes the real
+    // cache, so we must defer to it rather than clobber its result.
+    writeInstalled('1.9.0');
+    writeConfig({ autoUpdate: true });
+    fs.writeFileSync(paths.lockFile, '999', 'utf8');
+    const stale = new Date(NOW - LOCK_STALE_MS - 60000);
+    fs.utimesSync(paths.lockFile, stale, stale);
+    let opens = 0;
+    const racedFs = {
+      ...fs,
+      openSync: (file, flags) => {
+        if (file === paths.lockFile) {
+          opens++;
+          const err = new Error('EEXIST'); // first: the stale lock; second: the new one
+          err.code = 'EEXIST';
+          throw err;
+        }
+        return fs.openSync(file, flags);
+      },
+    };
+
+    const result = runUpdateCheck({
+      fs: racedFs,
+      execSync: makeExecSync({ latest: '1.10.0' }),
+      paths,
+      now: () => NOW,
+      pid: 4242,
+    });
+
+    assert.equal(opens, 2, 'the reclaim must have retried the acquire');
+    assert.equal(result.status, 'deferred');
+    assert.deepEqual(calls, [NPM_VIEW_COMMAND], 'the new lock holder installs, not us');
+    assert.equal(fs.existsSync(paths.cacheFile), false);
   });
 
   it('does not touch the lock at all when auto-update is off', () => {
@@ -439,8 +476,9 @@ describe('runUpdateCheck', () => {
 // broken real-fs/real-home wiring can't pass. `npm` is stubbed on PATH so the
 // check stays hermetic (no network, no npx install).
 
-// How long the slow `npm view` stub sleeps. A parent that returns sooner
-// provably did not wait for its worker.
+// How long the slow `npm view` stub sleeps, used to observe that the parent does
+// not wait for its worker. Must stay under the hook's own 5s npm view timeout,
+// or the worker gives up on the stub and records latest:'unknown'.
 const SLOW_NPM_MS = 2000;
 
 describe('check-update worker entrypoint', { skip: process.platform === 'win32' }, () => {
@@ -502,7 +540,7 @@ describe('check-update worker entrypoint', { skip: process.platform === 'win32' 
     const proc = runHook(['--worker']);
 
     assert.equal(proc.status, 0, proc.stderr);
-    assert.deepEqual(JSON.parse(fs.readFileSync(paths.cacheFile, 'utf8')).latest, '9.9.9');
+    assert.equal(JSON.parse(fs.readFileSync(paths.cacheFile, 'utf8')).latest, '9.9.9');
     assert.equal(JSON.parse(fs.readFileSync(paths.cacheFile, 'utf8')).update_available, true);
   });
 
@@ -514,14 +552,14 @@ describe('check-update worker entrypoint', { skip: process.platform === 'win32' 
     fs.writeFileSync(paths.versionFile, '1.9.0\n', 'utf8');
     writeNpmStub('sleep ' + SLOW_NPM_MS / 1000 + '\n');
 
-    const started = Date.now();
     const proc = runHook([]);
-    const parentMs = Date.now() - started;
     assert.equal(proc.status, 0, proc.stderr);
-    // The npm stub sleeps SLOW_NPM_MS. If the parent waited on its child at all,
-    // it could not have returned this fast — this is the 'never blocks session
-    // start' contract that detached + unref() provides.
-    assert.ok(parentMs < SLOW_NPM_MS, 'SessionStart returned in ' + parentMs + 'ms');
+    // The npm stub sleeps SLOW_NPM_MS, so the worker cannot have finished yet —
+    // unless the parent waited for it, which is exactly what detached + unref()
+    // exist to prevent. Asserting the ordering rather than an elapsed-time bound
+    // keeps this from flaking on a loaded CI runner.
+    assert.equal(fs.existsSync(paths.cacheFile), false,
+      'SessionStart blocked until its worker had already written the cache');
 
     const cache = await waitForCache();
     assert.equal(cache.latest, '9.9.9');
