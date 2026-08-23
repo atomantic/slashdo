@@ -15,9 +15,37 @@ if [ -d "$SCRIPT_DIR/commands/do" ] && [ -d "$SCRIPT_DIR/lib" ]; then
   LOCAL_MODE=true
 fi
 
-# Fetch a file: local cp if available, otherwise curl from GitHub
-# Usage: fetch_file <repo_relative_path> <destination>
-fetch_file() {
+# Private staging area for the OpenCode rewrite step. Fixed /tmp names race
+# under concurrent installs and are pre-creatable by any other local user, so
+# every temp path this script touches is randomized and cleaned up on exit.
+STAGE_DIR=""
+cleanup_stage() {
+  [ -n "$STAGE_DIR" ] && rm -rf "$STAGE_DIR"
+  return 0
+}
+trap cleanup_stage EXIT
+
+# Run a writer command against a temp file in the destination directory, then
+# rename it into place. Writing straight to the final path (curl -o "$dest",
+# sed > "$dest") truncates it up front, so a failed or interrupted transfer
+# would leave a broken file installed over a previously working one.
+# Usage: atomic_write <destination> <writer> [args...]   (the writer receives
+# the temp path as its final argument)
+atomic_write() {
+  local dest="$1"
+  shift
+  local tmp
+  tmp="$(mktemp "$(dirname "$dest")/.slashdo-tmp.XXXXXX")" || return 1
+  if "$@" "$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$dest"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
+# Copy a repo file locally, or download it from GitHub, into <destination>.
+# Usage: fetch_into <repo_relative_path> <destination>
+fetch_into() {
   local src_path="$1"
   local dest="$2"
   if [ "$LOCAL_MODE" = true ] && [ -f "$SCRIPT_DIR/$src_path" ]; then
@@ -25,6 +53,21 @@ fetch_file() {
   fi
   # Fallback to curl (remote mode, or local cp failed)
   curl -fsSL "$BASE_URL/$src_path" -o "$dest" 2>/dev/null
+}
+
+# Fetch a file: local cp if available, otherwise curl from GitHub
+# Usage: fetch_file <repo_relative_path> <destination>
+fetch_file() {
+  atomic_write "$2" fetch_into "$1"
+}
+
+# Rewrite lib-path cross-references and the config-path token so commands and
+# libs resolve under OpenCode at runtime (mirrors npm's transformLib).
+# Usage: rewrite_for_opencode <source> <destination>
+rewrite_for_opencode() {
+  sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
+      -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
+      "$1" > "$2"
 }
 
 CYAN='\033[0;36m'
@@ -165,36 +208,49 @@ install_claude() {
 
       let modified = false;
 
-      // SessionStart hook (only if hook file exists)
+      // SessionStart hook (only if hook file exists). This mirrors
+      // registerHooksInSettings() in src/installer.js — keep the two in sync.
+      // In particular: an unrecognized settings.hooks shape is left untouched
+      // rather than clobbered, and an unrecognized SessionStart shape still
+      // lets the statusLine step below run.
       const updateHookPath = path.join(hooksDir, "slashdo-check-update.js");
-      if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) settings.hooks = {};
-      if (typeof settings.hooks.SessionStart === "undefined") {
-        settings.hooks.SessionStart = [];
-      } else if (!Array.isArray(settings.hooks.SessionStart)) {
-        process.stdout.write("skipped (settings.hooks.SessionStart has unexpected shape)");
+      if (!settings.hooks) {
+        settings.hooks = {};
+      } else if (typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) {
+        process.stdout.write("skipped (settings.hooks has unexpected shape)");
         process.exit(0);
       }
 
-      const hookCmd = "node \"" + updateHookPath + "\"";
-      const alreadyRegistered = settings.hooks.SessionStart.some(function(g) {
-        return g && typeof g === "object" && Array.isArray(g.hooks) && g.hooks.some(function(h) {
-          return h && typeof h === "object" && typeof h.command === "string" && h.command.indexOf("slashdo-check-update") !== -1;
-        });
-      });
+      var sessionStartUsable = true;
+      if (Object.prototype.hasOwnProperty.call(settings.hooks, "SessionStart") &&
+          !Array.isArray(settings.hooks.SessionStart)) {
+        sessionStartUsable = false;
+      } else if (!Array.isArray(settings.hooks.SessionStart)) {
+        settings.hooks.SessionStart = [];
+      }
 
-      if (!alreadyRegistered) {
-        if (settings.hooks.SessionStart.length > 0) {
-          var firstGroup = settings.hooks.SessionStart[0];
-          if (!firstGroup || typeof firstGroup !== "object") {
-            firstGroup = {};
-            settings.hooks.SessionStart[0] = firstGroup;
+      if (sessionStartUsable) {
+        const hookCmd = "node \"" + updateHookPath + "\"";
+        const alreadyRegistered = settings.hooks.SessionStart.some(function(g) {
+          return g && typeof g === "object" && Array.isArray(g.hooks) && g.hooks.some(function(h) {
+            return h && typeof h === "object" && typeof h.command === "string" && h.command.indexOf("slashdo-check-update") !== -1;
+          });
+        });
+
+        if (!alreadyRegistered) {
+          if (settings.hooks.SessionStart.length > 0) {
+            var firstGroup = settings.hooks.SessionStart[0];
+            if (!firstGroup || typeof firstGroup !== "object") {
+              firstGroup = {};
+              settings.hooks.SessionStart[0] = firstGroup;
+            }
+            if (!Array.isArray(firstGroup.hooks)) firstGroup.hooks = [];
+            firstGroup.hooks.push({ type: "command", command: hookCmd });
+          } else {
+            settings.hooks.SessionStart.push({ hooks: [{ type: "command", command: hookCmd }] });
           }
-          if (!Array.isArray(firstGroup.hooks)) firstGroup.hooks = [];
-          firstGroup.hooks.push({ type: "command", command: hookCmd });
-        } else {
-          settings.hooks.SessionStart.push({ hooks: [{ type: "command", command: hookCmd }] });
+          modified = true;
         }
-        modified = true;
       }
 
       // Statusline: upgrade gsd-statusline → slashdo-statusline (superset)
@@ -216,7 +272,11 @@ install_claude() {
         fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
       }
 
-      process.stdout.write(modified ? "updated" : "already configured");
+      if (!sessionStartUsable) {
+        process.stdout.write("skipped (settings.hooks.SessionStart has unexpected shape)");
+      } else {
+        process.stdout.write(modified ? "updated" : "already configured");
+      }
     ' 2>/dev/null); then
       printf " %sfailed%s\n" "$YELLOW" "$RESET"
     elif echo "$node_result" | grep -q "^skipped"; then
@@ -236,36 +296,36 @@ install_opencode() {
   local target_lib="$HOME/.config/opencode/lib"
   mkdir -p "$target_cmd" "$target_lib"
 
+  # Stage downloads in a private, randomized directory (removed by the EXIT
+  # trap) rather than fixed /tmp/slashdo-* names another local user could
+  # pre-create or a concurrent install could clobber.
+  if ! STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-install.XXXXXX")"; then
+    printf "    ${YELLOW}skipped (could not create a temp directory)${RESET}\n"
+    return 0
+  fi
+
   printf "  Installing to ${GREEN}OpenCode${RESET}...\n"
 
   for cmd in "${COMMANDS[@]}"; do
     printf "    /do-%-20s" "$cmd"
-    if fetch_file "commands/do/$cmd.md" "/tmp/slashdo-$cmd.md"; then
-      # Rewrite lib paths and the config-path token for OpenCode
-      sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
-          -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
-          "/tmp/slashdo-$cmd.md" > "$target_cmd/do-$cmd.md"
-      rm -f "/tmp/slashdo-$cmd.md"
+    if fetch_file "commands/do/$cmd.md" "$STAGE_DIR/$cmd.md" &&
+       atomic_write "$target_cmd/do-$cmd.md" rewrite_for_opencode "$STAGE_DIR/$cmd.md"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
     fi
+    rm -f "$STAGE_DIR/$cmd.md"
   done
 
   for lib in "${LIBS[@]}"; do
     printf "    lib/%-20s" "$lib.md"
-    if fetch_file "lib/$lib.md" "/tmp/slashdo-lib-$lib.md"; then
-      # Rewrite lib-path cross-references and the config-path token so libs
-      # resolve under OpenCode at runtime (mirrors the command loop and npm's
-      # transformLib).
-      sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
-          -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
-          "/tmp/slashdo-lib-$lib.md" > "$target_lib/$lib.md"
-      rm -f "/tmp/slashdo-lib-$lib.md"
+    if fetch_file "lib/$lib.md" "$STAGE_DIR/lib-$lib.md" &&
+       atomic_write "$target_lib/$lib.md" rewrite_for_opencode "$STAGE_DIR/lib-$lib.md"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
     fi
+    rm -f "$STAGE_DIR/lib-$lib.md"
   done
 
   for old in "${OLD_COMMANDS[@]}"; do

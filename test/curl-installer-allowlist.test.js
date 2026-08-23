@@ -8,6 +8,10 @@
 // a command spec's `!cat ~/.claude/lib/<name>.md` fails at runtime, or the
 // command itself is absent). The npm installer (src/installer.js) enumerates
 // both dirs dynamically, so it doesn't catch this drift — only this test does.
+//
+// Scope: this file only diffs the bash array literals as text. The scripts'
+// actual runtime behavior (files written, settings.json merged, uninstall
+// removal) is covered end-to-end in test/install-sh.test.js.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
