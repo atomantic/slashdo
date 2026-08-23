@@ -62,6 +62,57 @@ describe('slashdo statusline', () => {
     assert.equal(result.stderr, '');
   });
 
+  it('renders an update-check notice badge from the cache', () => {
+    const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-statusline-notice-'));
+
+    try {
+      fs.mkdirSync(path.join(configDir, 'cache'));
+      fs.writeFileSync(path.join(configDir, 'cache', 'slashdo-update-check.json'), JSON.stringify({
+        update_available: false,
+        command: '/do:update',
+        update_check: 'npm-unavailable',
+        notice: 'slashdo update check needs npm on PATH',
+      }));
+
+      const result = runStatusline(JSON.stringify({
+        model: { display_name: 'Opus' },
+        workspace: { current_dir: '/project/root' },
+      }), {
+        env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+      });
+
+      assert.equal(result.status, 0);
+      assert.match(result.stdout, /⚠ slashdo update check needs npm on PATH/);
+      assert.doesNotMatch(result.stdout, /⬆/);
+    } finally {
+      fs.rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('strips control characters from cache-supplied badge text', () => {
+    const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-statusline-escape-'));
+
+    try {
+      fs.mkdirSync(path.join(configDir, 'cache'));
+      fs.writeFileSync(path.join(configDir, 'cache', 'evil-update-check.json'), JSON.stringify({
+        update_available: true,
+        command: '/x\u001b[31mRED\u001b[0m',
+      }));
+
+      const result = runStatusline(JSON.stringify({
+        model: { display_name: 'Opus' },
+        workspace: { current_dir: '/project/root' },
+      }), {
+        env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+      });
+
+      assert.equal(result.status, 0);
+      assert.match(result.stdout, /⬆ \/x \[31mRED \[0m/);
+    } finally {
+      fs.rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
   it('reads the current task from CLAUDE_CONFIG_DIR', () => {
     const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-statusline-'));
     const todosDir = path.join(configDir, 'todos');
