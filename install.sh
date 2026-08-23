@@ -36,12 +36,16 @@ fi
 # under concurrent installs and are pre-creatable by any other local user, so
 # every temp path this script touches is randomized and cleaned up on exit.
 STAGE_DIR=""
+# Scratch copy of src/settings-hooks.js, the module this script calls instead of
+# re-implementing settings.json registration.
+MOD_DIR=""
 # The temp file atomic_write is currently filling, so an interrupted install
 # does not strand a .slashdo-tmp.* file next to the real command files.
 ACTIVE_TMP=""
 cleanup_temp() {
   [ -n "$ACTIVE_TMP" ] && rm -f "$ACTIVE_TMP"
   [ -n "$STAGE_DIR" ] && rm -rf "$STAGE_DIR"
+  [ -n "$MOD_DIR" ] && rm -rf "$MOD_DIR"
   return 0
 }
 trap cleanup_temp EXIT
@@ -122,6 +126,19 @@ GREEN='\033[0;32m'
 DIM='\033[2m'
 RESET='\033[0m'
 
+# Print one line per action src/settings-hooks.js reported. The severity is a
+# token the module emits, so this never re-infers it from the message text.
+print_settings_actions() {
+  local line
+  while IFS= read -r line; do
+    case "$line" in
+      "warn "*) printf "    ${YELLOW}%s${RESET}\n" "${line#warn }" ;;
+      "ok "*)   printf "    ${GREEN}%s${RESET}\n" "${line#ok }" ;;
+      *)        if [ -n "$line" ]; then printf "    %s\n" "$line"; fi ;;
+    esac
+  done <<< "$1"
+}
+
 banner() {
   printf "\n"
   printf "  ${CYAN}    ██╗${YELLOW}██████╗  ██████╗ ${RESET}\n"
@@ -164,6 +181,11 @@ LIBS=(
 )
 
 HOOKS=(slashdo-check-update slashdo-statusline)
+
+# install.sh leaves a copy of the shared module here so uninstall.sh can
+# deregister without a network round trip. Mirrors SETTINGS_HOOKS_CACHE in
+# src/settings-hooks.js.
+SETTINGS_HOOKS_CACHE=".slashdo-settings-hooks.js"
 
 OLD_HOOKS=(update-check)
 
@@ -228,116 +250,36 @@ install_claude() {
     fi
   done
 
-  # Register hooks in settings.json (requires Node.js and successful hook downloads)
-  if command -v node &>/dev/null && [ -f "$target_hooks/slashdo-check-update.js" ]; then
-    printf "    settings.json:          "
-    local node_result
-    if ! node_result=$(node -e '
-      const fs = require("fs");
-      const path = require("path");
-      const home = require("os").homedir();
-      const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(home, ".claude");
-      const settingsPath = path.join(claudeDir, "settings.json");
-      const hooksDir = path.join(claudeDir, "hooks");
-      const quote = String.fromCharCode(39);
-      const shellQuote = value => quote + value.split(quote).join(quote + "\\" + quote + quote) + quote;
+  # Register hooks in settings.json by calling the canonical implementation —
+  # src/settings-hooks.js, the same module the npm installer requires — instead
+  # of hand-translating it into shell-embedded JS that drifts (issue #166).
+  # Deriving the paths, hook list, and auto-update default there too is
+  # deliberate: doing it here would just move the drift onto the arguments.
+  if command -v node &>/dev/null &&
+     { [ -f "$target_hooks/slashdo-check-update.js" ] || [ -f "$target_hooks/slashdo-statusline.js" ]; }; then
+    MOD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-mod.XXXXXX")" || MOD_DIR=""
+    if [ -n "$MOD_DIR" ] && fetch_file "src/settings-hooks.js" "$MOD_DIR/settings-hooks.js"; then
+      # Keep a copy beside the hooks so uninstall.sh can deregister offline.
+      if ! cp "$MOD_DIR/settings-hooks.js" "$target_hooks/$SETTINGS_HOOKS_CACHE" 2>/dev/null; then
+        printf "    ${YELLOW}note: could not cache settings-hooks.js — uninstall will need network access${RESET}\n"
+      fi
 
-      // Default auto-update to enabled on first install. The curl installer
-      // is piped (no TTY to prompt), so we pick the same default the npx
-      // installer offers; re-run "npx slash-do@latest" interactively to change.
-      const configPath = path.join(claudeDir, ".slashdo-config.json");
-      if (!fs.existsSync(configPath)) {
-        try { fs.writeFileSync(configPath, JSON.stringify({ autoUpdate: true }, null, 2) + "\n"); } catch (e) {}
-      }
-
-      let settings = {};
-      if (fs.existsSync(settingsPath)) {
-        try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch (e) {
-          process.stdout.write("skipped (settings.json parse error)");
-          process.exit(0);
+      local node_result
+      if node_result=$(node -e '
+        const settingsHooks = require(process.argv[1]);
+        for (const action of settingsHooks.applyDefaultHooks(false)) {
+          process.stdout.write(settingsHooks.formatAction(action) + "\n");
         }
-      }
-
-      let modified = false;
-
-      // SessionStart hook (only if hook file exists). This mirrors
-      // registerHooksInSettings() in src/installer.js — keep the two in sync.
-      // In particular: an unrecognized settings.hooks shape is left untouched
-      // rather than clobbered, and an unrecognized SessionStart shape still
-      // lets the statusLine step below run.
-      const updateHookPath = path.join(hooksDir, "slashdo-check-update.js");
-      if (!settings.hooks) {
-        settings.hooks = {};
-      } else if (typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) {
-        process.stdout.write("skipped (settings.hooks has unexpected shape)");
-        process.exit(0);
-      }
-
-      var sessionStartUsable = true;
-      if (Object.prototype.hasOwnProperty.call(settings.hooks, "SessionStart") &&
-          !Array.isArray(settings.hooks.SessionStart)) {
-        sessionStartUsable = false;
-      } else if (!Array.isArray(settings.hooks.SessionStart)) {
-        settings.hooks.SessionStart = [];
-      }
-
-      if (sessionStartUsable) {
-        const hookCmd = "node " + shellQuote(updateHookPath);
-        const alreadyRegistered = settings.hooks.SessionStart.some(function(g) {
-          return g && typeof g === "object" && Array.isArray(g.hooks) && g.hooks.some(function(h) {
-            return h && typeof h === "object" && typeof h.command === "string" && h.command.indexOf("slashdo-check-update") !== -1;
-          });
-        });
-
-        if (!alreadyRegistered) {
-          if (settings.hooks.SessionStart.length > 0) {
-            var firstGroup = settings.hooks.SessionStart[0];
-            if (!firstGroup || typeof firstGroup !== "object") {
-              firstGroup = {};
-              settings.hooks.SessionStart[0] = firstGroup;
-            }
-            if (!Array.isArray(firstGroup.hooks)) firstGroup.hooks = [];
-            firstGroup.hooks.push({ type: "command", command: hookCmd });
-          } else {
-            settings.hooks.SessionStart.push({ hooks: [{ type: "command", command: hookCmd }] });
-          }
-          modified = true;
-        }
-      }
-
-      // Statusline: upgrade gsd-statusline → slashdo-statusline (superset)
-      const statuslineHookPath = path.join(hooksDir, "slashdo-statusline.js");
-      if (fs.existsSync(statuslineHookPath)) {
-        const slCmd = "node " + shellQuote(statuslineHookPath);
-        const currentCmd = (settings.statusLine && typeof settings.statusLine.command === "string") ? settings.statusLine.command : "";
-        if (!settings.statusLine) {
-          settings.statusLine = { type: "command", command: slCmd };
-          modified = true;
-        } else if (currentCmd.indexOf("gsd-statusline") !== -1) {
-          settings.statusLine = { type: "command", command: slCmd };
-          modified = true;
-        }
-        // slashdo-statusline already active or custom statusline → no change
-      }
-
-      if (modified) {
-        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
-      }
-
-      if (!sessionStartUsable) {
-        // The statusline step still runs, so do not claim nothing happened.
-        process.stdout.write(modified
-          ? "updated (SessionStart left alone: unexpected shape)"
-          : "skipped (settings.hooks.SessionStart has unexpected shape)");
-      } else {
-        process.stdout.write(modified ? "updated" : "already configured");
-      }
-    ' 2>/dev/null); then
-      printf " ${YELLOW}failed${RESET}\n"
-    elif echo "$node_result" | grep -q "^skipped"; then
-      printf "${YELLOW}%s${RESET}\n" "$node_result"
+      ' "$MOD_DIR/settings-hooks.js" 2>"$MOD_DIR/node.err"); then
+        print_settings_actions "$node_result"
+      else
+        printf "    ${YELLOW}settings.json: failed — hooks installed but not registered${RESET}\n"
+        # Surface why: an opaque "failed" on a permission or syntax error is
+        # what makes a broken curl install impossible to diagnose.
+        if [ -s "$MOD_DIR/node.err" ]; then sed -e 's/^/      /' "$MOD_DIR/node.err" >&2; fi
+      fi
     else
-      printf "%s ${GREEN}ok${RESET}\n" "$node_result"
+      printf "    ${YELLOW}settings.json: could not fetch src/settings-hooks.js — hooks installed but not registered${RESET}\n"
     fi
   elif command -v node &>/dev/null; then
     printf "    ${DIM}settings.json: skipped (hook files not found)${RESET}\n"

@@ -137,3 +137,67 @@ describe('curl-installer OpenCode temporary files', () => {
     assert.doesNotMatch(code, /\/tmp\/slashdo/, 'no predictable /tmp/slashdo-* path');
   });
 });
+
+// ── Shared settings.json mutation ───────────────────────────────────
+//
+// install.sh and uninstall.sh each used to inline a hand-translated `node -e`
+// copy of src/installer.js's registerHooksInSettings/deregisterHooksFromSettings,
+// and the copies drifted: a malformed `settings.hooks` was reset to {} instead
+// of skipped, and four distinct statusline outcomes collapsed into one flat
+// message (issue #166). Both scripts now fetch src/settings-hooks.js and call
+// it, so there is one implementation. These guards keep it that way; the
+// behavioral parity check lives in test/install-sh.test.js.
+
+const SHARED_MODULE = 'src/settings-hooks.js';
+
+function readRepoFile(name) {
+  return fs.readFileSync(path.join(REPO_ROOT, name), 'utf8');
+}
+
+describe('curl installer shares src/settings-hooks.js', () => {
+  for (const [script, entryPoint] of [
+    ['install.sh', 'applyDefaultHooks'],
+    ['uninstall.sh', 'removeDefaultHooks'],
+  ]) {
+    it(`${script} fetches the shared module and calls ${entryPoint}()`, () => {
+      const content = readRepoFile(script);
+      assert.ok(content.includes(`fetch_file "${SHARED_MODULE}"`),
+        `${script} must fetch ${SHARED_MODULE} rather than reimplementing it`);
+      assert.ok(content.includes(`settingsHooks.${entryPoint}(`),
+        `${script} must call ${entryPoint}() from the fetched module`);
+    });
+
+    it(`${script} does not reimplement the settings.json mutation or its inputs`, () => {
+      const content = readRepoFile(script);
+      // Markers of a hand-rolled copy: mutating settings.json from shell-embedded
+      // JS, or re-deriving the paths and hook list the module owns.
+      for (const marker of [
+        'settings.hooks', 'settings.statusLine', 'autoUpdate', 'JSON.parse', 'JSON.stringify',
+      ]) {
+        assert.ok(!content.includes(marker),
+          `${script} contains "${marker}" — settings.json mutation and the values it acts on ` +
+          `belong in ${SHARED_MODULE}, not in a second shell-embedded copy that can drift`);
+      }
+    });
+  }
+
+  it('the shared module stays dependency-free so the curl path can fetch it alone', () => {
+    // Both scripts fetch exactly one file into an empty temp dir, with no
+    // node_modules and no siblings: anything but a Node builtin fails to
+    // resolve at install time.
+    const BUILTINS = ['fs', 'os', 'path'];
+    const requires = [...readRepoFile(SHARED_MODULE).matchAll(/require\(['"]([^'"]+)['"]\)/g)]
+      .map((m) => m[1]);
+    assert.deepEqual(requires.filter((r) => !BUILTINS.includes(r)), [],
+      `${SHARED_MODULE} may only require ${BUILTINS.join('/')} — a sibling module or npm ` +
+      `package resolves to nothing when the curl installer fetches this file on its own`);
+  });
+
+  it('src/installer.js uses the shared module instead of its own copy', () => {
+    const content = readRepoFile('src/installer.js');
+    assert.ok(content.includes("require('./settings-hooks')"),
+      'src/installer.js must require ./settings-hooks so npm and curl share one implementation');
+    assert.ok(!content.includes('function registerHooksInSettings'),
+      'src/installer.js must not redefine registerHooksInSettings');
+  });
+});

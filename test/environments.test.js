@@ -187,3 +187,20 @@ describe('environment shape', () => {
     }
   });
 });
+
+// ── claudeEnv parity ────────────────────────────────────────────────
+
+describe('settings-hooks claudeEnv', () => {
+  const { claudeEnv } = require('../src/settings-hooks');
+
+  it('derives the same Claude paths ENVIRONMENTS.claude owns', () => {
+    // src/settings-hooks.js re-derives these so the curl installer can fetch it
+    // as a single dependency-free file. This pins the two together — moving
+    // ~/.claude in src/environments.js must move it there too, or install.sh
+    // and the npm installer would write different files (issue #166).
+    const env = claudeEnv();
+    assert.equal(env.settingsFile, ENVIRONMENTS.claude.settingsFile);
+    assert.equal(env.hooksDir, ENVIRONMENTS.claude.hooksDir);
+    assert.equal(env.configFile, ENVIRONMENTS.claude.configFile);
+  });
+});

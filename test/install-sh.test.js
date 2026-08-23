@@ -409,7 +409,7 @@ describe('install.sh — settings.json edge cases', () => {
 
     const result = runInstall({ home });
     assert.equal(result.status, 0, result.stdout);
-    assert.match(result.stdout, /skipped \(settings\.json parse error\)/);
+    assert.match(result.stdout, /settings\.json: skipped \(parse error\)/);
     assert.equal(fs.readFileSync(settingsPathOf(home), 'utf8'), '{ not json');
   });
 
@@ -751,15 +751,20 @@ describe('uninstall.sh — Claude Code', () => {
     assert.match(readSettings(home).statusLine.command, /gsd-statusline\.js/);
   });
 
-  it('leaves an unparseable settings.json untouched', () => {
+  it('leaves an unparseable settings.json untouched, and removes nothing', () => {
     const home = makeHome();
     runInstall({ home });
     fs.writeFileSync(settingsPathOf(home), '{ not json');
 
     const result = runUninstall({ home });
-    assert.equal(result.status, 0, result.stdout);
+    // Deleting the hook files while settings.json still names them would make
+    // Claude Code error on every session start, so nothing is removed.
+    assert.equal(result.status, 1, result.stdout);
     assert.match(result.stdout, /parse error/);
+    assert.match(result.stdout, /nothing was removed/);
     assert.equal(fs.readFileSync(settingsPathOf(home), 'utf8'), '{ not json');
+    assert.ok(fs.existsSync(path.join(home, '.claude', 'hooks', 'slashdo-check-update.js')),
+      'hooks named by a settings.json we could not edit must survive');
   });
 
   it('reports nothing to remove on a clean Claude directory', () => {
