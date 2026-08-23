@@ -28,8 +28,33 @@ describe('worktree-safe merge contracts', () => {
     // Swarm Phase C merges from the orchestrator; Phase D owns the local branch.
     assert.match(body, /git push origin --delete "next\/issue-<num>"/);
     // Single-issue Phase 7 keeps its own trailing remote delete as the real deletion.
-    assert.match(body, /git push origin --delete "next\/\$\{SLUG\}"/);
+    // Anchor on Phase 7's own cleanup chain — the bare command also appears in the
+    // Phase 2 abort branches and the abandoned-claim paragraph, so matching it alone
+    // would still pass with Phase 7's delete removed entirely.
+    assert.match(body, /git branch -d "next\/\$\{SLUG\}" && \\\n\{ git push origin --delete "next\/\$\{SLUG\}"/);
     assert.doesNotMatch(body, /remote no-op after --delete-branch merge/);
+  });
+
+  it('gates the swarm remote delete on the merge actually succeeding', () => {
+    // An unchained delete retracts the head branch of a PR the merge left OPEN,
+    // which auto-closes it — the opposite of Phase C's "leave that PR open" rule.
+    const body = readCommand('next.md');
+    assert.match(
+      body,
+      /gh pr merge <pr_number> --merge && \\\n\s+\{ git push origin --delete "next\/issue-<num>"/,
+    );
+  });
+
+  it('does not swallow a failed remote-branch delete', () => {
+    // Both deletes are now the real deletion, not a post-`--delete-branch` no-op,
+    // so a genuine failure must surface instead of vanishing into 2>/dev/null.
+    const body = readCommand('next.md');
+    for (const line of body.split('\n').filter((l) => l.includes('git push origin --delete "next/issue-<num>"'))) {
+      assert.doesNotMatch(line, /2>\/dev\/null/, line.trim());
+    }
+    const phase7 = body.split('\n').find((l) => l.includes('git push origin --delete "next/${SLUG}"') && l.includes('warning:'));
+    assert.ok(phase7, 'expected Phase 7 to report a failed remote delete');
+    assert.doesNotMatch(phase7, /2>\/dev\/null/);
   });
 
   it('explains why the flag is absent so it is not "cleaned up" back in', () => {
@@ -41,12 +66,27 @@ describe('worktree-safe merge contracts', () => {
 
   it('makes /do:pr resolve LINKED_WORKTREE and gate the flag on it', () => {
     const body = readCommand('pr.md');
-    assert.match(body, /git rev-parse --git-dir.*git rev-parse --git-common-dir/);
+    // --path-format=absolute is required: without it --git-common-dir is relative
+    // in a subdirectory of a plain clone, so the probe misreports every such repo
+    // as a linked worktree.
+    assert.match(
+      body,
+      /git rev-parse --path-format=absolute --git-dir.*git rev-parse --path-format=absolute --git-common-dir/,
+    );
     assert.match(body, /LINKED_WORKTREE=0/);
     assert.match(body, /LINKED_WORKTREE=1/);
     // Both merge forms must carry the drop-the-flag instruction.
     assert.match(body, /--auto --\{MERGE_METHOD\} --delete-branch` \(drop `--delete-branch` when `LINKED_WORKTREE=1`\)/);
     assert.match(body, /\{MERGE_METHOD\} --delete-branch` \(again, drop `--delete-branch` when `LINKED_WORKTREE=1`/);
+  });
+
+  it('deletes the remote branch via the config-derived upstream, not a hardcoded origin', () => {
+    // pr.md's own push step forbids a destination built from the local branch name:
+    // an upstream of upstream/feature-x or origin/pr-123-head must not be resolved
+    // to origin/<local name>, which would delete an unrelated remote branch.
+    const body = readCommand('pr.md');
+    assert.match(body, /git push "\$PUSH_REMOTE" --delete "\$PUSH_BRANCH"/);
+    assert.doesNotMatch(body, /git push origin --delete \{branch\}/);
   });
 
   it('skips /do:pr step 6\'s default-branch sync inside a linked worktree', () => {
