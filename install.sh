@@ -139,40 +139,25 @@ install_claude() {
   # Register hooks in settings.json using the canonical src/settings-hooks.js —
   # the same module the npm installer requires. Fetching it (like every other
   # file this script installs) keeps the curl path from maintaining a second,
-  # hand-translated copy of the algorithm that silently drifts.
+  # hand-translated copy of the algorithm that silently drifts. Deriving the
+  # paths and hook list there too is deliberate: doing it here would just move
+  # the drift onto the arguments.
   if command -v node &>/dev/null && [ -f "$target_hooks/slashdo-check-update.js" ]; then
     local mod_dir
     mod_dir="$(mktemp -d)"
     if fetch_file "src/settings-hooks.js" "$mod_dir/settings-hooks.js"; then
       local node_result
       if node_result=$(node -e '
-        const fs = require("fs");
-        const path = require("path");
-        const { registerHooksInSettings } = require(process.argv[1]);
-        const home = require("os").homedir();
-        const hooksDir = path.join(home, ".claude", "hooks");
-
-        // Default auto-update to enabled on first install. The curl installer
-        // is piped (no TTY to prompt), so we pick the same default the npx
-        // installer offers; re-run "npx slash-do@latest" interactively to change.
-        const configPath = path.join(home, ".claude", ".slashdo-config.json");
-        if (!fs.existsSync(configPath)) {
-          try { fs.writeFileSync(configPath, JSON.stringify({ autoUpdate: true }, null, 2) + "\n"); } catch (e) {}
+        const settingsHooks = require(process.argv[1]);
+        for (const action of settingsHooks.applyDefaultHooks(false)) {
+          process.stdout.write(settingsHooks.formatAction(action) + "\n");
         }
-
-        const hookFiles = ["slashdo-check-update.js", "slashdo-statusline.js"]
-          .filter((name) => fs.existsSync(path.join(hooksDir, name)))
-          .map((name) => ({ name }));
-        const env = { settingsFile: path.join(home, ".claude", "settings.json"), hooksDir };
-        const actions = registerHooksInSettings(env, hookFiles, false);
-        if (actions.length === 0) actions.push({ name: "settings.json", status: "nothing to register" });
-        for (const action of actions) process.stdout.write(action.name + ": " + action.status + "\n");
       ' "$mod_dir/settings-hooks.js" 2>/dev/null); then
         while IFS= read -r line; do
-          [ -n "$line" ] || continue
           case "$line" in
-            *": skipped"*) printf "    ${YELLOW}%s${RESET}\n" "$line" ;;
-            *) printf "    %s ${GREEN}ok${RESET}\n" "$line" ;;
+            "warn "*) printf "    ${YELLOW}%s${RESET}\n" "${line#warn }" ;;
+            "ok "*)   printf "    ${GREEN}%s${RESET}\n" "${line#ok }" ;;
+            *)        if [ -n "$line" ]; then printf "    %s\n" "$line"; fi ;;
           esac
         done <<< "$node_result"
       else

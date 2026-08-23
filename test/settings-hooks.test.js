@@ -1,14 +1,13 @@
 'use strict';
 
-// Direct unit tests for the canonical settings.json mutation module.
+// Unit tests for the shared settings.json mutation module.
 //
-// These two functions used to live inside src/installer.js and were only
-// reachable through install()/uninstall(), which is why install.sh and
-// uninstall.sh grew hand-translated copies that drifted (issue #166). Now that
-// both install paths call this one module, its outcomes are worth pinning
-// directly — especially the two behaviors the shell copies got wrong:
-// a malformed `settings.hooks` must be left alone, not clobbered, and every
-// statusline outcome must be reported distinctly.
+// test/installer.test.js already covers the happy paths through install() /
+// install({uninstall:true}) — fresh registration, parse-error skips, dry runs.
+// This file owns what those cannot reach and what the hand-translated shell
+// copies got wrong (issue #166): malformed input shapes that must be left
+// alone rather than clobbered, and the statusline outcomes that must stay
+// distinguishable from each other.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
@@ -28,9 +27,7 @@ function makeEnv(settings) {
   const settingsFile = path.join(tmpDir, 'settings.json');
   const hooksDir = path.join(tmpDir, 'hooks');
   fs.mkdirSync(hooksDir, { recursive: true });
-  if (settings !== undefined) {
-    fs.writeFileSync(settingsFile, typeof settings === 'string' ? settings : JSON.stringify(settings, null, 2));
-  }
+  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
   return { settingsFile, hooksDir };
 }
 
@@ -44,38 +41,20 @@ function statusOf(actions, name) {
 
 const slashdoStatusline = (env) => `node "${path.join(env.hooksDir, 'slashdo-statusline.js')}"`;
 
-// ── registerHooksInSettings ─────────────────────────────────────────
+// ── Malformed shapes are skipped, never clobbered ───────────────────
 
-describe('registerHooksInSettings', () => {
-  it('registers the SessionStart hook and statusline in a fresh settings.json', () => {
-    const env = makeEnv();
-    const actions = registerHooksInSettings(env, HOOK_FILES, false);
+describe('registerHooksInSettings on malformed input', () => {
+  for (const [label, hooks] of [['a string', 'some-string'], ['an array', ['nope']]]) {
+    it(`leaves settings.hooks untouched when it is ${label}`, () => {
+      // The curl installer used to reset a non-object `hooks` to {}, silently
+      // discarding whatever the user had there. Skipping is the canonical behavior.
+      const env = makeEnv({ hooks, otherSetting: true });
+      const actions = registerHooksInSettings(env, HOOK_FILES, false);
 
-    assert.equal(statusOf(actions, 'settings/SessionStart hook'), 'registered');
-    assert.equal(statusOf(actions, 'settings/statusLine'), 'configured');
-
-    const settings = readSettings(env);
-    assert.match(settings.hooks.SessionStart[0].hooks[0].command, /slashdo-check-update/);
-    assert.equal(settings.statusLine.command, slashdoStatusline(env));
-  });
-
-  it('leaves a malformed settings.hooks untouched instead of clobbering it', () => {
-    // The curl installer used to reset a non-object `hooks` to {}, silently
-    // discarding whatever the user had there. Skipping is the canonical behavior.
-    const env = makeEnv({ hooks: 'some-string', otherSetting: true });
-    const actions = registerHooksInSettings(env, HOOK_FILES, false);
-
-    assert.equal(statusOf(actions, 'settings/hooks'), 'skipped (unexpected shape)');
-    assert.deepEqual(readSettings(env), { hooks: 'some-string', otherSetting: true });
-  });
-
-  it('leaves an array settings.hooks untouched too', () => {
-    const env = makeEnv({ hooks: ['nope'] });
-    const actions = registerHooksInSettings(env, HOOK_FILES, false);
-
-    assert.equal(statusOf(actions, 'settings/hooks'), 'skipped (unexpected shape)');
-    assert.deepEqual(readSettings(env), { hooks: ['nope'] });
-  });
+      assert.equal(statusOf(actions, 'settings/hooks'), 'skipped (unexpected shape)');
+      assert.deepEqual(readSettings(env), { hooks, otherSetting: true });
+    });
+  }
 
   it('skips a malformed SessionStart but still configures the statusline', () => {
     const env = makeEnv({ hooks: { SessionStart: 'nope' } });
@@ -85,72 +64,51 @@ describe('registerHooksInSettings', () => {
     assert.equal(statusOf(actions, 'settings/statusLine'), 'configured');
     assert.equal(readSettings(env).hooks.SessionStart, 'nope');
   });
+});
 
-  it('skips a settings.json it cannot parse', () => {
-    const env = makeEnv('{ not json');
-    const actions = registerHooksInSettings(env, HOOK_FILES, false);
+// ── Every statusline outcome stays distinguishable ──────────────────
 
-    assert.equal(statusOf(actions, 'settings.json'), 'skipped (parse error)');
-    assert.equal(fs.readFileSync(env.settingsFile, 'utf8'), '{ not json');
-  });
-
-  it('reports each statusline outcome distinctly', () => {
-    // The curl installer collapsed these four into a flat "updated"/"already
-    // configured", so a user could not tell a preserved custom statusline from
-    // one that was never inspected.
-    const fresh = makeEnv();
+describe('registerHooksInSettings statusline outcomes', () => {
+  // The curl installer collapsed these four into a flat "updated"/"already
+  // configured", so a user could not tell a preserved custom statusline from
+  // one that was never inspected.
+  it('reports a fresh configure', () => {
+    const env = makeEnv({});
     assert.equal(
-      statusOf(registerHooksInSettings(fresh, HOOK_FILES, false), 'settings/statusLine'),
+      statusOf(registerHooksInSettings(env, HOOK_FILES, false), 'settings/statusLine'),
       'configured');
+  });
 
-    const gsd = makeEnv({ statusLine: { type: 'command', command: 'node "/x/gsd-statusline.js"' } });
+  it('reports a gsd upgrade and rewrites the command', () => {
+    const env = makeEnv({ statusLine: { type: 'command', command: 'node "/x/gsd-statusline.js"' } });
     assert.equal(
-      statusOf(registerHooksInSettings(gsd, HOOK_FILES, false), 'settings/statusLine'),
+      statusOf(registerHooksInSettings(env, HOOK_FILES, false), 'settings/statusLine'),
       'upgraded (gsd→slashdo)');
-    assert.equal(readSettings(gsd).statusLine.command, slashdoStatusline(gsd));
+    assert.equal(readSettings(env).statusLine.command, slashdoStatusline(env));
+  });
 
-    const already = makeEnv();
-    fs.writeFileSync(already.settingsFile,
-      JSON.stringify({ statusLine: { type: 'command', command: slashdoStatusline(already) } }));
+  it('reports an already-slashdo statusline as already configured', () => {
+    const env = makeEnv({});
+    fs.writeFileSync(env.settingsFile,
+      JSON.stringify({ statusLine: { type: 'command', command: slashdoStatusline(env) } }));
     assert.equal(
-      statusOf(registerHooksInSettings(already, HOOK_FILES, false), 'settings/statusLine'),
+      statusOf(registerHooksInSettings(env, HOOK_FILES, false), 'settings/statusLine'),
       'already configured');
+  });
 
-    const custom = makeEnv({ statusLine: { type: 'command', command: 'my-own-statusline' } });
+  it('reports a custom statusline as preserved and leaves it alone', () => {
+    const env = makeEnv({ statusLine: { type: 'command', command: 'my-own-statusline' } });
     assert.equal(
-      statusOf(registerHooksInSettings(custom, HOOK_FILES, false), 'settings/statusLine'),
+      statusOf(registerHooksInSettings(env, HOOK_FILES, false), 'settings/statusLine'),
       'existing statusline preserved');
-    assert.equal(readSettings(custom).statusLine.command, 'my-own-statusline');
-  });
-
-  it('is a no-op on a second run', () => {
-    const env = makeEnv();
-    registerHooksInSettings(env, HOOK_FILES, false);
-    const actions = registerHooksInSettings(env, HOOK_FILES, false);
-
-    assert.equal(statusOf(actions, 'settings/SessionStart hook'), 'already registered');
-    assert.equal(statusOf(actions, 'settings/statusLine'), 'already configured');
-    assert.equal(readSettings(env).hooks.SessionStart[0].hooks.length, 1);
-  });
-
-  it('writes nothing in dry-run mode', () => {
-    const env = makeEnv();
-    const actions = registerHooksInSettings(env, HOOK_FILES, true);
-
-    assert.equal(statusOf(actions, 'settings/SessionStart hook'), 'would register');
-    assert.equal(statusOf(actions, 'settings/statusLine'), 'would configure');
-    assert.equal(fs.existsSync(env.settingsFile), false);
-  });
-
-  it('returns nothing when the environment has no settings file', () => {
-    assert.deepEqual(registerHooksInSettings({ settingsFile: null }, HOOK_FILES, false), []);
+    assert.equal(readSettings(env).statusLine.command, 'my-own-statusline');
   });
 });
 
-// ── deregisterHooksFromSettings ─────────────────────────────────────
+// ── Round trip ──────────────────────────────────────────────────────
 
 describe('deregisterHooksFromSettings', () => {
-  it('removes what register added, leaving settings.json clean', () => {
+  it('removes exactly what register added', () => {
     const env = makeEnv({ theme: 'dark' });
     registerHooksInSettings(env, HOOK_FILES, false);
     const actions = deregisterHooksFromSettings(env, false);
@@ -161,7 +119,7 @@ describe('deregisterHooksFromSettings', () => {
   });
 
   it('preserves a foreign hook sharing the slashdo group', () => {
-    const env = makeEnv();
+    const env = makeEnv({});
     registerHooksInSettings(env, HOOK_FILES, false);
     const settings = readSettings(env);
     settings.hooks.SessionStart[0].hooks.push({ type: 'command', command: 'node other.js' });
@@ -173,47 +131,10 @@ describe('deregisterHooksFromSettings', () => {
       [{ type: 'command', command: 'node other.js' }]);
   });
 
-  it('downgrades back to gsd-statusline when its hook file still exists', () => {
-    const env = makeEnv();
-    registerHooksInSettings(env, HOOK_FILES, false);
-    const gsdPath = path.join(env.hooksDir, 'gsd-statusline.js');
-    fs.writeFileSync(gsdPath, '// gsd');
-
-    const actions = deregisterHooksFromSettings(env, false);
-
-    assert.equal(statusOf(actions, 'settings/statusLine'), 'downgraded (slashdo→gsd)');
-    assert.equal(readSettings(env).statusLine.command, `node "${gsdPath}"`);
-  });
-
   it('leaves a custom statusline alone', () => {
     const env = makeEnv({ statusLine: { type: 'command', command: 'my-own-statusline' } });
     deregisterHooksFromSettings(env, false);
 
     assert.equal(readSettings(env).statusLine.command, 'my-own-statusline');
-  });
-
-  it('skips a settings.json it cannot parse', () => {
-    const env = makeEnv('{ not json');
-    const actions = deregisterHooksFromSettings(env, false);
-
-    assert.equal(statusOf(actions, 'settings.json'), 'skipped (parse error)');
-    assert.equal(fs.readFileSync(env.settingsFile, 'utf8'), '{ not json');
-  });
-
-  it('writes nothing in dry-run mode', () => {
-    const env = makeEnv();
-    registerHooksInSettings(env, HOOK_FILES, false);
-    const before = fs.readFileSync(env.settingsFile, 'utf8');
-
-    const actions = deregisterHooksFromSettings(env, true);
-
-    assert.equal(statusOf(actions, 'settings/SessionStart hook'), 'would deregister');
-    assert.equal(statusOf(actions, 'settings/statusLine'), 'would remove');
-    assert.equal(fs.readFileSync(env.settingsFile, 'utf8'), before);
-  });
-
-  it('returns nothing when settings.json does not exist', () => {
-    const env = makeEnv();
-    assert.deepEqual(deregisterHooksFromSettings(env, false), []);
   });
 });

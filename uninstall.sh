@@ -4,26 +4,19 @@
 # shellcheck disable=SC2059,SC2207
 set -euo pipefail
 
-REPO="atomantic/slashdo"
-BRANCH="main"
-BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"
-
-# Detect local repo: if this script lives alongside commands/ and lib/, use local files
+# Fetch a repo file: from a local checkout when this script sits in one,
+# otherwise from GitHub. Mirrors install.sh's helper — keep the two in step.
+# A piped remote uninstall needs the same network access that fetched it; a
+# clone's copy is used as-is, so an offline uninstall works from a checkout.
+BASE_URL="https://raw.githubusercontent.com/atomantic/slashdo/main"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOCAL_MODE=false
-if [ -d "$SCRIPT_DIR/commands/do" ] && [ -d "$SCRIPT_DIR/lib" ]; then
-  LOCAL_MODE=true
-fi
 
-# Fetch a file: local cp if available, otherwise curl from GitHub
-# Usage: fetch_file <repo_relative_path> <destination>
 fetch_file() {
   local src_path="$1"
   local dest="$2"
-  if [ "$LOCAL_MODE" = true ] && [ -f "$SCRIPT_DIR/$src_path" ]; then
+  if [ -f "$SCRIPT_DIR/$src_path" ]; then
     cp "$SCRIPT_DIR/$src_path" "$dest" 2>/dev/null && return 0
   fi
-  # Fallback to curl (remote mode, or local cp failed)
   curl -fsSL "$BASE_URL/$src_path" -o "$dest" 2>/dev/null
 }
 
@@ -140,22 +133,16 @@ uninstall_claude() {
     if fetch_file "src/settings-hooks.js" "$mod_dir/settings-hooks.js"; then
       local node_result
       if node_result=$(node -e '
-        const path = require("path");
-        const { deregisterHooksFromSettings } = require(process.argv[1]);
-        const home = require("os").homedir();
-        const env = {
-          settingsFile: path.join(home, ".claude", "settings.json"),
-          hooksDir: path.join(home, ".claude", "hooks"),
-        };
-        for (const action of deregisterHooksFromSettings(env, false)) {
-          process.stdout.write(action.name + ": " + action.status + "\n");
+        const settingsHooks = require(process.argv[1]);
+        for (const action of settingsHooks.removeDefaultHooks(false)) {
+          process.stdout.write(settingsHooks.formatAction(action) + "\n");
         }
       ' "$mod_dir/settings-hooks.js" 2>/dev/null); then
         while IFS= read -r line; do
-          [ -n "$line" ] || continue
           case "$line" in
-            *": skipped"*) printf "    ${YELLOW}%s${RESET}\n" "$line" ;;
-            *) printf "    %s ${GREEN}ok${RESET}\n" "$line" ;;
+            "warn "*) printf "    ${YELLOW}%s${RESET}\n" "${line#warn }" ;;
+            "ok "*)   printf "    ${GREEN}%s${RESET}\n" "${line#ok }" ;;
+            *)        if [ -n "$line" ]; then printf "    %s\n" "$line"; fi ;;
           esac
         done <<< "$node_result"
       else

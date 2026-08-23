@@ -13,7 +13,11 @@
 // curl installer, so a new import breaks the no-npm path.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+
+// The hooks slashdo registers, by installed filename.
+const SLASHDO_HOOKS = ['slashdo-check-update.js', 'slashdo-statusline.js'];
 
 function registerHooksInSettings(env, hookFiles, dryRun) {
   if (!env.settingsFile) return [];
@@ -182,4 +186,63 @@ function deregisterHooksFromSettings(env, dryRun) {
   return actions;
 }
 
-module.exports = { registerHooksInSettings, deregisterHooksFromSettings };
+// ── Curl-installer entry points ─────────────────────────────────────
+//
+// install.sh / uninstall.sh call these instead of deriving slashdo's paths,
+// hook list, and config default in shell-embedded JS of their own. Keeping the
+// arguments here too is the point: an extraction that left the inputs to the
+// shell would just relocate the drift it set out to remove.
+// test/environments.test.js pins claudeEnv() against ENVIRONMENTS.claude, which
+// owns the same paths for the npm path.
+
+function claudeEnv() {
+  const claudeDir = path.join(os.homedir(), '.claude');
+  return {
+    settingsFile: path.join(claudeDir, 'settings.json'),
+    hooksDir: path.join(claudeDir, 'hooks'),
+    configFile: path.join(claudeDir, '.slashdo-config.json'),
+  };
+}
+
+function applyDefaultHooks(dryRun) {
+  const env = claudeEnv();
+
+  // Default auto-update to enabled on first install. The curl installer is
+  // piped (no TTY to prompt), so we pick the same default the npx installer
+  // offers; re-run "npx slash-do@latest" interactively to change it.
+  if (!dryRun && !fs.existsSync(env.configFile)) {
+    try {
+      fs.writeFileSync(env.configFile, JSON.stringify({ autoUpdate: true }, null, 2) + '\n', 'utf8');
+    } catch (e) {
+      // Best-effort: a config we cannot write must not abort hook registration
+    }
+  }
+
+  const hookFiles = SLASHDO_HOOKS
+    .filter((name) => fs.existsSync(path.join(env.hooksDir, name)))
+    .map((name) => ({ name }));
+
+  return registerHooksInSettings(env, hookFiles, dryRun);
+}
+
+function removeDefaultHooks(dryRun) {
+  return deregisterHooksFromSettings(claudeEnv(), dryRun);
+}
+
+// Render one action as "<severity> <name>: <status>". The severity travels with
+// the action so callers do not re-infer it by pattern-matching English prose —
+// a new 'failed (...)' status would otherwise print as a success.
+function formatAction(action) {
+  const severity = action.status.startsWith('skipped') ? 'warn' : 'ok';
+  return `${severity} ${action.name}: ${action.status}`;
+}
+
+module.exports = {
+  registerHooksInSettings,
+  deregisterHooksFromSettings,
+  claudeEnv,
+  applyDefaultHooks,
+  removeDefaultHooks,
+  formatAction,
+  SLASHDO_HOOKS,
+};
