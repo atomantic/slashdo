@@ -118,3 +118,22 @@ describe('curl-installer COMMANDS allowlist', () => {
       `  In COMMANDS but not commands/do/: ${actual.filter((x) => !expected.includes(x)).join(', ') || '(none)'}`);
   });
 });
+
+describe('curl-installer OpenCode temporary files', () => {
+  // The OpenCode rewrite stages every download before writing the target. The
+  // behavioral coverage — cleanup, concurrent installs, and never writing
+  // through a pre-existing TMPDIR path — lives in test/install-sh.test.js;
+  // this keeps the cheap source-level guard against a predictable name
+  // creeping back in.
+  it('derives its temporary paths from mktemp, never from a literal', () => {
+    const installer = fs.readFileSync(path.join(REPO_ROOT, 'install.sh'), 'utf8');
+    // Ignore comments so the rule reads the code, not the prose about it.
+    const code = installer.split('\n').filter((line) => !line.trim().startsWith('#')).join('\n');
+
+    assert.match(code, /mktemp -d "\$\{TMPDIR:-\/tmp\}\/slashdo-install\.XXXXXX"/,
+      'the OpenCode staging directory must come from mktemp -d');
+    assert.match(code, /mktemp "\$\(dirname "\$dest"\)\/\.slashdo-tmp\.XXXXXX"/,
+      'destination writes must stage through mktemp in the destination directory');
+    assert.doesNotMatch(code, /\/tmp\/slashdo/, 'no predictable /tmp/slashdo-* path');
+  });
+});

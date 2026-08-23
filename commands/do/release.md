@@ -55,7 +55,7 @@ Then apply any **saved defaults** (set via `/do:config`) to the flags above that
 
 Before doing anything, determine the project's source and target branches for releases. Do NOT hardcode branch names. Instead, discover them:
 
-1. **Source branch** — run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` to get the repo's default branch (typically `main`). While here, **derive the GitHub API host `{GH_HOST}` from the `origin` remote** and forward it to the review loop below — `gh api` (used by the GitHub-side reviewer loops) defaults to github.com and does **not** read the repo remote, so on a GitHub Enterprise repo those loops would silently poll the wrong host and time out. Derive it and run the per-host auth precheck per `~/.claude/lib/gh-host.md`: `GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"; [ -n "$GH_HOST" ] || GH_HOST=github.com` — and if `gh auth token --hostname "$GH_HOST"` fails, stop and tell the user to run `gh auth login --hostname $GH_HOST` rather than proceeding into a loop that will time out.
+1. **Source branch** — run `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` to get the repo's default branch (typically `main`). While here, **derive the GitHub API host `{GH_HOST}` from the `origin` remote** and forward it to the review loop below — `gh api` (used by the GitHub-side reviewer loops) defaults to github.com and does **not** read the repo remote, so on a GitHub Enterprise repo those loops would silently poll the wrong host and time out. Derive it and run the per-host auth precheck with the shared snippet included at the end of this section — and if `gh auth token --hostname "$GH_HOST"` fails, stop and tell the user to run `gh auth login --hostname $GH_HOST` rather than proceeding into a loop that will time out.
 2. **Target branch** — determine by reading (in priority order):
    - **GitHub Actions workflows** — check `.github/workflows/release.yml` (or similar) for `on: push: branches:` to find the branch that triggers the release pipeline
    - **Project conventions** (already in context) — look for git workflow sections, branch descriptions, or release instructions
@@ -78,6 +78,10 @@ Print the detected workflow: `Detected release flow: {source} → {target}`
 **Default mode**: If ambiguous, use the most likely branch (prefer `release` if it exists). If the target branch does not exist, create it from the last release tag (see step 3 above). If detection still yields `target == source`, abort with an error — a release PR cannot merge a branch into itself. **Interactive mode (`--interactive`)**: Ask the user to confirm before proceeding.
 
 **Important**: The PR direction is `{source}` → `{target}` (e.g., `main` → `release`). This gives any reviewer (and the human approver) the full diff of all changes since the last release. Do NOT create a branch from source and PR back into it — that only shows the version bump commit.
+
+**GitHub only** — the shared `{GH_HOST}` derivation step 1 refers to:
+
+!`cat ~/.claude/lib/gh-host.md`
 
 ## Pre-Release Checks
 

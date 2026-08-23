@@ -123,6 +123,7 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 # it and the command will fail at runtime. The npm installer (src/installer.js)
 # enumerates lib/ dynamically, so it doesn't need updating.
 LIBS=(
+  better-cleanup better-pr-and-ci better-review-loop better-verification
   ci-flake-handling code-review-checklist copilot-review-loop
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
@@ -332,8 +333,11 @@ install_opencode() {
 
   for cmd in "${COMMANDS[@]}"; do
     printf "    /do-%-20s" "$cmd"
-    if fetch_file "commands/do/$cmd.md" "$STAGE_DIR/$cmd.md" &&
-       atomic_write "$target_cmd/do-$cmd.md" rewrite_for_opencode "$STAGE_DIR/$cmd.md"; then
+    if fetch_file "commands/do/$cmd.md" "$STAGE_DIR/$cmd.md"; then
+      if ! atomic_write "$target_cmd/do-$cmd.md" rewrite_for_opencode "$STAGE_DIR/$cmd.md"; then
+        rm -f "$STAGE_DIR/$cmd.md"
+        return 1
+      fi
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
@@ -343,8 +347,11 @@ install_opencode() {
 
   for lib in "${LIBS[@]}"; do
     printf "    lib/%-20s" "$lib.md"
-    if fetch_file "lib/$lib.md" "$STAGE_DIR/lib-$lib.md" &&
-       atomic_write "$target_lib/$lib.md" rewrite_for_opencode "$STAGE_DIR/lib-$lib.md"; then
+    if fetch_file "lib/$lib.md" "$STAGE_DIR/lib-$lib.md"; then
+      if ! atomic_write "$target_lib/$lib.md" rewrite_for_opencode "$STAGE_DIR/lib-$lib.md"; then
+        rm -f "$STAGE_DIR/lib-$lib.md"
+        return 1
+      fi
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"

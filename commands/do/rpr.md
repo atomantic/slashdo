@@ -28,13 +28,15 @@ After parsing the flags above, apply any **saved defaults** (set via `/do:config
 
 Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: when a finding is **deferred** to the plan (see Finding Disposition), file it as a GitHub/GitLab issue instead of a PLAN.md line. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`. If the user passes **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`.
 
+!`cat ~/.claude/lib/gh-host.md`
+
 ## Steps
 
-1. **Get the current PR and determine repo ownership**: Use `gh pr view --json number,url,reviewDecision,reviews,headRefName,baseRefName` to find the PR for this branch. Parse owner/name from `gh repo view --json owner,name`. Also **derive the GitHub API host once and record it as `HOST`** — `gh api` defaults to github.com and does **not** read the repo remote, so on a GitHub Enterprise repo every `gh api` call below must carry `--hostname HOST` or it silently hits github.com (see `~/.claude/lib/gh-host.md`): `HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"; [ -n "$HOST" ] || HOST=github.com`. The `gh pr`/`gh repo` calls resolve the host from the remote on their own and need no flag. Also check the PR's base repository owner — if the PR targets an upstream repo you don't own (i.e., a fork-to-upstream PR), note this as `is_fork_pr=true`. You can detect this by comparing the PR URL's owner against your authenticated user (`gh api --hostname HOST user --jq .login`).
+1. **Get the current PR and determine repo ownership**: Use `gh pr view --json number,url,reviewDecision,reviews,headRefName,baseRefName` to find the PR for this branch. Parse owner/name from `gh repo view --json owner,name`. Also **derive the GitHub API host once and record it as `GH_HOST`**, using the shared snippet above — `gh api` defaults to github.com and does **not** read the repo remote, so on a GitHub Enterprise repo every `gh api` call below must carry `--hostname GH_HOST` or it silently hits github.com. The `gh pr`/`gh repo` calls resolve the host from the remote on their own and need no flag. Also check the PR's base repository owner — if the PR targets an upstream repo you don't own (i.e., a fork-to-upstream PR), note this as `is_fork_pr=true`. You can detect this by comparing the PR URL's owner against your authenticated user (`gh api --hostname GH_HOST user --jq .login`).
 
 2. **Check for existing code review and decide which reviewer (if any) to request** (only if `is_fork_pr=false`): Query the PR's review requests and recent reviews:
    ```bash
-   gh api --hostname HOST graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviewRequests(first: 10) { nodes { requestedReviewer { ... on Bot { login } } } } reviews(last: 50) { nodes { state body author { login } submittedAt } } } } }'
+   gh api --hostname GH_HOST graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUM) { reviewRequests(first: 10) { nodes { requestedReviewer { ... on Bot { login } } } } reviews(last: 50) { nodes { state body author { login } submittedAt } } } } }'
    ```
    Note whether **any** completed review exists (from a copilot bot, a human, or another bot) — call this `HAS_EXISTING_REVIEW` — and specifically whether a **completed** `copilot-pull-request-reviewer` review exists (a node in `reviews.nodes`, NOT merely a pending review request) — call this `HAS_COPILOT_REVIEW`. Track a Copilot review that is only **pending** (Copilot present in `reviewRequests.nodes[].requestedReviewer` with no completed Copilot review yet) separately as `COPILOT_REVIEW_PENDING` — a pending-only review must NOT set `HAS_COPILOT_REVIEW`, or the "completed review exists" branch below would fire and resolve threads before Copilot has posted anything. Then dispatch on `REVIEW_AGENTS`:
 
@@ -52,7 +54,7 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 
 3. **Fetch review comments**: Use `gh api graphql` with stdin JSON to get all unresolved review threads. **CRITICAL: Do NOT use `$variables` in GraphQL queries — shell expansion consumes `$` signs.** Always inline values and pipe JSON via stdin:
    ```bash
-   echo '{"query":"{ repository(owner: \"OWNER\", name: \"REPO\") { pullRequest(number: PR_NUM) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }"}' | gh api --hostname HOST graphql --input -
+   echo '{"query":"{ repository(owner: \"OWNER\", name: \"REPO\") { pullRequest(number: PR_NUM) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }"}' | gh api --hostname GH_HOST graphql --input -
    ```
    Save results to `/tmp/pr_threads.json` for parsing.
 
@@ -85,7 +87,7 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 
 7. **Resolve conversations**: For each addressed thread, resolve it via GraphQL mutation using stdin JSON. Track resolution count against the total from step 3. **Never use `$variables` in the query — inline the thread ID directly**:
    ```bash
-   echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"THREAD_ID_HERE\"}) { thread { id isResolved } } }"}' | gh api --hostname HOST graphql --input -
+   echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"THREAD_ID_HERE\"}) { thread { id isResolved } } }"}' | gh api --hostname GH_HOST graphql --input -
    ```
 
 8. **Decide whether to loop** (only if `is_fork_pr=false`): After pushing fixes, evaluate whether another review round is worth running. **Skip for fork-to-upstream PRs.**
@@ -144,7 +146,7 @@ This path runs **only** when you asked for `copilot` explicitly (typed flag or s
 
 ### Request via API
 ```bash
-gh api --hostname HOST repos/OWNER/REPO/pulls/PR_NUM/requested_reviewers -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
+gh api --hostname GH_HOST repos/OWNER/REPO/pulls/PR_NUM/requested_reviewers -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
 ```
 
 **CRITICAL**: The reviewer name MUST include the `[bot]` suffix. Without it (e.g., `copilot-pull-request-reviewer`), the API returns a 422 "not a collaborator" error.
@@ -158,9 +160,9 @@ Verify the request was accepted by checking that `Copilot` appears in the respon
 Start the monitor *once* (right after the first review request, or at session entry if a review is already pending). It tracks the most-recent Copilot review timestamp it has observed and emits exactly one event per *new* review that lands. In the same loop, transition-detect CI checks so you also get one event per CI bucket flip — no separate CI poll needed.
 
 ```bash
-# Replace OWNER/REPO/PR_NUM/HOST with literals — no shell variables inside the GraphQL query
-# string. HOST is the API host from step 1 (needed because `gh api` ignores the repo remote and
-# defaults to github.com); it goes in `--hostname HOST`, outside the query string.
+# Replace OWNER/REPO/PR_NUM/GH_HOST with literals — no shell variables inside the GraphQL query
+# string. GH_HOST is the API host from step 1 (needed because `gh api` ignores the repo remote and
+# defaults to github.com); it goes in `--hostname GH_HOST`, outside the query string.
 # The monitor uses `gh pr checks` with `--json name,bucket` throughout. The `bucket` field
 # groups checks into a small fixed vocabulary: `pass`, `fail`, `cancel`, `skipping`, `pending`
 # — see `gh pr checks --help`. The emitted `ci: <name>: <bucket>` events embed that vocabulary
@@ -182,7 +184,7 @@ Monitor:
     latest_seeded=""
     while [ -z "$latest_seeded" ]; do
       raw=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 50) { nodes { author { login } submittedAt } } } } }\"}" \
-        | gh api --hostname HOST graphql --input - 2>/dev/null)
+        | gh api --hostname GH_HOST graphql --input - 2>/dev/null)
       if [ -z "$raw" ]; then
         sleep 5
         continue
@@ -235,7 +237,7 @@ Monitor:
       # workflow ever pushes against that limit, raise the cap further; the response is
       # tiny so 100 or 200 is also viable.
       new_list=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 50) { nodes { author { login } submittedAt } } } } }\"}" \
-        | gh api --hostname HOST graphql --input - 2>/dev/null \
+        | gh api --hostname GH_HOST graphql --input - 2>/dev/null \
         | jq -r --arg t "$latest" '[.data.repository.pullRequest.reviews.nodes[]? | select(.author.login=="copilot-pull-request-reviewer") | select(.submittedAt > $t) | .submittedAt] | sort | .[]')
       if [ -n "$new_list" ]; then
         while IFS= read -r ts; do
