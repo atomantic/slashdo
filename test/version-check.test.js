@@ -74,4 +74,17 @@ describe('compareVersions', () => {
   it('handles mixed v prefix', () => {
     assert.equal(compareVersions('v1.0.0', '2.0.0'), 'major');
   });
+
+  // compareVersions ranks; it does not decide whether to nag. These two answers
+  // are shared with hooks/slashdo-check-update.js, which layers its update
+  // policy on top via isUpdateAvailable() — see test/check-update.test.js.
+  it('returns null for a version it cannot rank', () => {
+    assert.equal(compareVersions('1.2', '3.33.2'), null);
+    assert.equal(compareVersions('nightly', '1.0.0'), null);
+  });
+
+  it('ranks against the release a prerelease belongs to', () => {
+    assert.equal(compareVersions('1.2.3', '1.2.4-beta.1'), 'patch');
+    assert.equal(compareVersions('1.2.4-beta.1', '1.2.4'), null);
+  });
 });

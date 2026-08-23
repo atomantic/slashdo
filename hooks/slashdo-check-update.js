@@ -162,6 +162,11 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, paths, now, pid }) {
     // installer's writes are idempotent, so a rare double-install during crash
     // recovery is harmless; the lock just keeps it from being load-bearing.
     let haveLock = false;
+    // Someone else holds the lock. Only THIS makes deferring the cache write
+    // correct — a lock we failed to create for any other reason (read-only FS,
+    // EACCES) has no holder who will write the authoritative result for us, so
+    // deferring there would suppress the hint forever.
+    let lockHeldByOther = false;
     const acquire = () => {
       const fd = fsDep.openSync(paths.lockFile, 'wx');
       fsDep.writeSync(fd, String(pid));
@@ -172,6 +177,7 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, paths, now, pid }) {
       acquire();
     } catch (e) {
       if (e.code === 'EEXIST') {
+        lockHeldByOther = true;
         try {
           if (now() - fsDep.statSync(paths.lockFile).mtimeMs > LOCK_STALE_MS) {
             const staleName = paths.lockFile + '.stale.' + pid;
@@ -194,15 +200,15 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, paths, now, pid }) {
         // Installer already refreshed the cache to update_available:false and
         // bumped the version file, so nothing left to flag.
         updateAvailable = false;
-        autoUpdated = true;
         latest = installed = fsDep.readFileSync(paths.versionFile, 'utf8').trim();
+        autoUpdated = true;
       } catch (e) {
         // Auto-update failed — fall through and surface the hint so the user
         // can update manually.
       } finally {
         try { fsDep.unlinkSync(paths.lockFile); } catch (e) {}
       }
-    } else {
+    } else if (lockHeldByOther) {
       // Another session holds the lock and will install + write the authoritative
       // cache. Defer the cache write so we don't overwrite its result with our own
       // now-stale update_available:true (which would show a phantom /do:update

@@ -6,6 +6,12 @@ const fs = require('fs');
 // than here because the hook is deployed standalone into ~/.claude/hooks/, where
 // src/ does not exist — so the hook cannot require us, but we can require it.
 // Re-exported below so this module's public surface is unchanged.
+//
+// compareVersions RANKS a bump; it answers null whenever it cannot rank one,
+// including for a version it cannot parse ('1.2', 'nightly'). That is why the
+// hook pairs it with isUpdateAvailable(), which applies the update POLICY on top:
+// unrankable-but-different still surfaces the hint. checkForUpdate() below wants
+// the rank itself ('major'/'minor'/'patch'), so it stays on the ranking answer.
 const { compareVersions } = require('../hooks/slashdo-check-update');
 
 function getInstalledVersion(versionFile) {

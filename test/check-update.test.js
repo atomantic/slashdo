@@ -24,6 +24,23 @@ const {
 
 const HOOK_PATH = path.resolve(__dirname, '..', 'hooks', 'slashdo-check-update.js');
 
+// ── paths ───────────────────────────────────────────────────────────
+
+describe('check-update resolvePaths', () => {
+  it('writes a cache file the statusline will actually pick up', () => {
+    // hooks/slashdo-statusline.js only reads cache entries ending in
+    // '-update-check.json'; renaming this file silently kills the ⬆ badge.
+    const paths = resolvePaths('/home/someone');
+
+    assert.equal(paths.cacheFile,
+      path.join('/home/someone', '.claude', 'cache', 'slashdo-update-check.json'));
+    assert.ok(paths.cacheFile.endsWith('-update-check.json'));
+    assert.equal(paths.versionFile, path.join('/home/someone', '.claude', '.slashdo-version'));
+    assert.equal(paths.configFile, path.join('/home/someone', '.claude', '.slashdo-config.json'));
+    assert.equal(paths.lockFile, path.join(paths.cacheDir, 'slashdo-update.lock'));
+  });
+});
+
 // ── semver comparison ───────────────────────────────────────────────
 
 describe('check-update compareVersions', () => {
@@ -91,6 +108,7 @@ describe('runUpdateCheck', () => {
   let tmpDir;
   let paths;
   let calls;
+  let options_;
 
   const NOW = 1750000000000;
 
@@ -99,6 +117,7 @@ describe('runUpdateCheck', () => {
     paths = resolvePaths(tmpDir);
     fs.mkdirSync(paths.cacheDir, { recursive: true });
     calls = [];
+    options_ = [];
   });
 
   afterEach(() => {
@@ -109,8 +128,9 @@ describe('runUpdateCheck', () => {
   // `onInstall` (default: succeed and bump the version file, as the real
   // installer does).
   function makeExecSync({ latest, onInstall, npmViewThrows } = {}) {
-    return (command) => {
+    return (command, options) => {
       calls.push(command);
+      options_.push({ command, options });
       if (command === NPM_VIEW_COMMAND) {
         if (npmViewThrows) throw new Error('offline');
         return latest + '\n';
@@ -145,6 +165,27 @@ describe('runUpdateCheck', () => {
   function readCache() {
     return JSON.parse(fs.readFileSync(paths.cacheFile, 'utf8'));
   }
+
+  it('runs the exact npm and npx commands, each with a bounded timeout', () => {
+    // Asserted as LITERALS, not via the imported constants: comparing the module
+    // against itself would let '--env claude' (which keeps the non-TTY install
+    // out of the interactive multi-env prompt) or '-y' be dropped silently.
+    writeInstalled('1.9.0');
+    writeConfig({ autoUpdate: true });
+
+    run(makeExecSync({ latest: '1.10.0' }));
+
+    assert.deepEqual(calls, [
+      'npm view slash-do version',
+      'npx -y slash-do@latest --env claude',
+    ]);
+    assert.equal(options_[0].options.timeout, 5000, 'npm view must not hang session start');
+    assert.equal(options_[0].options.encoding, 'utf8');
+    assert.equal(options_[1].options.timeout, 120000,
+      'an unbounded install would hold the lock past LOCK_STALE_MS');
+    assert.equal(options_[1].options.stdio, 'ignore');
+    assert.ok(options_.every((c) => c.options.windowsHide === true));
+  });
 
   it('short-circuits when slashdo is not installed', () => {
     const result = run(makeExecSync({ latest: '2.0.0' }));
@@ -281,6 +322,68 @@ describe('runUpdateCheck', () => {
       'the renamed stale lock must be cleaned up, not left behind');
   });
 
+  it('still writes the cache when the lock cannot be created at all', () => {
+    // EACCES/EROFS is not EEXIST: there is no other session holding the lock and
+    // therefore nobody who will write the authoritative result. Deferring here
+    // would hide the update hint for good.
+    writeInstalled('1.9.0');
+    writeConfig({ autoUpdate: true });
+    const readOnlyFs = {
+      ...fs,
+      openSync: (file, flags) => {
+        if (file === paths.lockFile) {
+          const err = new Error('EACCES');
+          err.code = 'EACCES';
+          throw err;
+        }
+        return fs.openSync(file, flags);
+      },
+    };
+
+    const result = runUpdateCheck({
+      fs: readOnlyFs,
+      execSync: makeExecSync({ latest: '1.10.0' }),
+      paths,
+      now: () => NOW,
+      pid: 4242,
+    });
+
+    assert.equal(result.status, 'written');
+    assert.deepEqual(calls, [NPM_VIEW_COMMAND], 'no lock means no install');
+    assert.equal(readCache().update_available, true, 'the hint must still reach the statusline');
+  });
+
+  it('does not install when it loses the race to reclaim a stale lock', () => {
+    // Two sessions both see the same stale lock. The rename is what picks a
+    // single winner — the loser's renameSync throws ENOENT and it must NOT go on
+    // to install. A plain unlink-then-recreate would let both through.
+    writeInstalled('1.9.0');
+    writeConfig({ autoUpdate: true });
+    fs.writeFileSync(paths.lockFile, '999', 'utf8');
+    const stale = new Date(NOW - LOCK_STALE_MS - 60000);
+    fs.utimesSync(paths.lockFile, stale, stale);
+    const losingFs = {
+      ...fs,
+      renameSync: () => {
+        const err = new Error('ENOENT'); // the other reclaimer renamed it first
+        err.code = 'ENOENT';
+        throw err;
+      },
+    };
+
+    const result = runUpdateCheck({
+      fs: losingFs,
+      execSync: makeExecSync({ latest: '1.10.0' }),
+      paths,
+      now: () => NOW,
+      pid: 4242,
+    });
+
+    assert.deepEqual(calls, [NPM_VIEW_COMMAND], 'the reclaim winner installs, not us');
+    assert.equal(result.status, 'deferred');
+    assert.equal(fs.existsSync(paths.cacheFile), false);
+  });
+
   it('does not touch the lock at all when auto-update is off', () => {
     writeInstalled('1.9.0');
 
@@ -306,6 +409,10 @@ describe('runUpdateCheck', () => {
 // broken real-fs/real-home wiring can't pass. `npm` is stubbed on PATH so the
 // check stays hermetic (no network, no npx install).
 
+// How long the slow `npm view` stub sleeps. A parent that returns sooner
+// provably did not wait for its worker.
+const SLOW_NPM_MS = 2000;
+
 describe('check-update worker entrypoint', { skip: process.platform === 'win32' }, () => {
   let tmpDir;
   let paths;
@@ -317,10 +424,16 @@ describe('check-update worker entrypoint', { skip: process.platform === 'win32' 
     fs.mkdirSync(paths.cacheDir, { recursive: true });
     binDir = path.join(tmpDir, 'bin');
     fs.mkdirSync(binDir);
-    const npmStub = path.join(binDir, 'npm');
-    fs.writeFileSync(npmStub, '#!/bin/sh\necho 9.9.9\n', 'utf8');
-    fs.chmodSync(npmStub, 0o755);
+    writeNpmStub('');
   });
+
+  // `npm view slash-do version` without the network. `prelude` lets one test make
+  // it slow enough to observe that the parent did not wait for it.
+  function writeNpmStub(prelude) {
+    const npmStub = path.join(binDir, 'npm');
+    fs.writeFileSync(npmStub, '#!/bin/sh\n' + prelude + 'echo 9.9.9\n', 'utf8');
+    fs.chmodSync(npmStub, 0o755);
+  }
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -331,9 +444,11 @@ describe('check-update worker entrypoint', { skip: process.platform === 'win32' 
   async function waitForCache(timeoutMs = 15000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      if (fs.existsSync(paths.cacheFile)) {
+      try {
+        // existsSync goes true as soon as the fd is created, so the payload may
+        // not have landed yet — keep polling rather than failing on a short read.
         return JSON.parse(fs.readFileSync(paths.cacheFile, 'utf8'));
-      }
+      } catch (e) {}
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     throw new Error('worker never wrote ' + paths.cacheFile);
@@ -367,9 +482,16 @@ describe('check-update worker entrypoint', { skip: process.platform === 'win32' 
     // work, so poll for the cache file the child writes.
     fs.rmSync(paths.cacheDir, { recursive: true });
     fs.writeFileSync(paths.versionFile, '1.9.0\n', 'utf8');
+    writeNpmStub('sleep ' + SLOW_NPM_MS / 1000 + '\n');
 
+    const started = Date.now();
     const proc = runHook([]);
+    const parentMs = Date.now() - started;
     assert.equal(proc.status, 0, proc.stderr);
+    // The npm stub sleeps SLOW_NPM_MS. If the parent waited on its child at all,
+    // it could not have returned this fast — this is the 'never blocks session
+    // start' contract that detached + unref() provides.
+    assert.ok(parentMs < SLOW_NPM_MS, 'SessionStart returned in ' + parentMs + 'ms');
 
     const cache = await waitForCache();
     assert.equal(cache.latest, '9.9.9');
