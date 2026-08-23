@@ -8,7 +8,7 @@ const path = require('path');
 const CONDITIONAL_CAPABILITIES = { teams: 'supportsTeams' };
 
 function parseFrontmatter(content) {
-  const lines = content.split('\n');
+  const lines = content.split(/\r?\n/);
   if (lines[0] !== '---') return { frontmatter: {}, body: content };
 
   let endIdx = -1;
@@ -38,6 +38,11 @@ function rewriteLibPaths(body, targetPrefix) {
   return body.replace(/~\/\.claude\/lib\//g, targetPrefix);
 }
 
+function rewriteClaudeRootPaths(body, env) {
+  if (!env.claudeRootPathPrefix) return body;
+  return body.replace(/~\/\.claude\//g, env.claudeRootPathPrefix);
+}
+
 // Rewrites the slashdo config-path token (`~/.claude/.slashdo-config.json`) to
 // the host CLI's own config path so commands read/write the right file at
 // runtime. Unlike lib paths, this is a literal the agent resolves at runtime on
@@ -47,16 +52,6 @@ function rewriteLibPaths(body, targetPrefix) {
 function rewriteConfigPath(body, env) {
   if (!env.configPath || env.configPath === '~/.claude/.slashdo-config.json') return body;
   return body.replace(/~\/\.claude\/\.slashdo-config\.json/g, env.configPath);
-}
-
-function inlineLibContent(body, libDir) {
-  return body.replace(/!`cat ~\/\.claude\/lib\/(.+?)`/g, (match, filename) => {
-    const libFile = path.join(libDir, filename);
-    if (fs.existsSync(libFile)) {
-      return fs.readFileSync(libFile, 'utf8').trim();
-    }
-    return match;
-  });
 }
 
 // Matches a top-level `!cat ~/.claude/lib/<name>.md` runtime include.
@@ -231,6 +226,12 @@ function transformCommand(content, env, sourceLibDir, relPath) {
 
   let transformedBody = body;
 
+  // A relocated Claude config directory owns the entire ~/.claude tree, not
+  // only slashdo's libraries and saved config. Quote the custom root so the
+  // generated shell snippets remain valid when the directory contains spaces
+  // or shell metacharacters.
+  transformedBody = rewriteClaudeRootPaths(transformedBody, env);
+
   if (env.supportsCatInclusion && env.libPathPrefix) {
     transformedBody = rewriteLibPaths(transformedBody, env.libPathPrefix);
   } else if (!env.supportsCatInclusion && sourceLibDir) {
@@ -264,7 +265,7 @@ function transformCommand(content, env, sourceLibDir, relPath) {
 }
 
 function transformLib(content, env) {
-  let transformed = content;
+  let transformed = rewriteClaudeRootPaths(content, env);
   if (env.supportsCatInclusion && env.libPathPrefix) {
     transformed = rewriteLibPaths(transformed, env.libPathPrefix);
   }
@@ -276,7 +277,6 @@ module.exports = {
   parseFrontmatter,
   rewriteLibPaths,
   rewriteConfigPath,
-  inlineLibContent,
   inlineLibReferences,
   applyConditionalBlocks,
   getSkillName,

@@ -21,8 +21,8 @@ On GitHub, set `OWNER`/`REPO` once per run:
 then `OWNER="${OWNER_REPO%/*}"; REPO="${OWNER_REPO#*/}"`.
 Also set `GH_HOST` once — `gh api` (used below) defaults to github.com and does **not**
 read the repo remote, so on a GitHub Enterprise repo it must be told the host
-explicitly (see `~/.claude/lib/gh-host.md`):
-`GH_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"; [ -n "$GH_HOST" ] || GH_HOST=github.com`
+explicitly. Derive it with the canonical chain in `~/.claude/lib/gh-host.md`, or reuse
+the value the including command already derived from that same snippet.
 Pass `--hostname "$GH_HOST"` on every `gh api` call below (the `gh issue`/`gh pr`
 calls resolve the host from the remote on their own and need no flag).
 

@@ -2,6 +2,9 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const { getEnv, allEnvNames, allEnvAliases, canonicalEnvName, ENVIRONMENTS } = require('../src/environments');
 
@@ -13,6 +16,29 @@ describe('getEnv', () => {
     assert.equal(env.name, 'Claude Code');
     assert.equal(env.format, 'yaml-frontmatter');
     assert.equal(env.namespacing, 'subdirectory');
+  });
+
+  it('resolves every Claude path from CLAUDE_CONFIG_DIR', () => {
+    const configDir = path.join(os.tmpdir(), 'slashdo-custom-claude');
+    const script = `
+      const { getEnv } = require(${JSON.stringify(require.resolve('../src/environments'))});
+      process.stdout.write(JSON.stringify(getEnv('claude')));
+    `;
+    const result = spawnSync(process.execPath, ['-e', script], {
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const env = JSON.parse(result.stdout);
+    assert.equal(env.commandsDir, path.join(configDir, 'commands'));
+    assert.equal(env.libDir, path.join(configDir, 'lib'));
+    assert.equal(env.hooksDir, path.join(configDir, 'hooks'));
+    assert.equal(env.settingsFile, path.join(configDir, 'settings.json'));
+    assert.equal(env.versionFile, path.join(configDir, '.slashdo-version'));
+    assert.equal(env.configFile, path.join(configDir, '.slashdo-config.json'));
+    assert.equal(env.configPath, path.join(configDir, '.slashdo-config.json'));
+    assert.equal(env.libPathPrefix, `${path.join(configDir, 'lib')}${path.sep}`);
   });
 
   it('returns opencode env config', () => {
@@ -159,5 +185,22 @@ describe('environment shape', () => {
       const env = ENVIRONMENTS[name];
       assert.equal(typeof env.supportsTeams, 'boolean', `${name} missing supportsTeams`);
     }
+  });
+});
+
+// ── claudeEnv parity ────────────────────────────────────────────────
+
+describe('settings-hooks claudeEnv', () => {
+  const { claudeEnv } = require('../src/settings-hooks');
+
+  it('derives the same Claude paths ENVIRONMENTS.claude owns', () => {
+    // src/settings-hooks.js re-derives these so the curl installer can fetch it
+    // as a single dependency-free file. This pins the two together — moving
+    // ~/.claude in src/environments.js must move it there too, or install.sh
+    // and the npm installer would write different files (issue #166).
+    const env = claudeEnv();
+    assert.equal(env.settingsFile, ENVIRONMENTS.claude.settingsFile);
+    assert.equal(env.hooksDir, ENVIRONMENTS.claude.hooksDir);
+    assert.equal(env.configFile, ENVIRONMENTS.claude.configFile);
   });
 });
