@@ -179,7 +179,9 @@ A shell variable does not survive from one tool call to the next, so re-deriving
 `SPOOL_DIR` later gives a different directory and the filer agents find nothing.
 
 Each agent writes its findings to `$SPOOL_DIR/<agent-slug>.md` — one file per agent,
-so no two agents write the same path. Each finding is a **ready-to-file issue body**
+so no two agents write the same path. An agent that spools across more than one call
+**appends** after the first write (`cat >` once, `cat >>` thereafter); a second `cat >`
+silently truncates the findings already spooled. Each finding is a **ready-to-file issue body**
 under an id heading, not raw notes: whoever files it must be able to lift the block
 out and hand it straight to `--body-file` without rewriting a word.
 
