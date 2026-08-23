@@ -58,6 +58,17 @@ describe('worktree-safe merge contracts', () => {
     );
   });
 
+  it('gates the swarm merge on the required-checks watch', () => {
+    // `gh pr checks --fail-fast` exits non-zero on a failing required check, but an
+    // unchained `gh pr merge` on the next line merges regardless — shipping a red PR
+    // from the one step whose prose says "wait for CI, and only then merge".
+    const body = readCommand('next.md');
+    assert.match(
+      body,
+      /gh pr checks <pr_number> --required --watch --fail-fast && \\\n\s+gh pr merge <pr_number> --merge/,
+    );
+  });
+
   it('reads the MR state back on the GitLab swarm path too', () => {
     // `glab mr merge --auto-merge` hands the MR to the pipeline and returns, so its
     // exit status says nothing about whether the work landed — and step 4 closes the

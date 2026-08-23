@@ -123,8 +123,11 @@ After the barrier, merge the wave's returned PRs **one at a time, never concurre
    - GitHub (`gh`) — scope the watch to **required** checks only so an optional/non-required job can't block a merge branch protection would allow (vacuously satisfied when no required checks exist):
      ```bash
      git -C "<worktree>" push
-     gh pr checks <pr_number> --required --watch --fail-fast
-     gh pr merge <pr_number> --merge
+     # &&, not three separate lines: `--fail-fast` makes `gh pr checks` exit non-zero on
+     # a failing required check, but an unchained next line merges anyway — which is the
+     # opposite of what this step's own prose promises. Chain it so a red gate stops here.
+     gh pr checks <pr_number> --required --watch --fail-fast && \
+       gh pr merge <pr_number> --merge
      # Delete the head branch ONLY once the PR really reads MERGED.
      if [ "$(gh pr view <pr_number> --json state -q .state)" = "MERGED" ]; then
        if ! git push origin --delete "<branch>"; then
