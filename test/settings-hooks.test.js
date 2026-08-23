@@ -9,7 +9,7 @@
 // alone rather than clobbered, and the statusline outcomes that must stay
 // distinguishable from each other.
 
-const { describe, it, after } = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
@@ -22,12 +22,13 @@ const HOOK_FILES = [
   { name: 'slashdo-statusline.js' },
 ];
 
-const tmpDirs = [];
-after(() => tmpDirs.forEach((dir) => fs.rmSync(dir, { recursive: true, force: true })));
+// One temp root per run, with each case in a subdirectory of it. Nothing is
+// deleted — the OS reaps $TMPDIR — but the run leaves one entry behind, not one
+// per test.
+const TMP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-settings-'));
 
 function makeEnv(settings) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-settings-'));
-  tmpDirs.push(tmpDir);
+  const tmpDir = fs.mkdtempSync(path.join(TMP_ROOT, 'case-'));
   const settingsFile = path.join(tmpDir, 'settings.json');
   const hooksDir = path.join(tmpDir, 'hooks');
   fs.mkdirSync(hooksDir, { recursive: true });
@@ -48,12 +49,11 @@ const slashdoStatusline = (env) => `node "${path.join(env.hooksDir, 'slashdo-sta
 // ── Malformed shapes are skipped, never clobbered ───────────────────
 
 describe('registerHooksInSettings on malformed input', () => {
-  // null / "" / 0 / false are present values, not absent ones: a truthiness
-  // test would overwrite them exactly the way the shell copy overwrote a string.
+  // "" / 0 / false are present values, not absent ones: a truthiness test would
+  // overwrite them exactly the way the shell copy overwrote a string.
   for (const [label, hooks] of [
     ['a string', 'some-string'],
     ['an array', ['nope']],
-    ['null', null],
     ['an empty string', ''],
     ['false', false],
     ['zero', 0],
@@ -65,9 +65,31 @@ describe('registerHooksInSettings on malformed input', () => {
       const actions = registerHooksInSettings(env, HOOK_FILES, false);
 
       assert.equal(statusOf(actions, 'settings/hooks'), 'skipped (unexpected shape)');
-      assert.deepEqual(readSettings(env), { hooks, otherSetting: true });
+      assert.deepEqual(readSettings(env).hooks, hooks);
+      assert.equal(readSettings(env).otherSetting, true);
+    });
+
+    it(`still configures the statusline when settings.hooks is ${label}`, () => {
+      // settings.hooks and statusLine are independent: a malformed hooks value
+      // must not cost the user the statusline, any more than a malformed
+      // SessionStart does.
+      const env = makeEnv({ hooks });
+      const actions = registerHooksInSettings(env, HOOK_FILES, false);
+
+      assert.equal(statusOf(actions, 'settings/statusLine'), 'configured');
+      assert.equal(readSettings(env).statusLine.command, slashdoStatusline(env));
     });
   }
+
+  it('treats settings.hooks: null as absent and registers into it', () => {
+    // null carries no user data, so there is nothing to preserve — this matches
+    // what the npm installer has always done for a null value.
+    const env = makeEnv({ hooks: null });
+    const actions = registerHooksInSettings(env, HOOK_FILES, false);
+
+    assert.equal(statusOf(actions, 'settings/SessionStart hook'), 'registered');
+    assert.match(readSettings(env).hooks.SessionStart[0].hooks[0].command, /slashdo-check-update/);
+  });
 
   it('skips a malformed SessionStart but still configures the statusline', () => {
     const env = makeEnv({ hooks: { SessionStart: 'nope' } });

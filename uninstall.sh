@@ -36,6 +36,9 @@ fetch_file() {
   curl -fsSL "$BASE_URL/$src_path" -o "$dest" 2>/dev/null
 }
 
+# The copy install.sh left in the hooks dir, preferred over any network fetch.
+SETTINGS_HOOKS_CACHE=".slashdo-settings-hooks.js"
+
 # Scratch space for src/settings-hooks.js, cleaned up however we exit.
 MOD_DIR="$(mktemp -d)"
 trap 'rm -rf "$MOD_DIR"' EXIT
@@ -111,26 +114,30 @@ uninstall_claude() {
   # — the same module the npm uninstaller requires (see install.sh). This runs
   # before any file is removed: if the fetch or node call fails, settings.json
   # must not be left referencing hooks that are already gone.
-  if command -v node &>/dev/null; then
-    if fetch_file "src/settings-hooks.js" "$MOD_DIR/settings-hooks.js"; then
-      local node_result
-      if node_result=$(node -e '
-        const settingsHooks = require(process.argv[1]);
-        for (const action of settingsHooks.removeDefaultHooks(false)) {
-          process.stdout.write(settingsHooks.formatAction(action) + "\n");
-        }
-      ' "$MOD_DIR/settings-hooks.js" 2>"$MOD_DIR/node.err"); then
-        print_settings_actions "$node_result"
-      else
-        printf "    ${YELLOW}settings.json deregistration failed — leaving hook files in place${RESET}\n"
-        sed -e 's/^/      /' "$MOD_DIR/node.err" >&2
-        return 1
-      fi
+  if [ ! -f "$HOME/.claude/settings.json" ]; then
+    : # Nothing to deregister — do not make a missing file a reason to fail.
+  elif ! command -v node &>/dev/null; then
+    printf "    ${YELLOW}settings.json: Node.js not found, so slashdo's entries cannot be removed${RESET}\n"
+    printf "    ${DIM}(delete the SessionStart hook and statusLine lines mentioning slashdo- by hand)${RESET}\n"
+  elif cp "$target_hooks/$SETTINGS_HOOKS_CACHE" "$MOD_DIR/settings-hooks.js" 2>/dev/null ||
+       fetch_file "src/settings-hooks.js" "$MOD_DIR/settings-hooks.js"; then
+    local node_result
+    if node_result=$(node -e '
+      const settingsHooks = require(process.argv[1]);
+      for (const action of settingsHooks.removeDefaultHooks(false)) {
+        process.stdout.write(settingsHooks.formatAction(action) + "\n");
+      }
+    ' "$MOD_DIR/settings-hooks.js" 2>"$MOD_DIR/node.err"); then
+      print_settings_actions "$node_result"
     else
-      printf "    ${YELLOW}settings.json: could not fetch src/settings-hooks.js — leaving hook files in place${RESET}\n"
-      printf "    ${DIM}(settings.json still references them; re-run with network access or from a checkout)${RESET}\n"
+      printf "    ${YELLOW}settings.json deregistration failed — nothing was removed${RESET}\n"
+      sed -e 's/^/      /' "$MOD_DIR/node.err" >&2
       return 1
     fi
+  else
+    printf "    ${YELLOW}settings.json: could not read src/settings-hooks.js — nothing was removed${RESET}\n"
+    printf "    ${DIM}(re-run with network access, or from a checkout of the repo)${RESET}\n"
+    return 1
   fi
 
   for cmd in "${COMMANDS[@]}" "${OLD_COMMANDS[@]}"; do
@@ -156,6 +163,12 @@ uninstall_claude() {
       count=$((count + 1))
     fi
   done
+
+  if [ -f "$target_hooks/$SETTINGS_HOOKS_CACHE" ]; then
+    rm -f "$target_hooks/$SETTINGS_HOOKS_CACHE"
+    printf "    removed: hook/%-17s${GREEN}ok${RESET}\n" "$SETTINGS_HOOKS_CACHE"
+    count=$((count + 1))
+  fi
 
   for old in "${OLD_HOOKS[@]}"; do
     if [ -f "$target_hooks/$old.md" ]; then
@@ -377,9 +390,9 @@ for env in "${envs[@]}"; do
 done
 
 if [ "$claude_incomplete" = true ]; then
-  printf "  ${YELLOW}Incomplete:${RESET} settings.json could not be updated, so slashdo's hook files\n"
-  printf "  were left in place rather than stranding settings.json entries that point at\n"
-  printf "  deleted files. Re-run this script once Node.js and the source are reachable.\n\n"
+  printf "  ${YELLOW}Incomplete:${RESET} settings.json could not be updated, so nothing was removed\n"
+  printf "  from ~/.claude — deleting the files first would strand settings.json entries\n"
+  printf "  pointing at them. Re-run this script once Node.js and the source are reachable.\n\n"
   exit 1
 fi
 

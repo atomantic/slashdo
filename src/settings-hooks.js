@@ -19,6 +19,9 @@ const path = require('path');
 // The hooks slashdo registers, by installed filename.
 const SLASHDO_HOOKS = ['slashdo-check-update.js', 'slashdo-statusline.js'];
 
+// install.sh caches this module here so uninstall.sh can deregister offline.
+const SETTINGS_HOOKS_CACHE = '.slashdo-settings-hooks.js';
+
 function registerHooksInSettings(env, hookFiles, dryRun) {
   if (!env.settingsFile) return [];
 
@@ -43,19 +46,24 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
   if (updateCheckHook) {
     const hookCommand = `node "${path.join(env.hooksDir, updateCheckHook.name)}"`;
 
-    // Absent is ours to create; present-but-wrong is the user's to keep. A
-    // truthiness test would conflate the two and overwrite `hooks: null` or
-    // `hooks: ""` — the same silent clobbering this module exists to prevent.
+    // Absent (or null) is ours to create — neither carries user data. Any other
+    // non-object is a value the user put there, so leave it exactly as it is: a
+    // truthiness test would overwrite `hooks: ""` or `hooks: 0` the same way the
+    // shell copy overwrote `hooks: "some-string"`.
     const hooksValue = settings.hooks;
-    if (hooksValue === undefined) {
+    if (hooksValue === undefined || hooksValue === null) {
       settings.hooks = {};
-    } else if (!hooksValue || typeof hooksValue !== 'object' || Array.isArray(hooksValue)) {
+    } else if (typeof hooksValue !== 'object' || Array.isArray(hooksValue)) {
+      // Skip only the hook registration — the statusline below is independent
+      // of settings.hooks and must still be configured, exactly as it is when
+      // SessionStart alone is malformed.
       actions.push({ name: 'settings/hooks', status: 'skipped (unexpected shape)' });
-      return actions;
     }
 
     // If SessionStart exists but isn't an array, skip hook registration (but continue to statusLine)
-    if (Object.prototype.hasOwnProperty.call(settings.hooks, 'SessionStart') &&
+    if (typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) {
+      // Already reported as an unexpected shape above; nothing to register into.
+    } else if (Object.prototype.hasOwnProperty.call(settings.hooks, 'SessionStart') &&
       !Array.isArray(settings.hooks.SessionStart)) {
       actions.push({ name: 'settings/SessionStart hook', status: 'skipped (unexpected shape)' });
     } else {
@@ -249,4 +257,5 @@ module.exports = {
   removeDefaultHooks,
   formatAction,
   SLASHDO_HOOKS,
+  SETTINGS_HOOKS_CACHE,
 };

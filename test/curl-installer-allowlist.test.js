@@ -9,7 +9,7 @@
 // command itself is absent). The npm installer (src/installer.js) enumerates
 // both dirs dynamically, so it doesn't catch this drift — only this test does.
 
-const { describe, it, after } = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
@@ -129,7 +129,9 @@ describe('curl installer shares src/settings-hooks.js', () => {
       const content = readRepoFile(script);
       // Markers of a hand-rolled copy: mutating settings.json from shell-embedded
       // JS, or re-deriving the paths and hook list the module owns.
-      for (const marker of ['settings.hooks', 'settings.statusLine', 'settings.json"', 'autoUpdate']) {
+      for (const marker of [
+        'settings.hooks', 'settings.statusLine', 'autoUpdate', 'JSON.parse', 'JSON.stringify',
+      ]) {
         assert.ok(!content.includes(marker),
           `${script} contains "${marker}" — settings.json mutation and the paths it acts on ` +
           `belong in ${SHARED_MODULE}, not in a second shell-embedded copy that can drift`);
@@ -176,12 +178,11 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
     }).replace(ANSI, '');
   }
 
-  const homes = [];
-  after(() => homes.forEach((home) => fs.rmSync(home, { recursive: true, force: true })));
+  // One temp root per run — see test/settings-hooks.test.js.
+  const TMP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-curl-'));
 
   function makeHome(settings) {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-curl-'));
-    homes.push(home);
+    const home = fs.mkdtempSync(path.join(TMP_ROOT, 'home-'));
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify(settings, null, 2));
     return home;
@@ -212,7 +213,8 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
     const out = runScript('install.sh', home);
 
     assert.match(out, /settings\/hooks: skipped \(unexpected shape\)/);
-    assert.deepEqual(settingsOf(home), { hooks: 'some-string', theme: 'dark' });
+    assert.equal(settingsOf(home).hooks, 'some-string');
+    assert.equal(settingsOf(home).theme, 'dark');
   });
 
   it('reports a preserved custom statusline distinctly from one it configured', () => {
@@ -234,8 +236,7 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
   for (const script of ['install.sh', 'uninstall.sh']) {
     it(`${script} piped into bash never sources files from the caller's cwd`, () => {
       const home = makeHome({});
-      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-cwd-'));
-      homes.push(cwd);
+      const cwd = fs.mkdtempSync(path.join(TMP_ROOT, 'cwd-'));
       // A decoy checkout in the cwd, complete enough to satisfy every guard the
       // scripts apply before reaching the module. If they trust it, node runs
       // the file below.
@@ -252,12 +253,12 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
 
       // No network in CI: a curl stub makes every remote fetch fail, so the
       // only way the script can obtain the file is the cwd it must not trust.
-      const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-stub-'));
-      homes.push(stubDir);
+      const stubDir = fs.mkdtempSync(path.join(TMP_ROOT, 'stub-'));
       fs.writeFileSync(path.join(stubDir, 'curl'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 
+      let stdout;
       try {
-        execFileSync('bash', ['-s'], {
+        stdout = execFileSync('bash', ['-s'], {
           cwd,
           input: fs.readFileSync(path.join(REPO_ROOT, script), 'utf8'),
           env: { ...process.env, HOME: home, PATH: `${stubDir}${path.delimiter}${process.env.PATH}` },
@@ -265,11 +266,15 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
           timeout: 120000,
         });
       } catch (e) {
-        // uninstall.sh exits non-zero when it cannot reach the module — it
-        // refuses to delete hooks it could not deregister. That is the point.
-        assert.match(e.stdout || '', /could not fetch src\/settings-hooks\.js/);
+        // Both scripts exit non-zero when settings.json could not be updated.
+        stdout = e.stdout || '';
       }
 
+      // Proves the script actually reached the settings step and found nothing
+      // it was willing to use there — without this, a script that died on line
+      // 3 would pass. install.sh reports the hooks it could not fetch either;
+      // uninstall.sh names the module directly.
+      assert.match(stdout, /settings\.json: (skipped \(hook files not found\)|could not read src\/settings-hooks\.js)/);
       assert.equal(fs.existsSync(marker), false,
         `${script} executed src/settings-hooks.js from the caller's cwd when piped into bash`);
     });

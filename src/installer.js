@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { getTargetFilename, transformCommand, transformLib } = require('./transformer');
 const { readConfig, writeConfig } = require('./config');
-const { registerHooksInSettings, deregisterHooksFromSettings } = require('./settings-hooks');
+const { registerHooksInSettings, deregisterHooksFromSettings, SETTINGS_HOOKS_CACHE } = require('./settings-hooks');
 
 function collectCommands(commandsDir) {
   const commands = [];
@@ -332,6 +332,19 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
     // Deregister hooks and clean up cache
     const settingsActions = deregisterHooksFromSettings(env, dryRun);
     results.actions.push(...settingsActions);
+
+    // install.sh leaves a copy of settings-hooks.js here so an offline
+    // uninstall still works. An npm uninstall must not orphan it.
+    const settingsHooksCache = path.join(env.hooksDir, SETTINGS_HOOKS_CACHE);
+    if (fs.existsSync(settingsHooksCache)) {
+      if (dryRun) {
+        results.actions.push({ name: `hook/${SETTINGS_HOOKS_CACHE}`, status: 'would remove' });
+      } else {
+        fs.unlinkSync(settingsHooksCache);
+        results.actions.push({ name: `hook/${SETTINGS_HOOKS_CACHE}`, status: 'removed' });
+      }
+      results.removed++;
+    }
 
     const cacheFile = path.join(path.dirname(env.hooksDir), 'cache', 'slashdo-update-check.json');
     if (fs.existsSync(cacheFile)) {

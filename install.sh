@@ -36,6 +36,12 @@ fetch_file() {
   curl -fsSL "$BASE_URL/$src_path" -o "$dest" 2>/dev/null
 }
 
+# The copy of src/settings-hooks.js left in the hooks dir for uninstall.sh.
+SETTINGS_HOOKS_CACHE=".slashdo-settings-hooks.js"
+
+# Set when the commands installed but settings.json could not be updated.
+install_incomplete=false
+
 # Scratch space for src/settings-hooks.js, cleaned up however we exit.
 MOD_DIR="$(mktemp -d)"
 trap 'rm -rf "$MOD_DIR"' EXIT
@@ -170,6 +176,11 @@ install_claude() {
   # the drift onto the arguments.
   if command -v node &>/dev/null && [ -f "$target_hooks/slashdo-check-update.js" ]; then
     if fetch_file "src/settings-hooks.js" "$MOD_DIR/settings-hooks.js"; then
+      # Keep a copy next to the hooks: uninstall.sh needs this module to
+      # deregister, and a machine that is offline (or behind a proxy that has
+      # since started blocking raw.githubusercontent.com) must still be able to
+      # uninstall cleanly. uninstall.sh removes it along with the hooks.
+      cp "$MOD_DIR/settings-hooks.js" "$target_hooks/$SETTINGS_HOOKS_CACHE" 2>/dev/null || true
       local node_result
       if node_result=$(node -e '
         const settingsHooks = require(process.argv[1]);
@@ -179,16 +190,19 @@ install_claude() {
       ' "$MOD_DIR/settings-hooks.js" 2>"$MOD_DIR/node.err"); then
         print_settings_actions "$node_result"
       else
-        printf "    ${YELLOW}settings.json: failed${RESET}\n"
+        printf "    ${YELLOW}settings.json: failed — hooks installed but not registered${RESET}\n"
         # Surface why — an opaque "failed" on a permission or syntax error is
         # what makes a broken curl install impossible to diagnose.
         sed -e 's/^/      /' "$MOD_DIR/node.err" >&2
+        install_incomplete=true
       fi
     else
-      printf "    ${DIM}settings.json: skipped (could not fetch src/settings-hooks.js)${RESET}\n"
+      printf "    ${YELLOW}settings.json: could not fetch src/settings-hooks.js — hooks installed but not registered${RESET}\n"
+      install_incomplete=true
     fi
   elif command -v node &>/dev/null; then
-    printf "    ${DIM}settings.json: skipped (hook files not found)${RESET}\n"
+    printf "    ${YELLOW}settings.json: skipped (hook files not found)${RESET}\n"
+    install_incomplete=true
   else
     printf "    ${DIM}settings.json: skipped (node not found — hooks installed but not registered)${RESET}\n"
   fi
@@ -270,10 +284,16 @@ for env in "${envs[@]}"; do
   printf "\n"
 done
 
-if [ "$curl_installed" = true ]; then
+if [ "$curl_installed" = true ] && [ "$install_incomplete" = false ]; then
   printf "  ${GREEN}Done!${RESET} Commands are available as /do:<name> in your AI coding assistant.\n"
+elif [ "$curl_installed" = true ]; then
+  printf "  ${YELLOW}Partly done.${RESET} Commands are installed, but settings.json was not updated,\n"
+  printf "  so the update-check hook and statusline are not active. Re-run this script once\n"
+  printf "  Node.js and the source are reachable to finish.\n"
 fi
 if [ "$npx_needed" = true ]; then
   printf "  ${DIM}(Antigravity / Codex / Grok Build users: run the npx command above to complete installation.)${RESET}\n"
 fi
 printf "\n"
+
+[ "$install_incomplete" = false ]
