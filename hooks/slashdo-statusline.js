@@ -100,6 +100,9 @@ process.stdin.on('end', () => {
     }
 
     // Update notifications — scan all *-update-check.json files in cache dir
+    // Cache files are written by other tools, so strip control characters (they
+    // could otherwise inject ANSI escapes) and cap the length before rendering.
+    const badgeText = (v) => String(v).replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 80);
     let updates = '';
     const cacheDir = path.join(claudeDir, 'cache');
     try {
@@ -109,7 +112,14 @@ process.stdin.on('end', () => {
           try {
             const cache = JSON.parse(fs.readFileSync(path.join(cacheDir, f), 'utf8'));
             if (cache.update_available && cache.command) {
-              updates += `\x1b[33m⬆ ${cache.command}\x1b[0m │ `;
+              updates += `\x1b[33m⬆ ${badgeText(cache.command)}\x1b[0m │ `;
+            }
+            // A tool can also report that its update check itself is broken (e.g.
+            // slashdo writes update_check: 'npm-unavailable' when npm is off PATH).
+            // Without this the statusline would show nothing at all and the user
+            // would read "no badge" as "up to date".
+            if (cache.notice) {
+              updates += `\x1b[33m⚠ ${badgeText(cache.notice)}\x1b[0m │ `;
             }
           } catch (e) {}
         }

@@ -3,6 +3,12 @@
 // Check for slashdo updates in background, write result to cache.
 // Called by SessionStart hook - runs once per session.
 //
+// The curl installer (install.sh) is explicitly npm-free, so this hook can run
+// on a machine with no npm/npx on PATH. In that case there is no way to learn the
+// latest version, so the cache records `update_check: 'npm-unavailable'` plus a
+// one-shot `notice` for the statusline instead of a bare `update_available: false`
+// that would be indistinguishable from "you're already on the latest version".
+//
 // When the user opted into auto-update (~/.claude/.slashdo-config.json:
 // { "autoUpdate": true }), a detected update is applied automatically by
 // running `npx -y slash-do@latest` instead of surfacing the ⬆ /do:update
@@ -28,12 +34,33 @@ const { spawn, execSync } = require('child_process');
 // and reclaimed. Kept well above the 120s install timeout below so a slow-but-
 // live install is never stolen out from under itself.
 const LOCK_STALE_MS = 10 * 60 * 1000;
+// How long a surfaced npm/npx notice stays suppressed. It shows for the session
+// that wrote it and then goes quiet for a week: the hook cannot know whether a
+// statusline ever rendered it (the user may have a custom statusline, or a second
+// session may have rewritten the cache first), so it repeats on this cadence
+// rather than firing exactly once and risking being lost.
+const NOTICE_REPEAT_S = 7 * 24 * 60 * 60;
+const PROBE_TIMEOUT_MS = 5000;
 const NPM_VIEW_TIMEOUT_MS = 5000;
 const INSTALL_TIMEOUT_MS = 120000;
 const NPM_VIEW_COMMAND = 'npm view slash-do version';
 // --env claude keeps this scoped to the environment running the hook, and
 // avoids the interactive multi-env prompt (stdin is not a TTY here).
 const INSTALL_COMMAND = 'npx -y slash-do@latest --env claude';
+
+const NOTICES = {
+  'npm-unavailable': 'slashdo update check needs npm on PATH — update with install.sh',
+  'npx-unavailable': 'slashdo update available but npx is missing — update with install.sh',
+};
+// States that carry a pending update the user cannot apply: there is nothing
+// else on the statusline for them (the ⬆ badge is suppressed below), so this
+// one repeats every session until it is resolved rather than being rate-limited.
+const PERSISTENT_NOTICES = { 'npx-unavailable': true };
+
+// Shell probe for a command on PATH.
+function probeCommand(cmd) {
+  return (process.platform === 'win32' ? 'where ' : 'command -v ') + cmd;
+}
 
 // Every path the check reads or writes, derived from a home directory. Taking
 // homeDir as an argument (rather than calling os.homedir() inline) is what lets
@@ -95,6 +122,39 @@ function isUpdateAvailable(installed, latest) {
   return compareVersions(installed, latest) !== null;
 }
 
+// Decide whether this run surfaces a statusline notice, and carry the
+// suppression window forward. `previous` is the last cache body (or null).
+//
+// The stamp and the state it belongs to are tracked separately from
+// update_check: a transient 'lookup-failed' run in between must not drop the
+// stamp and re-open the window hours after the last warning, but a change to a
+// genuinely different message must still get through. A healthy check writes
+// neither, so npm going missing again later warns immediately.
+function applyNotice(result, updateCheck, previous, nowS) {
+  if (!updateCheck) return result;
+
+  result.update_check = updateCheck;
+  const lastNotice = Number(previous && previous.notice_at) || 0;
+  const lastState = (previous && previous.notice_state) || null;
+
+  if (NOTICES[updateCheck]) {
+    const windowElapsed = !lastNotice || nowS - lastNotice >= NOTICE_REPEAT_S;
+    if (PERSISTENT_NOTICES[updateCheck] || windowElapsed || lastState !== updateCheck) {
+      result.notice = NOTICES[updateCheck];
+      result.notice_at = nowS;
+    } else {
+      result.notice_at = lastNotice;
+    }
+    result.notice_state = updateCheck;
+  } else if (lastNotice) {
+    result.notice_at = lastNotice;
+    if (lastState) {
+      result.notice_state = lastState;
+    }
+  }
+  return result;
+}
+
 // The whole background check, with its side effects injected.
 //   deps.fs        — fs-like (readFileSync/writeFileSync/existsSync/openSync/…)
 //   deps.execSync  — child_process.execSync-like
@@ -103,6 +163,13 @@ function isUpdateAvailable(installed, latest) {
 //   deps.pid       — process id used to name the reclaimed stale lock
 // Returns { status, ... } describing what it did, for tests and callers.
 function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, paths, now, pid }) {
+  // Previous cache state — carries the last notice timestamp so we warn on a
+  // slow cadence instead of on every session for the rest of time.
+  let previous = null;
+  try {
+    previous = JSON.parse(fsDep.readFileSync(paths.cacheFile, 'utf8'));
+  } catch (e) {}
+
   let installed = '0.0.0';
   try {
     if (fsDep.existsSync(paths.versionFile)) {
@@ -123,16 +190,57 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, paths, now, pid }) {
     }
   } catch (e) {}
 
+  // Probe PATH before shelling out: without this, a missing npm throws ENOENT
+  // into the catch below, leaving latest === null and writing a cache that reads
+  // exactly like "up to date" — the user never learns the check is dead.
+  const hasCommand = (cmd) => {
+    try {
+      execSyncDep(probeCommand(cmd), {
+        stdio: 'ignore',
+        timeout: PROBE_TIMEOUT_MS,
+        windowsHide: true,
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // Distinct, machine-readable reason the check could not complete (null = it did).
+  let updateCheck = null;
+
   let latest = null;
-  try {
-    latest = execSyncDep(NPM_VIEW_COMMAND, {
-      encoding: 'utf8',
-      timeout: NPM_VIEW_TIMEOUT_MS,
-      windowsHide: true,
-    }).trim();
-  } catch (e) {}
+  if (hasCommand('npm')) {
+    try {
+      latest = execSyncDep(NPM_VIEW_COMMAND, {
+        encoding: 'utf8',
+        timeout: NPM_VIEW_TIMEOUT_MS,
+        windowsHide: true,
+      }).trim();
+    } catch (e) {
+      // Offline / registry error / timeout: transient, so no user-facing notice,
+      // but the cache still says the check failed rather than implying "current".
+      updateCheck = 'lookup-failed';
+    }
+  } else {
+    updateCheck = 'npm-unavailable';
+  }
 
   let updateAvailable = isUpdateAvailable(installed, latest);
+
+  // npm can be present while npx is not (npx is a separate shim on some
+  // distro-packaged Node builds). Both the auto-updater below and the manual
+  // /do:update hint shell out to npx, so probe whenever there is an update to
+  // apply — not just on the auto-update path, or a user with auto-update off
+  // would be pointed at a /do:update that cannot run.
+  const npxAvailable = updateAvailable ? hasCommand('npx') : true;
+  if (updateAvailable && !npxAvailable) {
+    updateCheck = 'npx-unavailable';
+    // Suppress the ⬆ /do:update badge: that command is itself an npx wrapper,
+    // so pointing at it here would just be a second dead end. The notice below
+    // still tells the user an update exists and how to get it.
+    updateAvailable = false;
+  }
 
   // Auto-update: apply the update instead of surfacing the statusline hint.
   // Guard it with an exclusive lock file so that when several Claude sessions
@@ -147,7 +255,7 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, paths, now, pid }) {
   // once the install completes.
   let deferred = false;
   let autoUpdated = false;
-  if (updateAvailable && autoUpdate) {
+  if (updateAvailable && autoUpdate && npxAvailable) {
     // wx = create-exclusive: succeeds for exactly one racer, throws EEXIST for
     // the rest. In the common case (no lock yet, several sessions starting at
     // once) this gives EXACT mutual exclusion — exactly one installs.
@@ -228,13 +336,14 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, paths, now, pid }) {
     return { status: 'deferred' };
   }
 
-  const result = {
+  const nowS = Math.floor(now() / 1000);
+  const result = applyNotice({
     update_available: updateAvailable,
     command: '/do:update',
     installed,
     latest: latest || 'unknown',
-    checked: Math.floor(now() / 1000),
-  };
+    checked: nowS,
+  }, updateCheck, previous, nowS);
 
   fsDep.writeFileSync(paths.cacheFile, JSON.stringify(result));
   return { status: 'written', autoUpdated, result };
@@ -276,8 +385,11 @@ if (require.main === module) {
 
 module.exports = {
   LOCK_STALE_MS,
+  NOTICE_REPEAT_S,
   NPM_VIEW_COMMAND,
   INSTALL_COMMAND,
+  NOTICES,
+  probeCommand,
   resolvePaths,
   compareVersions,
   isUpdateAvailable,

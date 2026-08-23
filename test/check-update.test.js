@@ -14,8 +14,11 @@ const { spawnSync } = require('child_process');
 
 const {
   LOCK_STALE_MS,
+  NOTICE_REPEAT_S,
   NPM_VIEW_COMMAND,
+  NOTICES,
   INSTALL_COMMAND,
+  probeCommand,
   resolvePaths,
   compareVersions,
   isUpdateAvailable,
@@ -126,10 +129,19 @@ describe('runUpdateCheck', () => {
   // execSync stub: `npm view` answers with `latest`, the install command runs
   // `onInstall` (default: succeed and bump the version file, as the real
   // installer does).
-  function makeExecSync({ latest, onInstall, npmViewThrows } = {}) {
+  // execSync stub. `missing` lists commands the PATH probe should not find;
+  // `npm view` answers with `latest`; the install command runs `onInstall`
+  // (default: succeed and bump the version file, as the real installer does).
+  function makeExecSync({ latest, onInstall, npmViewThrows, missing = [] } = {}) {
     return (command, options) => {
       calls.push(command);
       options_.push({ command, options });
+      for (const cmd of ['npm', 'npx']) {
+        if (command === probeCommand(cmd)) {
+          if (missing.includes(cmd)) throw new Error('not found');
+          return '';
+        }
+      }
       if (command === NPM_VIEW_COMMAND) {
         if (npmViewThrows) throw new Error('offline');
         return latest + '\n';
@@ -141,6 +153,12 @@ describe('runUpdateCheck', () => {
       }
       throw new Error('unexpected command: ' + command);
     };
+  }
+
+  // The probes run before every real command; assertions below care about the
+  // commands that do work, so filter the noise out.
+  function realCalls() {
+    return calls.filter((c) => c !== probeCommand('npm') && c !== probeCommand('npx'));
   }
 
   function run(execSyncStub) {
@@ -174,15 +192,17 @@ describe('runUpdateCheck', () => {
 
     run(makeExecSync({ latest: '1.10.0' }));
 
-    assert.deepEqual(calls, [
+    assert.deepEqual(realCalls(), [
       'npm view slash-do version',
       'npx -y slash-do@latest --env claude',
     ]);
-    assert.equal(options_[0].options.timeout, 5000, 'npm view must not hang session start');
-    assert.equal(options_[0].options.encoding, 'utf8');
-    assert.equal(options_[1].options.timeout, 120000,
+    const optionsFor = (command) => options_.find((c) => c.command === command).options;
+    assert.equal(optionsFor(NPM_VIEW_COMMAND).timeout, 5000, 'npm view must not hang session start');
+    assert.equal(optionsFor(NPM_VIEW_COMMAND).encoding, 'utf8');
+    assert.equal(optionsFor(INSTALL_COMMAND).timeout, 120000,
       'an unbounded install would hold the lock past LOCK_STALE_MS');
-    assert.equal(options_[1].options.stdio, 'ignore');
+    assert.equal(optionsFor(INSTALL_COMMAND).stdio, 'ignore');
+    assert.equal(optionsFor(probeCommand('npm')).timeout, 5000, 'even the PATH probe is bounded');
     assert.ok(options_.every((c) => c.options.windowsHide === true));
   });
 
@@ -190,7 +210,7 @@ describe('runUpdateCheck', () => {
     const result = run(makeExecSync({ latest: '2.0.0' }));
 
     assert.equal(result.status, 'not-installed');
-    assert.deepEqual(calls, [], 'must not hit the network when nothing is installed');
+    assert.deepEqual(realCalls(), [], 'must not hit the network when nothing is installed');
     assert.equal(fs.existsSync(paths.cacheFile), false, 'must not write a cache file');
   });
 
@@ -200,7 +220,7 @@ describe('runUpdateCheck', () => {
     const result = run(makeExecSync({ latest: '1.10.0' }));
 
     assert.equal(result.status, 'written');
-    assert.deepEqual(calls, [NPM_VIEW_COMMAND], 'must not install when auto-update is off');
+    assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND], 'must not install when auto-update is off');
     assert.deepEqual(readCache(), {
       update_available: true,
       command: '/do:update',
@@ -224,11 +244,11 @@ describe('runUpdateCheck', () => {
 
     run(makeExecSync({ latest: '2.0.0' }));
 
-    assert.deepEqual(calls, [NPM_VIEW_COMMAND]);
+    assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND]);
     assert.equal(readCache().update_available, true);
   });
 
-  it('records latest:unknown when the npm lookup fails', () => {
+  it('records latest:unknown and lookup-failed when the npm lookup fails', () => {
     writeInstalled('1.0.0');
 
     run(makeExecSync({ npmViewThrows: true }));
@@ -239,7 +259,66 @@ describe('runUpdateCheck', () => {
       installed: '1.0.0',
       latest: 'unknown',
       checked: Math.floor(NOW / 1000),
+      // Offline is transient, so it is recorded but carries no user-facing notice.
+      update_check: 'lookup-failed',
     });
+  });
+
+  it('reports npm-unavailable rather than a bare no-update result', () => {
+    writeInstalled('1.0.0');
+
+    run(makeExecSync({ latest: '2.0.0', missing: ['npm'] }));
+
+    assert.deepEqual(realCalls(), [], 'no npm on PATH means nothing to shell out to');
+    const cache = readCache();
+    assert.equal(cache.update_check, 'npm-unavailable');
+    assert.equal(cache.update_available, false);
+    assert.equal(cache.notice, NOTICES['npm-unavailable']);
+    assert.equal(cache.notice_at, Math.floor(NOW / 1000));
+  });
+
+  it('suppresses the badge and keeps warning when npx is missing', () => {
+    writeInstalled('1.0.0');
+
+    run(makeExecSync({ latest: '2.0.0', missing: ['npx'] }));
+
+    const cache = readCache();
+    assert.equal(cache.update_check, 'npx-unavailable');
+    assert.equal(cache.latest, '2.0.0', 'the newer version is still recorded');
+    // /do:update wraps npx too, so the badge would be a second dead end.
+    assert.equal(cache.update_available, false);
+    assert.equal(cache.notice, NOTICES['npx-unavailable']);
+  });
+
+  it('does not probe for npx when there is nothing to install', () => {
+    writeInstalled('2.0.0');
+
+    run(makeExecSync({ latest: '2.0.0' }));
+
+    assert.ok(!calls.includes(probeCommand('npx')), 'no update means no reason to probe npx');
+    assert.equal(readCache().update_check, undefined);
+  });
+
+  it('holds the npm-unavailable notice inside the repeat window, then warns again', () => {
+    writeInstalled('1.0.0');
+    const nowS = Math.floor(NOW / 1000);
+    const runAt = (ms) => runUpdateCheck({
+      fs,
+      execSync: makeExecSync({ latest: '2.0.0', missing: ['npm'] }),
+      paths,
+      now: () => ms,
+      pid: 4242,
+    });
+
+    runAt(NOW);
+    assert.equal(readCache().notice, NOTICES['npm-unavailable']);
+
+    runAt(NOW + 1000);
+    assert.equal(readCache().notice, undefined, 'already warned this window');
+    assert.equal(readCache().notice_at, nowS, 'and the window carries forward');
+
+    runAt(NOW + (NOTICE_REPEAT_S + 1) * 1000);
+    assert.equal(readCache().notice, NOTICES['npm-unavailable'], 'the window expires');
   });
 
   it('ignores a corrupt config file instead of throwing', () => {
@@ -248,7 +327,7 @@ describe('runUpdateCheck', () => {
 
     run(makeExecSync({ latest: '2.0.0' }));
 
-    assert.deepEqual(calls, [NPM_VIEW_COMMAND], 'corrupt config must read as auto-update off');
+    assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND], 'corrupt config must read as auto-update off');
     assert.equal(readCache().update_available, true);
   });
 
@@ -260,7 +339,7 @@ describe('runUpdateCheck', () => {
 
     const result = run(makeExecSync({ latest: '1.10.0' }));
 
-    assert.deepEqual(calls, [NPM_VIEW_COMMAND, INSTALL_COMMAND]);
+    assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND, INSTALL_COMMAND]);
     assert.equal(result.autoUpdated, true);
     assert.deepEqual(readCache(), {
       update_available: false,
@@ -295,7 +374,7 @@ describe('runUpdateCheck', () => {
     const result = run(makeExecSync({ latest: '1.10.0' }));
 
     assert.equal(result.status, 'deferred');
-    assert.deepEqual(calls, [NPM_VIEW_COMMAND], 'the lock holder installs, not us');
+    assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND], 'the lock holder installs, not us');
     assert.equal(fs.existsSync(paths.cacheFile), false,
       'a deferring session must not clobber the holder\'s result');
     assert.equal(fs.readFileSync(paths.lockFile, 'utf8'), '999',
@@ -312,7 +391,7 @@ describe('runUpdateCheck', () => {
     const result = run(makeExecSync({ latest: '1.10.0' }));
 
     assert.equal(result.status, 'written');
-    assert.deepEqual(calls, [NPM_VIEW_COMMAND, INSTALL_COMMAND]);
+    assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND, INSTALL_COMMAND]);
     assert.equal(readCache().update_available, false);
     assert.equal(fs.existsSync(paths.lockFile), false);
     assert.deepEqual(
@@ -348,7 +427,7 @@ describe('runUpdateCheck', () => {
     });
 
     assert.equal(result.status, 'written');
-    assert.deepEqual(calls, [NPM_VIEW_COMMAND], 'no lock means no install');
+    assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND], 'no lock means no install');
     assert.equal(readCache().update_available, true, 'the hint must still reach the statusline');
   });
 
@@ -378,7 +457,7 @@ describe('runUpdateCheck', () => {
       pid: 4242,
     });
 
-    assert.deepEqual(calls, [NPM_VIEW_COMMAND], 'the reclaim winner installs, not us');
+    assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND], 'the reclaim winner installs, not us');
     assert.equal(result.status, 'deferred');
     assert.equal(fs.existsSync(paths.cacheFile), false);
   });
@@ -410,7 +489,7 @@ describe('runUpdateCheck', () => {
     });
 
     assert.equal(result.status, 'written');
-    assert.deepEqual(calls, [NPM_VIEW_COMMAND], 'we never took the lock, so we must not install');
+    assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND], 'we never took the lock, so we must not install');
     assert.equal(readCache().update_available, true);
   });
 
@@ -447,7 +526,7 @@ describe('runUpdateCheck', () => {
 
     assert.equal(opens, 2, 'the reclaim must have retried the acquire');
     assert.equal(result.status, 'deferred');
-    assert.deepEqual(calls, [NPM_VIEW_COMMAND], 'the new lock holder installs, not us');
+    assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND], 'the new lock holder installs, not us');
     assert.equal(fs.existsSync(paths.cacheFile), false);
   });
 
@@ -465,7 +544,7 @@ describe('runUpdateCheck', () => {
 
     run(makeExecSync({ latest: '1.10.0' }));
 
-    assert.deepEqual(calls, [NPM_VIEW_COMMAND]);
+    assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND]);
     assert.equal(fs.existsSync(paths.lockFile), false);
   });
 });
@@ -584,5 +663,191 @@ describe('check-update worker entrypoint', { skip: process.platform === 'win32' 
     });
 
     assert.equal(proc.status, 0, proc.stderr);
+  });
+});
+
+// ── spawn-level: no npm / no npx on PATH ────────────────────────────
+//
+// The curl installer (install.sh) is npm-free, so this hook has to run on
+// machines where npm/npx are simply not on PATH. These tests drive the real
+// hook with a PATH that resolves nothing, which is how that user machine looks.
+
+// Synchronous sleep — these tests wait on a detached background child, and the
+// node:test callbacks here are sync.
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+const hook = HOOK_PATH;
+
+function makeHome(installedVersion) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-check-update-'));
+  fs.mkdirSync(path.join(home, '.claude', 'cache'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.claude', '.slashdo-version'), `${installedVersion}\n`, 'utf8');
+  return home;
+}
+
+function cacheFileFor(home) {
+  return path.join(home, '.claude', 'cache', 'slashdo-update-check.json');
+}
+
+// A stub npm that reports a newer version, so the hook sees a real pending update.
+function makeFakeNpmBin() {
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-fake-npm-'));
+  const fakeNpm = path.join(binDir, 'npm');
+  fs.writeFileSync(fakeNpm, '#!/bin/sh\necho 99.0.0\n', 'utf8');
+  fs.chmodSync(fakeNpm, 0o755);
+  return binDir;
+}
+
+function readCacheRaw(home) {
+  try {
+    return fs.readFileSync(cacheFileFor(home), 'utf8');
+  } catch (e) {
+    return null;
+  }
+}
+
+// The hook spawns a detached background child, so the cache lands after the
+// parent exits. Poll for it rather than guessing at a sleep duration.
+function runHookAndReadCache(home, { pathValue, settleMs = 3000 } = {}) {
+  const before = readCacheRaw(home);
+  const result = spawnSync(process.execPath, [hook], {
+    encoding: 'utf8',
+    timeout: 10000,
+    // Default PATH resolves nothing: no npm, no npx. node is spawned by absolute path.
+    env: { HOME: home, USERPROFILE: home, PATH: pathValue || path.join(home, 'no-such-bin') },
+  });
+  assert.equal(result.status, 0, 'hook must never fail the session start');
+
+  const deadline = Date.now() + 8000;
+  const settleUntil = Date.now() + settleMs;
+  while (Date.now() < deadline) {
+    const now = readCacheRaw(home);
+    // A changed body proves the child ran. An unchanged one is also a legitimate
+    // outcome (a re-run can write the same bytes), so accept it once the child has
+    // had time to finish rather than polling mtime, whose filesystem granularity
+    // could hide the second write entirely.
+    if (now !== null && (now !== before || Date.now() >= settleUntil)) {
+      try {
+        return JSON.parse(now);
+      } catch (e) {} // mid-write, try again
+    }
+    sleep(25);
+  }
+  throw new Error('background update check never wrote the cache file');
+}
+
+describe('slashdo update check without npm', () => {
+  it('records npm-unavailable instead of a bare "no update" result', () => {
+    const home = makeHome('1.0.0');
+
+    try {
+      const cache = runHookAndReadCache(home);
+
+      assert.equal(cache.update_check, 'npm-unavailable');
+      assert.equal(cache.update_available, false);
+      assert.equal(cache.latest, 'unknown');
+      assert.equal(cache.installed, '1.0.0');
+      assert.match(cache.notice, /npm/);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('does not repeat the notice on the next session', () => {
+    const home = makeHome('1.0.0');
+
+    try {
+      const first = runHookAndReadCache(home);
+      assert.ok(first.notice, 'first run should warn');
+      assert.ok(first.notice_at > 0, 'first run should stamp when it warned');
+
+      const second = runHookAndReadCache(home);
+      assert.equal(second.update_check, 'npm-unavailable', 'state stays readable for /do:help');
+      assert.equal(second.notice, undefined, 'already warned — no per-session statusline nag');
+      assert.equal(second.notice_at, first.notice_at, 'suppression window carries forward');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('warns again once the suppression window has passed', () => {
+    // A notice can be written and never rendered (custom statusline, or a second
+    // session rewrites the cache first), so suppression has to expire.
+    const home = makeHome('1.0.0');
+
+    try {
+      const first = runHookAndReadCache(home);
+      const stale = { ...first, notice_at: first.notice_at - 8 * 24 * 60 * 60 };
+      delete stale.notice;
+      fs.writeFileSync(cacheFileFor(home), JSON.stringify(stale));
+
+      const again = runHookAndReadCache(home);
+      assert.match(again.notice, /npm/, 'a week-old notice should fire again');
+      assert.ok(again.notice_at > stale.notice_at, 'and re-stamp the window');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('flags npx-unavailable when an update exists but npx is missing', { skip: process.platform === 'win32' }, () => {
+    // Auto-update is OFF here: the ⬆ /do:update hint the user would otherwise be
+    // shown also runs npx, so the missing shim has to be reported on this path too.
+    const home = makeHome('1.0.0');
+    const binDir = makeFakeNpmBin();
+
+    try {
+      const cache = runHookAndReadCache(home, { pathValue: binDir });
+
+      assert.equal(cache.update_check, 'npx-unavailable');
+      assert.equal(cache.latest, '99.0.0', 'the newer version is still recorded');
+      assert.match(cache.notice, /npx/);
+      // No ⬆ badge: /do:update wraps npx, so it would be a second dead end.
+      assert.equal(cache.update_available, false);
+
+      // With the badge suppressed, the notice is the only signal left — it has to
+      // survive into later sessions instead of being rate-limited into silence.
+      const next = runHookAndReadCache(home, { pathValue: binDir });
+      assert.match(next.notice, /npx/, 'a pending, unappliable update keeps warning');
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('warns again when the reason changes, without waiting out the window', { skip: process.platform === 'win32' }, () => {
+    const home = makeHome('1.0.0');
+    const binDir = makeFakeNpmBin();
+
+    try {
+      const withNpm = runHookAndReadCache(home, { pathValue: binDir });
+      assert.equal(withNpm.notice_state, 'npx-unavailable');
+
+      // npm disappears too: a different, newly-true message the user has not seen.
+      const withoutNpm = runHookAndReadCache(home);
+      assert.equal(withoutNpm.update_check, 'npm-unavailable');
+      assert.match(withoutNpm.notice, /npm/, 'a new reason is not swallowed by the window');
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('stays silent when slashdo is not installed', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-check-update-none-'));
+    fs.mkdirSync(path.join(home, '.claude', 'cache'), { recursive: true });
+
+    try {
+      const result = spawnSync(process.execPath, [hook], {
+        encoding: 'utf8',
+        timeout: 10000,
+        env: { HOME: home, USERPROFILE: home, PATH: path.join(home, 'no-such-bin') },
+      });
+
+      assert.equal(result.status, 0);
+      sleep(500);
+      assert.ok(!fs.existsSync(cacheFileFor(home)), 'no version file means no cache write');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });
