@@ -147,6 +147,120 @@ existing issue unless the new finding genuinely changes its category or severity
 Everything else about the command is unchanged: in issue mode it simply files
 labeled issues wherever it would have written `PLAN.md` lines.
 
+## Bulk filing — spool the bodies, dedup on an index
+
+Everything above describes filing **one** item, and a run that files a handful — a
+review that deferred two findings, a depfree run with six removable packages —
+should just do that inline and stop reading here.
+
+**Apply this section only when a run expects to file more than ~20 issues at once**
+— an audit whose parallel agents each return dozens of findings. Below that
+threshold the inline path is simpler and this machinery costs more than it saves.
+
+At that scale the naïve shape has the orchestrator hold every finding's full body in
+context and then re-emit each one into a `gh issue create` call. **The re-emission
+is both the expensive part and the inaccurate part**: the body was already written
+once, by the agent that did the investigation, and regenerating a hundred of them
+serially is where bodies get truncated, evidence gets paraphrased away, and findings
+get silently dropped off the end. The fix is to split each finding into a **key** and
+a **body**, and never let the body reach the orchestrator at all.
+
+### 1. Producing agents spool bodies to disk
+
+The orchestrator creates a per-run spool directory before dispatch and passes it to
+every producing agent:
+
+```bash
+SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_DIR"
+```
+
+**Record the printed path in run state and pass that literal path to every agent.**
+A shell variable does not survive from one tool call to the next, so re-deriving
+`SPOOL_DIR` later gives a different directory and the filer agents find nothing.
+
+Each agent writes its findings to `$SPOOL_DIR/<agent-slug>.md` — one file per agent,
+so no two agents write the same path. Each finding is a **ready-to-file issue body**
+under an id heading, not raw notes: whoever files it must be able to lift the block
+out and hand it straight to `--body-file` without rewriting a word.
+
+```markdown
+## [<agent-slug>-01] <Title — a self-contained, claimable task>
+severity: high
+category: security
+labels: model:light, effort:medium
+files: src/routes/pr.js:142
+
+<the issue body: what is wrong, the quoted evidence, why it matters, the
+suggested fix, and enough context for someone to pick it up cold>
+
+## [<agent-slug>-02] <Title>
+...
+```
+
+The id only has to be unique within the run — `<agent-slug>-<NN>` is enough. It is a
+handle for the orchestrator, not a plan slug (issue mode assigns no slugs, per
+[plan-id-format.md](./plan-id-format.md)) and not the final ID (the issue number is).
+
+### 2. Agents return an index, not bodies
+
+Each agent's **return value** is one line per finding and nothing else:
+
+```
+<id> | <SEVERITY> | <category> | <file:line> | <one-line title>
+```
+
+That is roughly a twentieth of what the bodies cost, and it is a *better* input for
+the next step than prose — dedup, severity ranking, and ownership all key off
+exactly these fields. An agent that finds nothing returns an empty index and writes
+no file.
+
+### 3. The orchestrator decides on the index alone
+
+Everything only the orchestrator can see happens here, against the index:
+
+- **Cross-agent dedup** — two agents flagging the same `file:line` is normal and
+  expected; collapse to one, keeping the more specific title.
+- **Dedup against `EXISTING_ISSUES`**, per "Recording a plan item" above.
+- Any severity adjustment, ownership mapping, or ordering the command specifies.
+
+This is the step that makes per-agent filing wrong: an agent that files its own
+findings as it goes cannot dedup against agents that have not returned yet, and
+overlapping audit agents are a design feature, not an accident. The output here is a
+surviving id list grouped by category. **The orchestrator never opens a spool file.**
+
+### 4. Filer agents file, in parallel, one per category
+
+Dispatch one filer agent per category, in parallel, giving each:
+
+- the surviving ids for its category, and the spool file each id lives in,
+- `CLI_TOOL`, `PLAN_LABEL`, and the label rules from "Labels, not title brackets",
+- the `URL` / `${URL##*/}` number-capture form from "Recording a plan item".
+
+For each id the filer extracts that block from the spool file into its own
+`--body-file` temp file, creates any missing labels, creates the issue, and captures
+the number. It returns only `<id> -> #<number>` lines. **A filer never rewrites a
+body** — it moves bytes from the spool to the tracker. If a block is malformed or its
+id is missing from the spool, the filer reports `<id> -> ERROR: <reason>` and moves
+on rather than inventing a replacement.
+
+Category is the right partition because step 3 already assigned each surviving
+finding to exactly one category, so no two filers can race on the same finding.
+
+**Rate limits.** Issue creation is subject to GitHub/GitLab secondary rate limits,
+which parallel filers trip far more easily than a serial loop does. Give every filer
+this rule verbatim: on a `403` mentioning a secondary rate limit, or a `429`, sleep
+60s and retry that one issue, up to 3 attempts; on the third failure report the id as
+`ERROR: rate-limited` and continue with the rest. Keep the fan-out modest — one agent
+per category is already bounded, so never shard a single category across agents.
+
+### 5. The orchestrator reports
+
+Merge the filers' `<id> -> #<number>` maps and report created, reused (deduped), and
+errored counts with their numbers, exactly as the single-item path would. **Any id
+that came back `ERROR` was not filed** — list those explicitly with the spool path so
+the user can file them by hand, and never report an errored finding as filed. Leave
+`SPOOL_DIR` on disk when any error occurred; otherwise remove it.
+
 ## The dispatch hint (`model:` + `effort:`)
 
 Two optional labels that record **how to run the work**, not how big it is. They are
