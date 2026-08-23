@@ -1,16 +1,16 @@
 'use strict';
 
-// Canonical ~/.claude/settings.json mutation for slashdo's SessionStart hook and
-// statusline. This lives in its own module — with no dependency beyond fs/path —
-// so BOTH install paths share one implementation:
+// Canonical settings.json mutation for slashdo's SessionStart hook and
+// statusline. This lives in its own module — with no dependency beyond Node
+// builtins — so BOTH install paths share one implementation:
 //
 //   * the npm/npx path requires it from src/installer.js
 //   * the curl path (install.sh / uninstall.sh) fetches this single file and
 //     calls it via `node -e`, instead of hand-translating the algorithm into a
 //     shell-embedded copy that silently drifts (see issue #166)
 //
-// Keep it dependency-free: any require() added here must also be fetched by the
-// curl installer, so a new import breaks the no-npm path.
+// Keep it dependency-free: anything this file requires must also be fetched by
+// the curl installer, so a new import of a sibling module breaks the no-npm path.
 
 const fs = require('fs');
 const os = require('os');
@@ -22,7 +22,9 @@ const SLASHDO_HOOKS = ['slashdo-check-update.js', 'slashdo-statusline.js'];
 // install.sh caches this module here so uninstall.sh can deregister offline.
 const SETTINGS_HOOKS_CACHE = '.slashdo-settings-hooks.js';
 
-// Read settings.json, or null when it cannot be trusted. An empty or
+const shellQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+
+// Read settings.json, or throw when it cannot be trusted. An empty or
 // whitespace-only file reads as {}: it provably holds nothing to lose, and
 // treating it as corruption would block both install and uninstall.
 function readSettings(settingsPath) {
@@ -60,7 +62,7 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
   // Register SessionStart hook for slashdo-check-update.js
   const updateCheckHook = hookFiles.find(h => h.name === 'slashdo-check-update.js');
   if (updateCheckHook) {
-    const hookCommand = `node "${path.join(env.hooksDir, updateCheckHook.name)}"`;
+    const hookCommand = `node ${shellQuote(path.join(env.hooksDir, updateCheckHook.name))}`;
 
     // Absent (or null) is ours to create — neither carries user data. Any other
     // non-object is a value the user put there, so leave it exactly as it is: a
@@ -123,7 +125,7 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
   // Configure statusline: upgrade gsd-statusline → slashdo-statusline (superset)
   const statuslineHook = hookFiles.find(h => h.name === 'slashdo-statusline.js');
   if (statuslineHook) {
-    const statuslineCommand = `node "${path.join(env.hooksDir, statuslineHook.name)}"`;
+    const statuslineCommand = `node ${shellQuote(path.join(env.hooksDir, statuslineHook.name))}`;
     const currentCmd = typeof settings.statusLine?.command === 'string' ? settings.statusLine.command : '';
 
     if (!settings.statusLine) {
@@ -198,7 +200,7 @@ function deregisterHooksFromSettings(env, dryRun) {
     // Restore gsd-statusline if its hook file still exists
     const gsdHookPath = path.join(env.hooksDir, 'gsd-statusline.js');
     if (fs.existsSync(gsdHookPath)) {
-      settings.statusLine = { type: 'command', command: `node "${gsdHookPath}"` };
+      settings.statusLine = { type: 'command', command: `node ${shellQuote(gsdHookPath)}` };
       actions.push({ name: 'settings/statusLine', status: dryRun ? 'would downgrade (slashdo→gsd)' : 'downgraded (slashdo→gsd)' });
     } else {
       delete settings.statusLine;
@@ -220,11 +222,11 @@ function deregisterHooksFromSettings(env, dryRun) {
 // hook list, and config default in shell-embedded JS of their own. Keeping the
 // arguments here too is the point: an extraction that left the inputs to the
 // shell would just relocate the drift it set out to remove.
-// test/environments.test.js pins claudeEnv() against ENVIRONMENTS.claude, which
-// owns the same paths for the npm path.
 
 function claudeEnv() {
-  const claudeDir = path.join(os.homedir(), '.claude');
+  // Mirrors CLAUDE_DIR in src/environments.js — test/environments.test.js pins
+  // the two together.
+  const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   return {
     settingsFile: path.join(claudeDir, 'settings.json'),
     hooksDir: path.join(claudeDir, 'hooks'),

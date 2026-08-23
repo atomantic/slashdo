@@ -44,7 +44,10 @@ function statusOf(actions, name) {
   return actions.find((a) => a.name === name)?.status;
 }
 
-const slashdoStatusline = (env) => `node "${path.join(env.hooksDir, 'slashdo-statusline.js')}"`;
+// Matches src/settings-hooks.js: hook commands are shell-quoted so a path with
+// a space or a quote in it still runs.
+const slashdoStatusline = (env) =>
+  `node '${path.join(env.hooksDir, 'slashdo-statusline.js')}'`;
 
 // ── Malformed shapes are skipped, never clobbered ───────────────────
 
