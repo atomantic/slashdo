@@ -4,76 +4,13 @@
 # shellcheck disable=SC2059,SC2207
 set -euo pipefail
 
-REPO="atomantic/slashdo"
-BRANCH="main"
-BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"
-
-# Detect a local repo: only when this script is a real file on disk that sits
-# alongside commands/ and lib/. Piped into bash (the documented curl usage)
-# BASH_SOURCE[0] is unset, so ${BASH_SOURCE[0]:-} must be guarded — an
-# unguarded expansion both trips `set -u` and resolves SCRIPT_DIR to the
-# caller's cwd, which would let a stray ./src or ./commands tree next to the
-# user's shell supply the files this script installs and executes.
-SCRIPT_PATH="${BASH_SOURCE[0]:-}"
-SCRIPT_DIR=""
-if [ -n "$SCRIPT_PATH" ] && [ -f "$SCRIPT_PATH" ]; then
-  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
-fi
-LOCAL_MODE=false
-if [ -n "$SCRIPT_DIR" ] && [ -d "$SCRIPT_DIR/commands/do" ] && [ -d "$SCRIPT_DIR/lib" ]; then
-  LOCAL_MODE=true
-fi
-
-# Fetch a file: local cp if available, otherwise curl from GitHub
-# Usage: fetch_file <repo_relative_path> <destination>
-fetch_file() {
-  local src_path="$1"
-  local dest="$2"
-  if [ "$LOCAL_MODE" = true ] && [ -f "$SCRIPT_DIR/$src_path" ]; then
-    cp "$SCRIPT_DIR/$src_path" "$dest" 2>/dev/null && return 0
-  fi
-  # Fallback to curl (remote mode, or local cp failed)
-  curl -fsSL "$BASE_URL/$src_path" -o "$dest" 2>/dev/null
-}
-
-# The copy install.sh left in the hooks dir, preferred over any network fetch.
-SETTINGS_HOOKS_CACHE=".slashdo-settings-hooks.js"
-
-# Set by uninstall_claude when it refuses to remove files it could not deregister.
-claude_incomplete=false
-
-# Scratch space for src/settings-hooks.js, cleaned up however we exit.
-MOD_DIR="$(mktemp -d)"
-trap 'rm -rf "$MOD_DIR"' EXIT
+CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
 CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
 GREEN='\033[0;32m'
 DIM='\033[2m'
 RESET='\033[0m'
-
-# Run the deregistration through whichever copy of the module is in MOD_DIR.
-run_deregister() {
-  node -e '
-    const settingsHooks = require(process.argv[1]);
-    for (const action of settingsHooks.removeDefaultHooks(false)) {
-      process.stdout.write(settingsHooks.formatAction(action) + "\n");
-    }
-  ' "$MOD_DIR/settings-hooks.js" 2>"$MOD_DIR/node.err"
-}
-
-# Print one line per action src/settings-hooks.js reported. The severity is a
-# token the module emits, so this never re-infers it from the message text.
-print_settings_actions() {
-  local line
-  while IFS= read -r line; do
-    case "$line" in
-      "warn "*) printf "    ${YELLOW}%s${RESET}\n" "${line#warn }" ;;
-      "ok "*)   printf "    ${GREEN}%s${RESET}\n" "${line#ok }" ;;
-      *)        if [ -n "$line" ]; then printf "    %s\n" "$line"; fi ;;
-    esac
-  done <<< "$1"
-}
 
 banner() {
   printf "\n"
@@ -97,6 +34,7 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
 # NOTE: keep in sync with install.sh LIBS — see comment there.
 LIBS=(
+  better-cleanup better-pr-and-ci better-review-loop better-verification
   ci-flake-handling code-review-checklist copilot-review-loop
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
@@ -116,60 +54,12 @@ HOOKS=(slashdo-check-update slashdo-statusline)
 OLD_HOOKS=(update-check)
 
 uninstall_claude() {
-  local target_cmd="$HOME/.claude/commands/do"
-  local target_lib="$HOME/.claude/lib"
-  local target_hooks="$HOME/.claude/hooks"
+  local target_cmd="$CLAUDE_CONFIG_DIR/commands/do"
+  local target_lib="$CLAUDE_CONFIG_DIR/lib"
+  local target_hooks="$CLAUDE_CONFIG_DIR/hooks"
   local count=0
 
   printf "  Uninstalling from ${GREEN}Claude Code${RESET}...\n"
-
-  # Deregister from settings.json FIRST, using the canonical src/settings-hooks.js
-  # — the same module the npm uninstaller requires (see install.sh). This runs
-  # before any file is removed: if the fetch or node call fails, settings.json
-  # must not be left referencing hooks that are already gone.
-  if [ ! -f "$HOME/.claude/settings.json" ]; then
-    : # Nothing to deregister — do not make a missing file a reason to fail.
-  elif ! command -v node &>/dev/null; then
-    printf "    ${YELLOW}settings.json: Node.js not found — nothing was removed${RESET}\n"
-    printf "    ${DIM}(install Node.js and re-run, or delete ~/.claude/commands/do, ~/.claude/lib,${RESET}\n"
-    printf "    ${DIM} ~/.claude/hooks/slashdo-* and the settings.json lines mentioning slashdo- by hand)${RESET}\n"
-    claude_incomplete=true
-    return 0
-  else
-    # Prefer the copy install.sh cached (so an offline machine can uninstall),
-    # but fall back to the network if that copy is corrupt or predates a rename
-    # in this module — otherwise a bad cache would block uninstall forever.
-    local node_result deregistered=false
-    if cp "$target_hooks/$SETTINGS_HOOKS_CACHE" "$MOD_DIR/settings-hooks.js" 2>/dev/null &&
-       node_result=$(run_deregister); then
-      deregistered=true
-    elif fetch_file "src/settings-hooks.js" "$MOD_DIR/settings-hooks.js" &&
-         node_result=$(run_deregister); then
-      deregistered=true
-    fi
-
-    if [ "$deregistered" = false ]; then
-      printf "    ${YELLOW}settings.json: could not deregister — nothing was removed${RESET}\n"
-      printf "    ${DIM}(re-run with network access or from a checkout; if it persists, delete${RESET}\n"
-      printf "    ${DIM} %s and try again)${RESET}\n" "$target_hooks/$SETTINGS_HOOKS_CACHE"
-      if [ -s "$MOD_DIR/node.err" ]; then sed -e 's/^/      /' "$MOD_DIR/node.err" >&2; fi
-      claude_incomplete=true
-      return 0
-    fi
-
-    print_settings_actions "$node_result"
-    # A warn line means the module declined to touch settings.json — removing
-    # the files it still references is exactly what this ordering prevents.
-    # Line-anchored: only a line that starts with the severity token counts,
-    # so a status that merely contains the word cannot trip this.
-    case $'\n'"$node_result" in
-      *$'\n'"warn "*)
-        printf "    ${YELLOW}settings.json was left as-is — nothing was removed${RESET}\n"
-        claude_incomplete=true
-        return 0
-        ;;
-    esac
-  fi
 
   for cmd in "${COMMANDS[@]}" "${OLD_COMMANDS[@]}"; do
     if [ -f "$target_cmd/$cmd.md" ]; then
@@ -195,12 +85,6 @@ uninstall_claude() {
     fi
   done
 
-  if [ -f "$target_hooks/$SETTINGS_HOOKS_CACHE" ]; then
-    rm -f "$target_hooks/$SETTINGS_HOOKS_CACHE"
-    printf "    removed: hook/%-17s${GREEN}ok${RESET}\n" "$SETTINGS_HOOKS_CACHE"
-    count=$((count + 1))
-  fi
-
   for old in "${OLD_HOOKS[@]}"; do
     if [ -f "$target_hooks/$old.md" ]; then
       rm -f "$target_hooks/$old.md"
@@ -210,22 +94,89 @@ uninstall_claude() {
   done
 
   # Remove cache file
-  if [ -f "$HOME/.claude/cache/slashdo-update-check.json" ]; then
-    rm -f "$HOME/.claude/cache/slashdo-update-check.json"
+  if [ -f "$CLAUDE_CONFIG_DIR/cache/slashdo-update-check.json" ]; then
+    rm -f "$CLAUDE_CONFIG_DIR/cache/slashdo-update-check.json"
     printf "    removed: cache/slashdo-update-check.json ${GREEN}ok${RESET}\n"
     count=$((count + 1))
   fi
 
-  if [ -f "$HOME/.claude/.slashdo-version" ]; then
-    rm -f "$HOME/.claude/.slashdo-version"
+  if [ -f "$CLAUDE_CONFIG_DIR/.slashdo-version" ]; then
+    rm -f "$CLAUDE_CONFIG_DIR/.slashdo-version"
     printf "    removed: .slashdo-version        ${GREEN}ok${RESET}\n"
     count=$((count + 1))
   fi
 
-  if [ -f "$HOME/.claude/.slashdo-config.json" ]; then
-    rm -f "$HOME/.claude/.slashdo-config.json"
+  if [ -f "$CLAUDE_CONFIG_DIR/.slashdo-config.json" ]; then
+    rm -f "$CLAUDE_CONFIG_DIR/.slashdo-config.json"
     printf "    removed: .slashdo-config.json    ${GREEN}ok${RESET}\n"
     count=$((count + 1))
+  fi
+
+  # Deregister from settings.json (requires Node.js)
+  if command -v node &>/dev/null; then
+    if node -e '
+      const fs = require("fs");
+      const path = require("path");
+      const home = require("os").homedir();
+      const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(home, ".claude");
+      const settingsPath = path.join(claudeDir, "settings.json");
+
+      if (!fs.existsSync(settingsPath)) process.exit(0);
+
+      let settings;
+      try {
+        settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+      } catch (e) {
+        process.stdout.write("    skipped settings.json deregistration (parse error)\n");
+        process.exit(0);
+      }
+      let modified = false;
+
+      if (settings.hooks && Array.isArray(settings.hooks.SessionStart)) {
+        var emptiedByUs = {};
+        for (var i = 0; i < settings.hooks.SessionStart.length; i++) {
+          var group = settings.hooks.SessionStart[i];
+          if (!group || typeof group !== "object") continue;
+          if (Array.isArray(group.hooks)) {
+            var before = group.hooks.length;
+            group.hooks = group.hooks.filter(function(h) {
+              if (!h || typeof h !== "object") return true;
+              return typeof h.command !== "string" || h.command.indexOf("slashdo-check-update") === -1;
+            });
+            if (group.hooks.length < before) {
+              modified = true;
+              if (group.hooks.length === 0) emptiedByUs[i] = true;
+            }
+          }
+        }
+        settings.hooks.SessionStart = settings.hooks.SessionStart.filter(function(g, i) {
+          return !emptiedByUs[i];
+        });
+        if (settings.hooks.SessionStart.length === 0) delete settings.hooks.SessionStart;
+        if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
+      }
+
+      if (settings.statusLine && settings.statusLine.command &&
+          settings.statusLine.command.indexOf("slashdo-statusline") !== -1) {
+        var hooksDir = path.join(claudeDir, "hooks");
+        var gsdHookPath = path.join(hooksDir, "gsd-statusline.js");
+        if (fs.existsSync(gsdHookPath)) {
+          settings.statusLine = { type: "command", command: "node \"" + gsdHookPath + "\"" };
+        } else {
+          delete settings.statusLine;
+        }
+        modified = true;
+      }
+
+      if (modified) {
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+        process.stdout.write("    deregistered from settings.json\n");
+      }
+    '; then
+      : # deregistration handled inside node
+    else
+      printf "    ${YELLOW}settings.json deregistration failed${RESET}\n"
+    fi
   fi
 
   if [ $count -eq 0 ]; then
@@ -385,7 +336,7 @@ uninstall_gemini_legacy() {
 
 detect_envs() {
   local envs=()
-  [ -d "$HOME/.claude" ] && envs+=(claude)
+  [ -d "$CLAUDE_CONFIG_DIR" ] && envs+=(claude)
   [ -d "$HOME/.config/opencode" ] && envs+=(opencode)
   [ -d "$HOME/.gemini/antigravity-cli" ] && envs+=(antigravity)
   [ -d "$HOME/.codex" ] && envs+=(codex)
@@ -417,13 +368,6 @@ for env in "${envs[@]}"; do
   esac
   printf "\n"
 done
-
-if [ "$claude_incomplete" = true ]; then
-  printf "  ${YELLOW}Incomplete:${RESET} settings.json could not be updated, so nothing was removed\n"
-  printf "  from ~/.claude — deleting the files first would strand settings.json entries\n"
-  printf "  pointing at them. Re-run this script once Node.js and the source are reachable.\n\n"
-  exit 1
-fi
 
 printf "  ${GREEN}Done!${RESET} All slashdo commands have been removed.\n"
 printf "  ${DIM}To reinstall: curl -fsSL https://raw.githubusercontent.com/atomantic/slashdo/main/install.sh | bash${RESET}\n\n"

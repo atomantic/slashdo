@@ -3,12 +3,14 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const readline = require('readline');
-const { detectInstalled, getEnv, allEnvNames, allEnvAliases, canonicalEnvName, ENVIRONMENTS } = require('../src/environments');
+const { detectInstalled, getEnv, allEnvNames, allEnvAliases, canonicalEnvName, ENVIRONMENTS, ALIASES } = require('../src/environments');
 const { install, list } = require('../src/installer');
 const { readConfig } = require('../src/config');
 
 const PACKAGE_DIR = path.resolve(__dirname, '..');
+const HOME = os.homedir();
 
 const BANNER = `
   \x1b[36m    ██╗\x1b[33m██████╗  ██████╗ \x1b[0m
@@ -21,6 +23,20 @@ const BANNER = `
 `;
 
 function usage() {
+  const aliasesByEnvironment = Object.entries(ALIASES).reduce((aliases, [alias, environment]) => {
+    (aliases[environment] ||= []).push(alias);
+    return aliases;
+  }, {});
+  const environmentHelp = Object.entries(ENVIRONMENTS).map(([key, env]) => {
+    const aliases = aliasesByEnvironment[key];
+    const aliasText = aliases?.length ? `  [aliases: ${aliases.join(', ')}]` : '';
+    const relativeCommandsDir = path.relative(HOME, env.commandsDir);
+    const commandsDir = relativeCommandsDir && !relativeCommandsDir.startsWith(`..${path.sep}`)
+      ? `~${path.sep}${relativeCommandsDir}`
+      : env.commandsDir;
+    return `  ${key.padEnd(12)} ${env.name.padEnd(16)} (${commandsDir})${aliasText}`;
+  }).join('\n');
+
   console.log(BANNER);
   console.log(`Usage:
   npx slash-do@latest                          Install/update all, auto-detect envs
@@ -42,11 +58,7 @@ Options:
   --help          Show this help message
 
 Environments:
-  claude       Claude Code      (~/.claude/commands/)
-  opencode     OpenCode         (~/.config/opencode/commands/)
-  antigravity  Antigravity CLI  (~/.gemini/antigravity-cli/skills/)  [aliases: gemini, agy]
-  codex        Codex            (~/.codex/skills/)
-  grok         Grok Build       (~/.grok/skills/)
+${environmentHelp}
 `);
 }
 
