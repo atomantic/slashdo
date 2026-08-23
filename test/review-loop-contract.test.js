@@ -459,55 +459,60 @@ describe('review-loop parse contracts', () => {
     // full 3-step fallback chain. Eight sites used to re-type a shortened 2-step copy
     // that skipped the `gh repo view` fallback, so a repo with no parsable origin
     // silently polled github.com instead of the Enterprise host. Assert the partial
-    // still carries the chain, that every GH_HOST-deriving command pulls it in via the
-    // runtime include, and that nobody re-types the derivation inline.
+    // still carries the chain, that every command whose `gh api` calls need the host
+    // pulls it in via the runtime include, and that nobody re-types the derivation.
     const partial = readLib('gh-host.md');
     assert.match(partial, /GH_HOST=\$\(git remote get-url origin/);
     assert.match(partial, /gh repo view --json url --jq '\.url'/);
     assert.match(partial, /\|\| GH_HOST=github\.com/);
 
-    const GH_HOST_COMMANDS = [
-      'pr.md', 'next.md', 'review.md', 'release.md', 'rpr.md',
-      'better.md', 'better-swift.md', 'depfree.md',
-    ];
-    for (const name of GH_HOST_COMMANDS) {
-      assert.match(
-        readCommand(name),
-        /!`cat ~\/\.claude\/lib\/gh-host\.md`/,
-        `${name} must include lib/gh-host.md rather than restating the derivation`,
-      );
-    }
+    const GH_HOST_INCLUDE = /!`cat ~\/\.claude\/lib\/gh-host\.md`/;
+    const CAT_INCLUDE = /!`cat ~\/\.claude\/lib\/([A-Za-z0-9._-]+\.md)`/g;
+    const HOSTNAME_USE = /gh api --hostname/;
 
-    // The inline shortcut, in any of its drifted spellings (`GH_HOST` or rpr's old
-    // `HOST`). next.md legitimately parses the origin host once as ORIGIN_HOST to pick
-    // gh vs glab BEFORE any GH_HOST exists (gh-host.md's own `gh repo view` fallback is
-    // GitHub-only, so it cannot do that job) — that parse is allowed; assigning a bare
-    // github.com fallback outside the partial is not.
-    const DRIFTED = /\[ -n "\$(?:GH_)?HOST" \] \|\| (?:GH_)?HOST=github\.com/;
-    for (const name of [...GH_HOST_COMMANDS, 'plan-task.md']) {
-      assert.doesNotMatch(
-        readCommand(name),
-        DRIFTED,
-        `${name} must not hand-copy the GH_HOST fallback chain`,
-      );
-    }
-    assert.doesNotMatch(readLib('epic-children.md'), DRIFTED);
+    // A file needs GH_HOST if it calls `gh api --hostname` itself or inlines a lib
+    // that does (gh-host.md itself only documents the flag, so it doesn't count).
+    const libNeedsHost = (name, seen = new Set()) => {
+      if (name === 'gh-host.md' || seen.has(name)) return false;
+      seen.add(name);
+      const body = readLib(name);
+      if (HOSTNAME_USE.test(body)) return true;
+      return [...body.matchAll(CAT_INCLUDE)].some(([, dep]) => libNeedsHost(dep, seen));
+    };
 
-    // Every command that pulls in lib/epic-children.md must also pull in gh-host.md:
-    // that partial's `gh api --hostname "$GH_HOST"` calls no longer carry a derivation
-    // of their own, so a consumer that skips the include would run them with an empty
-    // host. Derived from the tree, not hardcoded, so a new consumer fails here.
+    // Derived from the tree, never hardcoded: a new command (or a newly-included lib)
+    // that reaches a `gh api --hostname` call must carry the include or fail here.
     const commandsDir = path.join(__dirname, '..', 'commands', 'do');
-    const epicConsumers = fs.readdirSync(commandsDir)
-      .filter((f) => f.endsWith('.md'))
-      .filter((f) => /!`cat ~\/\.claude\/lib\/epic-children\.md`/.test(readCommand(f)));
-    assert.ok(epicConsumers.length > 0, 'epic-children.md must have at least one consumer');
-    for (const name of epicConsumers) {
+    const commands = fs.readdirSync(commandsDir).filter((f) => f.endsWith('.md'));
+    const needsHost = commands.filter((name) => {
+      const body = readCommand(name);
+      return HOSTNAME_USE.test(body)
+        || [...body.matchAll(CAT_INCLUDE)].some(([, dep]) => libNeedsHost(dep));
+    });
+    assert.ok(
+      needsHost.length >= 8,
+      `expected the GH_HOST-dependent command set to stay broad, got ${needsHost.join(', ')}`,
+    );
+    for (const name of needsHost) {
       assert.match(
         readCommand(name),
-        /!`cat ~\/\.claude\/lib\/gh-host\.md`/,
-        `${name} includes epic-children.md, so it must also include gh-host.md to define GH_HOST`,
+        GH_HOST_INCLUDE,
+        `${name} reaches a \`gh api --hostname\` call, so it must include lib/gh-host.md`,
       );
+    }
+
+    // And nobody re-types the derivation inline, in either of its drifted spellings
+    // (`GH_HOST` or rpr's old `HOST`). next.md legitimately parses the origin host once
+    // as ORIGIN_HOST to pick gh vs glab BEFORE any GH_HOST exists (gh-host.md's own
+    // `gh repo view` fallback is GitHub-only, so it cannot do that job) — that parse is
+    // allowed; assigning a bare github.com fallback outside the partial is not.
+    const DRIFTED = /\[ -n "\$(?:GH_)?HOST" \] \|\| (?:GH_)?HOST=github\.com/;
+    for (const name of commands) {
+      assert.doesNotMatch(readCommand(name), DRIFTED, `${name} must not hand-copy the GH_HOST fallback chain`);
+    }
+    const libsDir = path.join(__dirname, '..', 'lib');
+    for (const name of fs.readdirSync(libsDir).filter((f) => f.endsWith('.md') && f !== 'gh-host.md')) {
+      assert.doesNotMatch(readLib(name), DRIFTED, `lib/${name} must not hand-copy the GH_HOST fallback chain`);
     }
   });
 
