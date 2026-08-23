@@ -4,27 +4,60 @@
 # shellcheck disable=SC2059,SC2207
 set -euo pipefail
 
-# Fetch a repo file: from a local checkout when this script sits in one,
-# otherwise from GitHub. Mirrors install.sh's helper — keep the two in step.
-# A piped remote uninstall needs the same network access that fetched it; a
-# clone's copy is used as-is, so an offline uninstall works from a checkout.
-BASE_URL="https://raw.githubusercontent.com/atomantic/slashdo/main"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="atomantic/slashdo"
+BRANCH="main"
+BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"
 
+# Detect a local repo: only when this script is a real file on disk that sits
+# alongside commands/ and lib/. Piped into bash (the documented curl usage)
+# BASH_SOURCE[0] is unset, so ${BASH_SOURCE[0]:-} must be guarded — an
+# unguarded expansion both trips `set -u` and resolves SCRIPT_DIR to the
+# caller's cwd, which would let a stray ./src or ./commands tree next to the
+# user's shell supply the files this script installs and executes.
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR=""
+if [ -n "$SCRIPT_PATH" ] && [ -f "$SCRIPT_PATH" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+fi
+LOCAL_MODE=false
+if [ -n "$SCRIPT_DIR" ] && [ -d "$SCRIPT_DIR/commands/do" ] && [ -d "$SCRIPT_DIR/lib" ]; then
+  LOCAL_MODE=true
+fi
+
+# Fetch a file: local cp if available, otherwise curl from GitHub
+# Usage: fetch_file <repo_relative_path> <destination>
 fetch_file() {
   local src_path="$1"
   local dest="$2"
-  if [ -f "$SCRIPT_DIR/$src_path" ]; then
+  if [ "$LOCAL_MODE" = true ] && [ -f "$SCRIPT_DIR/$src_path" ]; then
     cp "$SCRIPT_DIR/$src_path" "$dest" 2>/dev/null && return 0
   fi
+  # Fallback to curl (remote mode, or local cp failed)
   curl -fsSL "$BASE_URL/$src_path" -o "$dest" 2>/dev/null
 }
+
+# Scratch space for src/settings-hooks.js, cleaned up however we exit.
+MOD_DIR="$(mktemp -d)"
+trap 'rm -rf "$MOD_DIR"' EXIT
 
 CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
 GREEN='\033[0;32m'
 DIM='\033[2m'
 RESET='\033[0m'
+
+# Print one line per action src/settings-hooks.js reported. The severity is a
+# token the module emits, so this never re-infers it from the message text.
+print_settings_actions() {
+  local line
+  while IFS= read -r line; do
+    case "$line" in
+      "warn "*) printf "    ${YELLOW}%s${RESET}\n" "${line#warn }" ;;
+      "ok "*)   printf "    ${GREEN}%s${RESET}\n" "${line#ok }" ;;
+      *)        if [ -n "$line" ]; then printf "    %s\n" "$line"; fi ;;
+    esac
+  done <<< "$1"
+}
 
 banner() {
   printf "\n"
@@ -73,6 +106,32 @@ uninstall_claude() {
   local count=0
 
   printf "  Uninstalling from ${GREEN}Claude Code${RESET}...\n"
+
+  # Deregister from settings.json FIRST, using the canonical src/settings-hooks.js
+  # — the same module the npm uninstaller requires (see install.sh). This runs
+  # before any file is removed: if the fetch or node call fails, settings.json
+  # must not be left referencing hooks that are already gone.
+  if command -v node &>/dev/null; then
+    if fetch_file "src/settings-hooks.js" "$MOD_DIR/settings-hooks.js"; then
+      local node_result
+      if node_result=$(node -e '
+        const settingsHooks = require(process.argv[1]);
+        for (const action of settingsHooks.removeDefaultHooks(false)) {
+          process.stdout.write(settingsHooks.formatAction(action) + "\n");
+        }
+      ' "$MOD_DIR/settings-hooks.js" 2>"$MOD_DIR/node.err"); then
+        print_settings_actions "$node_result"
+      else
+        printf "    ${YELLOW}settings.json deregistration failed — leaving hook files in place${RESET}\n"
+        sed -e 's/^/      /' "$MOD_DIR/node.err" >&2
+        return 1
+      fi
+    else
+      printf "    ${YELLOW}settings.json: could not fetch src/settings-hooks.js — leaving hook files in place${RESET}\n"
+      printf "    ${DIM}(settings.json still references them; re-run with network access or from a checkout)${RESET}\n"
+      return 1
+    fi
+  fi
 
   for cmd in "${COMMANDS[@]}" "${OLD_COMMANDS[@]}"; do
     if [ -f "$target_cmd/$cmd.md" ]; then
@@ -123,35 +182,6 @@ uninstall_claude() {
     rm -f "$HOME/.claude/.slashdo-config.json"
     printf "    removed: .slashdo-config.json    ${GREEN}ok${RESET}\n"
     count=$((count + 1))
-  fi
-
-  # Deregister from settings.json using the canonical src/settings-hooks.js —
-  # the same module the npm uninstaller requires (see install.sh).
-  if command -v node &>/dev/null; then
-    local mod_dir
-    mod_dir="$(mktemp -d)"
-    if fetch_file "src/settings-hooks.js" "$mod_dir/settings-hooks.js"; then
-      local node_result
-      if node_result=$(node -e '
-        const settingsHooks = require(process.argv[1]);
-        for (const action of settingsHooks.removeDefaultHooks(false)) {
-          process.stdout.write(settingsHooks.formatAction(action) + "\n");
-        }
-      ' "$mod_dir/settings-hooks.js" 2>/dev/null); then
-        while IFS= read -r line; do
-          case "$line" in
-            "warn "*) printf "    ${YELLOW}%s${RESET}\n" "${line#warn }" ;;
-            "ok "*)   printf "    ${GREEN}%s${RESET}\n" "${line#ok }" ;;
-            *)        if [ -n "$line" ]; then printf "    %s\n" "$line"; fi ;;
-          esac
-        done <<< "$node_result"
-      else
-        printf "    ${YELLOW}settings.json deregistration failed${RESET}\n"
-      fi
-    else
-      printf "    ${YELLOW}settings.json: skipped (could not fetch src/settings-hooks.js — settings.json may still reference slashdo hooks)${RESET}\n"
-    fi
-    rm -rf "$mod_dir"
   fi
 
   if [ $count -eq 0 ]; then
@@ -332,9 +362,11 @@ fi
 
 printf "  Detected: ${GREEN}%s${RESET}\n\n" "${envs[*]}"
 
+claude_incomplete=false
+
 for env in "${envs[@]}"; do
   case "$env" in
-    claude)        uninstall_claude ;;
+    claude)        uninstall_claude || claude_incomplete=true ;;
     opencode)      uninstall_opencode ;;
     antigravity)   uninstall_antigravity ;;
     codex)         uninstall_agent_skills "Codex" "$HOME/.codex" ;;
@@ -343,6 +375,13 @@ for env in "${envs[@]}"; do
   esac
   printf "\n"
 done
+
+if [ "$claude_incomplete" = true ]; then
+  printf "  ${YELLOW}Incomplete:${RESET} settings.json could not be updated, so slashdo's hook files\n"
+  printf "  were left in place rather than stranding settings.json entries that point at\n"
+  printf "  deleted files. Re-run this script once Node.js and the source are reachable.\n\n"
+  exit 1
+fi
 
 printf "  ${GREEN}Done!${RESET} All slashdo commands have been removed.\n"
 printf "  ${DIM}To reinstall: curl -fsSL https://raw.githubusercontent.com/atomantic/slashdo/main/install.sh | bash${RESET}\n\n"

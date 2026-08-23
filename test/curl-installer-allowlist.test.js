@@ -9,7 +9,7 @@
 // command itself is absent). The npm installer (src/installer.js) enumerates
 // both dirs dynamically, so it doesn't catch this drift — only this test does.
 
-const { describe, it } = require('node:test');
+const { describe, it, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
@@ -138,12 +138,15 @@ describe('curl installer shares src/settings-hooks.js', () => {
   }
 
   it('the shared module stays dependency-free so the curl path can fetch it alone', () => {
-    // Both scripts fetch exactly one file; a require() of another repo module
-    // would resolve to a missing path at install time.
+    // Both scripts fetch exactly one file into an empty temp dir, with no
+    // node_modules and no siblings: anything but a Node builtin fails to
+    // resolve at install time.
+    const BUILTINS = ['fs', 'os', 'path'];
     const requires = [...readRepoFile(SHARED_MODULE).matchAll(/require\(['"]([^'"]+)['"]\)/g)]
       .map((m) => m[1]);
-    assert.deepEqual(requires.filter((r) => r.startsWith('.')), [],
-      `${SHARED_MODULE} must not require() sibling modules — the curl installer fetches it on its own`);
+    assert.deepEqual(requires.filter((r) => !BUILTINS.includes(r)), [],
+      `${SHARED_MODULE} may only require ${BUILTINS.join('/')} — a sibling module or npm ` +
+      `package resolves to nothing when the curl installer fetches this file on its own`);
   });
 
   it('src/installer.js uses the shared module instead of its own copy', () => {
@@ -173,8 +176,12 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
     }).replace(ANSI, '');
   }
 
+  const homes = [];
+  after(() => homes.forEach((home) => fs.rmSync(home, { recursive: true, force: true })));
+
   function makeHome(settings) {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-curl-'));
+    homes.push(home);
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify(settings, null, 2));
     return home;
@@ -219,4 +226,52 @@ describe('curl installer settings.json parity (end-to-end)', { skip: process.pla
     assert.match(uninstalled, /settings\/SessionStart hook: deregistered/);
     assert.deepEqual(settingsOf(home), { statusLine: { type: 'command', command: 'my-own-statusline' } });
   });
+
+  // The documented usage is `curl ... | bash`, where BASH_SOURCE[0] is unset.
+  // An unguarded expansion resolves SCRIPT_DIR to the caller's cwd, so a repo
+  // the user merely happens to be standing in would supply the files these
+  // scripts install and execute. Piped execution must always fetch remotely.
+  for (const script of ['install.sh', 'uninstall.sh']) {
+    it(`${script} piped into bash never sources files from the caller's cwd`, () => {
+      const home = makeHome({});
+      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-cwd-'));
+      homes.push(cwd);
+      // A decoy checkout in the cwd, complete enough to satisfy every guard the
+      // scripts apply before reaching the module. If they trust it, node runs
+      // the file below.
+      for (const dir of ['commands/do', 'lib', 'src', 'hooks', 'bin']) {
+        fs.mkdirSync(path.join(cwd, dir), { recursive: true });
+      }
+      for (const hook of ['slashdo-check-update.js', 'slashdo-statusline.js']) {
+        fs.writeFileSync(path.join(cwd, 'hooks', hook), '// decoy\n');
+      }
+      const marker = path.join(cwd, 'PWNED');
+      fs.writeFileSync(path.join(cwd, 'src', 'settings-hooks.js'),
+        `require('fs').writeFileSync(${JSON.stringify(marker)}, 'x');\n` +
+        'module.exports = { applyDefaultHooks: () => [], removeDefaultHooks: () => [], formatAction: () => "" };\n');
+
+      // No network in CI: a curl stub makes every remote fetch fail, so the
+      // only way the script can obtain the file is the cwd it must not trust.
+      const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-stub-'));
+      homes.push(stubDir);
+      fs.writeFileSync(path.join(stubDir, 'curl'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+
+      try {
+        execFileSync('bash', ['-s'], {
+          cwd,
+          input: fs.readFileSync(path.join(REPO_ROOT, script), 'utf8'),
+          env: { ...process.env, HOME: home, PATH: `${stubDir}${path.delimiter}${process.env.PATH}` },
+          encoding: 'utf8',
+          timeout: 120000,
+        });
+      } catch (e) {
+        // uninstall.sh exits non-zero when it cannot reach the module — it
+        // refuses to delete hooks it could not deregister. That is the point.
+        assert.match(e.stdout || '', /could not fetch src\/settings-hooks\.js/);
+      }
+
+      assert.equal(fs.existsSync(marker), false,
+        `${script} executed src/settings-hooks.js from the caller's cwd when piped into bash`);
+    });
+  }
 });

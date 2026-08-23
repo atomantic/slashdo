@@ -43,9 +43,13 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
   if (updateCheckHook) {
     const hookCommand = `node "${path.join(env.hooksDir, updateCheckHook.name)}"`;
 
-    if (!settings.hooks) {
+    // Absent is ours to create; present-but-wrong is the user's to keep. A
+    // truthiness test would conflate the two and overwrite `hooks: null` or
+    // `hooks: ""` — the same silent clobbering this module exists to prevent.
+    const hooksValue = settings.hooks;
+    if (hooksValue === undefined) {
       settings.hooks = {};
-    } else if (typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) {
+    } else if (!hooksValue || typeof hooksValue !== 'object' || Array.isArray(hooksValue)) {
       actions.push({ name: 'settings/hooks', status: 'skipped (unexpected shape)' });
       return actions;
     }

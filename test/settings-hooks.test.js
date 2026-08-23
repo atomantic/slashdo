@@ -9,7 +9,7 @@
 // alone rather than clobbered, and the statusline outcomes that must stay
 // distinguishable from each other.
 
-const { describe, it } = require('node:test');
+const { describe, it, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
@@ -22,8 +22,12 @@ const HOOK_FILES = [
   { name: 'slashdo-statusline.js' },
 ];
 
+const tmpDirs = [];
+after(() => tmpDirs.forEach((dir) => fs.rmSync(dir, { recursive: true, force: true })));
+
 function makeEnv(settings) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-settings-'));
+  tmpDirs.push(tmpDir);
   const settingsFile = path.join(tmpDir, 'settings.json');
   const hooksDir = path.join(tmpDir, 'hooks');
   fs.mkdirSync(hooksDir, { recursive: true });
@@ -44,7 +48,16 @@ const slashdoStatusline = (env) => `node "${path.join(env.hooksDir, 'slashdo-sta
 // ── Malformed shapes are skipped, never clobbered ───────────────────
 
 describe('registerHooksInSettings on malformed input', () => {
-  for (const [label, hooks] of [['a string', 'some-string'], ['an array', ['nope']]]) {
+  // null / "" / 0 / false are present values, not absent ones: a truthiness
+  // test would overwrite them exactly the way the shell copy overwrote a string.
+  for (const [label, hooks] of [
+    ['a string', 'some-string'],
+    ['an array', ['nope']],
+    ['null', null],
+    ['an empty string', ''],
+    ['false', false],
+    ['zero', 0],
+  ]) {
     it(`leaves settings.hooks untouched when it is ${label}`, () => {
       // The curl installer used to reset a non-object `hooks` to {}, silently
       // discarding whatever the user had there. Skipping is the canonical behavior.

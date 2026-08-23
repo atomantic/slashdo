@@ -8,10 +8,19 @@ REPO="atomantic/slashdo"
 BRANCH="main"
 BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"
 
-# Detect local repo: if this script lives alongside commands/ and lib/, use local files
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Detect a local repo: only when this script is a real file on disk that sits
+# alongside commands/ and lib/. Piped into bash (the documented curl usage)
+# BASH_SOURCE[0] is unset, so ${BASH_SOURCE[0]:-} must be guarded — an
+# unguarded expansion both trips `set -u` and resolves SCRIPT_DIR to the
+# caller's cwd, which would let a stray ./src or ./commands tree next to the
+# user's shell supply the files this script installs and executes.
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR=""
+if [ -n "$SCRIPT_PATH" ] && [ -f "$SCRIPT_PATH" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+fi
 LOCAL_MODE=false
-if [ -d "$SCRIPT_DIR/commands/do" ] && [ -d "$SCRIPT_DIR/lib" ]; then
+if [ -n "$SCRIPT_DIR" ] && [ -d "$SCRIPT_DIR/commands/do" ] && [ -d "$SCRIPT_DIR/lib" ]; then
   LOCAL_MODE=true
 fi
 
@@ -27,11 +36,28 @@ fetch_file() {
   curl -fsSL "$BASE_URL/$src_path" -o "$dest" 2>/dev/null
 }
 
+# Scratch space for src/settings-hooks.js, cleaned up however we exit.
+MOD_DIR="$(mktemp -d)"
+trap 'rm -rf "$MOD_DIR"' EXIT
+
 CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
 GREEN='\033[0;32m'
 DIM='\033[2m'
 RESET='\033[0m'
+
+# Print one line per action src/settings-hooks.js reported. The severity is a
+# token the module emits, so this never re-infers it from the message text.
+print_settings_actions() {
+  local line
+  while IFS= read -r line; do
+    case "$line" in
+      "warn "*) printf "    ${YELLOW}%s${RESET}\n" "${line#warn }" ;;
+      "ok "*)   printf "    ${GREEN}%s${RESET}\n" "${line#ok }" ;;
+      *)        if [ -n "$line" ]; then printf "    %s\n" "$line"; fi ;;
+    esac
+  done <<< "$1"
+}
 
 banner() {
   printf "\n"
@@ -143,30 +169,24 @@ install_claude() {
   # paths and hook list there too is deliberate: doing it here would just move
   # the drift onto the arguments.
   if command -v node &>/dev/null && [ -f "$target_hooks/slashdo-check-update.js" ]; then
-    local mod_dir
-    mod_dir="$(mktemp -d)"
-    if fetch_file "src/settings-hooks.js" "$mod_dir/settings-hooks.js"; then
+    if fetch_file "src/settings-hooks.js" "$MOD_DIR/settings-hooks.js"; then
       local node_result
       if node_result=$(node -e '
         const settingsHooks = require(process.argv[1]);
         for (const action of settingsHooks.applyDefaultHooks(false)) {
           process.stdout.write(settingsHooks.formatAction(action) + "\n");
         }
-      ' "$mod_dir/settings-hooks.js" 2>/dev/null); then
-        while IFS= read -r line; do
-          case "$line" in
-            "warn "*) printf "    ${YELLOW}%s${RESET}\n" "${line#warn }" ;;
-            "ok "*)   printf "    ${GREEN}%s${RESET}\n" "${line#ok }" ;;
-            *)        if [ -n "$line" ]; then printf "    %s\n" "$line"; fi ;;
-          esac
-        done <<< "$node_result"
+      ' "$MOD_DIR/settings-hooks.js" 2>"$MOD_DIR/node.err"); then
+        print_settings_actions "$node_result"
       else
         printf "    ${YELLOW}settings.json: failed${RESET}\n"
+        # Surface why — an opaque "failed" on a permission or syntax error is
+        # what makes a broken curl install impossible to diagnose.
+        sed -e 's/^/      /' "$MOD_DIR/node.err" >&2
       fi
     else
       printf "    ${DIM}settings.json: skipped (could not fetch src/settings-hooks.js)${RESET}\n"
     fi
-    rm -rf "$mod_dir"
   elif command -v node &>/dev/null; then
     printf "    ${DIM}settings.json: skipped (hook files not found)${RESET}\n"
   else
