@@ -124,10 +124,15 @@ After the barrier, merge the wave's returned PRs **one at a time, never concurre
      ```bash
      git -C "<worktree>" push
      gh pr checks <pr_number> --required --watch --fail-fast
-     gh pr merge <pr_number> --merge && \
-       { git push origin --delete "next/issue-<num>" || echo "warning: remote branch next/issue-<num> not deleted"; }
+     gh pr merge <pr_number> --merge
+     # Delete the head branch ONLY once the PR really reads MERGED.
+     if [ "$(gh pr view <pr_number> --json state -q .state)" = "MERGED" ]; then
+       git push origin --delete "next/issue-<num>" || echo "warning: remote branch next/issue-<num> not deleted"
+     else
+       echo "PR <pr_number> is not MERGED — keeping next/issue-<num>"
+     fi
      ```
-     **No `--delete-branch`** — it deletes the *local* branch too, and `next/issue-<num>` is checked out in the agent's worktree, so git refuses (`cannot delete branch 'next/issue-<num>' used by worktree at …`) and **`gh` exits non-zero after the merge already succeeded**. That reads as a merge failure and fires any `||` fallback wrapped around the merge. Delete the remote branch with the explicit `git push origin --delete` above — it needs no local checkout — and let Phase D remove the worktree and the local branch from the main repo, where that works. **The `&&` is load-bearing**: `--delete-branch` only ever deleted the head branch *because* the merge succeeded, and an unchained delete would retract the head of a PR the merge left **open** (unmergeable, branch protection, a lost race) — GitHub auto-closes a PR whose head branch disappears, destroying exactly the "leave that PR open, record it, and move to the next" outcome step 3 requires and the worktree/branch Phase D is told to keep.
+     **No `--delete-branch`** — it deletes the *local* branch too, and `next/issue-<num>` is checked out in the agent's worktree, so git refuses (`cannot delete branch 'next/issue-<num>' used by worktree at …`) and **`gh` exits non-zero after the merge already succeeded**. That reads as a merge failure and fires any `||` fallback wrapped around the merge. Delete the remote branch with the explicit `git push origin --delete` above — it needs no local checkout — and let Phase D remove the worktree and the local branch from the main repo, where that works. **The `MERGED` read-back is load-bearing**: `--delete-branch` only ever deleted the head branch *because* the merge had happened, and an ungated delete would retract the head of a PR that is still open — either the merge failed (unmergeable, branch protection, a lost race) or, on a repo with a **merge queue**, `gh pr merge` returned success having merely *queued* it. GitHub auto-closes a PR whose head branch disappears, which destroys both the "leave that PR open, record it, and move to the next" outcome step 3 requires and the queued merge itself. Read the state back rather than trusting the merge command's exit status.
    - GitLab (`glab`) — there's no discrete "required checks" list to scope to; the project's own merge/pipeline-success requirement governs, and `--auto-merge` (the default) already waits for the pipeline before merging:
      ```bash
      git -C "<worktree>" push

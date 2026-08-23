@@ -7,6 +7,18 @@ const path = require('path');
 
 const readCommand = (name) => fs.readFileSync(path.join(__dirname, '..', 'commands', 'do', name), 'utf8');
 
+// Command lines only — the surrounding prose explains why `--delete-branch` is
+// absent, so a naive whole-file scan would flag its own rationale.
+const fencedLines = (body) => {
+  const out = [];
+  let inFence = false;
+  for (const line of body.split('\n')) {
+    if (/^\s*```/.test(line)) { inFence = !inFence; continue; }
+    if (inFence) out.push(line);
+  }
+  return out;
+};
+
 // `gh pr merge --delete-branch` deletes the LOCAL branch too, and to do that gh
 // checks out the default branch first. Inside a linked worktree that checkout
 // fails ("already used by worktree at …") and gh exits non-zero AFTER the merge
@@ -16,7 +28,7 @@ const readCommand = (name) => fs.readFileSync(path.join(__dirname, '..', 'comman
 describe('worktree-safe merge contracts', () => {
   it('keeps --delete-branch off every gh merge /do:next runs from a worktree', () => {
     const body = readCommand('next.md');
-    const merges = body.split('\n').filter((line) => line.includes('gh pr merge'));
+    const merges = fencedLines(body).filter((line) => line.includes('gh pr merge'));
     assert.ok(merges.length >= 2, 'expected /do:next to document both the swarm and single-issue merges');
     for (const line of merges) {
       assert.doesNotMatch(line, /--delete-branch/, `worktree merge must not pass --delete-branch: ${line.trim()}`);
@@ -35,13 +47,14 @@ describe('worktree-safe merge contracts', () => {
     assert.doesNotMatch(body, /remote no-op after --delete-branch merge/);
   });
 
-  it('gates the swarm remote delete on the merge actually succeeding', () => {
-    // An unchained delete retracts the head branch of a PR the merge left OPEN,
-    // which auto-closes it — the opposite of Phase C's "leave that PR open" rule.
+  it('gates the swarm remote delete on a read-back MERGED state', () => {
+    // An ungated delete retracts the head branch of a PR that is still open —
+    // the merge failed, or a merge queue accepted it without merging yet — and
+    // GitHub auto-closes a PR whose head branch disappears.
     const body = readCommand('next.md');
     assert.match(
       body,
-      /gh pr merge <pr_number> --merge && \\\n\s+\{ git push origin --delete "next\/issue-<num>"/,
+      /if \[ "\$\(gh pr view <pr_number> --json state -q \.state\)" = "MERGED" \]; then\n\s+git push origin --delete "next\/issue-<num>"/,
     );
   });
 
@@ -49,7 +62,7 @@ describe('worktree-safe merge contracts', () => {
     // Both deletes are now the real deletion, not a post-`--delete-branch` no-op,
     // so a genuine failure must surface instead of vanishing into 2>/dev/null.
     const body = readCommand('next.md');
-    for (const line of body.split('\n').filter((l) => l.includes('git push origin --delete "next/issue-<num>"'))) {
+    for (const line of fencedLines(body).filter((l) => l.includes('git push origin --delete "next/issue-<num>"'))) {
       assert.doesNotMatch(line, /2>\/dev\/null/, line.trim());
     }
     const phase7 = body.split('\n').find((l) => l.includes('git push origin --delete "next/${SLUG}"') && l.includes('warning:'));
