@@ -13,6 +13,7 @@ function runStatusline(input, options = {}) {
   return spawnSync(process.execPath, [statusline], {
     encoding: 'utf8',
     input,
+    timeout: 2000,
     ...options,
   });
 }
@@ -33,21 +34,23 @@ describe('slashdo statusline', () => {
   });
 
   it('exits promptly and silently when stdin closes without data', () => {
-    const startedAt = Date.now();
     const result = runStatusline('');
 
+    assert.equal(result.error, undefined);
     assert.equal(result.status, 0);
     assert.equal(result.stdout, '');
     assert.equal(result.stderr, '');
-    assert.ok(Date.now() - startedAt < 2500, 'statusline waited for its 3s timeout');
   });
 
   it('exits silently when stdin emits an error', () => {
     const result = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(statusline)}); process.stdin.emit('error', new Error('broken pipe'));`], {
       encoding: 'utf8',
+      timeout: 2000,
     });
 
+    assert.equal(result.error, undefined);
     assert.equal(result.status, 0);
+    assert.equal(result.stdout, '');
     assert.equal(result.stderr, '');
   });
 
