@@ -51,6 +51,11 @@ describe('check-update compareVersions', () => {
     assert.equal(compareVersions('not-a-version', '1.0.0'), null);
     assert.equal(compareVersions('1.0.0', 'not-a-version'), null);
   });
+
+  it('returns null for a short version instead of comparing against a missing segment', () => {
+    assert.equal(compareVersions('1.0', '1.0.1'), null);
+    assert.equal(compareVersions('1.0.1', '1.0'), null);
+  });
 });
 
 describe('check-update isUpdateAvailable', () => {
@@ -70,6 +75,13 @@ describe('check-update isUpdateAvailable', () => {
   it('falls back to inequality when a version is unparseable', () => {
     assert.equal(isUpdateAvailable('nightly', '1.0.0'), true);
     assert.equal(isUpdateAvailable('nightly', 'nightly'), false);
+  });
+
+  it('still flags an update when the installed version is short or empty', () => {
+    // compareVersions cannot rank these, so the hint must win over silence —
+    // otherwise a truncated .slashdo-version would pin the user forever.
+    assert.equal(isUpdateAvailable('1.0', '1.0.1'), true);
+    assert.equal(isUpdateAvailable('', '1.0.0'), true);
   });
 });
 
@@ -314,6 +326,19 @@ describe('check-update worker entrypoint', { skip: process.platform === 'win32' 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  // The SessionStart entrypoint detaches its worker, so the cache file appears
+  // after the parent has already exited.
+  async function waitForCache(timeoutMs = 15000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (fs.existsSync(paths.cacheFile)) {
+        return JSON.parse(fs.readFileSync(paths.cacheFile, 'utf8'));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('worker never wrote ' + paths.cacheFile);
+  }
+
   function runHook(args) {
     return spawnSync(process.execPath, [HOOK_PATH].concat(args), {
       encoding: 'utf8',
@@ -334,6 +359,21 @@ describe('check-update worker entrypoint', { skip: process.platform === 'win32' 
     assert.equal(proc.status, 0, proc.stderr);
     assert.deepEqual(JSON.parse(fs.readFileSync(paths.cacheFile, 'utf8')).latest, '9.9.9');
     assert.equal(JSON.parse(fs.readFileSync(paths.cacheFile, 'utf8')).update_available, true);
+  });
+
+  it('spawns the worker from the SessionStart entrypoint, creating the cache dir', async () => {
+    // No --worker: this is the argv the installed SessionStart hook actually
+    // runs. It must return immediately and leave a detached child that does the
+    // work, so poll for the cache file the child writes.
+    fs.rmSync(paths.cacheDir, { recursive: true });
+    fs.writeFileSync(paths.versionFile, '1.9.0\n', 'utf8');
+
+    const proc = runHook([]);
+    assert.equal(proc.status, 0, proc.stderr);
+
+    const cache = await waitForCache();
+    assert.equal(cache.latest, '9.9.9');
+    assert.equal(cache.update_available, true);
   });
 
   it('exits quietly with no version file', () => {

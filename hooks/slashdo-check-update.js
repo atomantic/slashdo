@@ -61,15 +61,23 @@ function parseVersion(version) {
     .map(Number);
 }
 
+// Comparable means every major/minor/patch segment is a real number. A short
+// version like '1.0' is NOT comparable: its missing patch segment would make
+// every comparison against it silently false, hiding a genuine update.
+function isComparableVersion(version) {
+  const parts = parseVersion(version);
+  return parts.length >= 3 && parts.every(Number.isFinite);
+}
+
 // Semver comparison over NUMERIC segments, so 1.9.0 → 1.10.0 reads as a minor
 // bump rather than the backwards answer a lexical compare would give.
-// Returns 'major' | 'minor' | 'patch' when latest is newer, else null.
+// Returns 'major' | 'minor' | 'patch' when latest is newer, else null — including
+// when either side is not a comparable version, which callers must handle.
 function compareVersions(installed, latest) {
-  if (!installed || !latest) return null;
+  if (!isComparableVersion(installed) || !isComparableVersion(latest)) return null;
 
   const [iMajor, iMinor, iPatch] = parseVersion(installed);
   const [lMajor, lMinor, lPatch] = parseVersion(latest);
-  if ([iMajor, iMinor, iPatch, lMajor, lMinor, lPatch].some(Number.isNaN)) return null;
 
   if (lMajor > iMajor) return 'major';
   if (lMajor === iMajor && lMinor > iMinor) return 'minor';
@@ -77,15 +85,12 @@ function compareVersions(installed, latest) {
   return null;
 }
 
-function isComparableVersion(version) {
-  return !parseVersion(version).some(Number.isNaN);
-}
-
 // Update decision for the hook: a newer semver, or — when either side isn't
 // parseable as semver — any difference at all, so an odd version string still
 // surfaces the hint rather than silently pinning the user to a stale install.
+// Only a missing `latest` (the npm lookup failed) settles it as 'no update'.
 function isUpdateAvailable(installed, latest) {
-  if (!installed || !latest || installed === latest) return false;
+  if (!latest || installed === latest) return false;
   if (!isComparableVersion(installed) || !isComparableVersion(latest)) return true;
   return compareVersions(installed, latest) !== null;
 }
