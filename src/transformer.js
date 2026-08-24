@@ -40,7 +40,9 @@ function rewriteLibPaths(body, targetPrefix) {
 
 function rewriteClaudeRootPaths(body, env) {
   if (!env.claudeRootPathPrefix) return body;
-  return body.replace(/~\/\.claude\//g, () => env.claudeRootPathPrefix);
+  const rootPath = env.claudeRootPathPrefix.slice(0, -path.sep.length);
+  return body.replace(/~\/\.claude(\/|(?=$|[^A-Za-z0-9_-]))/g,
+    (match, slash) => slash ? env.claudeRootPathPrefix : rootPath);
 }
 
 // Rewrites the slashdo config-path token (`~/.claude/.slashdo-config.json`) to

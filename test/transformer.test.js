@@ -526,6 +526,17 @@ describe('transformCommand', () => {
     assert.ok(result.includes("!`cat '/tmp/$&/profile/'lib/foo.md`"));
   });
 
+  it('rewrites bare custom Claude roots as well as rooted paths', () => {
+    const content = '---\ndescription: Test\n---\nProtect ~/.claude and read ~/.claude/commands/do.md.';
+    const env = {
+      ...claudeEnv,
+      claudeRootPathPrefix: "'/tmp/custom profile'/",
+    };
+    const result = transformCommand(content, env);
+    assert.ok(result.includes("Protect '/tmp/custom profile' and read '/tmp/custom profile'/commands/do.md."));
+    assert.ok(!result.includes('~/.claude'));
+  });
+
   it('inlines lib content for environments without supportsCatInclusion', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-test-'));
     fs.writeFileSync(path.join(tmpDir, 'foo.md'), 'Inlined content\n', 'utf8');

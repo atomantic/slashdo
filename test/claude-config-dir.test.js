@@ -32,7 +32,7 @@ function assertInstalledDocsUseCustomRoot(configDir) {
       path.join(configDir, 'lib', name)),
   ];
   for (const file of installedDocs) {
-    assert.ok(!fs.readFileSync(file, 'utf8').includes('~/.claude/'), file);
+    assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /~\/\.claude(?:\/|[^A-Za-z0-9_-]|$)/, file);
   }
   const command = fs.readFileSync(path.join(configDir, 'commands', 'do', 'next.md'), 'utf8');
   assert.ok(command.includes(`!\`cat ${quotedRoot}/lib/gh-host.md\``));

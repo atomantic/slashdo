@@ -108,7 +108,9 @@ rewrite_for_claude() {
   quoted_root=$(printf '%s' "$CLAUDE_CONFIG_DIR" | sed "s/'/'\\\\''/g")
   quoted_root="'$quoted_root'"
   escaped_root=$(printf '%s' "$quoted_root" | sed 's/[&|\\]/\\&/g')
-  sed "s|~/.claude/|$escaped_root/|g" "$1" > "$2"
+  sed -e "s|~/.claude/|$escaped_root/|g" \
+      -e "s|~/.claude\([^A-Za-z0-9_-]\)|$escaped_root\1|g" \
+      -e "s|~/.claude$|$escaped_root|g" "$1" > "$2"
 }
 
 # Rewrite lib-path cross-references and the config-path token so commands and
@@ -203,6 +205,7 @@ install_claude() {
   local target_cmd="$CLAUDE_CONFIG_DIR/commands/do"
   local target_lib="$CLAUDE_CONFIG_DIR/lib"
   local target_hooks="$CLAUDE_CONFIG_DIR/hooks"
+  local registration_failed=false
   mkdir -p "$target_cmd" "$target_lib" "$target_hooks"
 
   printf "  Installing to ${GREEN}Claude Code${RESET}...\n"
@@ -277,14 +280,22 @@ install_claude() {
         # Surface why: an opaque "failed" on a permission or syntax error is
         # what makes a broken curl install impossible to diagnose.
         if [ -s "$MOD_DIR/node.err" ]; then sed -e 's/^/      /' "$MOD_DIR/node.err" >&2; fi
+        registration_failed=true
       fi
     else
       printf "    ${YELLOW}settings.json: could not fetch src/settings-hooks.js — hooks installed but not registered${RESET}\n"
+      registration_failed=true
     fi
   elif command -v node &>/dev/null; then
     printf "    ${DIM}settings.json: skipped (hook files not found)${RESET}\n"
+    registration_failed=true
   else
     printf "    ${DIM}settings.json: skipped (node not found — hooks installed but not registered)${RESET}\n"
+    registration_failed=true
+  fi
+
+  if [ "$registration_failed" = true ]; then
+    return 1
   fi
 }
 
@@ -362,7 +373,7 @@ curl_installed=false
 install_failed=false
 for env in "${envs[@]}"; do
   case "$env" in
-    claude)      install_claude; curl_installed=true ;;
+    claude)      if install_claude; then curl_installed=true; else install_failed=true; fi ;;
     opencode)    if install_opencode; then curl_installed=true; else install_failed=true; fi ;;
     antigravity) printf "  ${DIM}Antigravity CLI: use 'npx slash-do@latest --env antigravity' (Agent Skills require Node.js for content inlining)${RESET}\n"; npx_needed=true ;;
     codex)       printf "  ${DIM}Codex: use 'npx slash-do@latest --env codex' (requires Node.js for content inlining)${RESET}\n"; npx_needed=true ;;

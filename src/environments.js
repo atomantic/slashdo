@@ -6,7 +6,10 @@ const os = require('os');
 
 const HOME = os.homedir();
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
-const shellQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+const shellQuote = (value, platform = process.platform) => {
+  if (platform === 'win32') return `"${value.replace(/"/g, '""')}"`;
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+};
 const CLAUDE_ROOT_PATH_PREFIX = process.env.CLAUDE_CONFIG_DIR
   ? `${shellQuote(CLAUDE_DIR)}${path.sep}`
   : null;

@@ -149,6 +149,10 @@ const makeServingCurl = () => makeCurlStub(
   `[ -f "${REPO_ROOT}/$rel" ] || exit 22\ncp "${REPO_ROOT}/$rel" "$dest"`
 );
 
+const makeServingCurlWithoutSettingsHooks = () => makeCurlStub(
+  `[ "$rel" = "src/settings-hooks.js" ] && exit 22\n[ -f "${REPO_ROOT}/$rel" ] || exit 22\ncp "${REPO_ROOT}/$rel" "$dest"`
+);
+
 // Writes a partial body and then fails, standing in for a dead transfer.
 const makeFailingCurl = () => makeCurlStub('[ -n "$dest" ] && printf TRUNCATED > "$dest"\nexit 1');
 
@@ -444,11 +448,11 @@ describe('install.sh — atomic writes', () => {
 
     const remote = runScript(remoteModeInstaller(), { home, pathPrefix: makeFailingCurl() });
 
-    // Current contract: a failed fetch is reported per file and the script
-    // still finishes successfully — it never aborts a partly-done install.
-    assert.equal(remote.status, 0, remote.stdout);
+    // A failed fetch is reported per file, and a Claude install that cannot
+    // register its hooks now fails closed instead of claiming completion.
+    assert.equal(remote.status, 1, remote.stdout);
     assert.match(remote.stdout, /failed/, 'the stubbed curl should make fetches fail');
-    assert.match(remote.stdout, /Done!/);
+    assert.doesNotMatch(remote.stdout, /Done!/);
 
     assert.equal(fs.readFileSync(pushPath, 'utf8'), before, 'push.md must not be truncated by a failed fetch');
     assert.doesNotMatch(fs.readFileSync(pushPath, 'utf8'), /TRUNCATED/);
@@ -468,6 +472,18 @@ describe('install.sh — atomic writes', () => {
       assert.deepEqual(strayTempFiles(path.join(home, '.config', 'opencode', dir)), [], `opencode/${dir} leftovers`);
     }
     assert.deepEqual(fs.readdirSync(tmpdir), [], 'the OpenCode staging dir should be removed even when fetches fail');
+  });
+
+  it('fails closed when hook registration cannot fetch its shared module', () => {
+    const home = makeHome();
+    const remote = runScript(remoteModeInstaller(), {
+      home,
+      pathPrefix: makeServingCurlWithoutSettingsHooks(),
+    });
+
+    assert.equal(remote.status, 1, remote.stdout);
+    assert.match(remote.stdout, /could not fetch src\/settings-hooks\.js/);
+    assert.doesNotMatch(remote.stdout, /Done!/);
   });
 
   it('removes the in-flight temp file when the install is interrupted', { timeout: 60000 }, async () => {
