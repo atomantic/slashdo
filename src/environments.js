@@ -6,6 +6,7 @@ const os = require('os');
 
 const HOME = os.homedir();
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
+const CLAUDE_ROOT_PATH = process.env.CLAUDE_CONFIG_DIR ? CLAUDE_DIR : null;
 const shellQuote = (value, platform = process.platform) => {
   if (platform === 'win32') return `"${value.replace(/"/g, '""')}"`;
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -32,6 +33,7 @@ const ENVIRONMENTS = {
     // Runtime form of configFile, used by the transformer to rewrite the
     // config-path token in command/lib text for each host CLI.
     configPath: CLAUDE_CONFIG_PATH,
+    claudeRootPath: CLAUDE_ROOT_PATH,
     claudeRootPathPrefix: CLAUDE_ROOT_PATH_PREFIX,
     // format: documentation only — transformCommand always emits YAML frontmatter
     // now that the legacy Gemini TOML path was removed.

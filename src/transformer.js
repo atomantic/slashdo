@@ -38,9 +38,32 @@ function rewriteLibPaths(body, targetPrefix) {
   return body.replace(/~\/\.claude\/lib\//g, targetPrefix);
 }
 
+function shellQuotePath(value, platform = process.platform) {
+  if (platform === 'win32') return `"${value.replace(/"/g, '""')}"`;
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function joinClaudePath(root, suffix, platform) {
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const separator = platform === 'win32' ? '\\' : '/';
+  return pathApi.join(root, suffix.replace(/^[/\\]+/, '').replace(/\//g, separator));
+}
+
 function rewriteClaudeRootPaths(body, env) {
+  if (env.claudeRootPath) {
+    const platform = env.platform || process.platform;
+    const rootToken = '~/.claude';
+    // Match complete path-like references so the replacement can quote the
+    // joined path. Quoting only the directory prefix produces invalid Windows
+    // tokens such as `"C:\\Claude Data"\\lib/file.md`.
+    return body.replace(/~\/\.claude(?:\/(?:[A-Za-z0-9_-]|\.[A-Za-z0-9_-])+)*\/?(?![A-Za-z0-9_-])/g,
+      (match) => shellQuotePath(joinClaudePath(env.claudeRootPath,
+        match.slice(rootToken.length), platform), platform));
+  }
   if (!env.claudeRootPathPrefix) return body;
-  const rootPath = env.claudeRootPathPrefix.slice(0, -path.sep.length);
+  const rootPath = env.claudeRootPathPrefix.endsWith(path.sep)
+    ? env.claudeRootPathPrefix.slice(0, -path.sep.length)
+    : env.claudeRootPathPrefix;
   return body.replace(/~\/\.claude(\/|(?=$|[^A-Za-z0-9_-]))/g,
     (match, slash) => slash ? env.claudeRootPathPrefix : rootPath);
 }

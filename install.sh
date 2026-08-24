@@ -36,6 +36,9 @@ fi
 # under concurrent installs and are pre-creatable by any other local user, so
 # every temp path this script touches is randomized and cleaned up on exit.
 STAGE_DIR=""
+# Scratch area for Claude files. Keeping downloads out of the final tree means
+# a failed transfer never publishes raw or partial content before rewriting.
+CLAUDE_STAGE_DIR=""
 # Scratch copy of src/settings-hooks.js, the module this script calls instead of
 # re-implementing settings.json registration.
 MOD_DIR=""
@@ -45,6 +48,7 @@ ACTIVE_TMP=""
 cleanup_temp() {
   [ -n "$ACTIVE_TMP" ] && rm -f "$ACTIVE_TMP"
   [ -n "$STAGE_DIR" ] && rm -rf "$STAGE_DIR"
+  [ -n "$CLAUDE_STAGE_DIR" ] && rm -rf "$CLAUDE_STAGE_DIR"
   [ -n "$MOD_DIR" ] && rm -rf "$MOD_DIR"
   return 0
 }
@@ -193,7 +197,7 @@ OLD_HOOKS=(update-check)
 
 detect_envs() {
   local envs=()
-  [ -d "$CLAUDE_CONFIG_DIR" ] && envs+=(claude)
+  { [ "$CLAUDE_CONFIG_CUSTOM" = true ] || [ -d "$CLAUDE_CONFIG_DIR" ]; } && envs+=(claude)
   [ -d "$HOME/.config/opencode" ] && envs+=(opencode)
   [ -d "$HOME/.gemini/antigravity-cli" ] && envs+=(antigravity)
   [ -d "$HOME/.codex" ] && envs+=(codex)
@@ -206,37 +210,47 @@ install_claude() {
   local target_lib="$CLAUDE_CONFIG_DIR/lib"
   local target_hooks="$CLAUDE_CONFIG_DIR/hooks"
   local registration_failed=false
+  local hooks_ready=true
+  if ! CLAUDE_STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-claude.XXXXXX")"; then
+    printf "    ${YELLOW}failed (could not create a temp directory)${RESET}\n"
+    return 1
+  fi
   mkdir -p "$target_cmd" "$target_lib" "$target_hooks"
 
   printf "  Installing to ${GREEN}Claude Code${RESET}...\n"
 
   for cmd in "${COMMANDS[@]}"; do
     printf "    /do:%-20s" "$cmd"
-    if fetch_file "commands/do/$cmd.md" "$target_cmd/$cmd.md" &&
-        atomic_write "$target_cmd/$cmd.md" rewrite_for_claude "$target_cmd/$cmd.md"; then
+    if fetch_file "commands/do/$cmd.md" "$CLAUDE_STAGE_DIR/command-$cmd.md" &&
+        atomic_write "$target_cmd/$cmd.md" rewrite_for_claude "$CLAUDE_STAGE_DIR/command-$cmd.md"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
     fi
+    rm -f "$CLAUDE_STAGE_DIR/command-$cmd.md"
   done
 
   for lib in "${LIBS[@]}"; do
     printf "    lib/%-20s" "$lib.md"
-    if fetch_file "lib/$lib.md" "$target_lib/$lib.md" &&
-        atomic_write "$target_lib/$lib.md" rewrite_for_claude "$target_lib/$lib.md"; then
+    if fetch_file "lib/$lib.md" "$CLAUDE_STAGE_DIR/lib-$lib.md" &&
+        atomic_write "$target_lib/$lib.md" rewrite_for_claude "$CLAUDE_STAGE_DIR/lib-$lib.md"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
     fi
+    rm -f "$CLAUDE_STAGE_DIR/lib-$lib.md"
   done
 
   for hook in "${HOOKS[@]}"; do
     printf "    hook/%-19s" "$hook.js"
-    if fetch_file "hooks/$hook.js" "$target_hooks/$hook.js"; then
+    if fetch_file "hooks/$hook.js" "$CLAUDE_STAGE_DIR/hook-$hook.js" &&
+        atomic_write "$target_hooks/$hook.js" cp "$CLAUDE_STAGE_DIR/hook-$hook.js"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
+      hooks_ready=false
     fi
+    rm -f "$CLAUDE_STAGE_DIR/hook-$hook.js"
   done
 
   for old in "${OLD_COMMANDS[@]}"; do
@@ -258,8 +272,9 @@ install_claude() {
   # of hand-translating it into shell-embedded JS that drifts (issue #166).
   # Deriving the paths, hook list, and auto-update default there too is
   # deliberate: doing it here would just move the drift onto the arguments.
-  if command -v node &>/dev/null &&
-     { [ -f "$target_hooks/slashdo-check-update.js" ] || [ -f "$target_hooks/slashdo-statusline.js" ]; }; then
+  if [ "$hooks_ready" = true ] && command -v node &>/dev/null &&
+     [ -f "$target_hooks/slashdo-check-update.js" ] &&
+     [ -f "$target_hooks/slashdo-statusline.js" ]; then
     MOD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-mod.XXXXXX")" || MOD_DIR=""
     if [ -n "$MOD_DIR" ] && fetch_file "src/settings-hooks.js" "$MOD_DIR/settings-hooks.js"; then
       # Keep a copy beside the hooks so uninstall.sh can deregister offline.

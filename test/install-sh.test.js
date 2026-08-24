@@ -115,6 +115,13 @@ function strayTempFiles(dir) {
   return fs.readdirSync(dir).filter((f) => f.startsWith('.slashdo-tmp.'));
 }
 
+function stagingDirs(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter((f) =>
+    f.startsWith('slashdo-claude.') || f.startsWith('slashdo-install.') || f.startsWith('slashdo-mod.')
+  );
+}
+
 const claudeSubdirs = (home) => ['commands/do', 'lib', 'hooks'].map((d) => path.join(home, '.claude', ...d.split('/')));
 
 // ── curl stubs (remote mode) ────────────────────────────────────────
@@ -151,6 +158,10 @@ const makeServingCurl = () => makeCurlStub(
 
 const makeServingCurlWithoutSettingsHooks = () => makeCurlStub(
   `[ "$rel" = "src/settings-hooks.js" ] && exit 22\n[ -f "${REPO_ROOT}/$rel" ] || exit 22\ncp "${REPO_ROOT}/$rel" "$dest"`
+);
+
+const makeServingCurlWithoutHook = (hook) => makeCurlStub(
+  `[ "$rel" = "hooks/${hook}.js" ] && exit 22\n[ -f "${REPO_ROOT}/$rel" ] || exit 22\ncp "${REPO_ROOT}/$rel" "$dest"`
 );
 
 // Writes a partial body and then fails, standing in for a dead transfer.
@@ -486,6 +497,20 @@ describe('install.sh — atomic writes', () => {
     assert.doesNotMatch(remote.stdout, /Done!/);
   });
 
+  it('fails closed when either required hook file cannot download', () => {
+    const home = makeHome();
+    const remote = runScript(remoteModeInstaller(), {
+      home,
+      pathPrefix: makeServingCurlWithoutHook('slashdo-check-update'),
+    });
+
+    assert.equal(remote.status, 1, remote.stdout);
+    assert.match(remote.stdout, /hooks\/slashdo-check-update\.js|hook\/slashdo-check-update\.js/);
+    assert.doesNotMatch(remote.stdout, /Done!/);
+    assert.equal(fs.existsSync(path.join(home, '.claude', 'settings.json')), false,
+      'settings must not be registered when the SessionStart hook is missing');
+  });
+
   it('removes the in-flight temp file when the install is interrupted', { timeout: 60000 }, async () => {
     const home = makeHome();
     runInstall({ home });
@@ -502,11 +527,11 @@ describe('install.sh — atomic writes', () => {
     const exited = new Promise((resolve) => child.on('exit', resolve));
 
     try {
-      // Wait until a staging temp file actually exists, so the signal lands
+      // Wait until the private staging directory exists, so the signal lands
       // while a write is genuinely in flight rather than before or after it.
       const deadline = Date.now() + 20000;
-      while (strayTempFiles(cmdDir).length === 0 && Date.now() < deadline) await sleep(25);
-      assert.ok(strayTempFiles(cmdDir).length > 0, 'expected an in-flight staging temp file to interrupt');
+      while (stagingDirs(home).length === 0 && Date.now() < deadline) await sleep(25);
+      assert.ok(stagingDirs(home).length > 0, 'expected an in-flight staging directory to interrupt');
 
       process.kill(-child.pid, 'SIGTERM');
       await Promise.race([exited, sleep(20000)]);
@@ -517,6 +542,7 @@ describe('install.sh — atomic writes', () => {
     }
 
     assert.deepEqual(strayTempFiles(cmdDir), [], 'the interrupted temp file should be cleaned up');
+    assert.deepEqual(stagingDirs(home), [], 'the interrupted private staging directory should be cleaned up');
     assert.equal(fs.readFileSync(pushPath, 'utf8'), before, 'the previously installed file must survive');
   });
 });

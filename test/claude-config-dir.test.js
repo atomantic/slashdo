@@ -23,7 +23,7 @@ function waitForJson(file, timeout = 8000) {
   throw new Error(`Timed out waiting for ${file}`);
 }
 
-function assertInstalledDocsUseCustomRoot(configDir) {
+function assertInstalledDocsUseCustomRoot(configDir, { completePaths = false } = {}) {
   const quotedRoot = shellQuote(configDir);
   const installedDocs = [
     ...fs.readdirSync(path.join(configDir, 'commands', 'do')).map((name) =>
@@ -35,7 +35,10 @@ function assertInstalledDocsUseCustomRoot(configDir) {
     assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /~\/\.claude(?:\/|[^A-Za-z0-9_-]|$)/, file);
   }
   const command = fs.readFileSync(path.join(configDir, 'commands', 'do', 'next.md'), 'utf8');
-  assert.ok(command.includes(`!\`cat ${quotedRoot}/lib/gh-host.md\``));
+  const expectedPath = completePaths
+    ? shellQuote(path.join(configDir, 'lib', 'gh-host.md'))
+    : `${quotedRoot}/lib/gh-host.md`;
+  assert.ok(command.includes(`!\`cat ${expectedPath}\``));
 }
 
 function assertRegisteredCommandsRun(configDir, env) {
@@ -47,6 +50,26 @@ function assertRegisteredCommandsRun(configDir, env) {
 }
 
 describe('curl installer CLAUDE_CONFIG_DIR support', () => {
+  it('creates an explicitly configured root when it does not exist', { timeout: 30000 }, () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-custom-home-'));
+    const configDir = path.join(home, 'not-yet-created');
+    const env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: configDir };
+
+    try {
+      const installed = spawnSync('bash', [path.join(repoRoot, 'install.sh')], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env,
+        timeout: 20000,
+      });
+      assert.equal(installed.status, 0, installed.stderr || installed.stdout);
+      assert.ok(fs.existsSync(path.join(configDir, 'commands', 'do', 'next.md')));
+      assert.equal(fs.existsSync(path.join(home, '.claude')), false);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('installs, registers, and uninstalls entirely within the custom root', { timeout: 30000 }, () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-custom-home-'));
     const configDir = path.join(home, "claude's profile");
@@ -147,7 +170,7 @@ describe('curl installer CLAUDE_CONFIG_DIR support', () => {
         timeout: 20000,
       });
       assert.equal(installed.status, 0, installed.stderr || installed.stdout);
-      assertInstalledDocsUseCustomRoot(configDir);
+      assertInstalledDocsUseCustomRoot(configDir, { completePaths: true });
       assertRegisteredCommandsRun(configDir, env);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });

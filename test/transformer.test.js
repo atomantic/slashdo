@@ -520,21 +520,34 @@ describe('transformCommand', () => {
     const content = '---\ndescription: Test\n---\n!`cat ~/.claude/lib/foo.md`';
     const env = {
       ...claudeEnv,
-      claudeRootPathPrefix: "'/tmp/$&/profile/'",
+      claudeRootPath: '/tmp/$&/profile',
+      platform: 'linux',
     };
     const result = transformCommand(content, env);
-    assert.ok(result.includes("!`cat '/tmp/$&/profile/'lib/foo.md`"));
+    assert.ok(result.includes("!`cat '/tmp/$&/profile/lib/foo.md'"));
   });
 
   it('rewrites bare custom Claude roots as well as rooted paths', () => {
     const content = '---\ndescription: Test\n---\nProtect ~/.claude and read ~/.claude/commands/do.md.';
     const env = {
       ...claudeEnv,
-      claudeRootPathPrefix: "'/tmp/custom profile'/",
+      claudeRootPath: '/tmp/custom profile',
+      platform: 'linux',
     };
     const result = transformCommand(content, env);
-    assert.ok(result.includes("Protect '/tmp/custom profile' and read '/tmp/custom profile'/commands/do.md."));
+    assert.ok(result.includes("Protect '/tmp/custom profile' and read '/tmp/custom profile/commands/do.md'."));
     assert.ok(!result.includes('~/.claude'));
+  });
+
+  it('quotes complete custom-root paths on Windows', () => {
+    const content = '---\ndescription: Test\n---\n!`cat ~/.claude/lib/foo.md`';
+    const env = {
+      ...claudeEnv,
+      claudeRootPath: 'C:\\Claude Data',
+      platform: 'win32',
+    };
+    const result = transformCommand(content, env);
+    assert.ok(result.includes('!`cat "C:\\Claude Data\\lib\\foo.md"`'));
   });
 
   it('inlines lib content for environments without supportsCatInclusion', () => {

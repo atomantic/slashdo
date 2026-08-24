@@ -38,6 +38,7 @@ describe('getEnv', () => {
     assert.equal(env.versionFile, path.join(configDir, '.slashdo-version'));
     assert.equal(env.configFile, path.join(configDir, '.slashdo-config.json'));
     assert.equal(env.configPath, path.join(configDir, '.slashdo-config.json'));
+    assert.equal(env.claudeRootPath, configDir);
     assert.equal(env.libPathPrefix, `${path.join(configDir, 'lib')}${path.sep}`);
   });
 
