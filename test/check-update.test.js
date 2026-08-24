@@ -158,7 +158,7 @@ describe('runUpdateCheck', () => {
       calls.push(command);
       options_.push({ command, options });
       for (const cmd of ['npm', 'npx']) {
-        if (command === probeCommand(cmd)) {
+        if (command === probeCommand(cmd) || command === probeCommand(cmd, 'win32')) {
           if (missing.includes(cmd)) throw new Error('not found');
           return '';
         }
@@ -170,11 +170,15 @@ describe('runUpdateCheck', () => {
       const invocation = [command, ...args].join(' ');
       calls.push(invocation);
       options_.push({ command: invocation, args, options });
-      if (command === 'npm' && JSON.stringify(args) === JSON.stringify(NPM_VIEW_ARGS)) {
+      const windowsShell = args[0] === '/d' && args[1] === '/s' && args[2] === '/c';
+      const commandLine = windowsShell ? args[3].split(' ') : null;
+      const invokedCommand = windowsShell ? commandLine[0] : command;
+      const invokedArgs = windowsShell ? commandLine.slice(1) : args;
+      if (invokedCommand === 'npm' && JSON.stringify(invokedArgs) === JSON.stringify(NPM_VIEW_ARGS)) {
         if (npmViewThrows) throw new Error('offline');
         return latest + '\n';
       }
-      if (command === 'npx' && JSON.stringify(args) === JSON.stringify(buildInstallArgs(latest))) {
+      if (invokedCommand === 'npx' && JSON.stringify(invokedArgs) === JSON.stringify(buildInstallArgs(latest))) {
         if (onInstall) return onInstall();
         fs.writeFileSync(paths.versionFile, latest + '\n', 'utf8');
         return '';
@@ -188,16 +192,18 @@ describe('runUpdateCheck', () => {
   // The probes run before every real command; assertions below care about the
   // commands that do work, so filter the noise out.
   function realCalls() {
-    return calls.filter((c) => c !== probeCommand('npm') && c !== probeCommand('npx'));
+    const probes = ['npm', 'npx'].flatMap((cmd) => [probeCommand(cmd), probeCommand(cmd, 'win32')]);
+    return calls.filter((c) => !probes.includes(c));
   }
 
-  function run(execDeps) {
+  function run(execDeps, options = {}) {
     return runUpdateCheck({
       fs,
       ...execDeps,
       paths,
       now: () => NOW,
       pid: 4242,
+      ...options,
     });
   }
 
@@ -237,6 +243,26 @@ describe('runUpdateCheck', () => {
     ['--yes', '--ignore-scripts', 'slash-do@1.10.0', '--env', 'claude']);
     assert.equal(optionsFor(probeCommand('npm')).timeout, 5000, 'even the PATH probe is bounded');
     assert.ok(options_.every((c) => c.options.windowsHide === true));
+  });
+
+  it('uses cmd.exe for npm shims on Windows without changing the package arguments', () => {
+    writeInstalled('1.9.0');
+    writeConfig({ autoUpdate: true });
+
+    const result = run(makeExec({ latest: '1.10.0' }), {
+      platform: 'win32',
+      windowsShell: 'cmd.exe',
+    });
+
+    assert.equal(result.autoUpdated, true);
+    assert.deepEqual(realCalls(), [
+      'cmd.exe /d /s /c npm view slash-do version',
+      'cmd.exe /d /s /c npx --yes --ignore-scripts slash-do@1.10.0 --env claude',
+    ]);
+    assert.deepEqual(options_.filter((entry) => entry.command.startsWith('cmd.exe ')).map((entry) => entry.args), [
+      ['/d', '/s', '/c', 'npm view slash-do version'],
+      ['/d', '/s', '/c', 'npx --yes --ignore-scripts slash-do@1.10.0 --env claude'],
+    ]);
   });
 
   it('short-circuits when slashdo is not installed', () => {

@@ -57,7 +57,23 @@ const EXACT_VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(
 // --ignore-scripts prevents package lifecycle hooks from becoming an additional
 // unattended execution path; slash-do's bin still runs as the requested command.
 function buildInstallArgs(version) {
+  if (!isInstallableVersion(version)) {
+    throw new TypeError('refusing an invalid slash-do version');
+  }
   return ['--yes', '--ignore-scripts', `slash-do@${version}`, '--env', 'claude'];
+}
+
+// Windows exposes npm and npx as .cmd shims, which cannot be launched through
+// execFileSync directly. Run cmd.exe itself as the executable there. Every
+// command-line token is fixed except the registry version, which has already
+// passed isInstallableVersion(), so the wrapper cannot turn registry output into
+// additional cmd syntax. POSIX uses the stronger direct-argv path.
+function runTool(execFileSyncDep, command, args, options, platform = process.platform,
+  windowsShell = process.env.ComSpec || 'cmd.exe') {
+  if (platform === 'win32') {
+    return execFileSyncDep(windowsShell, ['/d', '/s', '/c', [command, ...args].join(' ')], options);
+  }
+  return execFileSyncDep(command, args, options);
 }
 
 const NOTICES = {
@@ -71,8 +87,8 @@ const NOTICES = {
 const PERSISTENT_NOTICES = { 'npx-unavailable': true, 'invalid-version': true };
 
 // Shell probe for a command on PATH.
-function probeCommand(cmd) {
-  return (process.platform === 'win32' ? 'where ' : 'command -v ') + cmd;
+function probeCommand(cmd, platform = process.platform) {
+  return (platform === 'win32' ? 'where ' : 'command -v ') + cmd;
 }
 
 // Every path the check reads or writes, derived from a home directory. Taking
@@ -186,7 +202,16 @@ function applyNotice(result, updateCheck, previous, nowS) {
 //   deps.now       — () => epoch ms
 //   deps.pid       — process id used to name the reclaimed stale lock
 // Returns { status, ... } describing what it did, for tests and callers.
-function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, execFileSync: execFileSyncDep, paths, now, pid }) {
+function runUpdateCheck({
+  fs: fsDep,
+  execSync: execSyncDep,
+  execFileSync: execFileSyncDep,
+  paths,
+  now,
+  pid,
+  platform = process.platform,
+  windowsShell = process.env.ComSpec || 'cmd.exe',
+}) {
   // Previous cache state — carries the last notice timestamp so we warn on a
   // slow cadence instead of on every session for the rest of time.
   let previous = null;
@@ -219,7 +244,7 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, execFileSync: execFi
   // exactly like "up to date" — the user never learns the check is dead.
   const hasCommand = (cmd) => {
     try {
-      execSyncDep(probeCommand(cmd), {
+      execSyncDep(probeCommand(cmd, platform), {
         stdio: 'ignore',
         timeout: PROBE_TIMEOUT_MS,
         windowsHide: true,
@@ -236,11 +261,11 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, execFileSync: execFi
   let latest = null;
   if (hasCommand(NPM_COMMAND)) {
     try {
-      const candidate = String(execFileSyncDep(NPM_COMMAND, NPM_VIEW_ARGS, {
+      const candidate = String(runTool(execFileSyncDep, NPM_COMMAND, NPM_VIEW_ARGS, {
         encoding: 'utf8',
         timeout: NPM_VIEW_TIMEOUT_MS,
         windowsHide: true,
-      })).trim();
+      }, platform, windowsShell)).trim();
       if (isInstallableVersion(candidate)) {
         latest = candidate;
       } else {
@@ -336,11 +361,11 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, execFileSync: execFi
     // Only the lock holder updates.
     if (haveLock) {
       try {
-        execFileSyncDep(NPX_COMMAND, buildInstallArgs(latest), {
+        runTool(execFileSyncDep, NPX_COMMAND, buildInstallArgs(latest), {
           stdio: 'ignore',
           timeout: INSTALL_TIMEOUT_MS,
           windowsHide: true,
-        });
+        }, platform, windowsShell);
         // A zero exit code alone is not enough: a stale/cached install could
         // otherwise be reported as successful while the old version remains.
         const updatedVersion = fsDep.readFileSync(paths.versionFile, 'utf8').trim();
@@ -391,6 +416,8 @@ function runWorker() {
     paths: resolvePaths(os.homedir(), process.env.CLAUDE_CONFIG_DIR),
     now: Date.now,
     pid: process.pid,
+    platform: process.platform,
+    windowsShell: process.env.ComSpec || 'cmd.exe',
   });
 }
 
@@ -423,6 +450,7 @@ module.exports = {
   NPM_VIEW_COMMAND,
   NPM_VIEW_ARGS,
   buildInstallArgs,
+  runTool,
   NOTICES,
   probeCommand,
   resolvePaths,
