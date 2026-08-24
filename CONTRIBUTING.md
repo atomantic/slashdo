@@ -12,6 +12,7 @@ Thanks for considering a contribution. slashdo is a small, actively-maintained p
 - `commands/do/*.md` — the source of truth for every `/do:*` command, written in Claude Code's native format
 - `lib/*.md` — shared partials referenced from multiple commands
 - `src/*.js` — the installer/transformer that converts `commands/do/` and `lib/` into each target environment's native format (Claude Code, OpenCode, Antigravity CLI, Codex, Grok Build)
+- `src/settings-hooks.js` — the single implementation of the `~/.claude/settings.json` hook/statusline mutation, shared by the npm installer and (fetched at install time) by `install.sh`/`uninstall.sh`; keep it dependency-free so the curl path can fetch it alone
 - `install.sh` / `uninstall.sh` — the no-npm curl-based install path; their `COMMANDS`/`LIBS` arrays must stay in sync with `commands/do/` and `lib/` (`test/curl-installer-allowlist.test.js` enforces this in CI)
 - `test/*.test.js` — the test suite, run with `node --test`
 

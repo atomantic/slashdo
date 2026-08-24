@@ -34,7 +34,7 @@ List all available `/do:*` commands with their descriptions.
 | `/do:simplify` | Refactor-only audit — architecture, DRY, simplification, and cognitive load — shipped as per-category PRs that must not change behavior (`/do:better --simplify-only`) |
 | `/do:update` | Update slashdo commands to the latest version |
 
-2. **Check for updates**: Run `npm view slash-do version` and compare to the installed version in `~/.claude/.slashdo-version`. If an update is available, mention it.
+2. **Check for updates**: If `command -v npm` finds npm, run `npm view slash-do version` and compare to the installed version in `~/.claude/.slashdo-version`; mention it if an update is available. If npm is missing (the curl installer does not require it), say so instead of reporting "up to date" — the update check and the `⬆ /do:update` statusline hint cannot work without npm, so point the user at `curl -fsSL https://raw.githubusercontent.com/atomantic/slashdo/main/install.sh | bash` to update in place.
 
 ## Notes
 

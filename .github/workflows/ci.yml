@@ -6,6 +6,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -20,7 +23,7 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - name: Validate modules load
-        run: node -e "require('./src/environments'); require('./src/transformer'); require('./src/installer'); require('./src/version-check'); console.log('OK')"
+        run: node -e "require('./src/environments'); require('./src/transformer'); require('./src/installer'); console.log('OK')"
 
       - name: Validate CLI help
         run: node bin/cli.js --help

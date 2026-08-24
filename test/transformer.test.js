@@ -10,7 +10,6 @@ const {
   parseFrontmatter,
   rewriteLibPaths,
   rewriteConfigPath,
-  inlineLibContent,
   inlineLibReferences,
   applyConditionalBlocks,
   getSkillName,
@@ -24,6 +23,14 @@ const {
 describe('parseFrontmatter', () => {
   it('parses normal YAML frontmatter', () => {
     const content = '---\ndescription: Hello world\nallowed-tools: foo\n---\nBody text';
+    const { frontmatter, body } = parseFrontmatter(content);
+    assert.equal(frontmatter.description, 'Hello world');
+    assert.equal(frontmatter['allowed-tools'], 'foo');
+    assert.equal(body, 'Body text');
+  });
+
+  it('parses YAML frontmatter with CRLF line endings', () => {
+    const content = '---\r\ndescription: Hello world\r\nallowed-tools: foo\r\n---\r\nBody text';
     const { frontmatter, body } = parseFrontmatter(content);
     assert.equal(frontmatter.description, 'Hello world');
     assert.equal(frontmatter['allowed-tools'], 'foo');
@@ -115,41 +122,6 @@ describe('rewriteConfigPath', () => {
   it('is a no-op when env has no configPath', () => {
     const body = 'read ~/.claude/.slashdo-config.json now';
     assert.equal(rewriteConfigPath(body, {}), body);
-  });
-});
-
-// ── inlineLibContent ────────────────────────────────────────────────
-
-describe('inlineLibContent', () => {
-  let tmpDir;
-
-  it('inlines content when file exists', () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-test-'));
-    fs.writeFileSync(path.join(tmpDir, 'checklist.md'), 'Checklist content\n', 'utf8');
-
-    const body = 'Before\n!`cat ~/.claude/lib/checklist.md`\nAfter';
-    const result = inlineLibContent(body, tmpDir);
-    assert.equal(result, 'Before\nChecklist content\nAfter');
-    fs.rmSync(tmpDir, { recursive: true });
-  });
-
-  it('preserves pattern when file is missing', () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-test-'));
-    const body = '!`cat ~/.claude/lib/missing.md`';
-    const result = inlineLibContent(body, tmpDir);
-    assert.equal(result, '!`cat ~/.claude/lib/missing.md`');
-    fs.rmSync(tmpDir, { recursive: true });
-  });
-
-  it('handles multiple inline patterns', () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-test-'));
-    fs.writeFileSync(path.join(tmpDir, 'a.md'), 'Content A\n', 'utf8');
-    fs.writeFileSync(path.join(tmpDir, 'b.md'), 'Content B\n', 'utf8');
-
-    const body = '!`cat ~/.claude/lib/a.md` and !`cat ~/.claude/lib/b.md`';
-    const result = inlineLibContent(body, tmpDir);
-    assert.equal(result, 'Content A and Content B');
-    fs.rmSync(tmpDir, { recursive: true });
   });
 });
 
@@ -542,6 +514,40 @@ describe('transformCommand', () => {
     const result = transformCommand(content, catInclusionEnv);
     assert.ok(result.includes('~/.config/opencode/lib/foo.md'));
     assert.ok(!result.includes('~/.claude/lib/'));
+  });
+
+  it('inserts custom Claude roots literally when they contain replacement syntax', () => {
+    const content = '---\ndescription: Test\n---\n!`cat ~/.claude/lib/foo.md`';
+    const env = {
+      ...claudeEnv,
+      claudeRootPath: '/tmp/$&/profile',
+      platform: 'linux',
+    };
+    const result = transformCommand(content, env);
+    assert.ok(result.includes("!`cat '/tmp/$&/profile/lib/foo.md'"));
+  });
+
+  it('rewrites bare custom Claude roots as well as rooted paths', () => {
+    const content = '---\ndescription: Test\n---\nProtect ~/.claude and read ~/.claude/commands/do.md.';
+    const env = {
+      ...claudeEnv,
+      claudeRootPath: '/tmp/custom profile',
+      platform: 'linux',
+    };
+    const result = transformCommand(content, env);
+    assert.ok(result.includes("Protect '/tmp/custom profile' and read '/tmp/custom profile/commands/do.md'."));
+    assert.ok(!result.includes('~/.claude'));
+  });
+
+  it('quotes complete custom-root paths on Windows', () => {
+    const content = '---\ndescription: Test\n---\n!`cat ~/.claude/lib/foo.md`';
+    const env = {
+      ...claudeEnv,
+      claudeRootPath: 'C:\\Claude Data',
+      platform: 'win32',
+    };
+    const result = transformCommand(content, env);
+    assert.ok(result.includes('!`cat "C:\\Claude Data\\lib\\foo.md"`'));
   });
 
   it('inlines lib content for environments without supportsCatInclusion', () => {

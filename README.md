@@ -472,7 +472,7 @@ npx slash-do@latest push pr release           # install specific commands only
 
 ## Updating
 
-On install, slashdo asks whether to **auto-update** (default: yes, Claude Code only). When enabled, the SessionStart hook silently runs `npx slash-do@latest` whenever it detects a newer version — no manual step needed. When disabled, the statusline shows a `⬆ /do:update` hint instead, and you update manually:
+On install, slashdo asks whether to **auto-update** (default: yes, Claude Code only). When enabled, the SessionStart hook asks npm for the current version, validates the result, and runs that exact version with npm lifecycle scripts disabled whenever it detects a newer release — no manual step needed. The automatic path does not execute the mutable `@latest` tag, and it only treats the update as successful when the requested version is installed. If npm returns invalid metadata or the install fails, the statusline keeps the `⬆ /do:update` hint instead. When disabled, the statusline shows the same hint and you update manually:
 
 ```bash
 npx slash-do@latest        # from your terminal
@@ -481,6 +481,8 @@ npx slash-do@latest        # from your terminal
 ```
 /do:update                # from inside your AI coding assistant
 ```
+
+Both paths need `npm`/`npx` on your `PATH`. If you installed with the npm-free `install.sh` and never installed npm, the statusline says so (`⚠ slashdo update check needs npm on PATH — update with install.sh`) rather than silently implying you are current — re-run the curl installer to update in place.
 
 The preference lives in `~/.claude/.slashdo-config.json` (`{ "autoUpdate": true }`). Change it any time without the prompt:
 

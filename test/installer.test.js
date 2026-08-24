@@ -1,23 +1,26 @@
 'use strict';
 
-const { describe, it, beforeEach } = require('node:test');
+const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
 const { install, collectCommands, list } = require('../src/installer');
+const { SETTINGS_HOOKS_CACHE } = require('../src/settings-hooks');
 
 // Reach into internals we need to test directly
 // These are not exported, so we require the file and test via the install() entrypoint
 // For registerHooksInSettings / deregisterHooksFromSettings, we test indirectly through install/uninstall
 
 const PACKAGE_DIR = path.resolve(__dirname, '..');
+const tempDirs = new Set();
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
 function makeTmpEnv(opts = {}) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-inst-'));
+  tempDirs.add(tmpDir);
   const env = {
     name: 'Test Env',
     commandsDir: path.join(tmpDir, 'commands'),
@@ -38,7 +41,12 @@ function makeTmpEnv(opts = {}) {
 
 function cleanup(tmpDir) {
   fs.rmSync(tmpDir, { recursive: true, force: true });
+  tempDirs.delete(tmpDir);
 }
+
+afterEach(() => {
+  for (const tmpDir of tempDirs) cleanup(tmpDir);
+});
 
 // ── collectCommands ─────────────────────────────────────────────────
 
@@ -428,6 +436,19 @@ describe('uninstall', () => {
 
     cleanup(tmpDir);
   });
+
+  it('removes the curl installer settings module on uninstall', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    const settingsHooksCache = path.join(env.hooksDir, SETTINGS_HOOKS_CACHE);
+
+    install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+    fs.writeFileSync(settingsHooksCache, '// cached curl dependency\n', 'utf8');
+
+    install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false });
+
+    assert.ok(!fs.existsSync(settingsHooksCache), 'cached settings module should be removed');
+    cleanup(tmpDir);
+  });
 });
 
 // ── registerHooksInSettings (via install) ───────────────────────────
@@ -444,6 +465,8 @@ describe('hook registration via install', () => {
     assert.ok(settings.hooks, 'hooks should exist');
     assert.ok(Array.isArray(settings.hooks.SessionStart), 'SessionStart should be array');
     assert.ok(settings.statusLine, 'statusLine should be configured');
+
+    cleanup(tmpDir);
   });
 
   it('skips registration on corrupted settings.json', () => {
