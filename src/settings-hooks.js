@@ -22,7 +22,17 @@ const SLASHDO_HOOKS = ['slashdo-check-update.js', 'slashdo-statusline.js'];
 // install.sh caches this module here so uninstall.sh can deregister offline.
 const SETTINGS_HOOKS_CACHE = '.slashdo-settings-hooks.js';
 
-const shellQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+// Settings commands are executed by the host shell. POSIX shells use single
+// quotes, while Windows cmd.exe needs double quotes for paths containing spaces.
+// `platform` is injectable so migration behavior can be tested without a
+// Windows runner.
+const shellQuote = (value, platform = process.platform) => {
+  if (platform === 'win32') return `"${value.replace(/"/g, '""')}"`;
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+};
+
+const hookCommand = (env, hookName) =>
+  `node ${shellQuote(path.join(env.hooksDir, hookName), env.platform)}`;
 
 // Read settings.json, or throw when it cannot be trusted. An empty or
 // whitespace-only file reads as {}: it provably holds nothing to lose, and
@@ -62,7 +72,7 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
   // Register SessionStart hook for slashdo-check-update.js
   const updateCheckHook = hookFiles.find(h => h.name === 'slashdo-check-update.js');
   if (updateCheckHook) {
-    const hookCommand = `node ${shellQuote(path.join(env.hooksDir, updateCheckHook.name))}`;
+    const expectedHookCommand = hookCommand(env, updateCheckHook.name);
 
     // Absent (or null) is ours to create — neither carries user data. Any other
     // non-object is a value the user put there, so leave it exactly as it is: a
@@ -87,14 +97,23 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
     } else {
       if (!Array.isArray(settings.hooks.SessionStart)) settings.hooks.SessionStart = [];
 
-      const alreadyRegistered = settings.hooks.SessionStart.some(group =>
-        group &&
-        typeof group === 'object' &&
-        Array.isArray(group.hooks) &&
-        group.hooks.some(h => typeof h?.command === 'string' && h.command.includes('slashdo-check-update'))
+      const registeredHooks = settings.hooks.SessionStart.flatMap(group =>
+        group && typeof group === 'object' && Array.isArray(group.hooks)
+          ? group.hooks.filter(h =>
+            typeof h?.command === 'string' && h.command.includes('slashdo-check-update'))
+          : []
       );
 
-      if (!alreadyRegistered) {
+      if (registeredHooks.length > 0) {
+        const needsMigration = registeredHooks.some(h => h.command !== expectedHookCommand);
+        if (needsMigration) {
+          if (!dryRun) registeredHooks.forEach(h => { h.command = expectedHookCommand; });
+          modified = true;
+          actions.push({ name: 'settings/SessionStart hook', status: dryRun ? 'would update' : 'updated' });
+        } else {
+          actions.push({ name: 'settings/SessionStart hook', status: 'already registered' });
+        }
+      } else {
         if (settings.hooks.SessionStart.length > 0) {
           let firstGroup = settings.hooks.SessionStart[0];
           if (!firstGroup || typeof firstGroup !== 'object') {
@@ -104,20 +123,18 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
           if (!Array.isArray(firstGroup.hooks)) firstGroup.hooks = [];
           firstGroup.hooks.push({
             type: 'command',
-            command: hookCommand,
+            command: expectedHookCommand,
           });
         } else {
           settings.hooks.SessionStart.push({
             hooks: [{
               type: 'command',
-              command: hookCommand,
+              command: expectedHookCommand,
             }],
           });
         }
         modified = true;
         actions.push({ name: 'settings/SessionStart hook', status: dryRun ? 'would register' : 'registered' });
-      } else {
-        actions.push({ name: 'settings/SessionStart hook', status: 'already registered' });
       }
     }
   }
@@ -125,7 +142,7 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
   // Configure statusline: upgrade gsd-statusline → slashdo-statusline (superset)
   const statuslineHook = hookFiles.find(h => h.name === 'slashdo-statusline.js');
   if (statuslineHook) {
-    const statuslineCommand = `node ${shellQuote(path.join(env.hooksDir, statuslineHook.name))}`;
+    const statuslineCommand = hookCommand(env, statuslineHook.name);
     const currentCmd = typeof settings.statusLine?.command === 'string' ? settings.statusLine.command : '';
 
     if (!settings.statusLine) {
@@ -137,7 +154,13 @@ function registerHooksInSettings(env, hookFiles, dryRun) {
       modified = true;
       actions.push({ name: 'settings/statusLine', status: dryRun ? 'would upgrade (gsd→slashdo)' : 'upgraded (gsd→slashdo)' });
     } else if (currentCmd.includes('slashdo-statusline')) {
-      actions.push({ name: 'settings/statusLine', status: 'already configured' });
+      if (currentCmd !== statuslineCommand) {
+        if (!dryRun) settings.statusLine.command = statuslineCommand;
+        modified = true;
+        actions.push({ name: 'settings/statusLine', status: dryRun ? 'would update' : 'updated' });
+      } else {
+        actions.push({ name: 'settings/statusLine', status: 'already configured' });
+      }
     } else {
       actions.push({ name: 'settings/statusLine', status: 'existing statusline preserved' });
     }
@@ -200,7 +223,7 @@ function deregisterHooksFromSettings(env, dryRun) {
     // Restore gsd-statusline if its hook file still exists
     const gsdHookPath = path.join(env.hooksDir, 'gsd-statusline.js');
     if (fs.existsSync(gsdHookPath)) {
-      settings.statusLine = { type: 'command', command: `node ${shellQuote(gsdHookPath)}` };
+      settings.statusLine = { type: 'command', command: `node ${shellQuote(gsdHookPath, env.platform)}` };
       actions.push({ name: 'settings/statusLine', status: dryRun ? 'would downgrade (slashdo→gsd)' : 'downgraded (slashdo→gsd)' });
     } else {
       delete settings.statusLine;

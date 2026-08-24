@@ -299,6 +299,20 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
       results,
     });
 
+    // The curl installer caches this dependency-free module beside the hooks so
+    // it can uninstall offline. It is slashdo-owned even though it is not part
+    // of the npm package's source hook list.
+    const settingsHooksCache = path.join(env.hooksDir, SETTINGS_HOOKS_CACHE);
+    if (fs.existsSync(settingsHooksCache)) {
+      if (dryRun) {
+        results.actions.push({ name: `hook/${SETTINGS_HOOKS_CACHE}`, status: 'would remove', target: settingsHooksCache });
+      } else {
+        fs.unlinkSync(settingsHooksCache);
+        results.actions.push({ name: `hook/${SETTINGS_HOOKS_CACHE}`, status: 'removed', target: settingsHooksCache });
+      }
+      results.removed++;
+    }
+
     // Clean up obsolete hooks that may have been installed by prior versions.
     removeObsoleteHooks(env, dryRun, results);
 

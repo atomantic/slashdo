@@ -545,6 +545,7 @@ describe('install.sh — temp file safety', () => {
     fs.chmodSync(tmpdir, 0o500); // readable and traversable, but not writable
     try {
       const result = runScript(INSTALL_SH, { home, tmpdir });
+      assert.equal(result.status, 1, 'a staging failure must propagate to the installer exit status');
       assert.match(result.stdout, /could not create a temp directory/);
       assert.doesNotMatch(result.stdout, /Done!/, 'a zero-file install must not report success');
     } finally {

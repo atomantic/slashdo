@@ -134,6 +134,24 @@ describe('registerHooksInSettings statusline outcomes', () => {
       'already configured');
   });
 
+  it('migrates existing hook commands to Windows quoting', () => {
+    const env = makeEnv({
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: "node '/old/slashdo-check-update.js'" }] }] },
+      statusLine: { type: 'command', command: "node '/old/slashdo-statusline.js'" },
+    });
+    env.platform = 'win32';
+
+    const actions = registerHooksInSettings(env, HOOK_FILES, false);
+    const settings = readSettings(env);
+    const expectedUpdate = `node "${path.join(env.hooksDir, 'slashdo-check-update.js')}"`;
+    const expectedStatusline = `node "${path.join(env.hooksDir, 'slashdo-statusline.js')}"`;
+
+    assert.equal(statusOf(actions, 'settings/SessionStart hook'), 'updated');
+    assert.equal(statusOf(actions, 'settings/statusLine'), 'updated');
+    assert.equal(settings.hooks.SessionStart[0].hooks[0].command, expectedUpdate);
+    assert.equal(settings.statusLine.command, expectedStatusline);
+  });
+
   it('reports a custom statusline as preserved and leaves it alone', () => {
     const env = makeEnv({ statusLine: { type: 'command', command: 'my-own-statusline' } });
     assert.equal(

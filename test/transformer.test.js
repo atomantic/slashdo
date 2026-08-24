@@ -516,6 +516,16 @@ describe('transformCommand', () => {
     assert.ok(!result.includes('~/.claude/lib/'));
   });
 
+  it('inserts custom Claude roots literally when they contain replacement syntax', () => {
+    const content = '---\ndescription: Test\n---\n!`cat ~/.claude/lib/foo.md`';
+    const env = {
+      ...claudeEnv,
+      claudeRootPathPrefix: "'/tmp/$&/profile/'",
+    };
+    const result = transformCommand(content, env);
+    assert.ok(result.includes("!`cat '/tmp/$&/profile/'lib/foo.md`"));
+  });
+
   it('inlines lib content for environments without supportsCatInclusion', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-test-'));
     fs.writeFileSync(path.join(tmpDir, 'foo.md'), 'Inlined content\n', 'utf8');

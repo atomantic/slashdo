@@ -7,6 +7,7 @@ const path = require('path');
 const os = require('os');
 
 const { install, collectCommands, list } = require('../src/installer');
+const { SETTINGS_HOOKS_CACHE } = require('../src/settings-hooks');
 
 // Reach into internals we need to test directly
 // These are not exported, so we require the file and test via the install() entrypoint
@@ -433,6 +434,19 @@ describe('uninstall', () => {
 
     assert.ok(!fs.existsSync(cacheFile), 'cache file should be removed');
 
+    cleanup(tmpDir);
+  });
+
+  it('removes the curl installer settings module on uninstall', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    const settingsHooksCache = path.join(env.hooksDir, SETTINGS_HOOKS_CACHE);
+
+    install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+    fs.writeFileSync(settingsHooksCache, '// cached curl dependency\n', 'utf8');
+
+    install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false });
+
+    assert.ok(!fs.existsSync(settingsHooksCache), 'cached settings module should be removed');
     cleanup(tmpDir);
   });
 });

@@ -359,16 +359,22 @@ printf "  Detected: ${GREEN}%s${RESET}\n\n" "${envs[*]}"
 
 npx_needed=false
 curl_installed=false
+install_failed=false
 for env in "${envs[@]}"; do
   case "$env" in
     claude)      install_claude; curl_installed=true ;;
-    opencode)    if install_opencode; then curl_installed=true; fi ;;
+    opencode)    if install_opencode; then curl_installed=true; else install_failed=true; fi ;;
     antigravity) printf "  ${DIM}Antigravity CLI: use 'npx slash-do@latest --env antigravity' (Agent Skills require Node.js for content inlining)${RESET}\n"; npx_needed=true ;;
     codex)       printf "  ${DIM}Codex: use 'npx slash-do@latest --env codex' (requires Node.js for content inlining)${RESET}\n"; npx_needed=true ;;
     grok)        printf "  ${DIM}Grok Build: use 'npx slash-do@latest --env grok' (requires Node.js for content inlining)${RESET}\n"; npx_needed=true ;;
   esac
   printf "\n"
 done
+
+if [ "$install_failed" = true ]; then
+  printf "  ${YELLOW}Install incomplete:${RESET} one or more environments could not be installed.\n"
+  exit 1
+fi
 
 if [ "$curl_installed" = true ]; then
   printf "  ${GREEN}Done!${RESET} Commands are available as /do:<name> in your AI coding assistant.\n"
