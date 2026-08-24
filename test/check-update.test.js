@@ -2,8 +2,9 @@
 
 // Exercises hooks/slashdo-check-update.js — the auto-update/version-check logic
 // that actually runs in production. It used to be an inline `-e` string no test
-// could reach; runUpdateCheck() now takes fs/execSync/clock as dependencies, so
-// every branch below is driven directly against a temp home directory.
+// could reach; runUpdateCheck() now takes fs/execSync/execFileSync/clock as
+// dependencies, so every branch below is driven directly against a temp home
+// directory.
 
 const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -17,10 +18,12 @@ const {
   NOTICE_REPEAT_S,
   NPM_VIEW_COMMAND,
   NOTICES,
-  INSTALL_COMMAND,
+  NPM_VIEW_ARGS,
+  buildInstallArgs,
   probeCommand,
   resolvePaths,
   compareVersions,
+  isInstallableVersion,
   isUpdateAvailable,
   runUpdateCheck,
 } = require('../hooks/slashdo-check-update');
@@ -112,6 +115,20 @@ describe('check-update isUpdateAvailable', () => {
   });
 });
 
+describe('check-update isInstallableVersion', () => {
+  it('accepts exact semver values from the registry', () => {
+    assert.equal(isInstallableVersion('1.2.3'), true);
+    assert.equal(isInstallableVersion('1.2.3-beta.1'), true);
+    assert.equal(isInstallableVersion('1.2.3+build.7'), true);
+  });
+
+  it('rejects values that are not a single package version', () => {
+    assert.equal(isInstallableVersion('1.2'), false);
+    assert.equal(isInstallableVersion('1.2.3\n2.0.0'), false);
+    assert.equal(isInstallableVersion('1.2.3 && touch compromised'), false);
+  });
+});
+
 // ── runUpdateCheck ──────────────────────────────────────────────────
 
 describe('runUpdateCheck', () => {
@@ -134,14 +151,10 @@ describe('runUpdateCheck', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  // execSync stub: `npm view` answers with `latest`, the install command runs
-  // `onInstall` (default: succeed and bump the version file, as the real
-  // installer does).
-  // execSync stub. `missing` lists commands the PATH probe should not find;
-  // `npm view` answers with `latest`; the install command runs `onInstall`
-  // (default: succeed and bump the version file, as the real installer does).
-  function makeExecSync({ latest, onInstall, npmViewThrows, missing = [] } = {}) {
-    return (command, options) => {
+  // PATH probes still use execSync, while npm/npx receive argv through
+  // execFileSync so registry output can never become shell syntax.
+  function makeExec({ latest, onInstall, npmViewThrows, missing = [] } = {}) {
+    const execSync = (command, options) => {
       calls.push(command);
       options_.push({ command, options });
       for (const cmd of ['npm', 'npx']) {
@@ -150,17 +163,26 @@ describe('runUpdateCheck', () => {
           return '';
         }
       }
-      if (command === NPM_VIEW_COMMAND) {
+      throw new Error('unexpected shell command: ' + command);
+    };
+
+    const execFileSync = (command, args, options) => {
+      const invocation = [command, ...args].join(' ');
+      calls.push(invocation);
+      options_.push({ command: invocation, args, options });
+      if (command === 'npm' && JSON.stringify(args) === JSON.stringify(NPM_VIEW_ARGS)) {
         if (npmViewThrows) throw new Error('offline');
         return latest + '\n';
       }
-      if (command === INSTALL_COMMAND) {
+      if (command === 'npx' && JSON.stringify(args) === JSON.stringify(buildInstallArgs(latest))) {
         if (onInstall) return onInstall();
         fs.writeFileSync(paths.versionFile, latest + '\n', 'utf8');
         return '';
       }
-      throw new Error('unexpected command: ' + command);
+      throw new Error('unexpected file command: ' + invocation);
     };
+
+    return { execSync, execFileSync };
   }
 
   // The probes run before every real command; assertions below care about the
@@ -169,10 +191,10 @@ describe('runUpdateCheck', () => {
     return calls.filter((c) => c !== probeCommand('npm') && c !== probeCommand('npx'));
   }
 
-  function run(execSyncStub) {
+  function run(execDeps) {
     return runUpdateCheck({
       fs,
-      execSync: execSyncStub,
+      ...execDeps,
       paths,
       now: () => NOW,
       pid: 4242,
@@ -191,31 +213,34 @@ describe('runUpdateCheck', () => {
     return JSON.parse(fs.readFileSync(paths.cacheFile, 'utf8'));
   }
 
-  it('runs the exact npm and npx commands, each with a bounded timeout', () => {
+  it('resolves an exact version and runs npm/npx through argument-safe calls', () => {
     // Asserted as LITERALS, not via the imported constants: comparing the module
     // against itself would let '--env claude' (which keeps the non-TTY install
-    // out of the interactive multi-env prompt) or '-y' be dropped silently.
+    // out of the interactive multi-env prompt) or '--yes' be dropped silently.
     writeInstalled('1.9.0');
     writeConfig({ autoUpdate: true });
 
-    run(makeExecSync({ latest: '1.10.0' }));
+    run(makeExec({ latest: '1.10.0' }));
 
     assert.deepEqual(realCalls(), [
       'npm view slash-do version',
-      'npx -y slash-do@latest --env claude',
+      'npx --yes --ignore-scripts slash-do@1.10.0 --env claude',
     ]);
     const optionsFor = (command) => options_.find((c) => c.command === command).options;
     assert.equal(optionsFor(NPM_VIEW_COMMAND).timeout, 5000, 'npm view must not hang session start');
     assert.equal(optionsFor(NPM_VIEW_COMMAND).encoding, 'utf8');
-    assert.equal(optionsFor(INSTALL_COMMAND).timeout, 120000,
+    assert.equal(optionsFor('npx --yes --ignore-scripts slash-do@1.10.0 --env claude').timeout, 120000,
       'an unbounded install would hold the lock past LOCK_STALE_MS');
-    assert.equal(optionsFor(INSTALL_COMMAND).stdio, 'ignore');
+    assert.equal(optionsFor('npx --yes --ignore-scripts slash-do@1.10.0 --env claude').stdio, 'ignore');
+    assert.deepEqual(options_.find((c) => c.command ===
+      'npx --yes --ignore-scripts slash-do@1.10.0 --env claude').args,
+    ['--yes', '--ignore-scripts', 'slash-do@1.10.0', '--env', 'claude']);
     assert.equal(optionsFor(probeCommand('npm')).timeout, 5000, 'even the PATH probe is bounded');
     assert.ok(options_.every((c) => c.options.windowsHide === true));
   });
 
   it('short-circuits when slashdo is not installed', () => {
-    const result = run(makeExecSync({ latest: '2.0.0' }));
+    const result = run(makeExec({ latest: '2.0.0' }));
 
     assert.equal(result.status, 'not-installed');
     assert.deepEqual(realCalls(), [], 'must not hit the network when nothing is installed');
@@ -225,7 +250,7 @@ describe('runUpdateCheck', () => {
   it('writes update_available:true when a newer version exists and auto-update is off', () => {
     writeInstalled('1.9.0');
 
-    const result = run(makeExecSync({ latest: '1.10.0' }));
+    const result = run(makeExec({ latest: '1.10.0' }));
 
     assert.equal(result.status, 'written');
     assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND], 'must not install when auto-update is off');
@@ -241,7 +266,7 @@ describe('runUpdateCheck', () => {
   it('writes update_available:false when already current', () => {
     writeInstalled('1.10.0');
 
-    run(makeExecSync({ latest: '1.10.0' }));
+    run(makeExec({ latest: '1.10.0' }));
 
     assert.equal(readCache().update_available, false);
   });
@@ -250,7 +275,7 @@ describe('runUpdateCheck', () => {
     writeInstalled('1.0.0');
     writeConfig({ autoUpdate: false });
 
-    run(makeExecSync({ latest: '2.0.0' }));
+    run(makeExec({ latest: '2.0.0' }));
 
     assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND]);
     assert.equal(readCache().update_available, true);
@@ -259,7 +284,7 @@ describe('runUpdateCheck', () => {
   it('records latest:unknown and lookup-failed when the npm lookup fails', () => {
     writeInstalled('1.0.0');
 
-    run(makeExecSync({ npmViewThrows: true }));
+    run(makeExec({ npmViewThrows: true }));
 
     assert.deepEqual(readCache(), {
       update_available: false,
@@ -275,7 +300,7 @@ describe('runUpdateCheck', () => {
   it('reports npm-unavailable rather than a bare no-update result', () => {
     writeInstalled('1.0.0');
 
-    run(makeExecSync({ latest: '2.0.0', missing: ['npm'] }));
+    run(makeExec({ latest: '2.0.0', missing: ['npm'] }));
 
     assert.deepEqual(realCalls(), [], 'no npm on PATH means nothing to shell out to');
     const cache = readCache();
@@ -288,7 +313,7 @@ describe('runUpdateCheck', () => {
   it('suppresses the badge and keeps warning when npx is missing', () => {
     writeInstalled('1.0.0');
 
-    run(makeExecSync({ latest: '2.0.0', missing: ['npx'] }));
+    run(makeExec({ latest: '2.0.0', missing: ['npx'] }));
 
     const cache = readCache();
     assert.equal(cache.update_check, 'npx-unavailable');
@@ -301,7 +326,7 @@ describe('runUpdateCheck', () => {
   it('does not probe for npx when there is nothing to install', () => {
     writeInstalled('2.0.0');
 
-    run(makeExecSync({ latest: '2.0.0' }));
+    run(makeExec({ latest: '2.0.0' }));
 
     assert.ok(!calls.includes(probeCommand('npx')), 'no update means no reason to probe npx');
     assert.equal(readCache().update_check, undefined);
@@ -312,7 +337,7 @@ describe('runUpdateCheck', () => {
     const nowS = Math.floor(NOW / 1000);
     const runAt = (ms) => runUpdateCheck({
       fs,
-      execSync: makeExecSync({ latest: '2.0.0', missing: ['npm'] }),
+      ...makeExec({ latest: '2.0.0', missing: ['npm'] }),
       paths,
       now: () => ms,
       pid: 4242,
@@ -333,7 +358,7 @@ describe('runUpdateCheck', () => {
     writeInstalled('1.0.0');
     fs.writeFileSync(paths.configFile, '{not json', 'utf8');
 
-    run(makeExecSync({ latest: '2.0.0' }));
+    run(makeExec({ latest: '2.0.0' }));
 
     assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND], 'corrupt config must read as auto-update off');
     assert.equal(readCache().update_available, true);
@@ -345,9 +370,12 @@ describe('runUpdateCheck', () => {
     writeInstalled('1.9.0');
     writeConfig({ autoUpdate: true });
 
-    const result = run(makeExecSync({ latest: '1.10.0' }));
+    const result = run(makeExec({ latest: '1.10.0' }));
 
-    assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND, INSTALL_COMMAND]);
+    assert.deepEqual(realCalls(), [
+      NPM_VIEW_COMMAND,
+      'npx --yes --ignore-scripts slash-do@1.10.0 --env claude',
+    ]);
     assert.equal(result.autoUpdated, true);
     assert.deepEqual(readCache(), {
       update_available: false,
@@ -363,7 +391,7 @@ describe('runUpdateCheck', () => {
     writeInstalled('1.9.0');
     writeConfig({ autoUpdate: true });
 
-    const result = run(makeExecSync({
+    const result = run(makeExec({
       latest: '1.10.0',
       onInstall: () => { throw new Error('npx exploded'); },
     }));
@@ -374,12 +402,38 @@ describe('runUpdateCheck', () => {
     assert.equal(fs.existsSync(paths.lockFile), false, 'lock must be released even on failure');
   });
 
+  it('surfaces the hint when the command exits successfully without installing the target version', () => {
+    writeInstalled('1.9.0');
+    writeConfig({ autoUpdate: true });
+
+    const result = run(makeExec({ latest: '1.10.0', onInstall: () => '' }));
+
+    assert.equal(result.autoUpdated, false);
+    assert.equal(readCache().update_available, true, 'a stale install must not clear the update hint');
+    assert.equal(readCache().installed, '1.9.0');
+    assert.equal(fs.existsSync(paths.lockFile), false, 'lock must be released after verification failure');
+  });
+
+  it('does not execute a malformed registry version', () => {
+    writeInstalled('1.9.0');
+    writeConfig({ autoUpdate: true });
+
+    const result = run(makeExec({ latest: '1.10.0 && touch compromised' }));
+
+    assert.equal(result.autoUpdated, false);
+    assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND]);
+    assert.ok(!calls.some((call) => call.startsWith('npx ')), 'malformed metadata must not reach npx');
+    assert.equal(result.result.update_check, 'invalid-version');
+    assert.equal(result.result.update_available, false);
+    assert.match(result.result.notice, /invalid version/);
+  });
+
   it('defers to a fresh lock without installing or writing the cache', () => {
     writeInstalled('1.9.0');
     writeConfig({ autoUpdate: true });
     fs.writeFileSync(paths.lockFile, '999', 'utf8');
 
-    const result = run(makeExecSync({ latest: '1.10.0' }));
+    const result = run(makeExec({ latest: '1.10.0' }));
 
     assert.equal(result.status, 'deferred');
     assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND], 'the lock holder installs, not us');
@@ -396,10 +450,13 @@ describe('runUpdateCheck', () => {
     const stale = new Date(NOW - LOCK_STALE_MS - 60000);
     fs.utimesSync(paths.lockFile, stale, stale);
 
-    const result = run(makeExecSync({ latest: '1.10.0' }));
+    const result = run(makeExec({ latest: '1.10.0' }));
 
     assert.equal(result.status, 'written');
-    assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND, INSTALL_COMMAND]);
+    assert.deepEqual(realCalls(), [
+      NPM_VIEW_COMMAND,
+      'npx --yes --ignore-scripts slash-do@1.10.0 --env claude',
+    ]);
     assert.equal(readCache().update_available, false);
     assert.equal(fs.existsSync(paths.lockFile), false);
     assert.deepEqual(
@@ -428,7 +485,7 @@ describe('runUpdateCheck', () => {
 
     const result = runUpdateCheck({
       fs: readOnlyFs,
-      execSync: makeExecSync({ latest: '1.10.0' }),
+      ...makeExec({ latest: '1.10.0' }),
       paths,
       now: () => NOW,
       pid: 4242,
@@ -459,7 +516,7 @@ describe('runUpdateCheck', () => {
 
     const result = runUpdateCheck({
       fs: losingFs,
-      execSync: makeExecSync({ latest: '1.10.0' }),
+      ...makeExec({ latest: '1.10.0' }),
       paths,
       now: () => NOW,
       pid: 4242,
@@ -490,7 +547,7 @@ describe('runUpdateCheck', () => {
 
     const result = runUpdateCheck({
       fs: brokenUnlinkFs,
-      execSync: makeExecSync({ latest: '1.10.0' }),
+      ...makeExec({ latest: '1.10.0' }),
       paths,
       now: () => NOW,
       pid: 4242,
@@ -526,7 +583,7 @@ describe('runUpdateCheck', () => {
 
     const result = runUpdateCheck({
       fs: racedFs,
-      execSync: makeExecSync({ latest: '1.10.0' }),
+      ...makeExec({ latest: '1.10.0' }),
       paths,
       now: () => NOW,
       pid: 4242,
@@ -541,7 +598,7 @@ describe('runUpdateCheck', () => {
   it('does not touch the lock at all when auto-update is off', () => {
     writeInstalled('1.9.0');
 
-    run(makeExecSync({ latest: '1.10.0' }));
+    run(makeExec({ latest: '1.10.0' }));
 
     assert.equal(fs.existsSync(paths.lockFile), false);
   });
@@ -550,7 +607,7 @@ describe('runUpdateCheck', () => {
     writeInstalled('1.10.0');
     writeConfig({ autoUpdate: true });
 
-    run(makeExecSync({ latest: '1.10.0' }));
+    run(makeExec({ latest: '1.10.0' }));
 
     assert.deepEqual(realCalls(), [NPM_VIEW_COMMAND]);
     assert.equal(fs.existsSync(paths.lockFile), false);
