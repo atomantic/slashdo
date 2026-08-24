@@ -18,8 +18,9 @@
 //
 // Structure: the parent invocation (SessionStart) only spawns a detached child
 // running THIS SAME FILE with `--worker`, so session start is never blocked.
-// The worker body lives in `runUpdateCheck()` below with fs/execSync/clock
-// injected, so test/check-update.test.js can drive every branch directly —
+// The worker body lives in `runUpdateCheck()` below with filesystem, subprocess,
+// platform, and clock dependencies injected, so test/check-update.test.js can
+// drive every branch directly —
 // it used to be an inline `-e` string that no test could reach.
 //
 // This file is deployed standalone into ~/.claude/hooks/, where `src/` does not
@@ -47,7 +48,10 @@ const NPM_VIEW_TIMEOUT_MS = 5000;
 const INSTALL_TIMEOUT_MS = 120000;
 const NPM_COMMAND = 'npm';
 const NPX_COMMAND = 'npx';
-const NPM_VIEW_ARGS = Object.freeze(['view', 'slash-do', 'version']);
+// Pin the registry lookup to the stable latest tag and force scalar output so
+// user npm config (tag=next or json=true) cannot change what gets installed or
+// make a valid version look malformed.
+const NPM_VIEW_ARGS = Object.freeze(['view', 'slash-do@latest', 'version', '--json=false']);
 // Keep this human-readable form for diagnostics and tests; the real lookup
 // uses execFileSync so registry output never becomes shell syntax.
 const NPM_VIEW_COMMAND = `${NPM_COMMAND} ${NPM_VIEW_ARGS.join(' ')}`;

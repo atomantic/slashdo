@@ -221,15 +221,16 @@ describe('runUpdateCheck', () => {
 
   it('resolves an exact version and runs npm/npx through argument-safe calls', () => {
     // Asserted as LITERALS, not via the imported constants: comparing the module
-    // against itself would let '--env claude' (which keeps the non-TTY install
-    // out of the interactive multi-env prompt) or '--yes' be dropped silently.
+    // against itself would let the stable @latest tag, --json=false, '--env
+    // claude' (which keeps the non-TTY install out of the interactive multi-env
+    // prompt), or '--yes' be dropped silently.
     writeInstalled('1.9.0');
     writeConfig({ autoUpdate: true });
 
     run(makeExec({ latest: '1.10.0' }));
 
     assert.deepEqual(realCalls(), [
-      'npm view slash-do version',
+      'npm view slash-do@latest version --json=false',
       'npx --yes --ignore-scripts slash-do@1.10.0 --env claude',
     ]);
     const optionsFor = (command) => options_.find((c) => c.command === command).options;
@@ -256,11 +257,11 @@ describe('runUpdateCheck', () => {
 
     assert.equal(result.autoUpdated, true);
     assert.deepEqual(realCalls(), [
-      'cmd.exe /d /s /c npm view slash-do version',
+      'cmd.exe /d /s /c npm view slash-do@latest version --json=false',
       'cmd.exe /d /s /c npx --yes --ignore-scripts slash-do@1.10.0 --env claude',
     ]);
     assert.deepEqual(options_.filter((entry) => entry.command.startsWith('cmd.exe ')).map((entry) => entry.args), [
-      ['/d', '/s', '/c', 'npm view slash-do version'],
+      ['/d', '/s', '/c', 'npm view slash-do@latest version --json=false'],
       ['/d', '/s', '/c', 'npx --yes --ignore-scripts slash-do@1.10.0 --env claude'],
     ]);
   });
