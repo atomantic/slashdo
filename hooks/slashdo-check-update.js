@@ -11,24 +11,27 @@
 //
 // When the user opted into auto-update (~/.claude/.slashdo-config.json:
 // { "autoUpdate": true }), a detected update is applied automatically by
-// running `npx -y slash-do@latest` instead of surfacing the ⬆ /do:update
-// statusline hint. On auto-update failure we fall back to showing the hint.
+// resolving the current registry version first and running that exact version
+// with npm lifecycle scripts disabled, instead of surfacing the ⬆ /do:update
+// statusline hint. On validation or auto-update failure we fall back to showing
+// the hint.
 //
 // Structure: the parent invocation (SessionStart) only spawns a detached child
 // running THIS SAME FILE with `--worker`, so session start is never blocked.
-// The worker body lives in `runUpdateCheck()` below with fs/execSync/clock
-// injected, so test/check-update.test.js can drive every branch directly —
+// The worker body lives in `runUpdateCheck()` below with filesystem, subprocess,
+// platform, and clock dependencies injected, so test/check-update.test.js can
+// drive every branch directly —
 // it used to be an inline `-e` string that no test could reach.
 //
 // This file is deployed standalone into ~/.claude/hooks/, where `src/` does not
-// exist, so it must not require anything outside Node core. That is why the
-// semver comparison lives HERE and `src/version-check.js` re-exports it, rather
-// than the other way around — one implementation, reachable from both sides.
+// exist, so it must not require anything outside Node core. The semver
+// comparison lives HERE because this deployed hook must stay dependency-free
+// and standalone.
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { spawn, execSync } = require('child_process');
+const { spawn, execSync, execFileSync } = require('child_process');
 
 // A lock older than this is treated as abandoned (crashed/killed mid-update)
 // and reclaimed. Kept well above the 120s install timeout below so a slow-but-
@@ -43,23 +46,53 @@ const NOTICE_REPEAT_S = 7 * 24 * 60 * 60;
 const PROBE_TIMEOUT_MS = 5000;
 const NPM_VIEW_TIMEOUT_MS = 5000;
 const INSTALL_TIMEOUT_MS = 120000;
-const NPM_VIEW_COMMAND = 'npm view slash-do version';
+const NPM_COMMAND = 'npm';
+const NPX_COMMAND = 'npx';
+// Pin the registry lookup to the stable latest tag and force scalar output so
+// user npm config (tag=next or json=true) cannot change what gets installed or
+// make a valid version look malformed.
+const NPM_VIEW_ARGS = Object.freeze(['view', 'slash-do@latest', 'version', '--json=false']);
+// Keep this human-readable form for diagnostics and tests; the real lookup
+// uses execFileSync so registry output never becomes shell syntax.
+const NPM_VIEW_COMMAND = `${NPM_COMMAND} ${NPM_VIEW_ARGS.join(' ')}`;
+const EXACT_VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 // --env claude keeps this scoped to the environment running the hook, and
 // avoids the interactive multi-env prompt (stdin is not a TTY here).
-const INSTALL_COMMAND = 'npx -y slash-do@latest --env claude';
+// --ignore-scripts prevents package lifecycle hooks from becoming an additional
+// unattended execution path; slash-do's bin still runs as the requested command.
+function buildInstallArgs(version) {
+  if (!isInstallableVersion(version)) {
+    throw new TypeError('refusing an invalid slash-do version');
+  }
+  return ['--yes', '--ignore-scripts', `slash-do@${version}`, '--env', 'claude'];
+}
+
+// Windows exposes npm and npx as .cmd shims, which cannot be launched through
+// execFileSync directly. Run cmd.exe itself as the executable there. Every
+// command-line token is fixed except the registry version, which has already
+// passed isInstallableVersion(), so the wrapper cannot turn registry output into
+// additional cmd syntax. POSIX uses the stronger direct-argv path.
+function runTool(execFileSyncDep, command, args, options, platform = process.platform,
+  windowsShell = process.env.ComSpec || 'cmd.exe') {
+  if (platform === 'win32') {
+    return execFileSyncDep(windowsShell, ['/d', '/s', '/c', [command, ...args].join(' ')], options);
+  }
+  return execFileSyncDep(command, args, options);
+}
 
 const NOTICES = {
   'npm-unavailable': 'slashdo update check needs npm on PATH — update with install.sh',
   'npx-unavailable': 'slashdo update available but npx is missing — update with install.sh',
+  'invalid-version': 'slashdo update check returned an invalid version — no update was applied',
 };
 // States that carry a pending update the user cannot apply: there is nothing
 // else on the statusline for them (the ⬆ badge is suppressed below), so this
 // one repeats every session until it is resolved rather than being rate-limited.
-const PERSISTENT_NOTICES = { 'npx-unavailable': true };
+const PERSISTENT_NOTICES = { 'npx-unavailable': true, 'invalid-version': true };
 
 // Shell probe for a command on PATH.
-function probeCommand(cmd) {
-  return (process.platform === 'win32' ? 'where ' : 'command -v ') + cmd;
+function probeCommand(cmd, platform = process.platform) {
+  return (platform === 'win32' ? 'where ' : 'command -v ') + cmd;
 }
 
 // Every path the check reads or writes, derived from a home directory. Taking
@@ -76,7 +109,8 @@ function resolvePaths(homeDir, configDir) {
     versionFile: path.join(claudeDir, '.slashdo-version'),
     configFile: path.join(claudeDir, '.slashdo-config.json'),
     // Serializes the auto-update across concurrent Claude sessions — only the
-    // session that atomically creates this file runs `npx slash-do@latest`;
+    // session that atomically creates this file runs the exact resolved npx
+    // package version;
     // the rest defer.
     lockFile: path.join(cacheDir, 'slashdo-update.lock'),
   };
@@ -96,6 +130,13 @@ function parseVersion(version) {
 function isComparableVersion(version) {
   const parts = parseVersion(version);
   return parts.length >= 3 && parts.every(Number.isFinite);
+}
+
+// The registry result is later used as a package selector. Require a complete
+// semver value before it reaches npx, both to avoid package-spec surprises and
+// to refuse a malformed response rather than guessing at an update.
+function isInstallableVersion(version) {
+  return typeof version === 'string' && EXACT_VERSION_RE.test(version);
 }
 
 // Semver comparison over NUMERIC segments, so 1.9.0 → 1.10.0 reads as a minor
@@ -159,12 +200,22 @@ function applyNotice(result, updateCheck, previous, nowS) {
 
 // The whole background check, with its side effects injected.
 //   deps.fs        — fs-like (readFileSync/writeFileSync/existsSync/openSync/…)
-//   deps.execSync  — child_process.execSync-like
+//   deps.execSync  — child_process.execSync-like (PATH probes)
+//   deps.execFileSync — child_process.execFileSync-like (npm/npx calls)
 //   deps.paths     — resolvePaths() output
 //   deps.now       — () => epoch ms
 //   deps.pid       — process id used to name the reclaimed stale lock
 // Returns { status, ... } describing what it did, for tests and callers.
-function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, paths, now, pid }) {
+function runUpdateCheck({
+  fs: fsDep,
+  execSync: execSyncDep,
+  execFileSync: execFileSyncDep,
+  paths,
+  now,
+  pid,
+  platform = process.platform,
+  windowsShell = process.env.ComSpec || 'cmd.exe',
+}) {
   // Previous cache state — carries the last notice timestamp so we warn on a
   // slow cadence instead of on every session for the rest of time.
   let previous = null;
@@ -197,7 +248,7 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, paths, now, pid }) {
   // exactly like "up to date" — the user never learns the check is dead.
   const hasCommand = (cmd) => {
     try {
-      execSyncDep(probeCommand(cmd), {
+      execSyncDep(probeCommand(cmd, platform), {
         stdio: 'ignore',
         timeout: PROBE_TIMEOUT_MS,
         windowsHide: true,
@@ -212,13 +263,18 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, paths, now, pid }) {
   let updateCheck = null;
 
   let latest = null;
-  if (hasCommand('npm')) {
+  if (hasCommand(NPM_COMMAND)) {
     try {
-      latest = execSyncDep(NPM_VIEW_COMMAND, {
+      const candidate = String(runTool(execFileSyncDep, NPM_COMMAND, NPM_VIEW_ARGS, {
         encoding: 'utf8',
         timeout: NPM_VIEW_TIMEOUT_MS,
         windowsHide: true,
-      }).trim();
+      }, platform, windowsShell)).trim();
+      if (isInstallableVersion(candidate)) {
+        latest = candidate;
+      } else {
+        updateCheck = 'invalid-version';
+      }
     } catch (e) {
       // Offline / registry error / timeout: transient, so no user-facing notice,
       // but the cache still says the check failed rather than implying "current".
@@ -246,8 +302,8 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, paths, now, pid }) {
 
   // Auto-update: apply the update instead of surfacing the statusline hint.
   // Guard it with an exclusive lock file so that when several Claude sessions
-  // start at once, only one spawns "npx slash-do@latest" against the shared
-  // the Claude config directory — the installer's writes are idempotent today,
+  // start at once, only one spawns npx for the exact resolved version against
+  // the shared Claude config directory. The installer's writes are idempotent today,
   // but serializing keeps that assumption from being load-bearing if the
   // install logic ever stops being safe to run concurrently.
   // `deferred` is set when this session sees an available auto-update but
@@ -309,15 +365,19 @@ function runUpdateCheck({ fs: fsDep, execSync: execSyncDep, paths, now, pid }) {
     // Only the lock holder updates.
     if (haveLock) {
       try {
-        execSyncDep(INSTALL_COMMAND, {
+        runTool(execFileSyncDep, NPX_COMMAND, buildInstallArgs(latest), {
           stdio: 'ignore',
           timeout: INSTALL_TIMEOUT_MS,
           windowsHide: true,
-        });
-        // Installer already refreshed the cache to update_available:false and
-        // bumped the version file, so nothing left to flag.
+        }, platform, windowsShell);
+        // A zero exit code alone is not enough: a stale/cached install could
+        // otherwise be reported as successful while the old version remains.
+        const updatedVersion = fsDep.readFileSync(paths.versionFile, 'utf8').trim();
+        if (updatedVersion !== latest) {
+          throw new Error(`installed version ${updatedVersion} does not match ${latest}`);
+        }
         updateAvailable = false;
-        latest = installed = fsDep.readFileSync(paths.versionFile, 'utf8').trim();
+        installed = updatedVersion;
         autoUpdated = true;
       } catch (e) {
         // Auto-update failed — fall through and surface the hint so the user
@@ -356,9 +416,12 @@ function runWorker() {
   return runUpdateCheck({
     fs,
     execSync,
+    execFileSync,
     paths: resolvePaths(os.homedir(), process.env.CLAUDE_CONFIG_DIR),
     now: Date.now,
     pid: process.pid,
+    platform: process.platform,
+    windowsShell: process.env.ComSpec || 'cmd.exe',
   });
 }
 
@@ -389,11 +452,14 @@ module.exports = {
   LOCK_STALE_MS,
   NOTICE_REPEAT_S,
   NPM_VIEW_COMMAND,
-  INSTALL_COMMAND,
+  NPM_VIEW_ARGS,
+  buildInstallArgs,
+  runTool,
   NOTICES,
   probeCommand,
   resolvePaths,
   compareVersions,
+  isInstallableVersion,
   isUpdateAvailable,
   runUpdateCheck,
 };
