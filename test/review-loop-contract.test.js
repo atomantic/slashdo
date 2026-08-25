@@ -18,6 +18,30 @@ const LOOPS_WITH_OPTIONAL_ARRAYS = [
 ];
 
 describe('review-loop parse contracts', () => {
+  it('lets the host orchestrator select focused review lenses from the diff', () => {
+    const command = readCommand('review.md');
+    const selection = readLib('review-agent-selection.md');
+
+    assert.match(command, /The host CLI is the review orchestrator/);
+    assert.match(command, /Strict mode does not force a focused agent/);
+    assert.match(command, /selection protocol/);
+    assert.match(command, /Spawn the selected agents simultaneously/);
+    assert.match(command, /If the selection is\s+empty, spawn no focused agents/);
+    assert.doesNotMatch(command, /Always dispatch agents 1–5/);
+    assert.doesNotMatch(command, /Spawn agents 1–5 simultaneously/);
+
+    assert.match(selection, /Start with an empty `SELECTED_REVIEW_AGENTS` list/);
+    assert.match(selection, /If no focused lens is justified, dispatch no sub-agents/);
+    assert.match(selection, /Structural Ambition \| `--strict` is active \*\*and\*\*/);
+    assert.match(selection, /selected lenses and their reasons/);
+
+    const summaryStart = command.indexOf('## Report');
+    const report = command.slice(summaryStart);
+    assert.match(report, /The table is dynamic/);
+    assert.match(report, /Host orchestrator \(self-review\)/);
+    assert.match(report, /Omit all focused-lens rows when none were selected/);
+  });
+
   it('requires structured local-agent verdicts without weakening Codex handling', () => {
     const body = readLib('local-agent-review-loop.md');
     assert.match(body, /after stripping blank lines, the result must be either exactly `NO FINDINGS`/);

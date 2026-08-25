@@ -9,7 +9,10 @@ Analyze code review feedback on a PR, identify patterns our review system missed
 
 ## Architecture Overview
 
-The `/do:review` system uses 5 parallel agents, each with focused reading strategies:
+The `/do:review` system has one host orchestrator and six optional focused review
+lenses. The orchestrator inspects each PR and selects zero or more lenses based on
+the changed behavior; selected lenses run in parallel, and a simple change may use
+no sub-agents at all:
 
 | Agent | File | Focus |
 |---|---|---|
@@ -18,10 +21,12 @@ The `/do:review` system uses 5 parallel agents, each with focused reading strate
 | Security Audit | `lib/review-security-audit.md` | Trust boundaries, injection, SSRF, data exposure, access control |
 | Cross-File Tracing | `lib/review-cross-file-tracing.md` | State/lifecycle/concurrency across files: stale state propagation, lifecycle gaps, resource leaks, lock/flag exit paths, races |
 | Cross-File Contract | `lib/review-cross-file-contract.md` | Contracts across files: schema/shape agreements, validation parity, error classification, field-set enumerations, architectural-pattern adherence |
+| Structural Ambition | `lib/review-structural-ambition.md` | Strict-mode structural concerns: code-judo simplifications, file-size growth, abstraction sprawl, boundary leaks, and bespoke duplicates |
 
 Additionally:
 - `lib/code-review-checklist.md` — master source-of-truth (canonical reference, not directly used by agents)
 - `commands/do/review.md` — orchestrator (dispatches agents, deduplicates, fixes, reports)
+- `lib/review-agent-selection.md` — orchestrator's evidence-based lens-selection policy
 
 ## Phase 1: Parse Input & Fetch Feedback
 
