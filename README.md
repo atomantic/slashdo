@@ -293,7 +293,7 @@ By default the orchestrator that opened the PR applies every reviewer's fixes it
 
 ### Command-specific behavior
 
-- **`/do:review`** — the listed agents run *after* the host CLI's own multi-agent self-review; the list names *additional* reviewers.
+- **`/do:review`** — the host CLI inspects the change and selects only the focused self-review lenses it needs (possibly none); any `--review-with` agents run afterward as additional reviewers.
 - **`/do:better` / `/do:better-swift` / `/do:simplify` / `/do:depfree`** — the chosen reviewers run as the post-PR review loop (per PR, in parallel for the multi-PR better commands). **Omitting `--review-with` skips the review loop and the auto-merge** — PRs are left open for manual review.
 - **`/do:rpr`** — resolves review threads from any author (Copilot, human, or bot). Like every other command it has **no default reviewer**: omit `--review-with` (and set no saved default) and rpr requests nothing — it just fetches and resolves the unresolved threads the PR already carries. Name a reviewer and rpr requests it, then loops review → fix → re-review. It accepts only `--review-with` and `--reviewer-applies` (not `--review-iterations`, `--review-mode`, or the stop-mode flags), and it doesn't support `@<login>` entries — it drops them with a notice.
 
