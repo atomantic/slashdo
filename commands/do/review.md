@@ -6,9 +6,9 @@ argument-hint: "[--strict|--nuclear] [--draft] [--review-with <agent>[,<agent>..
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for:
-- **`--strict`** (alias: **`--nuclear`**): enable the Structural Ambition agent (6th agent) and promote structural findings to blocker tier. Use for branches you want to land cleanly — flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications.
+- **`--strict`** (alias: **`--nuclear`**): raise the structural-review bar and permit the Structural Ambition lens to be selected when the diff contains structural signals; promote structural findings to blocker tier. Strict mode does not force a focused agent when the orchestrator finds no structural concern. Use for branches you want to land cleanly — flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications.
 - **`--draft`** (PR mode only): write the review payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the `gh api` command to publish it manually, instead of posting the review immediately. Ignored when `PR_MODE=false`.
-- **`--review-with <agent[,agent,...]>`** (optional): after the host CLI's self-review completes (the multi-agent flow defined below), delegate **additional** review passes to the named external CLIs in order. Accepted slugs per slot: `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `grok`, `cursor` (alias `cursor-agent` — the Cursor Agent CLI), `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`; `codex`/`claude`/`agy`/`grok`/`cursor` likewise accept a `<agent>[<model>]` bracket — e.g. `codex[o3]`, `claude[claude-opus-4-8]`, `grok[grok-code-fast-1]` — stripped into a per-entry `REVIEW_MODEL`, empty → the reviewer's built-in default; `copilot` and `@<login>` take no model bracket), `copilot` (**legacy** — GitHub's cloud Copilot review; still supported when you name it, never selected implicitly), or an arbitrary GitHub login `@<login>` — any GitHub user or App/bot (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`); slashdo requests its review on the PR and waits for it (GitHub only, never posts an approval itself). Split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, dedupe preserving first-occurrence order (for a model-taking agent — `codex`/`claude`/`agy`/`grok`/`cursor`/`ollama` — the `[<model>]` bracket suffix is part of the dedup identity). Any slot may end in `~opt` (e.g. `ollama~opt`) to mark that reviewer **optional/non-blocking** — still requested and its findings still fixed, but an inconclusive result from it never contributes a merge-blocking `inconclusive` aggregate (a hard-error from it still does); strip `~opt` into a per-entry `{OPTIONAL}` flag before slug parsing, not part of the dedup identity (`ollama~opt` == `ollama`, optional-wins on collapse). A slot may also end in `~max=<n>` (e.g. `claude~max=2`, `ollama~max=1`) to cap how many review → fix → re-review cycles **that one reviewer** runs, or `~effort=<level>` (e.g. `codex[gpt-5.6-luna]~effort=max~opt`, `claude~effort=high~max=2`) to specify its reasoning effort level (`low`, `medium`, `high`, `xhigh`, `max`). Strip suffixes off the right of each token in any order before slug parsing. Deduplication preserves first-occurrence order and excludes `~` suffixes (survivor takes `~opt` if any had it, and cap/effort level from the first that carried them). Reject a malformed suffix with `Invalid --review-with suffix on {entry}: ~max must be a non-negative integer and ~effort must be one of low, medium, high, xhigh, max, each appearing at most once; the only suffixes are ~opt, ~max=<n>, and ~effort=<level>.` Abort with `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, cursor, ollama, copilot, @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).` on any unknown slug. The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no delegated reviewers (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default. If omitted, leave `REVIEW_AGENTS` **unset for now** — the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (no delegated passes — behavior matches the historical `/do:review` self-review only). **The host CLI is not implied in this list** — whichever CLI is hosting the review command (claude, codex, or agy) runs the self-review first regardless. The list names *additional* reviewers; an explicit `claude` entry while running under claude means "start a fresh claude headless session for a second-pass perspective," which is allowed.
+- **`--review-with <agent[,agent,...]>`** (optional): after the host CLI's self-review completes (the selection flow defined below), delegate **additional** review passes to the named external CLIs in order. Accepted slugs per slot: `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `grok`, `cursor` (alias `cursor-agent` — the Cursor Agent CLI), `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`; `codex`/`claude`/`agy`/`grok`/`cursor` likewise accept a `<agent>[<model>]` bracket — e.g. `codex[o3]`, `claude[claude-opus-4-8]`, `grok[grok-code-fast-1]` — stripped into a per-entry `REVIEW_MODEL`, empty → the reviewer's built-in default; `copilot` and `@<login>` take no model bracket), `copilot` (**legacy** — GitHub's cloud Copilot review; still supported when you name it, never selected implicitly), or an arbitrary GitHub login `@<login>` — any GitHub user or App/bot (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`); slashdo requests its review on the PR and waits for it (GitHub only, never posts an approval itself). Split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, dedupe preserving first-occurrence order (for a model-taking agent — `codex`/`claude`/`agy`/`grok`/`cursor`/`ollama` — the `[<model>]` bracket suffix is part of the dedup identity). Any slot may end in `~opt` (e.g. `ollama~opt`) to mark that reviewer **optional/non-blocking** — still requested and its findings still fixed, but an inconclusive result from it never contributes a merge-blocking `inconclusive` aggregate (a hard-error from it still does); strip `~opt` into a per-entry `{OPTIONAL}` flag before slug parsing, not part of the dedup identity (`ollama~opt` == `ollama`, optional-wins on collapse). A slot may also end in `~max=<n>` (e.g. `claude~max=2`, `ollama~max=1`) to cap how many review → fix → re-review cycles **that one reviewer** runs, or `~effort=<level>` (e.g. `codex[gpt-5.6-luna]~effort=max~opt`, `claude~effort=high~max=2`) to specify its reasoning effort level (`low`, `medium`, `high`, `xhigh`, `max`). Strip suffixes off the right of each token in any order before slug parsing. Deduplication preserves first-occurrence order and excludes `~` suffixes (survivor takes `~opt` if any had it, and cap/effort level from the first that carried them). Reject a malformed suffix with `Invalid --review-with suffix on {entry}: ~max must be a non-negative integer and ~effort must be one of low, medium, high, xhigh, max, each appearing at most once; the only suffixes are ~opt, ~max=<n>, and ~effort=<level>.` Abort with `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, cursor, ollama, copilot, @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).` on any unknown slug. The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no delegated reviewers (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default. If omitted, leave `REVIEW_AGENTS` **unset for now** — the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (no delegated passes — behavior matches the historical `/do:review` self-review only). **The host CLI is not implied in this list** — whichever CLI is hosting the review command (claude, codex, or agy) runs the self-review first regardless. The list names *additional* reviewers; an explicit `claude` entry while running under claude means "start a fresh claude headless session for a second-pass perspective," which is allowed.
 - **`--review-stop-on-findings` / `--review-stop-on-clean`** (mutually exclusive, optional): stop-mode for the delegated passes. Default `REVIEW_STOP_MODE=all` (run every listed agent). `on-findings` stops after the first delegated reviewer that surfaces a non-empty change set; `on-clean` stops after the first delegated reviewer that reports zero findings. Abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined` if both appear.
 - **`--review-mode <series|parallel>`** (optional): how the delegated passes are dispatched. `series` (default) runs the listed reviewers one-at-a-time so each sees the prior reviewer's committed fixes; `parallel` runs their reviews concurrently against one frozen baseline and then applies the deduped union of findings once (faster, but no reviewer sees another's fixes — `--reviewer-applies` and the stop-modes are ignored in this mode). Record as `REVIEW_MODE`; if omitted, leave it **unset for now** (the saved-defaults step fills it from the `review-mode` default; built-in default `series`). Abort with `--review-mode must be one of series, parallel (got: {value}).` on any other value.
 - **`--reviewer-applies`** (optional, boolean): forwarded to each delegated local-agent pass to route fixes through the reviewing CLI instead of the orchestrator. See `lib/local-agent-review-loop.md` "Editing mode" for the trade-offs. No effect on the copilot path, the `@<login>` path, the ollama path (Ollama is non-agentic — always review-only), or the host's self-review.
@@ -105,13 +105,24 @@ Before dispatching agents, understand what this change set claims to do:
 
 ## Dispatch Review Agents
 
-Read the agent instruction files, then spawn agents **in parallel** using the Agent tool at the **`heavy` tier** — this host's strongest available model named by its alias (`model: "opus"` on Claude Code), per [lib/model-tiers.md](../../lib/model-tiers.md). Each agent reviews ALL changed files independently.
+The host CLI is the review orchestrator. First inspect the scoped diff and run the
+selection protocol below; then read the instruction file and spawn only the focused
+agents the protocol selects. Selected agents run **in parallel** using the Agent
+tool at the **`heavy` tier** — this host's strongest available model named by its
+alias (`model: "opus"` on Claude Code), per [lib/model-tiers.md](../../lib/model-tiers.md).
+Each selected agent reviews ALL changed files independently.
 
 **Review is judgment-heavy — don't downgrade it.** `heavy` here means the strongest tier available, not "whatever the session happens to be running," so a review launched from a mid-tier session still gets top-tier reviewers. Use the **alias**, never a fully-qualified version ID: the alias resolves to whatever version the org has configured, so it neither goes stale nor overrides a pinned deployment. If the dispatch is rejected for lack of entitlement to that tier, retry once with `model` omitted (inherit the session), say so, and continue rather than skipping the review.
 
 **The agents are deliberately short and principle-led.** Each agent's checklist is a prompt for attention — the reviewing agent's job is to think about the problem space, not pattern-match against bullets. The most expensive misses in past reviews were *consequence-reasoning* bugs (a fallback path producing a different shape than the happy path; an encoder corrupting a downstream parser; a test asserting a symptom instead of the contract) — none findable by adding more bullets. Trust the agent to reason; the checklist seeds the lens, not the conclusions.
 
-Always dispatch agents 1–5. Dispatch agent 6 only when `STRICT_MODE=true`.
+The host orchestrator does the full review itself even when no focused agent is
+selected. Do not dispatch a focused agent merely because it exists below or because
+strict mode is active; use the selection protocol and record the decision.
+
+### Select the review lenses
+
+!`cat ~/.claude/lib/review-agent-selection.md`
 
 <surface_scan_agent>
 
@@ -165,9 +176,14 @@ Catches CONTRACT issues across files: schema/shape agreements, validation parity
 
 <structural_ambition_agent>
 
-### 6. Structural Ambition Agent (strict mode only)
+### 6. Structural Ambition Agent (optional; strict mode required)
 
-Dispatch only when `STRICT_MODE=true`. Catches STRUCTURAL issues the other agents miss: missed code-judo simplifications, file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, bespoke duplicates of canonical helpers, cast-heavy/optional-soup contracts. Push the bar to "this works AND the implementation feels inevitable in hindsight."
+Dispatch only when `STRICT_MODE=true` **and** the selection protocol identifies a
+structural signal. Catches STRUCTURAL issues the other agents miss: missed code-judo
+simplifications, file-size growth past 1000 lines, ad-hoc conditionals bolted onto
+unrelated flows, thin wrappers, boundary leaks, bespoke duplicates of canonical
+helpers, cast-heavy/optional-soup contracts. Push the bar to "this works AND the
+implementation feels inevitable in hindsight."
 
 !`cat ~/.claude/lib/review-structural-ambition.md`
 
@@ -175,23 +191,28 @@ Dispatch only when `STRICT_MODE=true`. Catches STRUCTURAL issues the other agent
 
 ### How to dispatch
 
-For each agent, construct its prompt by combining:
-1. The agent's instruction content (from the sections above)
+For each selected agent, construct its prompt by combining:
+1. The agent's instruction content (from the sections above), plus the orchestrator's
+   recorded reason for selecting that lens
 2. Project convention overrides from CLAUDE.md that affect the review (use the PR's CLAUDE.md/AGENTS.md when `PR_MODE=true`)
 3. The list of changed files from the diff stat (or `gh pr diff --name-only` in PR mode) AND, in PR mode, the path to each file's full content under `/tmp/do-review-pr-{PR_NUM}/`
 4. In PR mode only: the path to `/tmp/do-review-pr-{PR_NUM}-lines.json` (the commentable-lines map) and an instruction that **every finding MUST cite a `file:line` where `line` appears in the commentable-lines map** — otherwise the finding cannot be posted as an inline comment and should be downgraded to a summary-only finding
 5. Instruction: "Read each changed file in full (not just diff hunks). Apply your reading lens — the checklist seeds attention but is NOT a script. Reason from principles about each new shape, flow, or contract: what's the smallest input that breaks this? What does the producer believe vs the consumer? What does the fallback path actually deliver? What does the documentation claim vs what the code does? Report findings that demonstrate consequence reasoning, not just pattern matches."
 6. In PR mode only: "For every CRITICAL or IMPROVEMENT finding where a concrete fix is obvious, include a `suggestion:` block — the exact replacement text for the cited line(s). Use `start_line` and `line` to span multiple lines when the fix needs more than one line. The reviewer will package these as GitHub inline review suggestions."
 
-Spawn agents 1–5 simultaneously. If `STRICT_MODE=true`, also spawn agent 6 in the same parallel batch. Each returns its findings independently.
+Spawn the selected agents simultaneously in one parallel batch. If the selection is
+empty, spawn no focused agents and continue with the host orchestrator's self-review.
+Each selected agent returns its findings independently.
 
 ### Large PR handling
 
-If the diff touches more than 20 files, tell each agent to batch files by directory and process groups sequentially within their parallel run. The orchestrator does not manage batching.
+If the diff touches more than 20 files, tell each selected agent to batch files by
+directory and process groups sequentially within their parallel run. The orchestrator
+does not manage batching.
 
 ## Collect & Deduplicate
 
-After all dispatched agents return:
+After the host self-review and any selected agents return:
 
 1. **Merge** all findings into a single list, tagged by source agent
 2. **Deduplicate**: if two agents flagged the same `file:line` with overlapping descriptions, keep the most detailed version and note all agents that found it (overlap between Surface Scan and Surface Quality, or between Cross-File Tracing and Cross-File Contract, is expected for borderline issues — that's signal a finding is real, not noise). The Structural Ambition agent (strict mode) frequently overlaps with Surface Quality on wrapper/duplication findings — keep the Structural Ambition phrasing when it names a concrete reframing
@@ -309,22 +330,22 @@ If the user wants to inspect comments before publishing, support a `--draft` fla
 
 ## Report
 
-Print a summary table of what was reviewed and found:
+Print a summary table of what was reviewed and found. The table is dynamic: always
+include the host orchestrator, include only the focused agents actually selected,
+and do not print rows for focused agents that were skipped. Before the table, print
+the selected lenses with their reasons and note when the empty selection was
+intentional.
 
 ```
 ## Review Summary
 
-| Agent | Files Checked | Issues Found | Fixed |
-|-------|--------------|-------------|-------|
-| Surface Scan (Runtime) | N | N | N |
-| Surface Quality | N | N | N |
-| Security Audit | N | N | N |
-| Cross-File Tracing (State) | N | N | N |
-| Cross-File Contract | N | N | N |
-| Structural Ambition (strict) | N | N | N |
+| Reviewer | Files Checked | Issues Found | Fixed |
+|----------|--------------|-------------|-------|
+| Host orchestrator (self-review) | N | N | N |
+| {selected focused lens} | N | N | N |
 | **Total** | **N** | **N** | **N** |
 
-Omit the Structural Ambition row when `STRICT_MODE=false`.
+Omit all focused-lens rows when none were selected.
 
 ### Issues Fixed
 - file:line — description of fix (agent: Surface-Scan / Surface-Quality / Security / Cross-File-Tracing / Cross-File-Contract / Structural-Ambition)
