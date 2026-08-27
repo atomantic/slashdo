@@ -51,6 +51,19 @@ Collect targets into an ordered list `TARGETS` in three steps, **in this order**
 
 **Preconditions — check first; abort cleanly if any fails (do not partially claim):**
 - **Issues mode only.** Swarm's claim/lease is the tracker's issue-assignee marker (GitHub or GitLab), and partitioning by dependency needs the tracker. **Resolve `ISSUE_MODE` here first, including Phase 1's auto-redirect** — because swarm replaces Phases 1–7, that redirect won't fire on its own: if `--issues`/a saved default didn't already set it, apply the same structural check Phase 1 does — a repo with **no PLAN.md, or only the issue-mode stub**, *is* issue-tracked, so set `ISSUE_MODE=true` (state the switch). **An explicit numeric target settles this too** — issue numbers are inherently tracker references, so **any** numeric target (one or several) sets `ISSUE_MODE=true` (state the switch) even in a repo with a real PLAN.md backlog — **unless the user explicitly typed `--no-issues`**, which wins per this file's usual typed-flag-beats-inference rule and routes straight to the abort below. One target matters as much as several here: a lone `#12` hands off to the single-issue Phases 1–7, which must run in *issues* mode or Phase 1 would go looking for a PLAN.md slug named `12`. Abort when it still resolves to PLAN.md mode — a real PLAN.md backlog with either (no `--issues` and no numeric targets) or an explicit `--no-issues`: ``--swarm works in issues mode only — pass --issues (or run in an issue-tracked repo). PLAN.md-mode swarm is a future enhancement.``
+
+  **Then probe for `jq` on GitLab, right here.** Swarm replaces Phases 1–7, so the
+  identical probe at the top of "Phase 1 — issues mode" never runs on this path — yet
+  A1e/A2e's native blocked-by check calls plain `glab api ... | jq` just like the picker
+  does. Without this, an explicit GitLab swarm on a host with `glab` but no `jq` skips the
+  documented install check and cannot validate dependencies. Run it once `ISSUE_MODE` is
+  settled above (never before — the probe is issue-mode-only, for the same PLAN.md reason):
+  ```bash
+  if [ "$CLI_TOOL" = glab ]; then
+    command -v jq >/dev/null 2>&1 || {
+      echo "/do:next's GitLab issue mode pipes 'glab api' output through jq, which is not installed. Install it (e.g. 'brew install jq' or 'apt-get install jq') and re-run."; exit 1; }
+  fi
+  ```
 - **GitHub or GitLab, with the matching CLI authenticated** — the same Phase 1 pre-flight (it ships through `/do:pr`, which supports both).
 - **A subagent-capable harness.** Swarm fans out parallel agents via the harness's subagent mechanism (Claude Code's `Agent`/Task tool, or the equivalent). **If the environment cannot spawn parallel subagents, fall back to sequential** — run Phase B's per-issue task (Phases 2–6, **no merge**) for each partitioned issue one after another in this same session, then proceed to Phase C so the merge stays owned by the serialized queue, not each iteration (still useful: it drains `SWARM_N` items in one invocation, just not concurrently). State that you're doing so.
 - **Targets are optional — and may be an explicit list.** **Check target *shape* first, before mode resolution or any claim:** every target must be an **issue number** (bare or `#`-prefixed), because a PLAN.md slug can never be a swarm member — abort on one, and let this abort win over the issues-mode abort above so the message names the real problem: ``--swarm works on issue numbers only — "<slug>" looks like a PLAN.md item. Drop --swarm to claim it, or pass issue numbers.`` Then route by count: **no target** → Phase A auto-picks the batch; **two or more** → that list IS the batch (Phase A's explicit-list path; the same `#<num>` cherry-pick semantics, `SWARM_N` at a time); **exactly one** → this isn't a swarm: run the single-issue **Phases 1–7** for it (in issues mode, per the bullet above) and say so.
@@ -207,6 +220,11 @@ Runs **once per invocation**, after the last wave, over every result the batch p
 >     echo "/do:next detected a GitLab repo ($ORIGIN_HOST) but glab is not authenticated to it. Run 'glab auth login'."; exit 1; }
 >   # No GH_HOST-style workaround needed here: unlike `gh api`, `glab api` and
 >   # `glab issue`/`glab mr` already resolve the host from the repo's origin remote.
+>   # NOTE: the jq probe is deliberately NOT here. Piping `glab api` to the standalone
+>   # jq binary makes jq a dependency of the ISSUE-MODE GitLab path only — PLAN.md mode
+>   # never calls plain `glab api`, so probing in this shared pre-flight would abort a
+>   # GitLab + PLAN.md repo that has always worked without jq. The probe lives at the
+>   # top of "Phase 1 — issues mode" instead.
 > fi
 > ```
 > Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`. Carry `CLI_TOOL`/`VCS_HOST` (and `GH_HOST` on GitHub) through every later phase — [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md)'s own setup step reuses `CLI_TOOL` rather than re-detecting it.
@@ -252,6 +270,20 @@ Run the shared issue-mode setup — it reuses the `CLI_TOOL` (`gh`/`glab`) the P
 
 > **Issue mode works on GitHub or GitLab.** `/do:next`'s claim mechanics (Phase 2) use the tracker's **assignee** field as the cross-machine marker on either host — GitHub via `gh issue edit --add-assignee`/`--remove-assignee`, GitLab via `glab issue update --assignee "+<user>"`/`--assignee "-<user>"` (the `+`/`-` prefix adds/removes one assignee without clobbering any others already on the issue, which matters for the race read-back below). Every `gh issue`/`gh api` call in this phase has a `glab issue`/`glab api` equivalent alongside it, selected by `$CLI_TOOL`. One structural gap to know about: GitHub exposes a native, project-scoped **sub-issues** API for epic/child resolution (step 3) that GitLab does not — GitLab's closest analog (group-level Epics) is a different, tier-gated feature, so on GitLab the **convention fallback** (body task-lists + `Part of #N` back-references, per [lib/epic-children.md](../../lib/epic-children.md)) is the primary path rather than a fallback of last resort. It's fully host-agnostic once every `gh` call in it is paired with its `glab` form, which it already is.
 
+**GitLab only — probe for `jq` before the first plain `glab api` call.** `glab api` has no
+built-in `--jq` flag (only the `glab issue`/`glab mr` subcommands do), so this phase and
+Phase 2 pipe it to the **standalone** jq binary — which makes jq a hard dependency of the
+issue-mode GitLab path. Probe it here, not in the shared Pre-flight: PLAN.md mode never
+calls plain `glab api`, so a pre-flight probe would abort a GitLab + PLAN.md repo that has
+always worked without jq.
+
+```bash
+if [ "$CLI_TOOL" = glab ]; then
+  command -v jq >/dev/null 2>&1 || {
+    echo "/do:next's GitLab issue mode pipes 'glab api' output through jq, which is not installed. Install it (e.g. 'brew install jq' or 'apt-get install jq') and re-run."; exit 1; }
+fi
+```
+
 Then:
 
 1. **List candidates** — open issues, **by priority then oldest-first**, **across all labels by default** (`gh issue list`/`glab issue list` never return pull/merge requests, so those are excluded automatically). **By default there is no author filter and no required label** — auto-pick claims any open issue regardless of who filed it or what label it carries — the guards against claiming the wrong thing are the parking-label skip (step 3), the declared-dependency skip (step 4), and the in-flight/assigned checks, *not* a gating label. Three opt-in narrowings apply when active: a label filter (`LABEL_FILTER` set via `--issues-label` or a saved `issues-label` default) restricts the set to one curated label; a **dispatch-hint filter** (`MODEL_FILTER` / `EFFORT_FILTER` set via `--model` / `--effort`) restricts it to issues whose `model:`/`effort:` labels match; and — **when `SELF_MODE` is on (`--self` / saved `self` default)** — an **author filter restricts the set to issues YOU filed** (`--author "@me"`), so issues opened by anyone else are excluded at the source. The author filter is a **security boundary**, not advisory ordering like priority: it removes other people's issues from consideration entirely.
@@ -292,8 +324,21 @@ Then:
    # GitHub-CLI token `@me` — pass the authenticated login so --self actually
    # filters (the explicit-#num path below already compares against this same
    # `glab api user` value).
+   # Resolve the login in TWO steps, never one `glab api user | jq -r .username`
+   # pipeline: the pipeline's exit status is jq's, and `jq -r .username` exits 0 on
+   # empty input, so a failed `glab api user` would leave ME empty. Then GUARD ON
+   # NON-EMPTY separately: `jq -e` only fails on `null`/`false`, and an empty-string
+   # username ({"username":""}) is truthy to jq, so it exits 0 with no login. Either
+   # way an empty ME means `--author ""`, which glab reads as NO author filter — the
+   # --self security gate would silently enumerate and claim other people's issues.
+   # All three checks must pass before the filter is added.
    if [ "$SELF_MODE" = "true" ]; then
-     ME="$(glab api user --jq .username)"
+     ME_JSON="$(glab api user)" || {
+       echo "Could not read the authenticated GitLab user — --self cannot be enforced. Aborting."; exit 1; }
+     ME="$(printf '%s' "$ME_JSON" | jq -er .username)" || {
+       echo "Could not read the authenticated GitLab user — --self cannot be enforced. Aborting."; exit 1; }
+     [ -n "$ME" ] || {
+       echo "GitLab returned an empty username — --self cannot be enforced. Aborting."; exit 1; }
      LIST_ARGS+=(--author "$ME")
    fi
    glab issue list "${LIST_ARGS[@]}" --per-page 100 \
@@ -343,10 +388,10 @@ Then:
    - `epic-empty` (no children resolvable either way) → not really an umbrella; treat as an ordinary issue.
 4. **Resolve declared dependencies before picking (blocked-by).** A candidate may declare a hard dependency in its **body**: a line matching `Depends on #<N>` or `Blocked by #<N>` (case-insensitive; one such line may list several, e.g. `Depends on #12, #15`). Collect every `#<N>` referenced on those lines. A candidate is **blocked** when ANY referenced issue is still open — check the freshest state (GitHub: `gh issue view <N> --json state -q .state`; GitLab: `glab issue view <N> --output json --jq .state`) and test for "closed" rather than an exact "open" match, since the two hosts spell it differently (`OPEN`/`CLOSED` vs `opened`/`closed`); a referenced number that is closed, or doesn't exist, does not block. Resolve this **lazily** as you walk the queue (only for the candidate you're about to pick), so a long backlog doesn't fan out a `gh`/`glab` call per issue up front.
    - `blocked` (≥1 referenced issue still open) → **skip** in auto-pick; note `#N blocked by #M (open)`. The skip is **self-clearing** — when #M closes, #N becomes eligible on the next run with no manual relabel.
-   - Also honor each host's **native** blocked-by relationship when the API surfaces it — GitHub's GraphQL `blockedBy` connection, or GitLab's Issue Links API filtered to `link_type: "is_blocked_by"` (`glab api projects/:id/issues/<N>/links --jq '.[] | select(.link_type == "is_blocked_by")'`, id/iid resolved the same way the rest of this phase resolves them); the body convention is the portable default and the two are OR'd (blocked by *either* source ⇒ skip).
+   - Also honor each host's **native** blocked-by relationship when the API surfaces it — GitHub's GraphQL `blockedBy` connection, or GitLab's Issue Links API filtered to `link_type: "is_blocked_by"` (GitLab: capture the response first, then filter it — `LINKS_JSON="$(glab api projects/:id/issues/<N>/links)" || <treat as UNRESOLVED>` then `printf '%s' "$LINKS_JSON" | jq '.[] | select(.link_type == "is_blocked_by")'`; id/iid resolved the same way the rest of this phase resolves them). Two reasons for the two steps: plain `glab api` has no built-in `--jq` flag (unlike `glab issue view`/`glab issue list`), so it must pipe to the standalone `jq` binary — and a pipeline reports only **jq's** exit status, which succeeds on empty input. Collapsed into one pipeline, a links-API outage is indistinguishable from *"this issue has no native blockers"* and the picker would **fail open**, claiming a dependent ahead of its blocker. **A failed lookup is UNRESOLVED, not unblocked:** fall back to the body convention alone for that candidate and say so (`#N: native blocked-by lookup failed — using the body convention only`), never silently treat it as clear; the body convention is the portable default and the two are OR'd (blocked by *either* source ⇒ skip).
    - **Cycle / unresolvable chain** (A depends on B, B depends on A) → both stay skipped; note the cycle so a human can break it. Never loop trying to resolve one.
 5. **Pick the target issue:**
-   - **With argument** — the issue number (strip `#`); **set `ISSUE_NUM` to that stripped number now** (pulling step 6's assignment earlier so the checks below can reference `$ISSUE_NUM` — on a fresh run it isn't set yet). Verify open and NOT in flight. **`--self` first, as a hard gate:** when `SELF_MODE` is on, confirm the issue's author is the running account before anything else — GitHub: `gh issue view "$ISSUE_NUM" --json author -q .author.login` must equal `gh api --hostname "$GH_HOST" user -q .login`; GitLab: `glab issue view "$ISSUE_NUM" --output json --jq .author.username` must equal `glab api user --jq .username`; if it does not, **refuse and stop** with `Issue #<num> was filed by <author>, not you — /do:next --self only works on issues you filed. Drop --self to claim it.` This is the **one skip an explicit number does NOT override** — `--self` is a security boundary, not a curation preference, so a deliberate cherry-pick cannot cross it (unlike a parking label or label filter). If it's an epic, resolve its state (step 3) first and act on that state — claim an `epic-wrapup`, close an `epic-done`, or warn that children are still open on an `epic-open` (the explicit request still overrides — state that you're doing so). Otherwise a named number is an **explicit override**: it claims even an issue auto-pick would skip — a parking-labelled one, one with an **open declared blocker** (step 4), one outside the curated label when `LABEL_FILTER` is active, or one outside the dispatch-hint filter when `MODEL_FILTER`/`EFFORT_FILTER` is active (but **never** an issue another user filed while `--self` is on). State plainly when you're overriding a skip (e.g. "claiming `future`-labelled #123 by explicit request", "claiming #123 despite open blocker #120 by explicit request", or "claiming `model:heavy` #123 despite --model light by explicit request"). If any other check fails (closed, in flight), print why and stop.
+   - **With argument** — the issue number (strip `#`); **set `ISSUE_NUM` to that stripped number now** (pulling step 6's assignment earlier so the checks below can reference `$ISSUE_NUM` — on a fresh run it isn't set yet). Verify open and NOT in flight. **`--self` first, as a hard gate:** when `SELF_MODE` is on, confirm the issue's author is the running account before anything else — GitHub: `gh issue view "$ISSUE_NUM" --json author -q .author.login` must equal `gh api --hostname "$GH_HOST" user -q .login`; GitLab: `glab issue view "$ISSUE_NUM" --output json --jq .author.username` must equal the authenticated GitLab login, read as `glab api user` piped to `jq -er .username` (plain `glab api` has no built-in `--jq` flag, unlike the `glab issue`/`glab mr` subcommands — pipe to the standalone `jq` binary instead, capturing the two exit statuses separately so a failed `glab api` cannot pass as an empty login: a pipeline reports only jq's status, and jq exits 0 on empty input — and guarding the result on non-empty, since `jq -e` fails only on `null`/`false` and an empty-string username sails through it); if it does not, **refuse and stop** with `Issue #<num> was filed by <author>, not you — /do:next --self only works on issues you filed. Drop --self to claim it.` This is the **one skip an explicit number does NOT override** — `--self` is a security boundary, not a curation preference, so a deliberate cherry-pick cannot cross it (unlike a parking label or label filter). If it's an epic, resolve its state (step 3) first and act on that state — claim an `epic-wrapup`, close an `epic-done`, or warn that children are still open on an `epic-open` (the explicit request still overrides — state that you're doing so). Otherwise a named number is an **explicit override**: it claims even an issue auto-pick would skip — a parking-labelled one, one with an **open declared blocker** (step 4), one outside the curated label when `LABEL_FILTER` is active, or one outside the dispatch-hint filter when `MODEL_FILTER`/`EFFORT_FILTER` is active (but **never** an issue another user filed while `--self` is on). State plainly when you're overriding a skip (e.g. "claiming `future`-labelled #123 by explicit request", "claiming #123 despite open blocker #120 by explicit request", or "claiming `model:heavy` #123 despite --model light by explicit request"). If any other check fails (closed, in flight), print why and stop.
    - **Without argument** — pick the FIRST candidate in the priority/oldest walk (step 1) that is NOT in flight, NOT already assigned, NOT carrying a parking label (`blocked`, `needs-input`, `wontfix`, `discussion`, `future`, or any repo-specific parking label — skip and note it), NOT blocked by an open declared dependency (step 4 — skip and note it), and NOT an `epic-open`/`epic-done` epic per step 3 (an `epic-wrapup` epic **is** eligible). Because auto-pick is label-agnostic by default, the parking-label skip, the dependency skip, and the epic resolution are the primary guards against claiming parked, blocked, or umbrella work. An explicit `#num` can still claim a skipped issue; auto-pick never surfaces one.
 6. **Set `ISSUE_NUM=<num>` and `SLUG="issue-${ISSUE_NUM}"`** — later phases use `SLUG` for worktree/branch/commit/PR and `ISSUE_NUM` for `gh issue`/`glab issue` calls.
    - **Surface the claimed issue's dispatch hint, if it carries one** (`model:<tier>` / `effort:<level>`): `#42 hints model:heavy + effort:high`. In the **single-issue** flow this is a *report, not a dispatch* — a session cannot switch its own model or effort mid-run on any host, so the work proceeds in whatever session you're already in. Say so when there's a real mismatch worth acting on (`this session is on <current model> and #42 hints model:heavy — consider restarting on a stronger model, or continue as-is`), naming the mechanism **this** CLI uses to switch models if it has one, and then continue; never stall waiting for permission over an advisory label. Swarm is where the hint is actually *applied*, because that flow spawns a fresh agent per issue (Phase B).
@@ -408,11 +453,21 @@ if [ "$CLI_TOOL" = gh ]; then
   ME="$(gh api --hostname "$GH_HOST" user -q .login)"
   gh issue edit "$ISSUE_NUM" --add-assignee @me
 else
-  ME="$(glab api user --jq .username)"
+  # Plain `glab api` has no built-in --jq flag; pipe to the standalone jq binary
+  # (probed at the top of Phase 1 issues mode). Resolve the login in TWO steps, not one
+  # pipeline: a pipeline reports only jq's exit status, and `jq -r .username` exits 0 on
+  # empty input, so a failed `glab api user` would leave ME empty and `--assignee "+"`
+  # would claim nothing while still looking like a successful claim. Chaining with `&&`
+  # (plus `jq -e` and the emptiness guard) fails closed into the abort handler below,
+  # which retracts the remote claim instead of proceeding without a marker. The
+  # `[ -n "$ME" ]` is NOT redundant with `jq -e`: -e only fails on null/false, so an
+  # empty-string username exits 0 and would assign `+` — nobody — while looking like
+  # a successful claim.
+  #
   # `+` ADDS one assignee without touching whatever's already on the issue. A bare
   # `--assignee "$ME"` REPLACES the whole assignee list, which would silently
   # overwrite a sibling who claimed first and defeat the read-back check below.
-  glab issue update "$ISSUE_NUM" --assignee "+$ME"
+  ME_JSON="$(glab api user)" && ME="$(printf '%s' "$ME_JSON" | jq -er .username)" && [ -n "$ME" ] && glab issue update "$ISSUE_NUM" --assignee "+$ME"
 fi || {
   echo "Could not claim issue #$ISSUE_NUM (missing write access?) — aborting."
   # Phase 2 already created and (best-effort) pushed next/issue-<num>. Retract the
