@@ -91,7 +91,38 @@ Print the detected workflow: `Detected release flow: {source} → {target}`
 4. **Run tests** — execute the project's test suite (per project conventions already in context, or check package.json)
 5. **Run build** — execute the project's build command if one exists
 
+## Recover Prepared Release State
+
+Before determining a new version, look for an existing release-preparation commit
+on the current source history. An interrupted run must resume the prepared version,
+not bump it again:
+
+```bash
+PREVIOUS_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+if [ -n "$PREVIOUS_TAG" ]; then
+  PREPARED_RELEASE="$(git log --format='%H%x09%s' "$PREVIOUS_TAG..HEAD" | awk -F '\t' '$2 ~ /^chore: release v[0-9]+\.[0-9]+\.[0-9]+$/ { print; exit }')"
+else
+  PREPARED_RELEASE="$(git log --format='%H%x09%s' | awk -F '\t' '$2 ~ /^chore: release v[0-9]+\.[0-9]+\.[0-9]+$/ { print; exit }')"
+fi
+if [ -n "$PREPARED_RELEASE" ]; then
+  PREPARED_RELEASE_SHA="$(printf '%s\n' "$PREPARED_RELEASE" | cut -f1)"
+  VERSION="$(printf '%s\n' "$PREPARED_RELEASE" | sed -E 's/.*release v//')"
+  echo "Resuming prepared release v${VERSION} at ${PREPARED_RELEASE_SHA}; skipping version bump and changelog generation."
+else
+  echo "No prepared release commit found; determine a new version and finalize its changelog below."
+fi
+```
+
+When `PREPARED_RELEASE` is non-empty, verify that the checked-out package version
+is `{version}` and continue directly to **Local Code Review**. Do not determine a
+new bump, rewrite release notes, or create another `chore: release` commit. If the
+package version does not match the prepared commit's version, fail closed and
+preserve the prepared state for investigation.
+
 ## Determine Version and Finalize Changelog
+
+Skip this entire section when `PREPARED_RELEASE` is non-empty; it is only for a
+release with no prepared release commit.
 
 1. **Determine version bump** from commits since the last git tag:
    - Scan commit messages for conventional commit prefixes (also check each commit's body/footer for `BREAKING CHANGE:` — a recognized way to signal a breaking change without the prefix):
@@ -200,6 +231,7 @@ Verification — self-check before proceeding (no user prompt needed):
   elif [ "$MATCHING_COUNT" -eq 1 ]; then
     PR_NUMBER="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq -r '.[0].number')"
     PR_URL="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq -r '.[0].url')"
+    PR_STATE="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq -r '.[0].state')"
   else
     PR_URL="$(gh pr create --title "Release v{version}" --base "{target}" --head "{source}" --body "...")" || {
       echo "INCOMPLETE — Release PR is unverified; creation failed. Preserve the prepared release state and retry without creating another PR."
@@ -210,6 +242,7 @@ Verification — self-check before proceeding (no user prompt needed):
       echo "INCOMPLETE — Release PR is unverified; creation returned empty or malformed data. Preserve the prepared release state and retry."
       exit 1
     fi
+    PR_STATE="OPEN"
   fi
   ```
 - Title: `Release v{version}` (read version from package.json or equivalent)
@@ -219,6 +252,10 @@ Verification — self-check before proceeding (no user prompt needed):
 **Note**: Do NOT bump the version for review fixes — the version was already set during the release preparation.
 
 ## Run the Review Loop
+
+If the selected PR already has `PR_STATE=MERGED`, skip this section entirely.
+Do not request another review or treat an already-merged PR as an open merge
+candidate; set `OVERALL_STATUS=clean` for the post-merge verification path.
 
 **If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), skip this entire section — no external review loop runs. The Local Code Review gate above plus the passing build/tests are the merge gate; set `OVERALL_STATUS=clean` (no-review path) and proceed to the merge section. The Copilot-specific and local-agent-specific merge checks below do not apply when no reviewer ran.
 
@@ -289,6 +326,11 @@ For `dirty` or `inconclusive`:
 
 ### Merging (after all checks above pass)
 
+If `PR_STATE=MERGED`, skip the CI gate and merge command below and continue
+directly to **Checkpoint 3**. Otherwise, run the gate and merge command. This
+conditional is required for an interrupted rerun to recover from a merge that
+already succeeded remotely.
+
 - **Gate on required CI first.** If the repo has required checks on the target branch, watch them in-session before merging: `gh pr checks <number> --required --watch --fail-fast`. (If `gh` reports no required checks, this gate is vacuously satisfied — merge directly.)
   - On a required-check **failure**, apply the **CI flake handling** routine — one conservative re-run on the same commit (see `~/.claude/lib/ci-flake-handling.md` and the inlined copy above). If the same SHA passes on the single re-run, treat it as a flake and proceed (logging which check flaked); if it fails again, **abort the release merge** and report which check failed. A release must never merge over a real red.
 - Once confirmed clean, merge:
@@ -312,6 +354,7 @@ For `dirty` or `inconclusive`:
     exit 1
   fi
   MERGE_COMMIT="$(printf '%s\n' "$MERGE_JSON" | jq -r '.mergeCommit.oid')"
+  RELEASE_TREE="$(git rev-parse "$MERGE_COMMIT^{tree}")"
   ```
 
 ## Post-Merge
@@ -336,8 +379,10 @@ For `dirty` or `inconclusive`:
    fi
    ```
 2. **Checkpoint 5 — version tag.** Publish `v{version}` only when it is absent;
-   on a rerun, reuse it only if its remotely resolved commit is exactly
-   `TARGET_SHA`. Never force-push or overwrite a conflicting tag. A failed push
+   on a rerun, reuse it only if its remotely resolved commit has the exact
+   `RELEASE_TREE` from the merged release commit. The target branch may advance
+   with workflow housekeeping after the merge, so do not use its moving tip as
+   the tag identity. Never force-push or overwrite a conflicting tag. A failed push
    may have raced with another successful publisher, so re-read the tag before
    reporting failure; empty, malformed, mismatched, or inconclusive output names
    `Version tag` as the first unverified checkpoint:
@@ -347,19 +392,20 @@ For `dirty` or `inconclusive`:
      TAG_SHA="$(git ls-remote origin "refs/tags/v{version}" | awk 'NF { print $1; exit }')"
    fi
    if printf '%s\n' "$TAG_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
-     if [ "$TAG_SHA" != "$TARGET_SHA" ]; then
-       echo "INCOMPLETE — Version tag v{version} points to $TAG_SHA, not target commit $TARGET_SHA; refusing to overwrite it."
+     TAG_TREE="$(git rev-parse "$TAG_SHA^{tree}" 2>/dev/null || true)"
+     if [ "$TAG_TREE" != "$RELEASE_TREE" ]; then
+       echo "INCOMPLETE — Version tag v{version} points to tree ${TAG_TREE:-empty}, not merged release tree $RELEASE_TREE; refusing to overwrite it."
        exit 1
      fi
    else
      if git rev-parse -q --verify "refs/tags/v{version}" >/dev/null 2>&1; then
-       LOCAL_TAG_SHA="$(git rev-parse "v{version}^{commit}")"
-       if [ "$LOCAL_TAG_SHA" != "$TARGET_SHA" ]; then
-         echo "INCOMPLETE — Local version tag v{version} points to $LOCAL_TAG_SHA, not target commit $TARGET_SHA; refusing to overwrite it."
+       LOCAL_TAG_TREE="$(git rev-parse "v{version}^{tree}" 2>/dev/null || true)"
+       if [ "$LOCAL_TAG_TREE" != "$RELEASE_TREE" ]; then
+         echo "INCOMPLETE — Local version tag v{version} points to tree ${LOCAL_TAG_TREE:-empty}, not merged release tree $RELEASE_TREE; refusing to overwrite it."
          exit 1
        fi
      else
-       git tag "v{version}" "$TARGET_SHA" || {
+       git tag "v{version}" "$MERGE_COMMIT" || {
          echo "INCOMPLETE — Version tag is unverified; local tag creation failed. Preserve the prepared release state and retry."
          exit 1
        }
@@ -369,8 +415,9 @@ For `dirty` or `inconclusive`:
      if ! printf '%s\n' "$TAG_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
        TAG_SHA="$(git ls-remote origin "refs/tags/v{version}" | awk 'NF { print $1; exit }')"
      fi
-     if [ "$TAG_SHA" != "$TARGET_SHA" ]; then
-       echo "INCOMPLETE — Version tag is unverified; expected $TARGET_SHA, got ${TAG_SHA:-empty}. Preserve the prepared release state and retry."
+   TAG_TREE="$(git rev-parse "$TAG_SHA^{tree}" 2>/dev/null || true)"
+   if [ "$TAG_TREE" != "$RELEASE_TREE" ]; then
+     echo "INCOMPLETE — Version tag is unverified; expected merged release tree $RELEASE_TREE, got ${TAG_TREE:-empty}. Preserve the prepared release state and retry."
        exit 1
      fi
    fi

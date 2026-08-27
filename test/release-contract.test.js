@@ -36,6 +36,16 @@ describe('/do:release remote promotion contracts', () => {
     assert.match(body, /never create a\s+duplicate/);
   });
 
+  it('resumes prepared releases before version bumping and merged PRs after review', () => {
+    const recovery = body.indexOf('## Recover Prepared Release State');
+    const determineVersion = body.indexOf('## Determine Version and Finalize Changelog');
+    assert.ok(recovery >= 0 && recovery < determineVersion, 'prepared recovery must precede version determination');
+    assert.match(body, /Skip this entire section when `PREPARED_RELEASE` is non-empty/);
+    assert.match(body, /PR_STATE="\$\(printf '[^\n]+' \"\$MATCHING_RELEASE_PRS\" \| jq -r '\.\[0\]\.state'/);
+    assert.match(body, /If the selected PR already has `PR_STATE=MERGED`, skip this section entirely[\s\S]*?Do not request another review/);
+    assert.match(body, /If `PR_STATE=MERGED`, skip the CI gate and merge command below/);
+  });
+
   it('requires mergedAt and mergeCommit instead of trusting merge exit status', () => {
     assert.match(body, /gh pr view "\$PR_NUMBER" --json state,mergedAt,mergeCommit/);
     assert.match(body, /\.state == "MERGED"/);
@@ -51,7 +61,10 @@ describe('/do:release remote promotion contracts', () => {
     assert.match(body, /refs\/tags\/v\{version\}\^\{/);
     assert.match(body, /refusing to overwrite it/);
     assert.match(body, /git push origin "refs\/tags\/v\{version\}" \|\| true/);
-    assert.match(body, /expected \$TARGET_SHA, got \$\{TAG_SHA:-empty\}/);
+    assert.match(body, /RELEASE_TREE="\$\(git rev-parse "\$MERGE_COMMIT\^\{tree\}"\)"/);
+    assert.match(body, /TAG_TREE.*RELEASE_TREE/);
+    assert.match(body, /git tag "v\{version\}" "\$MERGE_COMMIT"/);
+    assert.match(body, /expected merged release tree \$RELEASE_TREE, got \$\{TAG_TREE:-empty\}/);
   });
 
   it('polls for a published GitHub Release and fails closed on timeout', () => {
