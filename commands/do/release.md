@@ -108,6 +108,17 @@ not bump it again:
 git fetch origin "refs/heads/{target}:refs/remotes/origin/{target}" >/dev/null 2>&1 || true
 if git show-ref --verify --quiet "refs/remotes/origin/{target}"; then
   PREPARED_RELEASE="$(git log --format='%H%x09%s' "origin/{target}..HEAD" | awk -F '\t' '$2 ~ /^chore: release v[0-9]+\.[0-9]+\.[0-9]+$/ { print; exit }')"
+  TARGET_PREPARED_RELEASE="$(git log -1 --format='%H%x09%s' "origin/{target}" | awk -F '\t' '$2 ~ /^chore: release v[0-9]+\.[0-9]+\.[0-9]+$/ { print }')"
+  if [ -z "$PREPARED_RELEASE" ] && [ -n "$TARGET_PREPARED_RELEASE" ]; then
+    TARGET_VERSION="$(printf '%s\n' "$TARGET_PREPARED_RELEASE" | sed -E 's/.*release v//')"
+    TARGET_TAG="$(git ls-remote origin "refs/tags/v${TARGET_VERSION}^{}" | awk 'NF { print $1; exit }')"
+    if ! printf '%s\n' "$TARGET_TAG" | grep -Eq '^[0-9a-f]{40}$'; then
+      TARGET_TAG="$(git ls-remote origin "refs/tags/v${TARGET_VERSION}" | awk 'NF { print $1; exit }')"
+    fi
+    if [ -z "$TARGET_TAG" ] || { [ "{publishes_github_release}" = "true" ] && ! gh release view "v${TARGET_VERSION}" >/dev/null 2>&1; }; then
+      PREPARED_RELEASE="$TARGET_PREPARED_RELEASE"
+    fi
+  fi
 else
   PREPARED_RELEASE="$(git log --format='%H%x09%s' | awk -F '\t' '$2 ~ /^chore: release v[0-9]+\.[0-9]+\.[0-9]+$/ { print; exit }')"
 fi
@@ -257,12 +268,18 @@ Verification — self-check before proceeding (no user prompt needed):
     fi
     PR_STATE="OPEN"
   fi
+  printf 'RELEASE_PR_HANDOFF\tPR_NUMBER=%s\tPR_URL=%s\tPR_STATE=%s\n' "$PR_NUMBER" "$PR_URL" "$PR_STATE"
   ```
 - Title: `Release v{version}` (read version from package.json or equivalent)
 - Body: include the changelog content for this version if available, otherwise summarize commits since last release
 - Keep the description clean — no co-author or "generated with" messages
 
 **Note**: Do NOT bump the version for review fixes — the version was already set during the release preparation.
+
+Record the printed `RELEASE_PR_HANDOFF` line and carry its literal `PR_NUMBER`,
+`PR_URL`, and `PR_STATE` values into the review and merge steps. Shell variables do
+not survive separate tool calls; do not re-expand them later expecting them to be
+populated.
 
 ## Run the Review Loop
 
@@ -353,8 +370,11 @@ already succeeded remotely.
     echo "INCOMPLETE — Merged release PR is unverified; the forge state query failed. Preserve the prepared release state and retry."
     exit 1
   }
-  if [ "$CURRENT_PR_STATE" != "MERGED" ]; then
+  if [ "$CURRENT_PR_STATE" = "OPEN" ]; then
     gh pr merge "$PR_NUMBER" --merge
+  elif [ "$CURRENT_PR_STATE" != "MERGED" ]; then
+    echo "INCOMPLETE — Merged release PR is unverified; expected OPEN or MERGED, got ${CURRENT_PR_STATE:-empty}. Preserve the prepared release state and retry."
+    exit 1
   fi
   ```
 - **Checkpoint 3 — merged release PR.** Do not infer completion from the merge
@@ -379,10 +399,7 @@ already succeeded remotely.
     exit 1
   fi
   MERGE_COMMIT="$(printf '%s\n' "$MERGE_JSON" | jq -r '.mergeCommit.oid')"
-  RELEASE_TREE="$(git rev-parse --verify --quiet "$MERGE_COMMIT^{tree}")" || {
-    echo "INCOMPLETE — Merged release PR is unverified; the merge commit tree could not be read locally. Preserve the prepared release state and retry."
-    exit 1
-  }
+  printf 'RELEASE_PR_HANDOFF\tPR_NUMBER=%s\tPR_URL=%s\tPR_STATE=MERGED\tMERGE_COMMIT=%s\n' "$PR_NUMBER" "$(gh pr view "$PR_NUMBER" --json url -q .url)" "$MERGE_COMMIT"
   ```
 
 ## Post-Merge
@@ -396,6 +413,22 @@ already succeeded remotely.
    Checkpoint 6 commands below must run as one shell invocation so verified values
    survive between checkpoints:
    ```bash
+   PR_NUMBER="<number>"
+   SOURCE_SHA="$(git rev-parse HEAD)"
+   MERGE_JSON="$(gh pr view "$PR_NUMBER" --json state,mergedAt,mergeCommit)" || {
+     echo "INCOMPLETE — Merged release PR is unverified; the forge query failed. Preserve the prepared release state and retry."
+     exit 1
+   }
+   if ! printf '%s\n' "$MERGE_JSON" | jq -e \
+     'type == "object" and .state == "MERGED" and (.mergedAt | type == "string") and (.mergeCommit.oid | type == "string") and (.mergeCommit.oid | length > 0)' >/dev/null; then
+     echo "INCOMPLETE — Merged release PR is unverified; the remote merge state is incomplete. Preserve the prepared release state and retry."
+     exit 1
+   fi
+   MERGE_COMMIT="$(printf '%s\n' "$MERGE_JSON" | jq -r '.mergeCommit.oid')"
+   PR_URL="$(gh pr view "$PR_NUMBER" --json url -q .url)" || {
+     echo "INCOMPLETE — Merged release PR is unverified; the PR URL could not be read. Preserve the prepared release state and retry."
+     exit 1
+   }
    # Checkpoint 4 — FETCH_HEAD pins the exact target ref fetched; do not resolve
    # a second moving tip with ls-remote.
    git fetch origin "refs/heads/{target}" || {
