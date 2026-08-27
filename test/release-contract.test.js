@@ -69,7 +69,7 @@ describe('/do:release remote promotion contracts', () => {
     assert.match(body, /git tag "v\{version\}" "\$MERGE_COMMIT"/);
     assert.match(body, /publishes_github_release/);
     assert.match(body, /\[ "\$ATTEMPT" -lt 30 \] && sleep 10/);
-    assert.match(body, /TARGET_PREPARED_RELEASE=.*git log --format=.*origin\/\{target\}/);
+    assert.match(body, /TARGET_PREPARED_RELEASE="\$\(git log[\s\S]*?origin\/\{target\}/);
     assert.match(body, /RELEASE_PR_HANDOFF/);
     assert.match(body, /case "\{publishes_github_release\}" in[\s\S]*true\|false/);
   });
