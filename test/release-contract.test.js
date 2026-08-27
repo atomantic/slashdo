@@ -46,6 +46,9 @@ describe('/do:release remote promotion contracts', () => {
     assert.match(body, /PR_STATE="\$\(printf '[^\n]+' \"\$MATCHING_RELEASE_PRS\" \| jq -r '\.\[0\]\.state'/);
     assert.match(body, /If the selected PR already has `PR_STATE=MERGED`, skip this section entirely[\s\S]*?Do not request another review/);
     assert.match(body, /If `PR_STATE=MERGED`, skip the CI gate and merge command below/);
+    assert.match(body, /TARGET_RECOVERY=true/);
+    assert.match(body, /RELEASE_TARGET_HANDOFF/);
+    assert.match(body, /skip Local Code Review, Checkpoints 1–2/);
   });
 
   it('requires mergedAt and mergeCommit instead of trusting merge exit status', () => {
@@ -72,6 +75,9 @@ describe('/do:release remote promotion contracts', () => {
     assert.match(body, /TARGET_PREPARED_RELEASE="\$\(git log[\s\S]*?origin\/\{target\}/);
     assert.match(body, /RELEASE_PR_HANDOFF/);
     assert.match(body, /case "\{publishes_github_release\}" in[\s\S]*true\|false/);
+    assert.match(body, /TARGET_RELEASE_STATUS=.*gh api --include/);
+    assert.match(body, /404\) TARGET_RELEASE_JSON=""/);
+    assert.match(body, /SOURCE_SHA="\$PREPARED_RELEASE_SHA"/);
   });
 
   it('polls for a published GitHub Release and fails closed on timeout', () => {
