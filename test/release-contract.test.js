@@ -41,6 +41,8 @@ describe('/do:release remote promotion contracts', () => {
     const determineVersion = body.indexOf('## Determine Version and Finalize Changelog');
     assert.ok(recovery >= 0 && recovery < determineVersion, 'prepared recovery must precede version determination');
     assert.match(body, /Skip this entire section when `PREPARED_RELEASE` is non-empty/);
+    assert.match(body, /PREPARED_RELEASE="\$\(git log[^\n]+origin\/\{target\}\.\.HEAD/);
+    assert.doesNotMatch(body, /PREVIOUS_TAG=.*git describe/);
     assert.match(body, /PR_STATE="\$\(printf '[^\n]+' \"\$MATCHING_RELEASE_PRS\" \| jq -r '\.\[0\]\.state'/);
     assert.match(body, /If the selected PR already has `PR_STATE=MERGED`, skip this section entirely[\s\S]*?Do not request another review/);
     assert.match(body, /If `PR_STATE=MERGED`, skip the CI gate and merge command below/);
@@ -55,16 +57,19 @@ describe('/do:release remote promotion contracts', () => {
   });
 
   it('verifies target ancestry and makes tag publication idempotent', () => {
-    assert.match(body, /git ls-remote --heads origin "refs\/heads\/\{target\}"/);
+    assert.match(body, /git fetch origin "refs\/heads\/\{target\}"/);
     assert.match(body, /git cat-file -e "\$TARGET_SHA\^\{tree\}"/);
     assert.match(body, /git merge-base --is-ancestor "\$MERGE_COMMIT" "\$TARGET_SHA"/);
     assert.match(body, /refs\/tags\/v\{version\}\^\{/);
     assert.match(body, /refusing to overwrite it/);
     assert.match(body, /git push origin "refs\/tags\/v\{version\}" \|\| true/);
-    assert.match(body, /RELEASE_TREE="\$\(git rev-parse "\$MERGE_COMMIT\^\{tree\}"\)"/);
-    assert.match(body, /TAG_TREE.*RELEASE_TREE/);
+    assert.match(body, /RELEASE_TREE="\$\(git rev-parse --verify --quiet "\$MERGE_COMMIT\^\{tree\}"\)/);
+    assert.match(body, /git rev-parse --verify --quiet FETCH_HEAD\^\{commit\}/);
+    assert.match(body, /git merge-base --is-ancestor "\$MERGE_COMMIT" "\$TAG_COMMIT"/);
+    assert.match(body, /git merge-base --is-ancestor "\$TAG_COMMIT" "\$TARGET_SHA"/);
     assert.match(body, /git tag "v\{version\}" "\$MERGE_COMMIT"/);
-    assert.match(body, /expected merged release tree \$RELEASE_TREE, got \$\{TAG_TREE:-empty\}/);
+    assert.match(body, /publishes_github_release/);
+    assert.match(body, /\[ "\$ATTEMPT" -lt 30 \] && sleep 10/);
   });
 
   it('polls for a published GitHub Release and fails closed on timeout', () => {
