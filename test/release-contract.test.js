@@ -64,13 +64,14 @@ describe('/do:release remote promotion contracts', () => {
     assert.match(body, /refusing to overwrite it/);
     assert.match(body, /git push origin "refs\/tags\/v\{version\}" \|\| true/);
     assert.match(body, /git rev-parse --verify --quiet FETCH_HEAD\^\{commit\}/);
-    assert.match(body, /git merge-base --is-ancestor "\$MERGE_COMMIT" "\$TAG_COMMIT"/);
+    assert.match(body, /git merge-base --is-ancestor "\$PREPARED_RELEASE_SHA" "\$TAG_COMMIT"/);
     assert.match(body, /git merge-base --is-ancestor "\$TAG_COMMIT" "\$TARGET_SHA"/);
     assert.match(body, /git tag "v\{version\}" "\$MERGE_COMMIT"/);
     assert.match(body, /publishes_github_release/);
     assert.match(body, /\[ "\$ATTEMPT" -lt 30 \] && sleep 10/);
-    assert.match(body, /TARGET_PREPARED_RELEASE=.*git log -1 .*origin\/\{target\}/);
+    assert.match(body, /TARGET_PREPARED_RELEASE=.*git log --format=.*origin\/\{target\}/);
     assert.match(body, /RELEASE_PR_HANDOFF/);
+    assert.match(body, /case "\{publishes_github_release\}" in[\s\S]*true\|false/);
   });
 
   it('polls for a published GitHub Release and fails closed on timeout', () => {
