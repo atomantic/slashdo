@@ -73,6 +73,13 @@ Before doing anything, determine the project's source and target branches for re
    ```
    This ensures the PR diff shows ALL changes since the last release, not just the version bump.
 
+4. **Detect GitHub Release publication** — set `{publishes_github_release}` to true
+   only when the documented workflow or release instructions publish a GitHub
+   Release (for example, they use `gh release`, `softprops/action-gh-release`, or
+   an equivalent release action). Projects that publish only packages or tags do
+   not have a GitHub Release checkpoint; their successful completion ends after
+   the version-tag checkpoint.
+
 Print the detected workflow: `Detected release flow: {source} → {target}`
 
 **Default mode**: If ambiguous, use the most likely branch (prefer `release` if it exists). If the target branch does not exist, create it from the last release tag (see step 3 above). If detection still yields `target == source`, abort with an error — a release PR cannot merge a branch into itself. **Interactive mode (`--interactive`)**: Ask the user to confirm before proceeding.
@@ -91,7 +98,97 @@ Print the detected workflow: `Detected release flow: {source} → {target}`
 4. **Run tests** — execute the project's test suite (per project conventions already in context, or check package.json)
 5. **Run build** — execute the project's build command if one exists
 
+## Recover Prepared Release State
+
+Before determining a new version, look for an existing release-preparation commit
+on the current source history. An interrupted run must resume the prepared version,
+not bump it again:
+
+```bash
+case "{publishes_github_release}" in
+  true|false) ;;
+  *)
+    echo "INCOMPLETE — GitHub Release publication flag is unresolved; preserve the prepared release state."
+    exit 1
+    ;;
+esac
+RECOVERED_TARGET_RELEASE=false
+if ! git fetch origin "refs/heads/{target}:refs/remotes/origin/{target}" >/dev/null 2>&1 \
+   || ! git show-ref --verify --quiet "refs/remotes/origin/{target}"; then
+  echo "INCOMPLETE — Prepared release state is unverified; origin/{target} could not be resolved. Preserve the prepared state and retry."
+  exit 1
+fi
+  PREPARED_RELEASE="$(git log --extended-regexp --format='%H%x09%s' "origin/{target}..HEAD" | awk -F '\t' '$2 ~ /^chore: release v[0-9]+\.[0-9]+\.[0-9]+$/ { print; exit }')"
+  TARGET_PREPARED_RELEASE="$(git log --extended-regexp --format='%H%x09%s' "origin/{target}" | awk -F '\t' '$2 ~ /^chore: release v[0-9]+\.[0-9]+\.[0-9]+$/ { print; exit }')"
+if [ -z "$PREPARED_RELEASE" ] && [ -n "$TARGET_PREPARED_RELEASE" ]; then
+  TARGET_VERSION="$(printf '%s\n' "$TARGET_PREPARED_RELEASE" | sed -E 's/.*release v//')"
+  TARGET_TAG="$(git ls-remote origin "refs/tags/v${TARGET_VERSION}^{}" | awk 'NF { print $1; exit }')"
+  if ! printf '%s\n' "$TARGET_TAG" | grep -Eq '^[0-9a-f]{40}$'; then
+    TARGET_TAG="$(git ls-remote origin "refs/tags/v${TARGET_VERSION}" | awk 'NF { print $1; exit }')"
+  fi
+  TARGET_RELEASE_STATUS="$(gh api --include "repos/{owner}/{repo}/releases/tags/v${TARGET_VERSION}" 2>/dev/null | awk '$1 ~ /^HTTP\// { print $2; exit }' || true)"
+  case "$TARGET_RELEASE_STATUS" in
+    200)
+      TARGET_RELEASE_JSON="$(gh release view "v${TARGET_VERSION}" --json isDraft,isPrerelease,publishedAt 2>/dev/null)" || {
+        echo "INCOMPLETE — Prepared release state is unverified; GitHub Release metadata could not be read. Preserve the prepared state and retry."
+        exit 1
+      }
+      ;;
+    404) TARGET_RELEASE_JSON="" ;;
+    *)
+      echo "INCOMPLETE — Prepared release state is unverified; GitHub Release lookup returned ${TARGET_RELEASE_STATUS:-empty}. Preserve the prepared state and retry."
+      exit 1
+      ;;
+  esac
+  if [ -z "$TARGET_TAG" ] || { [ "{publishes_github_release}" = "true" ] && ! printf '%s\n' "$TARGET_RELEASE_JSON" | jq -e 'type == "object" and .isDraft == false and .isPrerelease == false and (.publishedAt | type == "string") and (.publishedAt | length > 0)' >/dev/null 2>&1; }; then
+    PREPARED_RELEASE="$TARGET_PREPARED_RELEASE"
+    RECOVERED_TARGET_RELEASE=true
+  fi
+fi
+if [ -n "$PREPARED_RELEASE" ]; then
+  PREPARED_RELEASE_SHA="$(printf '%s\n' "$PREPARED_RELEASE" | cut -f1)"
+  VERSION="$(printf '%s\n' "$PREPARED_RELEASE" | sed -E 's/.*release v//')"
+  echo "Resuming prepared release v${VERSION} at ${PREPARED_RELEASE_SHA}; skipping version bump and changelog generation."
+  if [ "$RECOVERED_TARGET_RELEASE" = "true" ]; then
+    TARGET_RELEASE_PRS_JSON="$(gh pr list --state merged --base "{target}" --limit 100 --json number,state,headRefOid,baseRefName,headRefName,url,mergedAt,mergeCommit)" || {
+      echo "INCOMPLETE — Merged release PR is unverified; the forge query failed. Preserve the prepared state and retry."
+      exit 1
+    }
+    if ! printf '%s\n' "$TARGET_RELEASE_PRS_JSON" | jq -e 'type == "array"' >/dev/null; then
+      echo "INCOMPLETE — Merged release PR is unverified; the forge returned empty or malformed data. Preserve the prepared state and retry."
+      exit 1
+    fi
+    MATCHING_TARGET_RELEASE_PRS="$(printf '%s\n' "$TARGET_RELEASE_PRS_JSON" | jq -c --arg sha "$PREPARED_RELEASE_SHA" --arg source "{source}" '[.[] | select(.headRefOid == $sha and .baseRefName == "{target}" and .headRefName == $source)]')"
+    MATCHING_TARGET_RELEASE_COUNT="$(printf '%s\n' "$MATCHING_TARGET_RELEASE_PRS" | jq 'length')"
+    if [ "$MATCHING_TARGET_RELEASE_COUNT" -ne 1 ]; then
+      echo "INCOMPLETE — Merged release PR is unverified; expected exactly one merged PR for prepared SHA $PREPARED_RELEASE_SHA, found $MATCHING_TARGET_RELEASE_COUNT. Preserve the prepared state and retry."
+      exit 1
+    fi
+    PR_NUMBER="$(printf '%s\n' "$MATCHING_TARGET_RELEASE_PRS" | jq -r '.[0].number')"
+    PR_URL="$(printf '%s\n' "$MATCHING_TARGET_RELEASE_PRS" | jq -r '.[0].url')"
+    PR_STATE="MERGED"
+    printf 'RELEASE_TARGET_HANDOFF\tPREPARED_RELEASE_SHA=%s\tPR_NUMBER=%s\tPR_URL=%s\tPR_STATE=%s\n' "$PREPARED_RELEASE_SHA" "$PR_NUMBER" "$PR_URL" "$PR_STATE"
+  fi
+  printf 'RELEASE_PREPARED_HANDOFF\tPREPARED_RELEASE_SHA=%s\tVERSION=%s\tTARGET_RECOVERY=%s\n' "$PREPARED_RELEASE_SHA" "$VERSION" "$RECOVERED_TARGET_RELEASE"
+else
+  echo "No prepared release commit found; determine a new version and finalize its changelog below."
+fi
+```
+
+When `PREPARED_RELEASE` is non-empty, verify that the checked-out package version
+is `{version}` and continue directly to **Local Code Review**. Do not determine a
+new bump, rewrite release notes, or create another `chore: release` commit. If the
+package version does not match the prepared commit's version, fail closed and
+preserve the prepared state for investigation. When `TARGET_RECOVERY=true`, the
+prepared release is already merged into `{target}`: carry the
+`RELEASE_TARGET_HANDOFF` values and skip Local Code Review, Checkpoints 1–2, and
+the open-PR review/CI/merge gates; continue directly to Checkpoint 3 and then
+verify the target tree, tag, and GitHub Release.
+
 ## Determine Version and Finalize Changelog
+
+Skip this entire section when `PREPARED_RELEASE` is non-empty; it is only for a
+release with no prepared release commit.
 
 1. **Determine version bump** from commits since the last git tag:
    - Scan commit messages for conventional commit prefixes (also check each commit's body/footer for `BREAKING CHANGE:` — a recognized way to signal a breaking change without the prefix):
@@ -160,10 +257,76 @@ Verification — self-check before proceeding (no user prompt needed):
 
 ## Open the Release PR
 
-- Push the source branch to remote (it should already be up to date with the release commit)
-- Create a PR from `{source}` → `{target}` (e.g., `main` → `release`)
+When `TARGET_RECOVERY=true`, use the carried `RELEASE_TARGET_HANDOFF` instead of
+running Checkpoints 1–2; the already-merged PR is the release PR for this retry.
+Continue with Checkpoint 3 and the post-merge verification blocks below.
+
+- **Checkpoint 1 — source push.** Push the prepared source commit and verify the
+  forge reports the exact same commit before creating or reusing a PR. A successful
+  `git push` by itself is not proof that the remote ref was updated; empty,
+  malformed, or mismatched output is an incomplete release and must name
+  `Source push` as the first unverified checkpoint:
   ```bash
-  gh pr create --title "Release v{version}" --base {target} --head {source} --body "..."
+  git push -u origin "HEAD:refs/heads/{source}"
+  SOURCE_SHA="$(git rev-parse HEAD)"
+  PREPARED_RELEASE_SHA="$(git log --extended-regexp --format='%H%x09%s' | awk -F '\t' '$2 ~ /^chore: release v[0-9]+\.[0-9]+\.[0-9]+$/ { print $1; exit }')"
+  if ! printf '%s\n' "$PREPARED_RELEASE_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+    echo "INCOMPLETE — Prepared release state is unverified; the release preparation commit could not be identified. Preserve the prepared state and retry."
+    exit 1
+  fi
+  REMOTE_SOURCE_SHA="$(git ls-remote --heads origin "refs/heads/{source}" | awk 'NF { print $1; exit }')"
+  if ! printf '%s\n' "$REMOTE_SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$' || [ "$REMOTE_SOURCE_SHA" != "$SOURCE_SHA" ]; then
+    echo "INCOMPLETE — Source push is unverified; expected $SOURCE_SHA, got ${REMOTE_SOURCE_SHA:-empty}. Preserve the prepared release state and retry."
+    exit 1
+  fi
+  ```
+- **Checkpoint 2 — release PR.** Query all matching PRs for the current source SHA
+  before creating one. Reuse an open PR, or a merged PR whose head is still this
+  source SHA when an interrupted rerun already completed it; never create a
+  duplicate. Missing, empty, malformed, or ambiguous forge output is incomplete
+  and must name `Release PR` as the first unverified checkpoint. A closed,
+  unmerged PR is not reusable, so a later run may create a new PR for the newly
+  pushed source SHA:
+  ```bash
+  SOURCE_SHA="$(git rev-parse HEAD)"
+  PREPARED_RELEASE_SHA="$(git log --extended-regexp --format='%H%x09%s' | awk -F '\t' '$2 ~ /^chore: release v[0-9]+\.[0-9]+\.[0-9]+$/ { print $1; exit }')"
+  REMOTE_SOURCE_SHA="$(git ls-remote --heads origin "refs/heads/{source}" | awk 'NF { print $1; exit }')"
+  if ! printf '%s\n' "$REMOTE_SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$' || [ "$REMOTE_SOURCE_SHA" != "$SOURCE_SHA" ]; then
+    echo "INCOMPLETE — Source push is unverified; expected $SOURCE_SHA, got ${REMOTE_SOURCE_SHA:-empty}. Preserve the prepared release state and retry."
+    exit 1
+  fi
+  RELEASE_PRS_JSON="$(gh pr list --state all --base "{target}" --head "{source}" --limit 100 \
+    --json number,state,headRefOid,baseRefName,headRefName,url,createdAt)" || {
+    echo "INCOMPLETE — Release PR is unverified; the forge query failed. Preserve the prepared release state and retry."
+    exit 1
+  }
+  if ! printf '%s\n' "$RELEASE_PRS_JSON" | jq -e 'type == "array"' >/dev/null; then
+    echo "INCOMPLETE — Release PR is unverified; the forge returned empty or malformed data. Preserve the prepared release state and retry."
+    exit 1
+  fi
+  MATCHING_RELEASE_PRS="$(printf '%s\n' "$RELEASE_PRS_JSON" | jq -c --arg sha "$SOURCE_SHA" \
+    '[.[] | select(.headRefOid == $sha and (.state == "OPEN" or .state == "MERGED"))]')"
+  MATCHING_COUNT="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq 'length')"
+  if [ "$MATCHING_COUNT" -gt 1 ]; then
+    echo "INCOMPLETE — Release PR is ambiguous; more than one open or merged PR matches $SOURCE_SHA. Preserve the prepared release state and investigate."
+    exit 1
+  elif [ "$MATCHING_COUNT" -eq 1 ]; then
+    PR_NUMBER="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq -r '.[0].number')"
+    PR_URL="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq -r '.[0].url')"
+    PR_STATE="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq -r '.[0].state')"
+  else
+    PR_URL="$(gh pr create --title "Release v{version}" --base "{target}" --head "{source}" --body "...")" || {
+      echo "INCOMPLETE — Release PR is unverified; creation failed. Preserve the prepared release state and retry without creating another PR."
+      exit 1
+    }
+    PR_NUMBER="${PR_URL##*/}"
+    if ! printf '%s\n' "$PR_NUMBER" | grep -Eq '^[0-9]+$'; then
+      echo "INCOMPLETE — Release PR is unverified; creation returned empty or malformed data. Preserve the prepared release state and retry."
+      exit 1
+    fi
+    PR_STATE="OPEN"
+  fi
+  printf 'RELEASE_PR_HANDOFF\tPREPARED_RELEASE_SHA=%s\tPR_NUMBER=%s\tPR_URL=%s\tPR_STATE=%s\n' "$PREPARED_RELEASE_SHA" "$PR_NUMBER" "$PR_URL" "$PR_STATE"
   ```
 - Title: `Release v{version}` (read version from package.json or equivalent)
 - Body: include the changelog content for this version if available, otherwise summarize commits since last release
@@ -171,7 +334,16 @@ Verification — self-check before proceeding (no user prompt needed):
 
 **Note**: Do NOT bump the version for review fixes — the version was already set during the release preparation.
 
+Record the printed `RELEASE_PREPARED_HANDOFF` and `RELEASE_PR_HANDOFF` lines and
+carry their literal `PREPARED_RELEASE_SHA`, `PR_NUMBER`, `PR_URL`, and `PR_STATE`
+values into the review and merge steps. Shell variables do not survive separate
+tool calls; do not re-expand them later expecting them to be populated.
+
 ## Run the Review Loop
+
+If the selected PR already has `PR_STATE=MERGED`, skip this section entirely.
+Do not request another review or treat an already-merged PR as an open merge
+candidate; set `OVERALL_STATUS=clean` for the post-merge verification path.
 
 **If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), skip this entire section — no external review loop runs. The Local Code Review gate above plus the passing build/tests are the merge gate; set `OVERALL_STATUS=clean` (no-review path) and proceed to the merge section. The Copilot-specific and local-agent-specific merge checks below do not apply when no reviewer ran.
 
@@ -211,6 +383,10 @@ Each pass uses the matching single-reviewer loop:
 
 ## Merge the PR (only after a CLEAN multi-reviewer result)
 
+If `PR_STATE=MERGED`, skip all review-verdict and CI/merge gates in this section
+and continue directly to Checkpoint 3's remote read-back. An already-merged PR
+does not need another reviewer verdict to recover its post-merge checkpoints.
+
 The merge gate consumes the **wrapper's `{OVERALL_STATUS}`** plus, for any copilot pass that ran, the standard copilot post-pass checks.
 
 ### Wrapper status
@@ -242,26 +418,180 @@ For `dirty` or `inconclusive`:
 
 ### Merging (after all checks above pass)
 
+If `PR_STATE=MERGED`, skip the CI gate and merge command below and continue
+directly to **Checkpoint 3**. Otherwise, run the gate and merge command. This
+conditional is required for an interrupted rerun to recover from a merge that
+already succeeded remotely.
+
 - **Gate on required CI first.** If the repo has required checks on the target branch, watch them in-session before merging: `gh pr checks <number> --required --watch --fail-fast`. (If `gh` reports no required checks, this gate is vacuously satisfied — merge directly.)
   - On a required-check **failure**, apply the **CI flake handling** routine — one conservative re-run on the same commit (see `~/.claude/lib/ci-flake-handling.md` and the inlined copy above). If the same SHA passes on the single re-run, treat it as a flake and proceed (logging which check flaked); if it fails again, **abort the release merge** and report which check failed. A release must never merge over a real red.
 - Once confirmed clean, merge:
   ```bash
-  gh pr merge <number> --merge
+  PR_NUMBER="<number>"
+  CURRENT_PR_STATE="$(gh pr view "$PR_NUMBER" --json state -q .state)" || {
+    echo "INCOMPLETE — Merged release PR is unverified; the forge state query failed. Preserve the prepared release state and retry."
+    exit 1
+  }
+  if [ "$CURRENT_PR_STATE" = "OPEN" ]; then
+    gh pr merge "$PR_NUMBER" --merge
+  elif [ "$CURRENT_PR_STATE" != "MERGED" ]; then
+    echo "INCOMPLETE — Merged release PR is unverified; expected OPEN or MERGED, got ${CURRENT_PR_STATE:-empty}. Preserve the prepared release state and retry."
+    exit 1
+  fi
   ```
-- Verify the merge succeeded: `gh pr view <number> --json state,mergedAt`
+- **Checkpoint 3 — merged release PR.** Do not infer completion from the merge
+  command's exit status. Read back all three remote fields and require a merged
+  state, a non-empty merge timestamp, and a non-empty merge commit. Empty,
+  malformed, timed-out, queued, or otherwise inconclusive output is incomplete;
+  name `Merged release PR` as the first unverified checkpoint and preserve the
+  prepared state:
+  Run the Checkpoint 3 through Checkpoint 6 blocks below with a command timeout of
+  at least 600 seconds and as one shell invocation;
+  this keeps their verified values together. Substitute the carried preparation
+  SHA and selected PR number for `<prepared-release-sha>` and `<number>` rather
+  than relying on variables from earlier shell calls.
+  ```bash
+  PR_NUMBER="<number>"
+  MERGE_JSON="$(gh pr view "$PR_NUMBER" --json state,mergedAt,mergeCommit)" || {
+    echo "INCOMPLETE — Merged release PR is unverified; the forge query failed. Preserve the prepared release state and retry."
+    exit 1
+  }
+  if ! printf '%s\n' "$MERGE_JSON" | jq -e \
+    'type == "object" and .state == "MERGED" and (.mergedAt | type == "string") and (.mergedAt | length > 0) and (.mergeCommit.oid | type == "string") and (.mergeCommit.oid | length > 0)' >/dev/null; then
+    echo "INCOMPLETE — Merged release PR is unverified; state, mergedAt, or mergeCommit is missing or not MERGED. Preserve the prepared release state and retry."
+    exit 1
+  fi
+  MERGE_COMMIT="$(printf '%s\n' "$MERGE_JSON" | jq -r '.mergeCommit.oid')"
+  printf 'RELEASE_PR_HANDOFF\tPR_NUMBER=%s\tPR_URL=%s\tPR_STATE=MERGED\tMERGE_COMMIT=%s\n' "$PR_NUMBER" "$(gh pr view "$PR_NUMBER" --json url -q .url)" "$MERGE_COMMIT"
+  ```
 
 ## Post-Merge
 
-1. **Tag the release** on the target branch to trigger the publish workflow. Refuse to overwrite an existing tag — a colliding `v{version}` usually means the version bump heuristic picked an already-released value or a prior partial release left state behind, both of which need human attention before force-tagging would be safe:
+1. **Checkpoint 4 — target-branch tree.** Fetch the target and verify its remote
+   ref is a real commit with a tree that contains the merged release commit. This
+   proves the source-to-target promotion landed; checking only PR state would miss
+   a queued or otherwise incomplete target update. If any command is empty,
+   malformed, timed out, or fails, report `Target branch tree` as the first
+   unverified checkpoint and do not create or reuse a tag. The Checkpoint 3 through
+   Checkpoint 6 commands below must run as one shell invocation so verified values
+   survive between checkpoints:
    ```bash
-   git fetch origin {target} 'refs/tags/*:refs/tags/*'
-   if git rev-parse -q --verify "refs/tags/v{version}" >/dev/null; then
-     echo "Tag v{version} already exists. Aborting tag step. Investigate (rerun version bump? force-tag manually?) before retrying."
+   PREPARED_RELEASE_SHA="<prepared-release-sha>"
+   PR_NUMBER="<number>"
+   if [ "<target-recovery>" = "true" ]; then
+     SOURCE_SHA="$PREPARED_RELEASE_SHA"
+   else
+     SOURCE_SHA="$(git rev-parse HEAD)"
+   fi
+   MERGE_JSON="$(gh pr view "$PR_NUMBER" --json state,mergedAt,mergeCommit)" || {
+     echo "INCOMPLETE — Merged release PR is unverified; the forge query failed. Preserve the prepared release state and retry."
+     exit 1
+   }
+   if ! printf '%s\n' "$MERGE_JSON" | jq -e \
+    'type == "object" and .state == "MERGED" and (.mergedAt | type == "string") and (.mergedAt | length > 0) and (.mergeCommit.oid | type == "string") and (.mergeCommit.oid | length > 0)' >/dev/null; then
+     echo "INCOMPLETE — Merged release PR is unverified; the remote merge state is incomplete. Preserve the prepared release state and retry."
      exit 1
    fi
-   git tag v{version} origin/{target}
-   git push origin v{version}
+   MERGE_COMMIT="$(printf '%s\n' "$MERGE_JSON" | jq -r '.mergeCommit.oid')"
+   PR_URL="$(gh pr view "$PR_NUMBER" --json url -q .url)" || {
+     echo "INCOMPLETE — Merged release PR is unverified; the PR URL could not be read. Preserve the prepared release state and retry."
+     exit 1
+   }
+   # Checkpoint 4 — FETCH_HEAD pins the exact target ref fetched; do not resolve
+   # a second moving tip with ls-remote.
+   git fetch origin "refs/heads/{target}" || {
+     echo "INCOMPLETE — Target branch tree is unverified; fetching {target} failed. Preserve the prepared release state and retry."
+     exit 1
+   }
+   TARGET_SHA="$(git rev-parse --verify --quiet FETCH_HEAD^{commit} || true)"
+   if ! printf '%s\n' "$TARGET_SHA" | grep -Eq '^[0-9a-f]{40}$' \
+      || ! git cat-file -e "$TARGET_SHA^{tree}" 2>/dev/null \
+      || ! git merge-base --is-ancestor "$MERGE_COMMIT" "$TARGET_SHA"; then
+     echo "INCOMPLETE — Target branch tree is unverified; expected {target} to contain $MERGE_COMMIT, got ${TARGET_SHA:-empty}. Preserve the prepared release state and retry."
+     exit 1
+   fi
+   # Checkpoint 5 — version tag. A workflow may add housekeeping commits after
+   # the merge, so accept only a tag on the merged-release lineage, never an
+   # unrelated or stale tag, and never overwrite an existing tag. A failed push
+   # may have raced with another successful publisher, so re-read the tag before
+   # reporting failure.
+   TAG_SHA="$(git ls-remote origin "refs/tags/v{version}^{}" | awk 'NF { print $1; exit }')"
+   if ! printf '%s\n' "$TAG_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+     TAG_SHA="$(git ls-remote origin "refs/tags/v{version}" | awk 'NF { print $1; exit }')"
+   fi
+   if printf '%s\n' "$TAG_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+     TAG_COMMIT="$TAG_SHA"
+     if ! git merge-base --is-ancestor "$PREPARED_RELEASE_SHA" "$TAG_COMMIT" \
+        || ! git merge-base --is-ancestor "$TAG_COMMIT" "$TARGET_SHA"; then
+       echo "INCOMPLETE — Version tag v{version} is not on the merged release lineage; refusing to overwrite it."
+       exit 1
+     fi
+   else
+     if git rev-parse --verify --quiet "refs/tags/v{version}^{commit}" >/dev/null; then
+       LOCAL_TAG_COMMIT="$(git rev-parse --verify --quiet "refs/tags/v{version}^{commit}")" || {
+         echo "INCOMPLETE — Version tag is unverified; the local tag could not be read. Preserve the prepared release state and retry."
+         exit 1
+       }
+       if ! git merge-base --is-ancestor "$PREPARED_RELEASE_SHA" "$LOCAL_TAG_COMMIT" \
+          || ! git merge-base --is-ancestor "$LOCAL_TAG_COMMIT" "$TARGET_SHA"; then
+         echo "INCOMPLETE — Local version tag v{version} is not on the merged release lineage; refusing to overwrite it."
+         exit 1
+       fi
+     else
+       git tag "v{version}" "$MERGE_COMMIT" || {
+         echo "INCOMPLETE — Version tag is unverified; local tag creation failed. Preserve the prepared release state and retry."
+         exit 1
+       }
+     fi
+     git push origin "refs/tags/v{version}" || true
+     TAG_SHA="$(git ls-remote origin "refs/tags/v{version}^{}" | awk 'NF { print $1; exit }')"
+     if ! printf '%s\n' "$TAG_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+       TAG_SHA="$(git ls-remote origin "refs/tags/v{version}" | awk 'NF { print $1; exit }')"
+     fi
+     TAG_COMMIT="$TAG_SHA"
+     if ! printf '%s\n' "$TAG_COMMIT" | grep -Eq '^[0-9a-f]{40}$' \
+        || ! git merge-base --is-ancestor "$PREPARED_RELEASE_SHA" "$TAG_COMMIT" \
+        || ! git merge-base --is-ancestor "$TAG_COMMIT" "$TARGET_SHA"; then
+       echo "INCOMPLETE — Version tag is unverified; expected a tag on the merged release lineage, got ${TAG_COMMIT:-empty}. Preserve the prepared release state and retry."
+       exit 1
+     fi
+   fi
+
+   # Checkpoint 6 — GitHub Release. The release workflow may need time to publish
+   # after the tag. Missing, empty, malformed, or timed-out output is incomplete
+   # when GitHub Release publication is part of the documented workflow.
+   case "{publishes_github_release}" in
+     true|false) ;;
+     *)
+       echo "INCOMPLETE — GitHub Release publication flag is unresolved; preserve the prepared release state."
+       exit 1
+       ;;
+   esac
+   if [ "{publishes_github_release}" = "true" ]; then
+   RELEASE_JSON=""
+   for ATTEMPT in $(seq 1 30); do
+     RELEASE_JSON="$(gh release view "v{version}" --json tagName,isDraft,isPrerelease,publishedAt 2>/dev/null || true)"
+     if printf '%s\n' "$RELEASE_JSON" | jq -e \
+       'type == "object" and .tagName == "v{version}" and .isDraft == false and .isPrerelease == false and (.publishedAt | type == "string") and (.publishedAt | length > 0)' >/dev/null 2>&1; then
+       break
+     fi
+     RELEASE_JSON=""
+     [ "$ATTEMPT" -lt 30 ] && sleep 10
+   done
+   if ! printf '%s\n' "$RELEASE_JSON" | jq -e \
+     'type == "object" and .tagName == "v{version}" and .isDraft == false and .isPrerelease == false and (.publishedAt | type == "string") and (.publishedAt | length > 0)' >/dev/null 2>&1; then
+     echo "INCOMPLETE — GitHub Release is unverified after the bounded wait; preserve the prepared release state and retry."
+     exit 1
+   fi
+   else
+     echo "Checkpoint 6 — GitHub Release: skipped because the documented workflow does not publish one."
+   fi
+
+   echo "COMPLETE — source $SOURCE_SHA; PR $PR_NUMBER merged at $MERGE_COMMIT; target $TARGET_SHA; tag $TAG_COMMIT."
    ```
-2. **Switch back to the source branch** locally: `git checkout {source} && git pull --rebase --autostash`
-3. **Report the final status** including version, PR URL, tag, and merge state
-4. Remind the user to check for the GitHub release once CI completes (if the project uses automated releases)
+2. **Only after all six checkpoints pass** report the release as complete, including
+   the source SHA, PR URL and merged state, target SHA, tag SHA, and published
+   GitHub Release. A local prepared commit, a successful PR merge command, or a
+   pushed tag is never sufficient on its own. Switch back to the source branch
+   locally only after the remote verification succeeds:
+   `git checkout {source} && git pull --rebase --autostash`.
