@@ -5,8 +5,14 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-const readLib = (name) => fs.readFileSync(path.join(__dirname, '..', 'lib', name), 'utf8');
-const readCommand = (name) => fs.readFileSync(path.join(__dirname, '..', 'commands', 'do', name), 'utf8');
+const _readCache = new Map();
+const _read = (...parts) => {
+  const f = path.join(__dirname, "..", ...parts);
+  if (!_readCache.has(f)) _readCache.set(f, fs.readFileSync(f, "utf8"));
+  return _readCache.get(f);
+};
+const readLib = (name) => _read("lib", name);
+const readCommand = (name) => _read("commands", "do", name);
 
 // The loop partials whose invocations carry arrays that can legitimately be empty
 // (TIMEOUT_CMD when no timeout/gtimeout is installed, MODEL_FLAG when no model is
@@ -131,6 +137,60 @@ describe('review-loop parse contracts', () => {
     const ollama = readLib('ollama-review-loop.md');
     assert.match(ollama, /OLLAMA_EFFORT/);
     assert.match(ollama, /PROMPT="\$PROMPT Target reasoning effort level: \$OLLAMA_EFFORT\."/);
+  });
+  it('builds each reviewer a carrier its CLI actually accepts, defaulting to none', () => {
+    // `--effort` is correct for only claude/grok. Passing it to a CLI that
+    // rejects it is a non-zero exit BEFORE the review runs, so that reviewer's
+    // merge-gate slot holds a launch failure rather than a verdict:
+    //   codex-cli 0.149.1: no --effort at any level (top-level, `review`, `exec`)
+    //     -> error: unexpected argument '--effort' found
+    //   agy 1.1.22: --effort is mutually exclusive with --model, which this loop
+    //     always pins -> --effort is not supported for model "..."
+    // The pre-flight therefore dispatches per agent and defaults to NO flag; an
+    // agent nobody wrote an arm for must degrade to prompt-advisory effort, not
+    // inherit `--effort`. That inheritance is what broke codex and agy.
+    const loop = readLib('local-agent-review-loop.md');
+    const preflight = loop.slice(
+      loop.indexOf('# Reasoning effort carrier.'),
+      loop.indexOf('# agy only: pin the review model'),
+    );
+    assert.ok(preflight, 'the effort-carrier pre-flight block must exist');
+
+    // Per-agent carrier, asserted as a table so a new reviewer adds a row.
+    const CARRIERS = [
+      ['claude|grok', /claude\|grok\) EFFORT_FLAG=\(--effort "\$REVIEW_EFFORT"\)/],
+      ['codex', /codex\)\s+EFFORT_FLAG=\(-c "model_reasoning_effort=\$REVIEW_EFFORT"\)/],
+      ['cursor', /CURSOR_MODEL="\$\{REVIEW_MODEL\}\[effort=\$\{REVIEW_EFFORT\}\]"/],
+      ['agy', /agy\) : ;;/],
+    ];
+    for (const [agent, re] of CARRIERS) {
+      assert.match(preflight, re, `${agent} must get the carrier its CLI accepts`);
+    }
+
+    // Fail closed: the default is no flag, and the unknown-agent arm guesses nothing.
+    assert.match(preflight, /^EFFORT_FLAG=\(\)$/m);
+    assert.match(preflight, /\*\)\s+: ;;/, 'unknown agents must not inherit a flag');
+    assert.ok(
+      !/^\[ -n "\$REVIEW_EFFORT" \] && EFFORT_FLAG=\(--effort/m.test(preflight),
+      'no unconditional --effort assignment may precede the per-agent dispatch',
+    );
+
+    // No invocation may pass a carrier its CLI rejects.
+    for (const agent of ['codex', 'agy', 'cursor']) {
+      const row = loop.split('\n').find((l) => l.startsWith(`| \`${agent}\` |`));
+      assert.ok(row, `${agent} invocation row must exist`);
+      assert.ok(
+        agent === 'codex' || !row.includes('EFFORT_FLAG'),
+        `the ${agent} invocation must not pass EFFORT_FLAG`,
+      );
+    }
+
+    // The carrier table is the documented rule, and agy's variant is discovered
+    // at run time rather than baked into a level table that would go stale.
+    assert.match(loop, /\*\*Effort carriers\.\*\*/);
+    assert.match(loop, /\| `agy` \| a model \*\*variant\*\* picked from `agy models`/);
+    assert.match(loop, /not from a remembered table/);
+    assert.match(loop, /AGY_MODEL_RESOLVED/, 'the agy choice must persist across loop iterations');
   });
 
   it('tells the in-process claude reviewer what to do with ~effort, and what not to reach for', () => {
@@ -432,12 +492,11 @@ describe('review-loop parse contracts', () => {
     assert.match(loop, /Grok Build also installs an `agent` binary/);
     assert.match(loop, /--mode=ask/);
     assert.match(loop, /--force --trust/);
-    assert.match(loop, /Do not pass `EFFORT_FLAG` to `cursor`/);
+    assert.match(loop, /\| `cursor` \| folded into `--model` as `\[effort=<level>\]`/);
     // ~effort must actually change Cursor inference: fold into --model as
     // [effort=<level>], matching cursor[gpt-5]~effort=max and a saved
     // review-models cursor=gpt-5 plus cursor~effort=max. Never pass --effort.
     assert.match(loop, /CURSOR_MODEL="\$\{REVIEW_MODEL\}\[effort=\$\{REVIEW_EFFORT\}\]"/);
-    assert.match(loop, /folds `\{REVIEW_EFFORT\}` into the `--model` value/);
     assert.match(loop, /gpt-5\[effort=max\]/);
     // Review-only must not grant --force; reviewer-applies must.
     assert.match(loop, /omits `--force`/);
@@ -446,9 +505,8 @@ describe('review-loop parse contracts', () => {
     // other reviewers — a saved review-models entry and a ~effort suffix.
     assert.match(readCommand('config.md'), /--review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5/);
     assert.match(readCommand('config.md'), /cursor\[gpt-5\]~effort=max/);
-    const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
-    assert.match(readme, /cursor\[gpt-5\]~effort=max/);
-    assert.match(readme, /--review-models cursor=/);
+    assert.match(_read('README.md'), /cursor\[gpt-5\]~effort=max/);
+    assert.match(_read("README.md"), /--review-models cursor=/);
 
     assert.match(wrapper, /`cursor` \(alias `cursor-agent`\)/);
     assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `cursor`/);
