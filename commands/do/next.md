@@ -207,6 +207,13 @@ Runs **once per invocation**, after the last wave, over every result the batch p
 >     echo "/do:next detected a GitLab repo ($ORIGIN_HOST) but glab is not authenticated to it. Run 'glab auth login'."; exit 1; }
 >   # No GH_HOST-style workaround needed here: unlike `gh api`, `glab api` and
 >   # `glab issue`/`glab mr` already resolve the host from the repo's origin remote.
+>   # But `glab api` has no built-in `--jq` flag (only the `glab issue`/`glab mr`
+>   # subcommands do), so every `glab api` call below pipes to the STANDALONE jq
+>   # binary. That makes jq a hard dependency of the GitLab path — probe it here so a
+>   # machine with glab but no jq fails with a fixable message instead of dying
+>   # mid-claim on `jq: command not found`.
+>   command -v jq >/dev/null 2>&1 || {
+>     echo "/do:next's GitLab path pipes 'glab api' output through jq, which is not installed. Install it (e.g. 'brew install jq' or 'apt-get install jq') and re-run."; exit 1; }
 > fi
 > ```
 > Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`. Carry `CLI_TOOL`/`VCS_HOST` (and `GH_HOST` on GitHub) through every later phase — [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md)'s own setup step reuses `CLI_TOOL` rather than re-detecting it.
@@ -292,8 +299,16 @@ Then:
    # GitHub-CLI token `@me` — pass the authenticated login so --self actually
    # filters (the explicit-#num path below already compares against this same
    # `glab api user` value).
+   # Resolve the login in TWO steps, never one `glab api user | jq -r .username`
+   # pipeline: the pipeline's exit status is jq's, and `jq -r .username` exits 0 on
+   # empty input, so a failed `glab api user` would leave ME empty and `--author ""`
+   # would silently drop the --self filter — turning a security gate into a no-op.
+   # `jq -e` plus the explicit status checks make both halves fail closed.
    if [ "$SELF_MODE" = "true" ]; then
-     ME="$(glab api user | jq -r .username)"
+     ME_JSON="$(glab api user)" || {
+       echo "Could not read the authenticated GitLab user — --self cannot be enforced. Aborting."; exit 1; }
+     ME="$(printf '%s' "$ME_JSON" | jq -er .username)" || {
+       echo "Could not read the authenticated GitLab user — --self cannot be enforced. Aborting."; exit 1; }
      LIST_ARGS+=(--author "$ME")
    fi
    glab issue list "${LIST_ARGS[@]}" --per-page 100 \
@@ -346,7 +361,7 @@ Then:
    - Also honor each host's **native** blocked-by relationship when the API surfaces it — GitHub's GraphQL `blockedBy` connection, or GitLab's Issue Links API filtered to `link_type: "is_blocked_by"` (`glab api projects/:id/issues/<N>/links | jq '.[] | select(.link_type == "is_blocked_by")'` — unlike `glab issue view`/`glab issue list`, plain `glab api` has no built-in `--jq` flag, so pipe to the standalone `jq` binary; id/iid resolved the same way the rest of this phase resolves them); the body convention is the portable default and the two are OR'd (blocked by *either* source ⇒ skip).
    - **Cycle / unresolvable chain** (A depends on B, B depends on A) → both stay skipped; note the cycle so a human can break it. Never loop trying to resolve one.
 5. **Pick the target issue:**
-   - **With argument** — the issue number (strip `#`); **set `ISSUE_NUM` to that stripped number now** (pulling step 6's assignment earlier so the checks below can reference `$ISSUE_NUM` — on a fresh run it isn't set yet). Verify open and NOT in flight. **`--self` first, as a hard gate:** when `SELF_MODE` is on, confirm the issue's author is the running account before anything else — GitHub: `gh issue view "$ISSUE_NUM" --json author -q .author.login` must equal `gh api --hostname "$GH_HOST" user -q .login`; GitLab: `glab issue view "$ISSUE_NUM" --output json --jq .author.username` must equal `glab api user | jq -r .username` (plain `glab api` has no built-in `--jq` flag, unlike `glab issue`/`glab mr` subcommands — pipe to the standalone `jq` binary instead); if it does not, **refuse and stop** with `Issue #<num> was filed by <author>, not you — /do:next --self only works on issues you filed. Drop --self to claim it.` This is the **one skip an explicit number does NOT override** — `--self` is a security boundary, not a curation preference, so a deliberate cherry-pick cannot cross it (unlike a parking label or label filter). If it's an epic, resolve its state (step 3) first and act on that state — claim an `epic-wrapup`, close an `epic-done`, or warn that children are still open on an `epic-open` (the explicit request still overrides — state that you're doing so). Otherwise a named number is an **explicit override**: it claims even an issue auto-pick would skip — a parking-labelled one, one with an **open declared blocker** (step 4), one outside the curated label when `LABEL_FILTER` is active, or one outside the dispatch-hint filter when `MODEL_FILTER`/`EFFORT_FILTER` is active (but **never** an issue another user filed while `--self` is on). State plainly when you're overriding a skip (e.g. "claiming `future`-labelled #123 by explicit request", "claiming #123 despite open blocker #120 by explicit request", or "claiming `model:heavy` #123 despite --model light by explicit request"). If any other check fails (closed, in flight), print why and stop.
+   - **With argument** — the issue number (strip `#`); **set `ISSUE_NUM` to that stripped number now** (pulling step 6's assignment earlier so the checks below can reference `$ISSUE_NUM` — on a fresh run it isn't set yet). Verify open and NOT in flight. **`--self` first, as a hard gate:** when `SELF_MODE` is on, confirm the issue's author is the running account before anything else — GitHub: `gh issue view "$ISSUE_NUM" --json author -q .author.login` must equal `gh api --hostname "$GH_HOST" user -q .login`; GitLab: `glab issue view "$ISSUE_NUM" --output json --jq .author.username` must equal the authenticated GitLab login, read as `glab api user` piped to `jq -er .username` (plain `glab api` has no built-in `--jq` flag, unlike the `glab issue`/`glab mr` subcommands — pipe to the standalone `jq` binary instead, capturing the two exit statuses separately so a failed `glab api` cannot pass as an empty login: a pipeline reports only jq's status, and jq exits 0 on empty input); if it does not, **refuse and stop** with `Issue #<num> was filed by <author>, not you — /do:next --self only works on issues you filed. Drop --self to claim it.` This is the **one skip an explicit number does NOT override** — `--self` is a security boundary, not a curation preference, so a deliberate cherry-pick cannot cross it (unlike a parking label or label filter). If it's an epic, resolve its state (step 3) first and act on that state — claim an `epic-wrapup`, close an `epic-done`, or warn that children are still open on an `epic-open` (the explicit request still overrides — state that you're doing so). Otherwise a named number is an **explicit override**: it claims even an issue auto-pick would skip — a parking-labelled one, one with an **open declared blocker** (step 4), one outside the curated label when `LABEL_FILTER` is active, or one outside the dispatch-hint filter when `MODEL_FILTER`/`EFFORT_FILTER` is active (but **never** an issue another user filed while `--self` is on). State plainly when you're overriding a skip (e.g. "claiming `future`-labelled #123 by explicit request", "claiming #123 despite open blocker #120 by explicit request", or "claiming `model:heavy` #123 despite --model light by explicit request"). If any other check fails (closed, in flight), print why and stop.
    - **Without argument** — pick the FIRST candidate in the priority/oldest walk (step 1) that is NOT in flight, NOT already assigned, NOT carrying a parking label (`blocked`, `needs-input`, `wontfix`, `discussion`, `future`, or any repo-specific parking label — skip and note it), NOT blocked by an open declared dependency (step 4 — skip and note it), and NOT an `epic-open`/`epic-done` epic per step 3 (an `epic-wrapup` epic **is** eligible). Because auto-pick is label-agnostic by default, the parking-label skip, the dependency skip, and the epic resolution are the primary guards against claiming parked, blocked, or umbrella work. An explicit `#num` can still claim a skipped issue; auto-pick never surfaces one.
 6. **Set `ISSUE_NUM=<num>` and `SLUG="issue-${ISSUE_NUM}"`** — later phases use `SLUG` for worktree/branch/commit/PR and `ISSUE_NUM` for `gh issue`/`glab issue` calls.
    - **Surface the claimed issue's dispatch hint, if it carries one** (`model:<tier>` / `effort:<level>`): `#42 hints model:heavy + effort:high`. In the **single-issue** flow this is a *report, not a dispatch* — a session cannot switch its own model or effort mid-run on any host, so the work proceeds in whatever session you're already in. Say so when there's a real mismatch worth acting on (`this session is on <current model> and #42 hints model:heavy — consider restarting on a stronger model, or continue as-is`), naming the mechanism **this** CLI uses to switch models if it has one, and then continue; never stall waiting for permission over an advisory label. Swarm is where the hint is actually *applied*, because that flow spawns a fresh agent per issue (Phase B).
@@ -408,11 +423,18 @@ if [ "$CLI_TOOL" = gh ]; then
   ME="$(gh api --hostname "$GH_HOST" user -q .login)"
   gh issue edit "$ISSUE_NUM" --add-assignee @me
 else
-  ME="$(glab api user | jq -r .username)"   # plain `glab api` has no built-in --jq flag; pipe to the standalone jq binary
+  # Plain `glab api` has no built-in --jq flag; pipe to the standalone jq binary
+  # (probed in the Phase 1 pre-flight). Resolve the login in TWO steps rather than one
+  # pipeline: a pipeline reports only jq's exit status, and `jq -r .username` exits 0 on
+  # empty input, so a failed `glab api user` would leave ME empty and `--assignee "+"`
+  # would claim nothing while still looking like a successful claim. Chaining with `&&`
+  # (plus `jq -e` and the emptiness guard) fails closed into the abort handler below,
+  # which retracts the remote claim instead of proceeding without a marker.
+  #
   # `+` ADDS one assignee without touching whatever's already on the issue. A bare
   # `--assignee "$ME"` REPLACES the whole assignee list, which would silently
   # overwrite a sibling who claimed first and defeat the read-back check below.
-  glab issue update "$ISSUE_NUM" --assignee "+$ME"
+  ME_JSON="$(glab api user)" && ME="$(printf '%s' "$ME_JSON" | jq -er .username)" && [ -n "$ME" ] && glab issue update "$ISSUE_NUM" --assignee "+$ME"
 fi || {
   echo "Could not claim issue #$ISSUE_NUM (missing write access?) — aborting."
   # Phase 2 already created and (best-effort) pushed next/issue-<num>. Retract the
