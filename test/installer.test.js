@@ -794,16 +794,39 @@ describe('bundled lib docs', () => {
   }
 
   it('writes each deferred lib beside the SKILL.md that cites it', () => {
+    // Only the libs a command actually cites — /do:pr runs reviewers, so it bundles
+    // the four backends; it never opens the tracker, so it gets no issue-mode doc.
     const { tmpDir, env } = makeSkillEnv();
     try {
       install({ env, packageDir: PACKAGE_DIR, dryRun: false });
       const bundleDir = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR);
       assert.ok(fs.existsSync(bundleDir), 'do-pr must get a bundle dir');
       const written = fs.readdirSync(bundleDir);
-      for (const name of DEFERRED_LIBS) {
+      for (const name of ['copilot-review-loop.md', 'github-reviewer-loop.md',
+        'local-agent-review-loop.md', 'ollama-review-loop.md']) {
         assert.ok(written.includes(name), `${name} must be bundled with /do:pr`);
       }
+      assert.ok(!written.includes('plan-issue-mode.md'), '/do:pr does not use issue mode');
     } finally { cleanup(tmpDir); }
+  });
+
+  it('bundles a deferred lib only into the commands that cite it', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const bundled = (skill, name) =>
+        fs.existsSync(path.join(env.commandsDir, skill, BUNDLED_LIB_DIR, name));
+      assert.ok(bundled('do-next', 'plan-issue-mode.md'), '/do:next has an issues mode');
+      assert.ok(bundled('do-review', 'review-security-audit.md'), '/do:review has lenses');
+      assert.ok(!bundled('do-next', 'review-security-audit.md'), '/do:next has no lenses');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('gives every deferred lib a when/what for its directive', () => {
+    const { ON_DEMAND_LIBS } = require('../src/transformer');
+    for (const [name, meta] of ON_DEMAND_LIBS) {
+      assert.ok(meta && meta.when && meta.what, `${name} needs both when and what`);
+    }
   });
 
   it('every cited bundle path resolves to a file on disk', () => {

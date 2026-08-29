@@ -6,7 +6,19 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const next = fs.readFileSync(path.join(root, 'commands', 'do', 'next.md'), 'utf8');
+// A command's contract spans the file plus the lib docs it `!cat`-includes: those
+// are one document to the agent, and splitting a section into lib/ must not move it
+// out of a contract's reach. Resolve includes so these assertions scan what actually
+// reaches the agent, not just the top-level file.
+const resolveIncludes = (body) => body.replace(
+  /!`cat ~\/\.claude\/lib\/(.+?)`/g,
+  (match, name) => {
+    const libFile = path.join(__dirname, '..', 'lib', name);
+    return fs.existsSync(libFile) ? fs.readFileSync(libFile, 'utf8') : match;
+  });
+
+const next = resolveIncludes(
+  fs.readFileSync(path.join(root, 'commands', 'do', 'next.md'), 'utf8'));
 
 // `glab api` — unlike the `glab issue` / `glab mr` subcommands — has no built-in
 // `--jq` flag and exits with "Unknown flag: --jq", so every `glab api` call pipes to

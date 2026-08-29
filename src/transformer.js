@@ -118,36 +118,80 @@ const LIB_SIBLING_LINK_RE = /\[[^\]]*\]\(\.\/([A-Za-z0-9._-]+\.md)\)/g;
 // left alone.
 const LIB_BACKTICK_RE = /`lib\/([A-Za-z0-9._-]+\.md)`/g;
 
-// Reviewer BACKEND loops are mutually exclusive: one `--review-with` entry
-// dispatches to exactly ONE of these per reviewer, yet inlining all four costs
-// ~130KB (~33K tokens) in every command that runs a review — `/do:better`,
-// `/do:better-swift`, `/do:review`, `/do:pr`, `/do:release`, `/do:depfree`,
-// `/do:rpr`. The dispatcher (`multi-reviewer-loop.md`) stays inline because it is
-// always on the taken path and is what names the backend to load; the backends
-// themselves are written as sibling docs beside SKILL.md and cited by path, for
-// the agent to read on demand. Environments with runtime `!cat` (Claude/OpenCode)
-// never reach this path and are unaffected.
-const DEFERRED_LIBS = new Set([
-  'copilot-review-loop.md',
-  'github-reviewer-loop.md',
-  'local-agent-review-loop.md',
-  'ollama-review-loop.md',
+// Libs that sit on a CONDITIONAL path — content a given run needs only when it
+// takes a particular branch. Inlining them puts every branch in every SKILL.md at
+// once; for environments that bundle lib docs beside SKILL.md they are written as
+// sibling files and cited with a read directive instead.
+//
+// The bar for an entry is that a real run can finish WITHOUT it. A lib the command
+// always needs (`code-review-checklist.md` under a REQUIRED GATE, `swift-gotchas.md`
+// which Phase 1 says to "load into your context") must stay inline: deferring it
+// only buys an extra read, and risks the agent skipping content it always needed.
+//
+// `when` states the branch that makes the read required; `what` names the content.
+// Both are rendered into the directive, so the agent is told when it must read the
+// file rather than being left to infer it. Environments with runtime `!cat`
+// (Claude/OpenCode) never reach this path and are unaffected.
+const ON_DEMAND_LIBS = new Map([
+  // Reviewer backends: `--review-with` dispatches to exactly one of these per
+  // reviewer, so at most one of the four is ever live. The dispatcher
+  // (multi-reviewer-loop.md) deliberately stays inline — it is always on the taken
+  // path and is what names which backend to load.
+  ['copilot-review-loop.md',
+    { what: 'Copilot reviewer loop', when: 'the reviewer list includes `copilot`' }],
+  ['github-reviewer-loop.md',
+    { what: 'GitHub-reviewer loop', when: 'the reviewer list includes an `@<login>` reviewer' }],
+  ['local-agent-review-loop.md',
+    { what: 'local-agent reviewer loop', when: 'the reviewer list includes `codex`, `claude`, `agy`, `grok`, or `cursor`' }],
+  ['ollama-review-loop.md',
+    { what: 'Ollama reviewer loop', when: 'the reviewer list includes `ollama`' }],
+
+  // Issue-tracker machinery: only reached in issues mode. PLAN.md mode — the
+  // default — never opens the tracker at all.
+  ['plan-issue-mode.md',
+    { what: 'issue-mode setup and filing rules', when: 'this run is in issues mode' }],
+  ['epic-children.md',
+    { what: 'epic/child issue resolution rules', when: 'a candidate issue is an epic or carries children' }],
+
+  // Explicitly flag-gated or situational paths.
+  ['next-swarm.md',
+    { what: 'parallel swarm flow (phases A-D)', when: '`--swarm` was passed' }],
+  ['enhance-loop.md',
+    { what: 'draft-enhancement loop', when: '`--enhance-with` was passed' }],
+  ['ci-flake-handling.md',
+    { what: 'CI flake triage rules', when: 'a CI check fails in a way that looks like a flake' }],
+
+  // Review lenses: review-agent-selection.md dispatches only the lenses a diff
+  // actually signals — often one or two, sometimes none.
+  ['review-surface-scan.md',
+    { what: 'Surface Scan (Runtime) lens', when: 'you dispatch that lens' }],
+  ['review-surface-quality.md',
+    { what: 'Surface Quality lens', when: 'you dispatch that lens' }],
+  ['review-security-audit.md',
+    { what: 'Security Audit lens', when: 'you dispatch that lens' }],
+  ['review-cross-file-tracing.md',
+    { what: 'Cross-File Tracing (State) lens', when: 'you dispatch that lens' }],
+  ['review-cross-file-contract.md',
+    { what: 'Cross-File Contract lens', when: 'you dispatch that lens' }],
+  ['review-structural-ambition.md',
+    { what: 'Structural Ambition lens', when: 'you dispatch that lens (strict mode only)' }],
 ]);
 
-// Subdirectory, relative to a skill's own directory, that bundled lib docs are
-// written into by the installer. Cited from SKILL.md as `lib/<name>.md`.
+const DEFERRED_LIBS = new Set(ON_DEMAND_LIBS.keys());
+
 const BUNDLED_LIB_DIR = 'lib';
 
 // The read directive that replaces a deferred lib's inline content. Written as an
-// imperative instruction rather than a passive link: the agent must treat it as a
-// required read, not an optional reference, or the loop it names is lost.
-function deferredLibDirective(ref, name) {
+// imperative instruction naming the branch that makes it required, rather than a
+// passive link: the agent must treat it as a required read on that path, not an
+// optional reference, or the content it names is silently lost.
+function deferredLibDirective(ref, filename) {
+  const { what, when } = ON_DEMAND_LIBS.get(filename);
   return [
-    `> **Read \`${ref}\` now — required.** The full ${name} procedure lives in that`,
-    '> file, bundled alongside this skill. Read it in full before running this loop and',
-    '> follow it exactly. Do NOT improvise the loop from the summary above: the file',
-    '> carries the load-bearing detail (exit codes, verdict parsing, iteration caps,',
-    '> convergence and push rules) that the summary deliberately omits.',
+    `> **Read \`${ref}\` now — required when ${when}.** The full ${what} lives in`,
+    '> that file, bundled alongside this skill. Read it in full before acting on this',
+    '> step and follow it exactly. Do NOT improvise from the summary above: the file',
+    '> carries the load-bearing detail this summary deliberately omits.',
   ].join('\n');
 }
 
@@ -197,7 +241,7 @@ function inlineLibReferences(body, libDir, opts = {}) {
     // A deferred backend is bundled as its own file and cited, never inlined.
     if (deferred.has(filename)) {
       bundled.add(filename);
-      return deferredLibDirective(bundledRef(filename), bareName(filename));
+      return deferredLibDirective(bundledRef(filename), filename);
     }
     inlined.add(filename);
     return content;
@@ -404,6 +448,7 @@ function transformLib(content, env, sourceLibDir, opts = {}) {
 }
 
 module.exports = {
+  ON_DEMAND_LIBS,
   DEFERRED_LIBS,
   BUNDLED_LIB_DIR,
   parseFrontmatter,
