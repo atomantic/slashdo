@@ -146,6 +146,62 @@ function assertSafeBundlePath(targetPath, expectedType) {
   return true;
 }
 
+function collectBundledLibContents(entry, libDir, env) {
+  const contents = new Map();
+  if (!entry) return contents;
+
+  const { bundled: pending, present } = entry;
+  const processed = new Set();
+  // `pending` grows while draining when a bundled lib defers another.
+  while (processed.size < pending.size) {
+    for (const filename of Array.from(pending)) {
+      if (processed.has(filename)) continue;
+      processed.add(filename);
+      const absPath = path.join(libDir, filename);
+      if (!fs.existsSync(absPath)) continue;
+      contents.set(filename, transformLib(
+        fs.readFileSync(absPath, 'utf8'), env, libDir, { bundled: pending, present }));
+    }
+  }
+  return contents;
+}
+
+function bundledLibsAreEqual(skillDir, expected) {
+  const bundleDir = path.join(skillDir, BUNDLED_LIB_DIR);
+  let bundleStat;
+  try {
+    bundleStat = fs.lstatSync(bundleDir);
+  } catch (error) {
+    return error.code === 'ENOENT' && expected.size === 0;
+  }
+  if (bundleStat.isSymbolicLink() || !bundleStat.isDirectory()) return false;
+
+  let names;
+  try {
+    names = fs.readdirSync(bundleDir);
+  } catch {
+    return false;
+  }
+  if (names.length !== expected.size) return false;
+
+  for (const [filename, content] of expected) {
+    const targetPath = path.join(bundleDir, filename);
+    let targetStat;
+    try {
+      targetStat = fs.lstatSync(targetPath);
+    } catch {
+      return false;
+    }
+    if (targetStat.isSymbolicLink() || !targetStat.isFile()) return false;
+    try {
+      if (fs.readFileSync(targetPath, 'utf8') !== content) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 const RENAMED_COMMANDS = {
   cam: 'push',
   makegoals: 'goals',
@@ -246,31 +302,45 @@ function finalizeInstall(env, hookFiles, packageDir, dryRun, filterNames, autoUp
 function syncBundledLibs(commands, bundledByCommand, libDir, env, dryRun, results) {
   for (const cmd of commands) {
     const entry = bundledByCommand.get(cmd.relPath);
-    if (!entry || entry.bundled.size === 0) continue;
-    const { bundled: pending, present } = entry;
+    if (!entry) continue;
+    const contents = collectBundledLibContents(entry, libDir, env);
 
     const skillDir = path.dirname(path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)));
-    assertSafeBundlePath(skillDir, 'directory');
+    const skillExists = assertSafeBundlePath(skillDir, 'directory');
     const bundleDir = path.join(skillDir, BUNDLED_LIB_DIR);
-    assertSafeBundlePath(bundleDir, 'directory');
-    const written = new Set();
-    // `pending` grows while draining when a bundled lib defers another.
-    while (written.size < pending.size) {
-      for (const filename of Array.from(pending)) {
-        if (written.has(filename)) continue;
-        written.add(filename);
-        const absPath = path.join(libDir, filename);
-        if (!fs.existsSync(absPath)) continue;
-        const targetPath = path.join(bundleDir, filename);
-        assertSafeBundlePath(targetPath, 'file');
-        syncFile({
-          label: `/do:${cmd.name} ${BUNDLED_LIB_DIR}/${filename}`,
-          content: transformLib(fs.readFileSync(absPath, 'utf8'), env, libDir, { bundled: pending, present }),
-          targetPath,
-          dryRun,
-          results,
-        });
-      }
+    const bundleExists = skillExists && assertSafeBundlePath(bundleDir, 'directory');
+    const existingNames = bundleExists ? fs.readdirSync(bundleDir) : [];
+
+    // Validate the existing set before changing anything. The whole directory is
+    // installer-owned, so a safe regular file not in `contents` is stale.
+    for (const name of existingNames) {
+      assertSafeBundlePath(path.join(bundleDir, name), 'file');
+    }
+
+    for (const [filename, content] of contents) {
+      const targetPath = path.join(bundleDir, filename);
+      assertSafeBundlePath(targetPath, 'file');
+      syncFile({
+        label: `/do:${cmd.name} ${BUNDLED_LIB_DIR}/${filename}`,
+        content,
+        targetPath,
+        dryRun,
+        results,
+      });
+    }
+
+    for (const name of existingNames) {
+      if (contents.has(name)) continue;
+      removeFile({
+        label: `/do:${cmd.name} ${BUNDLED_LIB_DIR}/${name}`,
+        targetPath: path.join(bundleDir, name),
+        dryRun,
+        results,
+      });
+    }
+
+    if (!dryRun && bundleExists && fs.readdirSync(bundleDir).length === 0) {
+      fs.rmdirSync(bundleDir);
     }
   }
 }
@@ -450,19 +520,28 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
 
 function list({ env, packageDir }) {
   const commandsDir = path.join(packageDir, 'commands');
+  const libDir = path.join(packageDir, 'lib');
   const commands = collectCommands(commandsDir);
   const items = [];
 
   for (const cmd of commands) {
     const content = fs.readFileSync(cmd.absPath, 'utf8');
-    const transformed = transformCommand(content, env, path.join(packageDir, 'lib'), cmd.relPath);
+    const bundled = new Set();
+    const present = new Set();
+    const transformed = transformCommand(
+      content, env, libDir, cmd.relPath, { bundled, present });
+    const expectedBundles = env.bundlesLibs
+      ? collectBundledLibContents({ bundled, present }, libDir, env)
+      : null;
     const targetRel = getTargetFilename(cmd.relPath, env);
     const targetPath = path.join(env.commandsDir, targetRel);
 
     let status;
     if (!fs.existsSync(targetPath)) {
       status = 'not installed';
-    } else if (filesAreEqual(targetPath, transformed)) {
+    } else if (filesAreEqual(targetPath, transformed)
+      && (!expectedBundles
+        || bundledLibsAreEqual(path.dirname(targetPath), expectedBundles))) {
       status = 'up to date';
     } else {
       status = 'changed';

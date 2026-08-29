@@ -895,6 +895,59 @@ describe('bundled lib docs', () => {
     } finally { cleanup(tmpDir); }
   });
 
+  it('prunes stale bundled libs, including a transition to no bundle', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['pr'], dryRun: false });
+      const bundleDir = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR);
+      const stale = path.join(bundleDir, 'obsolete-backend.md');
+      fs.writeFileSync(stale, 'obsolete', 'utf8');
+
+      const synchronized = install({
+        env, packageDir: PACKAGE_DIR, filterNames: ['pr'], dryRun: false,
+      });
+      assert.ok(!fs.existsSync(stale), 'an obsolete bundle member must be pruned');
+      assert.ok(synchronized.actions.some(action =>
+        action.name.endsWith(`${BUNDLED_LIB_DIR}/obsolete-backend.md`)
+        && action.status === 'removed'));
+
+      const nextPackage = path.join(tmpDir, 'next-package');
+      fs.mkdirSync(path.join(nextPackage, 'commands', 'do'), { recursive: true });
+      fs.mkdirSync(path.join(nextPackage, 'lib'));
+      fs.writeFileSync(path.join(nextPackage, 'commands', 'do', 'pr.md'),
+        '---\ndescription: No bundled runtime\n---\n\nNothing deferred.\n', 'utf8');
+      fs.writeFileSync(path.join(nextPackage, 'package.json'),
+        JSON.stringify({ version: '1.0.0' }), 'utf8');
+
+      install({ env, packageDir: nextPackage, filterNames: ['pr'], dryRun: false });
+      assert.ok(!fs.existsSync(bundleDir),
+        'the bundle directory must be removed when the current set becomes empty');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('includes missing, changed, and stale bundled libs in list health', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['next'], dryRun: false });
+      const nextItem = () => list({ env, packageDir: PACKAGE_DIR })
+        .find(item => item.name === '/do:next');
+      const bundleDir = path.join(env.commandsDir, 'do-next', BUNDLED_LIB_DIR);
+      const bundlePath = path.join(bundleDir, 'next-swarm.md');
+
+      assert.equal(nextItem().status, 'up to date');
+      fs.unlinkSync(bundlePath);
+      assert.equal(nextItem().status, 'changed', 'a missing required bundle is unhealthy');
+
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['next'], dryRun: false });
+      fs.writeFileSync(bundlePath, 'changed', 'utf8');
+      assert.equal(nextItem().status, 'changed', 'a modified required bundle is unhealthy');
+
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['next'], dryRun: false });
+      fs.writeFileSync(path.join(bundleDir, 'obsolete.md'), 'stale', 'utf8');
+      assert.equal(nextItem().status, 'changed', 'an extra stale bundle is unhealthy');
+    } finally { cleanup(tmpDir); }
+  });
+
   it('refuses to install through a symlinked bundled lib file', () => {
     const { tmpDir, env } = makeSkillEnv();
     try {
