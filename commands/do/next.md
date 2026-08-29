@@ -211,9 +211,8 @@ Runs **once per invocation**, after the last wave, over every result the batch p
 >     echo "/do:next detected a GitHub repo ($ORIGIN_HOST) but gh is not authenticated to it. Run 'gh auth login'."; exit 1; }
 >   # Seed the API host for the `gh api` calls below. `gh api` ignores the repo remote
 >   # and defaults to github.com, so on a GHES repo it must be passed --hostname "$GH_HOST".
->   # $ORIGIN_HOST is the first step of the shared derivation included at the end of this
->   # section — seed GH_HOST with it, then apply that snippet's remaining fallbacks and its
->   # per-host auth precheck. `gh issue`/`gh pr` calls resolve the host on their own.
+>   # `gh issue`/`gh pr` calls resolve the host on their own. This is only the seed — the
+>   # shared snippet at the end of this section finishes the derivation.
 >   GH_HOST="$ORIGIN_HOST"
 > else
 >   glab auth status >/dev/null 2>&1 || {
@@ -577,7 +576,7 @@ Write the code, tests, and docs the item requires, following the **target repo's
 > [ -n "$DEFAULT_BRANCH" ] || DEFAULT_BRANCH="$(git -C "${WORKTREE}" remote show origin | sed -n 's/.*HEAD branch: //p')"
 > cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit "origin/${DEFAULT_BRANCH}"
 > ```
-> **Conflict rule — deletions win.** Resolve any PLAN.md / changelog conflict so a line removed on *either* side stays removed; keep additions from both. Then `git add` and `git commit --no-edit`.
+> **Conflict rule — deletions win.** Resolve any PLAN.md / changelog conflict so a line removed on *either* side stays removed; keep additions from both. Then `git add` the **specific resolved files** and `git commit --no-edit`. **Do NOT `git add -A`/`git add .` while paths are still unmerged** — that would stage raw conflict markers. A clean merge (or "Already up to date") needs no commit at all. Phase 6 re-syncs under this same rule.
 
 **Mark the work item done:**
 - **PLAN.md mode** — **remove the picked `- [ ]` line outright** (the changelog and git history are the audit trail; don't leave a checked `- [x]` behind unless the repo keeps items as a design log). If removing it empties a heading, leave the heading — section curation is `/do:replan`'s job.
@@ -645,7 +644,7 @@ DEFAULT_BRANCH="$(git -C "${WORKTREE}" symbolic-ref --quiet --short refs/remotes
 cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit "origin/${DEFAULT_BRANCH}"
 ```
 
-**If that merge reports a conflict** (unmerged PLAN.md / changelog paths — `git merge` exits non-zero and leaves `<<<<<<<` markers), **STOP and resolve it by hand** before going further: apply the deletions-win rule (a line removed on *either* side stays removed; keep additions from both), then `git add` the **specific resolved files** and `git commit --no-edit`. **Do NOT `git add -A`/`git add .` while paths are still unmerged** — that would stage raw conflict markers and push a broken tree. Only once `git status` shows no unmerged paths (a clean merge or "Already up to date" needs no commit at all) is it safe to push and merge:
+**If that merge reports a conflict** (unmerged PLAN.md / changelog paths — `git merge` exits non-zero and leaves `<<<<<<<` markers), **STOP and resolve it by hand** before going further, under Phase 5's **deletions win** conflict rule — including its ban on `git add -A` while paths are unmerged. Only once `git status` shows no unmerged paths is it safe to push and merge:
 
 ```bash
 git push
