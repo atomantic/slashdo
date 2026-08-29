@@ -454,6 +454,15 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
     }
   }
 
+  if (env.namespacing === 'directory') {
+    for (const cmd of commands) {
+      const skillDir = path.dirname(path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)));
+      if (!dryRun && fs.existsSync(skillDir) && fs.readdirSync(skillDir).length === 0) {
+        fs.rmdirSync(skillDir);
+      }
+    }
+  }
+
   if (env.libDir) {
     removeFileSet(libFiles, {
       getTargetPath: lib => path.join(env.libDir, lib.relPath),

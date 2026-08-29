@@ -874,7 +874,7 @@ describe('bundled lib docs', () => {
     } finally { cleanup(tmpDir); }
   });
 
-  it('removes bundled libs on uninstall', () => {
+  it('removes bundled libs and skill directory on uninstall', () => {
     const { tmpDir, env } = makeSkillEnv();
     try {
       install({ env, packageDir: PACKAGE_DIR, dryRun: false });
@@ -882,6 +882,7 @@ describe('bundled lib docs', () => {
       assert.ok(fs.existsSync(bundleDir));
       install({ env, packageDir: PACKAGE_DIR, dryRun: false, uninstall: true });
       assert.ok(!fs.existsSync(bundleDir), 'bundle dir must not be stranded');
+      assert.ok(!fs.existsSync(path.join(env.commandsDir, 'do-pr')), 'skill dir must not be stranded');
     } finally { cleanup(tmpDir); }
   });
 
