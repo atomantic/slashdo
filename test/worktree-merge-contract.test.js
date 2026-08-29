@@ -5,7 +5,19 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-const readCommand = (name) => fs.readFileSync(path.join(__dirname, '..', 'commands', 'do', name), 'utf8');
+// A command's contract spans the file plus the lib docs it `!cat`-includes: those
+// are one document to the agent, and splitting a section into lib/ must not move it
+// out of a contract's reach. Resolve includes so these assertions scan what actually
+// reaches the agent, not just the top-level file.
+const resolveIncludes = (body) => body.replace(
+  /!`cat ~\/\.claude\/lib\/(.+?)`/g,
+  (match, name) => {
+    const libFile = path.join(__dirname, '..', 'lib', name);
+    return fs.existsSync(libFile) ? fs.readFileSync(libFile, 'utf8') : match;
+  });
+
+const readCommand = (name) => resolveIncludes(
+  fs.readFileSync(path.join(__dirname, '..', 'commands', 'do', name), 'utf8'));
 
 // Command lines only — the surrounding prose explains why `--delete-branch` is
 // absent, so a naive whole-file scan would flag its own rationale.
