@@ -773,3 +773,222 @@ describe('renamed command cleanup', () => {
     cleanup(tmpDir);
   });
 });
+
+// ── bundled lib docs (Agent Skills envs) ────────────────────────────
+
+describe('bundled lib docs', () => {
+  const { DEFERRED_LIBS, BUNDLED_LIB_DIR } = require('../src/transformer');
+
+  function makeSkillEnv() {
+    const { tmpDir, env } = makeTmpEnv({
+      namespacing: 'directory',
+      ext: null,
+      libDir: null,
+      libPathPrefix: null,
+      hooksDir: null,
+      supportsHooks: false,
+      supportsCatInclusion: false,
+    });
+    env.bundlesLibs = true;
+    return { tmpDir, env };
+  }
+
+  it('writes each deferred lib beside the SKILL.md that cites it', () => {
+    // Only the libs a command actually cites — /do:pr runs reviewers, so it bundles
+    // the four backends; it never opens the tracker, so it gets no issue-mode doc.
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const bundleDir = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR);
+      assert.ok(fs.existsSync(bundleDir), 'do-pr must get a bundle dir');
+      const written = fs.readdirSync(bundleDir);
+      for (const name of ['copilot-review-loop.md', 'github-reviewer-loop.md',
+        'local-agent-review-loop.md', 'ollama-review-loop.md']) {
+        assert.ok(written.includes(name), `${name} must be bundled with /do:pr`);
+      }
+      assert.ok(!written.includes('plan-issue-mode.md'), '/do:pr does not use issue mode');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('bundles a deferred lib only into the commands that cite it', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const bundled = (skill, name) =>
+        fs.existsSync(path.join(env.commandsDir, skill, BUNDLED_LIB_DIR, name));
+      assert.ok(bundled('do-next', 'plan-issue-mode.md'), '/do:next has an issues mode');
+      assert.ok(bundled('do-review', 'review-security-audit.md'), '/do:review has lenses');
+      assert.ok(!bundled('do-next', 'review-security-audit.md'), '/do:next has no lenses');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('gives every deferred lib a when/what for its directive', () => {
+    const { ON_DEMAND_LIBS } = require('../src/transformer');
+    for (const [name, meta] of ON_DEMAND_LIBS) {
+      assert.ok(meta && meta.when && meta.what, `${name} needs both when and what`);
+    }
+  });
+
+  it('every cited bundle path resolves to a file on disk', () => {
+    // The read directive is only as good as the path it names — a dangling one
+    // silently drops the whole reviewer loop.
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      for (const skill of fs.readdirSync(env.commandsDir)) {
+        const skillFile = path.join(env.commandsDir, skill, 'SKILL.md');
+        if (!fs.existsSync(skillFile)) continue;
+        const body = fs.readFileSync(skillFile, 'utf8');
+        const cited = [...body.matchAll(/`(lib\/[A-Za-z0-9._-]+\.md)`/g)].map(m => m[1]);
+        for (const ref of new Set(cited)) {
+          assert.ok(fs.existsSync(path.join(env.commandsDir, skill, ref)),
+            `${skill}/SKILL.md cites ${ref}, which was not written`);
+        }
+      }
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('keeps deferred bodies out of SKILL.md but reachable in the bundle', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const skillDir = path.join(env.commandsDir, 'do-pr');
+      const body = fs.readFileSync(path.join(skillDir, 'SKILL.md'), 'utf8');
+      const source = fs.readFileSync(
+        path.join(PACKAGE_DIR, 'lib', 'ollama-review-loop.md'), 'utf8');
+      // A long, distinctive line from the backend: present in the bundle, absent
+      // from the skill body it was split out of.
+      const marker = source.split('\n').filter(l => l.trim().length > 100)[0].trim();
+      assert.ok(!body.includes(marker), 'deferred body must not remain in SKILL.md');
+      const bundled = fs.readFileSync(
+        path.join(skillDir, BUNDLED_LIB_DIR, 'ollama-review-loop.md'), 'utf8');
+      assert.ok(bundled.includes(marker), 'deferred body must survive in the bundle');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('does not bundle anything for a cat-inclusion environment', () => {
+    const { tmpDir, env } = makeTmpEnv({ namespacing: 'directory', ext: null });
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      assert.ok(!fs.existsSync(path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR)));
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('removes bundled libs and skill directory on uninstall', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const bundleDir = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR);
+      assert.ok(fs.existsSync(bundleDir));
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false, uninstall: true });
+      assert.ok(!fs.existsSync(bundleDir), 'bundle dir must not be stranded');
+      assert.ok(!fs.existsSync(path.join(env.commandsDir, 'do-pr')), 'skill dir must not be stranded');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('reports bundled libs as up to date on a second install', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const second = install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      assert.equal(second.installed, 0);
+      assert.equal(second.updated, 0);
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('prunes stale bundled libs, including a transition to no bundle', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['pr'], dryRun: false });
+      const bundleDir = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR);
+      const stale = path.join(bundleDir, 'obsolete-backend.md');
+      fs.writeFileSync(stale, 'obsolete', 'utf8');
+
+      const synchronized = install({
+        env, packageDir: PACKAGE_DIR, filterNames: ['pr'], dryRun: false,
+      });
+      assert.ok(!fs.existsSync(stale), 'an obsolete bundle member must be pruned');
+      assert.ok(synchronized.actions.some(action =>
+        action.name.endsWith(`${BUNDLED_LIB_DIR}/obsolete-backend.md`)
+        && action.status === 'removed'));
+
+      const nextPackage = path.join(tmpDir, 'next-package');
+      fs.mkdirSync(path.join(nextPackage, 'commands', 'do'), { recursive: true });
+      fs.mkdirSync(path.join(nextPackage, 'lib'));
+      fs.writeFileSync(path.join(nextPackage, 'commands', 'do', 'pr.md'),
+        '---\ndescription: No bundled runtime\n---\n\nNothing deferred.\n', 'utf8');
+      fs.writeFileSync(path.join(nextPackage, 'package.json'),
+        JSON.stringify({ version: '1.0.0' }), 'utf8');
+
+      install({ env, packageDir: nextPackage, filterNames: ['pr'], dryRun: false });
+      assert.ok(!fs.existsSync(bundleDir),
+        'the bundle directory must be removed when the current set becomes empty');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('includes missing, changed, and stale bundled libs in list health', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['next'], dryRun: false });
+      const nextItem = () => list({ env, packageDir: PACKAGE_DIR })
+        .find(item => item.name === '/do:next');
+      const bundleDir = path.join(env.commandsDir, 'do-next', BUNDLED_LIB_DIR);
+      const bundlePath = path.join(bundleDir, 'next-swarm.md');
+
+      assert.equal(nextItem().status, 'up to date');
+      fs.unlinkSync(bundlePath);
+      assert.equal(nextItem().status, 'changed', 'a missing required bundle is unhealthy');
+
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['next'], dryRun: false });
+      fs.writeFileSync(bundlePath, 'changed', 'utf8');
+      assert.equal(nextItem().status, 'changed', 'a modified required bundle is unhealthy');
+
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['next'], dryRun: false });
+      fs.writeFileSync(path.join(bundleDir, 'obsolete.md'), 'stale', 'utf8');
+      assert.equal(nextItem().status, 'changed', 'an extra stale bundle is unhealthy');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('refuses to install through a symlinked bundled lib file', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const target = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR,
+        'ollama-review-loop.md');
+      const victim = path.join(tmpDir, 'victim.md');
+      fs.writeFileSync(victim, 'must survive', 'utf8');
+      fs.unlinkSync(target);
+      fs.symlinkSync(victim, target);
+
+      assert.throws(
+        () => install({
+          env, packageDir: PACKAGE_DIR, filterNames: ['pr'], dryRun: false,
+        }),
+        /Refusing to traverse unsafe bundled lib file/);
+      assert.equal(fs.readFileSync(victim, 'utf8'), 'must survive');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('refuses to traverse a symlinked bundle directory on uninstall', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const bundleDir = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR);
+      const victimDir = path.join(tmpDir, 'victim');
+      const victim = path.join(victimDir, 'important.txt');
+      fs.mkdirSync(victimDir);
+      fs.writeFileSync(victim, 'must survive', 'utf8');
+      fs.rmSync(bundleDir, { recursive: true });
+      fs.symlinkSync(victimDir, bundleDir, 'dir');
+
+      assert.throws(
+        () => install({
+          env, packageDir: PACKAGE_DIR, filterNames: ['pr'], dryRun: false, uninstall: true,
+        }),
+        /Refusing to traverse unsafe bundled lib directory/);
+      assert.equal(fs.readFileSync(victim, 'utf8'), 'must survive');
+      assert.ok(fs.existsSync(path.join(env.commandsDir, 'do-pr', 'SKILL.md')),
+        'validation must fail before uninstall removes anything');
+    } finally { cleanup(tmpDir); }
+  });
+});

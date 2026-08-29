@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getTargetFilename, transformCommand, transformLib } = require('./transformer');
+const { getTargetFilename, transformCommand, transformLib, BUNDLED_LIB_DIR } = require('./transformer');
 const { readConfig, writeConfig } = require('./config');
 const {
   registerHooksInSettings,
@@ -130,6 +130,78 @@ function removeFileSet(items, { getTargetPath, getLabel, dryRun, results }) {
   }
 }
 
+function assertSafeBundlePath(targetPath, expectedType) {
+  let stat;
+  try {
+    stat = fs.lstatSync(targetPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+
+  const isExpectedType = expectedType === 'directory' ? stat.isDirectory() : stat.isFile();
+  if (stat.isSymbolicLink() || !isExpectedType) {
+    throw new Error(`Refusing to traverse unsafe bundled lib ${expectedType}: ${targetPath}`);
+  }
+  return true;
+}
+
+function collectBundledLibContents(entry, libDir, env) {
+  const contents = new Map();
+  if (!entry) return contents;
+
+  const { bundled: pending, present } = entry;
+  const processed = new Set();
+  // `pending` grows while draining when a bundled lib defers another.
+  while (processed.size < pending.size) {
+    for (const filename of Array.from(pending)) {
+      if (processed.has(filename)) continue;
+      processed.add(filename);
+      const absPath = path.join(libDir, filename);
+      if (!fs.existsSync(absPath)) continue;
+      contents.set(filename, transformLib(
+        fs.readFileSync(absPath, 'utf8'), env, libDir, { bundled: pending, present }));
+    }
+  }
+  return contents;
+}
+
+function bundledLibsAreEqual(skillDir, expected) {
+  const bundleDir = path.join(skillDir, BUNDLED_LIB_DIR);
+  let bundleStat;
+  try {
+    bundleStat = fs.lstatSync(bundleDir);
+  } catch (error) {
+    return error.code === 'ENOENT' && expected.size === 0;
+  }
+  if (bundleStat.isSymbolicLink() || !bundleStat.isDirectory()) return false;
+
+  let names;
+  try {
+    names = fs.readdirSync(bundleDir);
+  } catch {
+    return false;
+  }
+  if (names.length !== expected.size) return false;
+
+  for (const [filename, content] of expected) {
+    const targetPath = path.join(bundleDir, filename);
+    let targetStat;
+    try {
+      targetStat = fs.lstatSync(targetPath);
+    } catch {
+      return false;
+    }
+    if (targetStat.isSymbolicLink() || !targetStat.isFile()) return false;
+    try {
+      if (fs.readFileSync(targetPath, 'utf8') !== content) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 const RENAMED_COMMANDS = {
   cam: 'push',
   makegoals: 'goals',
@@ -223,6 +295,56 @@ function finalizeInstall(env, hookFiles, packageDir, dryRun, filterNames, autoUp
   writeVersionAndRefreshCache(env, packageDir, dryRun);
 }
 
+// Writes the lib docs a command defers into `<skillDir>/lib/`, so the read
+// directive in SKILL.md points at a file that exists. Transitive: a bundled lib
+// may itself defer a sibling backend (local-agent cites ollama), so drain the set
+// as it grows rather than iterating a snapshot.
+function syncBundledLibs(commands, bundledByCommand, libDir, env, dryRun, results) {
+  for (const cmd of commands) {
+    const entry = bundledByCommand.get(cmd.relPath);
+    if (!entry) continue;
+    const contents = collectBundledLibContents(entry, libDir, env);
+
+    const skillDir = path.dirname(path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)));
+    const skillExists = assertSafeBundlePath(skillDir, 'directory');
+    const bundleDir = path.join(skillDir, BUNDLED_LIB_DIR);
+    const bundleExists = skillExists && assertSafeBundlePath(bundleDir, 'directory');
+    const existingNames = bundleExists ? fs.readdirSync(bundleDir) : [];
+
+    // Validate the existing set before changing anything. The whole directory is
+    // installer-owned, so a safe regular file not in `contents` is stale.
+    for (const name of existingNames) {
+      assertSafeBundlePath(path.join(bundleDir, name), 'file');
+    }
+
+    for (const [filename, content] of contents) {
+      const targetPath = path.join(bundleDir, filename);
+      assertSafeBundlePath(targetPath, 'file');
+      syncFile({
+        label: `/do:${cmd.name} ${BUNDLED_LIB_DIR}/${filename}`,
+        content,
+        targetPath,
+        dryRun,
+        results,
+      });
+    }
+
+    for (const name of existingNames) {
+      if (contents.has(name)) continue;
+      removeFile({
+        label: `/do:${cmd.name} ${BUNDLED_LIB_DIR}/${name}`,
+        targetPath: path.join(bundleDir, name),
+        dryRun,
+        results,
+      });
+    }
+
+    if (!dryRun && bundleExists && fs.readdirSync(bundleDir).length === 0) {
+      fs.rmdirSync(bundleDir);
+    }
+  }
+}
+
 function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }) {
   const commandsDir = path.join(packageDir, 'commands');
   const libDir = path.join(packageDir, 'lib');
@@ -241,13 +363,29 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
     return doUninstall(filtered, libFiles, hookFiles, env, results, dryRun, filterNames);
   }
 
+  // Per-command set of lib docs to write beside its SKILL.md. Filled while each
+  // command is transformed (getContent runs for every item, up-to-date ones
+  // included), then drained below.
+  const bundledByCommand = new Map();
+
   syncFileSet(filtered, {
-    getContent: cmd => transformCommand(fs.readFileSync(cmd.absPath, 'utf8'), env, libDir, cmd.relPath),
+    getContent: (cmd) => {
+      const bundled = new Set();
+      const present = new Set();
+      const content = transformCommand(
+        fs.readFileSync(cmd.absPath, 'utf8'), env, libDir, cmd.relPath, { bundled, present });
+      if (env.bundlesLibs) bundledByCommand.set(cmd.relPath, { bundled, present });
+      return content;
+    },
     getTargetPath: cmd => path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)),
     getLabel: cmd => `/do:${cmd.name}`,
     dryRun,
     results,
   });
+
+  if (env.bundlesLibs) {
+    syncBundledLibs(filtered, bundledByCommand, libDir, env, dryRun, results);
+  }
 
   if (env.libDir) {
     syncFileSet(libFiles, {
@@ -275,12 +413,55 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
 }
 
 function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filterNames) {
+  const bundledToRemove = [];
+  if (env.bundlesLibs) {
+    for (const cmd of commands) {
+      const skillDir = path.dirname(path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)));
+      if (!assertSafeBundlePath(skillDir, 'directory')) continue;
+      const bundleDir = path.join(skillDir, BUNDLED_LIB_DIR);
+      if (!assertSafeBundlePath(bundleDir, 'directory')) continue;
+      const names = fs.readdirSync(bundleDir);
+      // Validate the whole set before uninstall removes anything. This keeps an
+      // unexpected entry from causing a partial uninstall or escaping the skill.
+      for (const name of names) {
+        assertSafeBundlePath(path.join(bundleDir, name), 'file');
+      }
+      bundledToRemove.push({ cmd, bundleDir, names });
+    }
+  }
+
   removeFileSet(commands, {
     getTargetPath: cmd => path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)),
     getLabel: cmd => `/do:${cmd.name}`,
     dryRun,
     results,
   });
+
+  // Bundled lib docs live INSIDE the skill directory, so removing SKILL.md alone
+  // would strand them (and leave the directory behind). Remove every file the
+  // bundle dir holds, then the now-empty dir.
+  if (env.bundlesLibs) {
+    for (const { cmd, bundleDir, names } of bundledToRemove) {
+      for (const name of names) {
+        removeFile({
+          label: `/do:${cmd.name} ${BUNDLED_LIB_DIR}/${name}`,
+          targetPath: path.join(bundleDir, name),
+          dryRun,
+          results,
+        });
+      }
+      if (!dryRun && fs.readdirSync(bundleDir).length === 0) fs.rmdirSync(bundleDir);
+    }
+  }
+
+  if (env.namespacing === 'directory') {
+    for (const cmd of commands) {
+      const skillDir = path.dirname(path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)));
+      if (!dryRun && fs.existsSync(skillDir) && fs.readdirSync(skillDir).length === 0) {
+        fs.rmdirSync(skillDir);
+      }
+    }
+  }
 
   if (env.libDir) {
     removeFileSet(libFiles, {
@@ -348,19 +529,28 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
 
 function list({ env, packageDir }) {
   const commandsDir = path.join(packageDir, 'commands');
+  const libDir = path.join(packageDir, 'lib');
   const commands = collectCommands(commandsDir);
   const items = [];
 
   for (const cmd of commands) {
     const content = fs.readFileSync(cmd.absPath, 'utf8');
-    const transformed = transformCommand(content, env, path.join(packageDir, 'lib'), cmd.relPath);
+    const bundled = new Set();
+    const present = new Set();
+    const transformed = transformCommand(
+      content, env, libDir, cmd.relPath, { bundled, present });
+    const expectedBundles = env.bundlesLibs
+      ? collectBundledLibContents({ bundled, present }, libDir, env)
+      : null;
     const targetRel = getTargetFilename(cmd.relPath, env);
     const targetPath = path.join(env.commandsDir, targetRel);
 
     let status;
     if (!fs.existsSync(targetPath)) {
       status = 'not installed';
-    } else if (filesAreEqual(targetPath, transformed)) {
+    } else if (filesAreEqual(targetPath, transformed)
+      && (!expectedBundles
+        || bundledLibsAreEqual(path.dirname(targetPath), expectedBundles))) {
       status = 'up to date';
     } else {
       status = 'changed';

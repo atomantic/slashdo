@@ -686,3 +686,150 @@ describe('transformLib', () => {
     );
   });
 });
+
+// ── deferred (bundled) reviewer-backend libs ────────────────────────
+
+describe('deferred lib bundling (bundlesLibs)', () => {
+  const { DEFERRED_LIBS, BUNDLED_LIB_DIR } = require('../src/transformer');
+
+  // Use a real deferred name so the production DEFERRED_LIBS set is exercised
+  // rather than a fixture-only substitute.
+  const BACKEND = 'ollama-review-loop.md';
+  const SENTINEL = 'OLLAMA-BACKEND-BODY-SENTINEL';
+
+  function withLibs(libs, fn) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-defer-'));
+    for (const [name, content] of Object.entries(libs)) {
+      fs.writeFileSync(path.join(tmpDir, name), content, 'utf8');
+    }
+    try {
+      return fn(tmpDir);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true });
+    }
+  }
+
+  it('names every deferred lib as a file that exists in the repo', () => {
+    for (const name of DEFERRED_LIBS) {
+      assert.ok(
+        fs.existsSync(path.join(__dirname, '..', 'lib', name)),
+        `DEFERRED_LIBS names ${name}, which is not a file under lib/`);
+    }
+  });
+
+  it('leaves the dispatcher out of the deferred set', () => {
+    // multi-reviewer-loop is always on the taken path and is what tells the agent
+    // which backend to load — deferring it would defer the instruction to defer.
+    assert.ok(!DEFERRED_LIBS.has('multi-reviewer-loop.md'));
+  });
+
+  it('replaces a deferred `!cat` with a read directive instead of the body', () => {
+    withLibs({ [BACKEND]: SENTINEL }, (dir) => {
+      const body = `Intro.\n!\`cat ~/.claude/lib/${BACKEND}\`\nOutro.`;
+      const result = inlineLibReferences(body, dir, { bundlesLibs: true });
+      assert.ok(!result.includes(SENTINEL), 'deferred body must not be inlined');
+      assert.ok(result.includes(`${BUNDLED_LIB_DIR}/${BACKEND}`), 'must cite the bundled path');
+      assert.match(result, /Read .*now — required/);
+    });
+  });
+
+  it('reports the deferred lib so the installer knows to write it', () => {
+    withLibs({ [BACKEND]: SENTINEL }, (dir) => {
+      const bundled = new Set();
+      inlineLibReferences(`!\`cat ~/.claude/lib/${BACKEND}\``, dir, { bundlesLibs: true, bundled });
+      assert.deepEqual([...bundled], [BACKEND]);
+    });
+  });
+
+  it('keeps a deferred lib out of the Referenced-libraries appendix', () => {
+    // A prose citation must not smuggle the body back in via the appendix — that
+    // path is what the deferral exists to close.
+    withLibs({ [BACKEND]: SENTINEL }, (dir) => {
+      const body = `See [lib/${BACKEND}](../../lib/${BACKEND}) for the loop.`;
+      const result = inlineLibReferences(body, dir, { bundlesLibs: true });
+      assert.ok(!result.includes(SENTINEL), 'appendix must not re-inline a deferred lib');
+      assert.ok(result.includes(`${BUNDLED_LIB_DIR}/${BACKEND}`));
+    });
+  });
+
+  it('does not defer when the environment lacks bundlesLibs', () => {
+    withLibs({ [BACKEND]: SENTINEL }, (dir) => {
+      const body = `!\`cat ~/.claude/lib/${BACKEND}\``;
+      assert.ok(inlineLibReferences(body, dir).includes(SENTINEL));
+    });
+  });
+
+  it('cites a sibling backend relatively from inside the bundle dir', () => {
+    withLibs({ [BACKEND]: SENTINEL }, (dir) => {
+      const body = `Falls back to [lib/${BACKEND}](../../lib/${BACKEND}).`;
+      const result = inlineLibReferences(body, dir, { bundlesLibs: true, fromLibDir: true });
+      assert.ok(result.includes(`./${BACKEND}`), 'sibling ref must be ./-relative');
+      assert.ok(!result.includes(`${BUNDLED_LIB_DIR}/${BACKEND}`), 'must not nest lib/lib/');
+    });
+  });
+
+  it('does not re-inline a lib the parent skill already carries', () => {
+    // Without the present-set, every bundled backend re-appends the dispatcher it
+    // was split away from and the split saves nothing at read time.
+    withLibs({ [BACKEND]: SENTINEL, 'shared.md': 'SHARED-BODY' }, (dir) => {
+      const body = 'Consult [lib/shared.md](../../lib/shared.md).';
+      const present = new Set(['shared.md']);
+      const result = inlineLibReferences(body, dir, { bundlesLibs: true, present });
+      assert.ok(!result.includes('SHARED-BODY'), 'already-present lib must not be re-inlined');
+    });
+  });
+
+  it('reports what it made present so children can skip those', () => {
+    withLibs({ 'shared.md': 'SHARED-BODY' }, (dir) => {
+      const presentOut = new Set();
+      inlineLibReferences('!`cat ~/.claude/lib/shared.md`', dir, { presentOut });
+      assert.ok(presentOut.has('shared.md'));
+    });
+  });
+
+  it('emits no dangling ~/.claude/lib ref when deferring', () => {
+    withLibs({ [BACKEND]: SENTINEL }, (dir) => {
+      const body = `!\`cat ~/.claude/lib/${BACKEND}\`\nAlso \`~/.claude/lib/${BACKEND}\`.`;
+      const result = inlineLibReferences(body, dir, { bundlesLibs: true });
+      assert.doesNotMatch(result, /~\/\.claude\/lib\/[A-Za-z0-9._-]+\.md/);
+    });
+  });
+});
+
+describe('backticked lib citations', () => {
+  function withLibs(libs, fn) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-tick-'));
+    for (const [name, content] of Object.entries(libs)) {
+      fs.writeFileSync(path.join(tmpDir, name), content, 'utf8');
+    }
+    try { return fn(tmpDir); } finally { fs.rmSync(tmpDir, { recursive: true }); }
+  }
+
+  it('does not drag a name-dropped lib into the appendix', () => {
+    // Regression: resolving the see-also form through the appendix queue inflated
+    // /do:config from 19KB to 91KB by pulling in a doc it only mentions.
+    withLibs({ 'shared.md': 'SHARED-BODY-SENTINEL' }, (dir) => {
+      const result = inlineLibReferences('Full mechanics in `lib/shared.md`.', dir,
+        { bundlesLibs: true });
+      assert.ok(!result.includes('SHARED-BODY-SENTINEL'), 'see-also must pull in nothing');
+      assert.ok(!result.includes('Referenced libraries'), 'no appendix for a mere mention');
+      assert.ok(result.includes('`shared`'), 'reads as a doc name, not a path');
+    });
+  });
+
+  it('cites the bundled path when the skill actually bundles that lib', () => {
+    const backend = 'ollama-review-loop.md';
+    withLibs({ [backend]: 'BODY' }, (dir) => {
+      const body = `!\`cat ~/.claude/lib/${backend}\`\nFull mechanics in \`lib/${backend}\`.`;
+      const result = inlineLibReferences(body, dir, { bundlesLibs: true });
+      assert.ok(result.includes(`\`lib/${backend}\``), 'bundled lib keeps a real path');
+    });
+  });
+
+  it('leaves an unrelated lib/-looking path alone', () => {
+    withLibs({}, (dir) => {
+      const body = 'Run `lib/not-a-slashdo-doc.md` from the project.';
+      assert.equal(inlineLibReferences(body, dir, { bundlesLibs: true }), body);
+    });
+  });
+});
