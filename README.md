@@ -454,7 +454,7 @@ npx slash-do@latest push pr release           # install specific commands only
   +------------------+
   |   Transformer    |  Converts format per environment:
   |                  |  - YAML frontmatter (Claude, OpenCode)
-  +------------------+  - Agent Skills / SKILL.md with inlined libs (Antigravity, Codex, Grok Build)
+  +------------------+  - Agent Skills / SKILL.md + bundled lib/ (Antigravity, Codex, Grok Build)
        |
        v
   +------------------+

@@ -773,3 +773,102 @@ describe('renamed command cleanup', () => {
     cleanup(tmpDir);
   });
 });
+
+// ── bundled lib docs (Agent Skills envs) ────────────────────────────
+
+describe('bundled lib docs', () => {
+  const { DEFERRED_LIBS, BUNDLED_LIB_DIR } = require('../src/transformer');
+
+  function makeSkillEnv() {
+    const { tmpDir, env } = makeTmpEnv({
+      namespacing: 'directory',
+      ext: null,
+      libDir: null,
+      libPathPrefix: null,
+      hooksDir: null,
+      supportsHooks: false,
+      supportsCatInclusion: false,
+    });
+    env.bundlesLibs = true;
+    return { tmpDir, env };
+  }
+
+  it('writes each deferred lib beside the SKILL.md that cites it', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const bundleDir = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR);
+      assert.ok(fs.existsSync(bundleDir), 'do-pr must get a bundle dir');
+      const written = fs.readdirSync(bundleDir);
+      for (const name of DEFERRED_LIBS) {
+        assert.ok(written.includes(name), `${name} must be bundled with /do:pr`);
+      }
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('every cited bundle path resolves to a file on disk', () => {
+    // The read directive is only as good as the path it names — a dangling one
+    // silently drops the whole reviewer loop.
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      for (const skill of fs.readdirSync(env.commandsDir)) {
+        const skillFile = path.join(env.commandsDir, skill, 'SKILL.md');
+        if (!fs.existsSync(skillFile)) continue;
+        const body = fs.readFileSync(skillFile, 'utf8');
+        const cited = [...body.matchAll(/`(lib\/[A-Za-z0-9._-]+\.md)`/g)].map(m => m[1]);
+        for (const ref of new Set(cited)) {
+          assert.ok(fs.existsSync(path.join(env.commandsDir, skill, ref)),
+            `${skill}/SKILL.md cites ${ref}, which was not written`);
+        }
+      }
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('keeps deferred bodies out of SKILL.md but reachable in the bundle', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const skillDir = path.join(env.commandsDir, 'do-pr');
+      const body = fs.readFileSync(path.join(skillDir, 'SKILL.md'), 'utf8');
+      const source = fs.readFileSync(
+        path.join(PACKAGE_DIR, 'lib', 'ollama-review-loop.md'), 'utf8');
+      // A long, distinctive line from the backend: present in the bundle, absent
+      // from the skill body it was split out of.
+      const marker = source.split('\n').filter(l => l.trim().length > 100)[0].trim();
+      assert.ok(!body.includes(marker), 'deferred body must not remain in SKILL.md');
+      const bundled = fs.readFileSync(
+        path.join(skillDir, BUNDLED_LIB_DIR, 'ollama-review-loop.md'), 'utf8');
+      assert.ok(bundled.includes(marker), 'deferred body must survive in the bundle');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('does not bundle anything for a cat-inclusion environment', () => {
+    const { tmpDir, env } = makeTmpEnv({ namespacing: 'directory', ext: null });
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      assert.ok(!fs.existsSync(path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR)));
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('removes bundled libs on uninstall', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const bundleDir = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR);
+      assert.ok(fs.existsSync(bundleDir));
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false, uninstall: true });
+      assert.ok(!fs.existsSync(bundleDir), 'bundle dir must not be stranded');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('reports bundled libs as up to date on a second install', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const second = install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      assert.equal(second.installed, 0);
+      assert.equal(second.updated, 0);
+    } finally { cleanup(tmpDir); }
+  });
+});

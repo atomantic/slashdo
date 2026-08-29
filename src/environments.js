@@ -78,6 +78,10 @@ const ENVIRONMENTS = {
     ext: null,
     namespacing: 'directory',
     libPathPrefix: null,
+    // Agent Skills environment: no runtime `!cat`, but the installer writes lib docs
+    // into each skill directory, so mutually-exclusive libs can be cited by
+    // path and read on demand instead of inlined into every SKILL.md.
+    bundlesLibs: true,
     supportsHooks: false,
     supportsCatInclusion: false,
     supportsTeams: false,
@@ -94,6 +98,10 @@ const ENVIRONMENTS = {
     ext: null,
     namespacing: 'directory',
     libPathPrefix: null,
+    // Agent Skills environment: no runtime `!cat`, but the installer writes lib docs
+    // into each skill directory, so mutually-exclusive libs can be cited by
+    // path and read on demand instead of inlined into every SKILL.md.
+    bundlesLibs: true,
     supportsHooks: false,
     supportsCatInclusion: false,
     supportsTeams: false,
@@ -114,6 +122,10 @@ const ENVIRONMENTS = {
     ext: null,
     namespacing: 'directory',
     libPathPrefix: null,
+    // Agent Skills environment: no runtime `!cat`, but the installer writes lib docs
+    // into each skill directory, so mutually-exclusive libs can be cited by
+    // path and read on demand instead of inlined into every SKILL.md.
+    bundlesLibs: true,
     supportsHooks: false,
     supportsCatInclusion: false,
     supportsTeams: false,

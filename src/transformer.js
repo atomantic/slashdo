@@ -108,6 +108,48 @@ const LIB_MD_LINK_RE = /\[[^\]]*\]\((?:\.\.\/)+lib\/([A-Za-z0-9._-]+\.md)\)/g;
 // rather than silently mis-rewriting. Teach this to resolve source-relative paths if
 // that invariant ever needs to be relaxed.
 const LIB_SIBLING_LINK_RE = /\[[^\]]*\]\(\.\/([A-Za-z0-9._-]+\.md)\)/g;
+// Matches a BACKTICKED bare citation, e.g. `` `lib/multi-reviewer-loop.md` `` — the
+// "full mechanics in X" pointers the command specs use. Harmless prose while every
+// lib was inlined, but once `lib/<name>.md` denotes a real bundled file beside
+// SKILL.md the same token reads as a path, and a non-bundled one is then a dangling
+// reference. Resolved like the other prose forms: to a bundled path when the lib is
+// deferred (the file exists), to a bare doc name when it is inlined nearby. Guarded
+// on the name existing under lib/, so an unrelated `lib/...md` in a shell snippet is
+// left alone.
+const LIB_BACKTICK_RE = /`lib\/([A-Za-z0-9._-]+\.md)`/g;
+
+// Reviewer BACKEND loops are mutually exclusive: one `--review-with` entry
+// dispatches to exactly ONE of these per reviewer, yet inlining all four costs
+// ~130KB (~33K tokens) in every command that runs a review — `/do:better`,
+// `/do:better-swift`, `/do:review`, `/do:pr`, `/do:release`, `/do:depfree`,
+// `/do:rpr`. The dispatcher (`multi-reviewer-loop.md`) stays inline because it is
+// always on the taken path and is what names the backend to load; the backends
+// themselves are written as sibling docs beside SKILL.md and cited by path, for
+// the agent to read on demand. Environments with runtime `!cat` (Claude/OpenCode)
+// never reach this path and are unaffected.
+const DEFERRED_LIBS = new Set([
+  'copilot-review-loop.md',
+  'github-reviewer-loop.md',
+  'local-agent-review-loop.md',
+  'ollama-review-loop.md',
+]);
+
+// Subdirectory, relative to a skill's own directory, that bundled lib docs are
+// written into by the installer. Cited from SKILL.md as `lib/<name>.md`.
+const BUNDLED_LIB_DIR = 'lib';
+
+// The read directive that replaces a deferred lib's inline content. Written as an
+// imperative instruction rather than a passive link: the agent must treat it as a
+// required read, not an optional reference, or the loop it names is lost.
+function deferredLibDirective(ref, name) {
+  return [
+    `> **Read \`${ref}\` now — required.** The full ${name} procedure lives in that`,
+    '> file, bundled alongside this skill. Read it in full before running this loop and',
+    '> follow it exactly. Do NOT improvise the loop from the summary above: the file',
+    '> carries the load-bearing detail (exit codes, verdict parsing, iteration caps,',
+    '> convergence and push rules) that the summary deliberately omits.',
+  ].join('\n');
+}
 
 // For Agent Skills environments (Codex/Antigravity/Grok — `libDir: null`, no
 // runtime `!cat`, and no `~/.claude/lib/` on disk for a host-only user), make
@@ -124,10 +166,24 @@ const LIB_SIBLING_LINK_RE = /\[[^\]]*\]\(\.\/([A-Za-z0-9._-]+\.md)\)/g;
 //      and cycle-safe — so the load-bearing detail is available host-side.
 // Claude/OpenCode never reach this path (they keep runtime `~/.claude/lib/` via
 // cat inclusion), so their output is unchanged.
-function inlineLibReferences(body, libDir) {
+function inlineLibReferences(body, libDir, opts = {}) {
   const inlined = new Set();   // libs whose full content is present in the document
   const queued = new Set();    // libs already appended or scheduled for the appendix
   const appendQueue = [];      // ordered absent-but-cited libs to inline as appendix
+  // Deferral is opt-in per environment (`bundlesLibs`). When off, every code path
+  // below behaves exactly as before, so Claude/OpenCode output is byte-identical.
+  const deferred = opts.bundlesLibs ? DEFERRED_LIBS : new Set();
+  // Every lib the installer must write beside SKILL.md, filled as they are cited.
+  const bundled = opts.bundled instanceof Set ? opts.bundled : new Set();
+  const fromLibDir = opts.fromLibDir === true;
+  // Libs the READER already has in front of them (the parent SKILL.md's inlined
+  // content and appendix). A bundled child cites those by name instead of
+  // re-inlining them — without this, every backend file re-appends the whole
+  // dispatcher it was split away from, and the split saves nothing on read.
+  const present = opts.present instanceof Set ? opts.present : new Set();
+  // Reports back everything this document makes available, so a parent transform
+  // can hand its own set to the children it bundles.
+  const presentOut = opts.presentOut instanceof Set ? opts.presentOut : null;
 
   const readLib = (filename) => {
     const libFile = path.join(libDir, filename);
@@ -138,19 +194,47 @@ function inlineLibReferences(body, libDir) {
   const inlineCatIncludes = (text) => text.replace(LIB_CAT_RE, (match, filename) => {
     const content = readLib(filename);
     if (content === null) return match;
+    // A deferred backend is bundled as its own file and cited, never inlined.
+    if (deferred.has(filename)) {
+      bundled.add(filename);
+      return deferredLibDirective(bundledRef(filename), bareName(filename));
+    }
     inlined.add(filename);
     return content;
   });
 
+  // Where a bundled lib lives from the citing document: `lib/<name>.md` from a
+  // SKILL.md, `./<name>.md` from a doc already inside that bundle directory.
+  const bundledRef = (filename) =>
+    (fromLibDir ? `./${filename}` : `${BUNDLED_LIB_DIR}/${filename}`);
+  const bareName = (filename) => filename.replace(/\.md$/, '');
+
   // Rewrite a cited lib to its bare doc name, queueing any cited-but-absent lib
   // (one never `!cat`-inlined) for the appendix so its content is available.
   const queueAndName = (filename) => {
-    if (!inlined.has(filename) && !queued.has(filename) && readLib(filename) !== null) {
+    // A deferred backend must never reach the appendix — that would re-inline the
+    // very content the deferral exists to keep out. Cite the bundled file instead,
+    // which is a path the agent can actually open.
+    if (deferred.has(filename) && readLib(filename) !== null) {
+      bundled.add(filename);
+      return bundledRef(filename);
+    }
+    if (!present.has(filename) && !inlined.has(filename) && !queued.has(filename)
+        && readLib(filename) !== null) {
       queued.add(filename);
       appendQueue.push(filename);
     }
-    return filename.replace(/\.md$/, '');
+    return bareName(filename);
   };
+
+  // The backticked "full mechanics in `lib/x.md`" form is a SEE-ALSO pointer, not a
+  // demand for the content. Routing it through queueAndName would drag the whole doc
+  // (and its transitive citations) into the appendix of every skill that merely
+  // name-drops it — which inflated /do:config from 19KB to 91KB. So: cite the real
+  // bundled path when this skill actually bundles the file, otherwise strip it to a
+  // bare doc name and pull in nothing.
+  const nameOnly = (filename) =>
+    (bundled.has(filename) ? bundledRef(filename) : bareName(filename));
 
   // Resolve all three citation forms — relative Markdown links, intra-lib sibling
   // links, and `~/.claude/lib/` prose refs — to bare doc names. Links are handled
@@ -163,6 +247,8 @@ function inlineLibReferences(body, libDir) {
       .replace(LIB_MD_LINK_RE, (match, filename) => queueAndName(filename))
       .replace(LIB_SIBLING_LINK_RE, (match, filename) =>
         readLib(filename) === null ? match : queueAndName(filename))
+      .replace(LIB_BACKTICK_RE, (match, filename) =>
+        readLib(filename) === null ? match : `\`${nameOnly(filename)}\``)
       .replace(LIB_PROSE_RE, (match, filename) => queueAndName(filename));
 
   // Main body: inline includes first, then resolve the prose refs left behind
@@ -180,6 +266,11 @@ function inlineLibReferences(body, libDir) {
     if (raw === null) continue; // only real files are queued; defensive
     const content = resolveProseRefs(inlineCatIncludes(raw));
     sections.push(`### ${filename.replace(/\.md$/, '')}\n\n${content}`);
+  }
+
+  if (presentOut) {
+    for (const f of inlined) presentOut.add(f);
+    for (const f of queued) presentOut.add(f);
   }
 
   if (sections.length === 0) return out;
@@ -246,7 +337,7 @@ function getTargetFilename(relPath, env) {
   }
 }
 
-function transformCommand(content, env, sourceLibDir, relPath) {
+function transformCommand(content, env, sourceLibDir, relPath, opts = {}) {
   const { frontmatter, body } = parseFrontmatter(content);
 
   let transformedBody = body;
@@ -260,7 +351,11 @@ function transformCommand(content, env, sourceLibDir, relPath) {
   if (env.supportsCatInclusion && env.libPathPrefix) {
     transformedBody = rewriteLibPaths(transformedBody, env.libPathPrefix);
   } else if (!env.supportsCatInclusion && sourceLibDir) {
-    transformedBody = inlineLibReferences(transformedBody, sourceLibDir);
+    transformedBody = inlineLibReferences(transformedBody, sourceLibDir, {
+      bundlesLibs: env.bundlesLibs === true,
+      bundled: opts.bundled,
+      presentOut: opts.present,
+    });
   }
 
   // Run on the full body (after inlining) so config-path tokens that arrived via
@@ -289,16 +384,28 @@ function transformCommand(content, env, sourceLibDir, relPath) {
   return header + '\n' + transformedBody;
 }
 
-function transformLib(content, env) {
+function transformLib(content, env, sourceLibDir, opts = {}) {
   let transformed = rewriteClaudeRootPaths(content, env);
   if (env.supportsCatInclusion && env.libPathPrefix) {
     transformed = rewriteLibPaths(transformed, env.libPathPrefix);
+  } else if (!env.supportsCatInclusion && sourceLibDir) {
+    // A bundled lib is read standalone, so its own citations must resolve the same
+    // way SKILL.md's do. `fromLibDir` makes sibling references relative to the lib
+    // directory the file itself lives in (`./x.md`, not `lib/x.md`).
+    transformed = inlineLibReferences(transformed, sourceLibDir, {
+      bundlesLibs: env.bundlesLibs === true,
+      bundled: opts.bundled,
+      present: opts.present,
+      fromLibDir: true,
+    });
   }
   transformed = rewriteConfigPath(transformed, env);
   return applyConditionalBlocks(transformed, env);
 }
 
 module.exports = {
+  DEFERRED_LIBS,
+  BUNDLED_LIB_DIR,
   parseFrontmatter,
   rewriteLibPaths,
   rewriteConfigPath,

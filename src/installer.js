@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getTargetFilename, transformCommand, transformLib } = require('./transformer');
+const { getTargetFilename, transformCommand, transformLib, BUNDLED_LIB_DIR } = require('./transformer');
 const { readConfig, writeConfig } = require('./config');
 const {
   registerHooksInSettings,
@@ -223,6 +223,37 @@ function finalizeInstall(env, hookFiles, packageDir, dryRun, filterNames, autoUp
   writeVersionAndRefreshCache(env, packageDir, dryRun);
 }
 
+// Writes the lib docs a command defers into `<skillDir>/lib/`, so the read
+// directive in SKILL.md points at a file that exists. Transitive: a bundled lib
+// may itself defer a sibling backend (local-agent cites ollama), so drain the set
+// as it grows rather than iterating a snapshot.
+function syncBundledLibs(commands, bundledByCommand, libDir, env, dryRun, results) {
+  for (const cmd of commands) {
+    const entry = bundledByCommand.get(cmd.relPath);
+    if (!entry || entry.bundled.size === 0) continue;
+    const { bundled: pending, present } = entry;
+
+    const skillDir = path.dirname(path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)));
+    const written = new Set();
+    // `pending` grows while draining when a bundled lib defers another.
+    while (written.size < pending.size) {
+      for (const filename of Array.from(pending)) {
+        if (written.has(filename)) continue;
+        written.add(filename);
+        const absPath = path.join(libDir, filename);
+        if (!fs.existsSync(absPath)) continue;
+        syncFile({
+          label: `/do:${cmd.name} ${BUNDLED_LIB_DIR}/${filename}`,
+          content: transformLib(fs.readFileSync(absPath, 'utf8'), env, libDir, { bundled: pending, present }),
+          targetPath: path.join(skillDir, BUNDLED_LIB_DIR, filename),
+          dryRun,
+          results,
+        });
+      }
+    }
+  }
+}
+
 function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }) {
   const commandsDir = path.join(packageDir, 'commands');
   const libDir = path.join(packageDir, 'lib');
@@ -241,13 +272,29 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
     return doUninstall(filtered, libFiles, hookFiles, env, results, dryRun, filterNames);
   }
 
+  // Per-command set of lib docs to write beside its SKILL.md. Filled while each
+  // command is transformed (getContent runs for every item, up-to-date ones
+  // included), then drained below.
+  const bundledByCommand = new Map();
+
   syncFileSet(filtered, {
-    getContent: cmd => transformCommand(fs.readFileSync(cmd.absPath, 'utf8'), env, libDir, cmd.relPath),
+    getContent: (cmd) => {
+      const bundled = new Set();
+      const present = new Set();
+      const content = transformCommand(
+        fs.readFileSync(cmd.absPath, 'utf8'), env, libDir, cmd.relPath, { bundled, present });
+      if (env.bundlesLibs) bundledByCommand.set(cmd.relPath, { bundled, present });
+      return content;
+    },
     getTargetPath: cmd => path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)),
     getLabel: cmd => `/do:${cmd.name}`,
     dryRun,
     results,
   });
+
+  if (env.bundlesLibs) {
+    syncBundledLibs(filtered, bundledByCommand, libDir, env, dryRun, results);
+  }
 
   if (env.libDir) {
     syncFileSet(libFiles, {
@@ -281,6 +328,26 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
     dryRun,
     results,
   });
+
+  // Bundled lib docs live INSIDE the skill directory, so removing SKILL.md alone
+  // would strand them (and leave the directory behind). Remove every file the
+  // bundle dir holds, then the now-empty dir.
+  if (env.bundlesLibs) {
+    for (const cmd of commands) {
+      const skillDir = path.dirname(path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)));
+      const bundleDir = path.join(skillDir, BUNDLED_LIB_DIR);
+      if (!fs.existsSync(bundleDir)) continue;
+      for (const name of fs.readdirSync(bundleDir)) {
+        removeFile({
+          label: `/do:${cmd.name} ${BUNDLED_LIB_DIR}/${name}`,
+          targetPath: path.join(bundleDir, name),
+          dryRun,
+          results,
+        });
+      }
+      if (!dryRun && fs.readdirSync(bundleDir).length === 0) fs.rmdirSync(bundleDir);
+    }
+  }
 
   if (env.libDir) {
     removeFileSet(libFiles, {
