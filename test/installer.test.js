@@ -894,4 +894,47 @@ describe('bundled lib docs', () => {
       assert.equal(second.updated, 0);
     } finally { cleanup(tmpDir); }
   });
+
+  it('refuses to install through a symlinked bundled lib file', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const target = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR,
+        'ollama-review-loop.md');
+      const victim = path.join(tmpDir, 'victim.md');
+      fs.writeFileSync(victim, 'must survive', 'utf8');
+      fs.unlinkSync(target);
+      fs.symlinkSync(victim, target);
+
+      assert.throws(
+        () => install({
+          env, packageDir: PACKAGE_DIR, filterNames: ['pr'], dryRun: false,
+        }),
+        /Refusing to traverse unsafe bundled lib file/);
+      assert.equal(fs.readFileSync(victim, 'utf8'), 'must survive');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('refuses to traverse a symlinked bundle directory on uninstall', () => {
+    const { tmpDir, env } = makeSkillEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const bundleDir = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR);
+      const victimDir = path.join(tmpDir, 'victim');
+      const victim = path.join(victimDir, 'important.txt');
+      fs.mkdirSync(victimDir);
+      fs.writeFileSync(victim, 'must survive', 'utf8');
+      fs.rmSync(bundleDir, { recursive: true });
+      fs.symlinkSync(victimDir, bundleDir, 'dir');
+
+      assert.throws(
+        () => install({
+          env, packageDir: PACKAGE_DIR, filterNames: ['pr'], dryRun: false, uninstall: true,
+        }),
+        /Refusing to traverse unsafe bundled lib directory/);
+      assert.equal(fs.readFileSync(victim, 'utf8'), 'must survive');
+      assert.ok(fs.existsSync(path.join(env.commandsDir, 'do-pr', 'SKILL.md')),
+        'validation must fail before uninstall removes anything');
+    } finally { cleanup(tmpDir); }
+  });
 });

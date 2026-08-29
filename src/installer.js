@@ -130,6 +130,22 @@ function removeFileSet(items, { getTargetPath, getLabel, dryRun, results }) {
   }
 }
 
+function assertSafeBundlePath(targetPath, expectedType) {
+  let stat;
+  try {
+    stat = fs.lstatSync(targetPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+
+  const isExpectedType = expectedType === 'directory' ? stat.isDirectory() : stat.isFile();
+  if (stat.isSymbolicLink() || !isExpectedType) {
+    throw new Error(`Refusing to traverse unsafe bundled lib ${expectedType}: ${targetPath}`);
+  }
+  return true;
+}
+
 const RENAMED_COMMANDS = {
   cam: 'push',
   makegoals: 'goals',
@@ -234,6 +250,9 @@ function syncBundledLibs(commands, bundledByCommand, libDir, env, dryRun, result
     const { bundled: pending, present } = entry;
 
     const skillDir = path.dirname(path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)));
+    assertSafeBundlePath(skillDir, 'directory');
+    const bundleDir = path.join(skillDir, BUNDLED_LIB_DIR);
+    assertSafeBundlePath(bundleDir, 'directory');
     const written = new Set();
     // `pending` grows while draining when a bundled lib defers another.
     while (written.size < pending.size) {
@@ -242,10 +261,12 @@ function syncBundledLibs(commands, bundledByCommand, libDir, env, dryRun, result
         written.add(filename);
         const absPath = path.join(libDir, filename);
         if (!fs.existsSync(absPath)) continue;
+        const targetPath = path.join(bundleDir, filename);
+        assertSafeBundlePath(targetPath, 'file');
         syncFile({
           label: `/do:${cmd.name} ${BUNDLED_LIB_DIR}/${filename}`,
           content: transformLib(fs.readFileSync(absPath, 'utf8'), env, libDir, { bundled: pending, present }),
-          targetPath: path.join(skillDir, BUNDLED_LIB_DIR, filename),
+          targetPath,
           dryRun,
           results,
         });
@@ -322,6 +343,23 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
 }
 
 function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filterNames) {
+  const bundledToRemove = [];
+  if (env.bundlesLibs) {
+    for (const cmd of commands) {
+      const skillDir = path.dirname(path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)));
+      if (!assertSafeBundlePath(skillDir, 'directory')) continue;
+      const bundleDir = path.join(skillDir, BUNDLED_LIB_DIR);
+      if (!assertSafeBundlePath(bundleDir, 'directory')) continue;
+      const names = fs.readdirSync(bundleDir);
+      // Validate the whole set before uninstall removes anything. This keeps an
+      // unexpected entry from causing a partial uninstall or escaping the skill.
+      for (const name of names) {
+        assertSafeBundlePath(path.join(bundleDir, name), 'file');
+      }
+      bundledToRemove.push({ cmd, bundleDir, names });
+    }
+  }
+
   removeFileSet(commands, {
     getTargetPath: cmd => path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)),
     getLabel: cmd => `/do:${cmd.name}`,
@@ -333,11 +371,8 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
   // would strand them (and leave the directory behind). Remove every file the
   // bundle dir holds, then the now-empty dir.
   if (env.bundlesLibs) {
-    for (const cmd of commands) {
-      const skillDir = path.dirname(path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)));
-      const bundleDir = path.join(skillDir, BUNDLED_LIB_DIR);
-      if (!fs.existsSync(bundleDir)) continue;
-      for (const name of fs.readdirSync(bundleDir)) {
+    for (const { cmd, bundleDir, names } of bundledToRemove) {
+      for (const name of names) {
         removeFile({
           label: `/do:${cmd.name} ${BUNDLED_LIB_DIR}/${name}`,
           targetPath: path.join(bundleDir, name),
