@@ -160,6 +160,8 @@ const ON_DEMAND_LIBS = new Map([
     { what: 'draft-enhancement loop', when: '`--enhance-with` was passed' }],
   ['ci-flake-handling.md',
     { what: 'CI flake triage rules', when: 'a CI check fails in a way that looks like a flake' }],
+  ['rebase-conflict-resolution.md',
+    { what: 'autonomous rebase-conflict resolution playbook', when: 'a rebase stops on conflicts' }],
 
   // Review lenses: review-agent-selection.md dispatches only the lenses a diff
   // actually signals — often one or two, sometimes none.

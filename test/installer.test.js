@@ -794,8 +794,9 @@ describe('bundled lib docs', () => {
   }
 
   it('writes each deferred lib beside the SKILL.md that cites it', () => {
-    // Only the libs a command actually cites — /do:pr runs reviewers, so it bundles
-    // the four backends; it never opens the tracker, so it gets no issue-mode doc.
+    // Only the libs a command actually cites — /do:pr bundles its four reviewer
+    // backends plus the conflict resolver; it never opens the tracker, so it gets
+    // no issue-mode doc.
     const { tmpDir, env } = makeSkillEnv();
     try {
       install({ env, packageDir: PACKAGE_DIR, dryRun: false });
@@ -803,7 +804,8 @@ describe('bundled lib docs', () => {
       assert.ok(fs.existsSync(bundleDir), 'do-pr must get a bundle dir');
       const written = fs.readdirSync(bundleDir);
       for (const name of ['copilot-review-loop.md', 'github-reviewer-loop.md',
-        'local-agent-review-loop.md', 'ollama-review-loop.md']) {
+        'local-agent-review-loop.md', 'ollama-review-loop.md',
+        'rebase-conflict-resolution.md']) {
         assert.ok(written.includes(name), `${name} must be bundled with /do:pr`);
       }
       assert.ok(!written.includes('plan-issue-mode.md'), '/do:pr does not use issue mode');
