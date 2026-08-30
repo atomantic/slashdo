@@ -342,19 +342,18 @@ describe('review-loop parse contracts', () => {
     // The point is that the push lives inside the guard, in the same shell — not
     // that it sits on any particular line.
     assert.match(wrapper, /if \[ -n "\$UNPUSHED" \]; then[\s\S]{0,600}?git push "\$PUSH_REMOTE" "HEAD:\$PUSH_BRANCH"/);
-    // A conflicted retry must not strand the branch mid-rebase: push-failed is a
-    // continue-signal, so the next reviewer would inherit a detached HEAD whose own
-    // assertion then silently skips (no resolvable @{u} to compare against).
-    // Anchored to the else-branch, not a bare substring: naming `git rebase --abort`
-    // anywhere in the prose would otherwise satisfy this while the code path is gone.
-    // The trailing `false` is what makes a failed push observable to the orchestrator
-    // — without it the abort's own success flips the block to exit 0, the pass is
-    // never recorded push-failed, and the stranded commits reach the merge gate.
+    // A conflicted retry is a resolution handoff, not an automatic abort or a
+    // push-failed verdict. The trailing false keeps the shell block from falling
+    // through, while the explicit marker tells the orchestrator to resolve and
+    // rerun the config-derived block before it dispatches another reviewer.
     assert.match(
       wrapper,
-      /else\n\s*git rebase --abort 2>\/dev\/null[^\n]*\n\s*false\n/,
-      'a conflicted retry must abort the rebase AND still exit non-zero so the pass records push-failed',
+      /else\n\s*echo "REBASE_CONFLICT_NEEDS_RESOLUTION"\n\s*false\n/,
+      'a conflicted retry must hand control to autonomous resolution without falling through',
     );
+    assert.doesNotMatch(wrapper, /git rebase --abort/, 'the shared retry must not abort at the first conflict');
+    assert.match(wrapper, /do \*\*not\*\* record `push-failed`/);
+    assert.match(wrapper, /complete the rebase[\s\S]{0,180}?rerun this entire config-derived block/);
 
     // do:pr's pre-PR push must derive its destination the SAME way, from the branch's
     // upstream config — `git push origin {current_branch}` hardcodes the local branch
@@ -410,9 +409,39 @@ describe('review-loop parse contracts', () => {
     // re-pointing a differently-named or non-origin upstream at origin/<local-name>.
     // Without this, reintroducing `-u` in the second bullet passes every other test.
     assert.match(pr, /\*\*A genuine remote upstream\*\*[^\n]*never `-u`/);
-    // A conflicted retry must not strand the branch mid-rebase for /do:next and
-    // /do:pr-better, which invoke /do:pr programmatically.
-    assert.match(pr, /conflicts, abort it\*\* \(`git rebase --abort 2>\/dev\/null`\)/);
+    // A conflicted retry must be resolved before /do:next or /do:pr-better resumes.
+    assert.match(pr, /If that rebase conflicts, \*\*resolve it through/);
+    assert.match(pr, /Do not classify an active rebase conflict as a push failure/);
+    assert.doesNotMatch(pr, /conflicts, abort it\*\*/);
+  });
+
+  it('resolves do:pr rebase conflicts autonomously and regenerates derived files', () => {
+    const pr = readCommand('pr.md');
+    const prBetter = readCommand('pr-better.md');
+    const phaseB = prBetter.slice(prBetter.indexOf('## Phase B'));
+    const resolver = readLib('rebase-conflict-resolution.md');
+
+    assert.match(pr, /If the rebase hits conflicts, \*\*resolve them and continue the rebase\*\*/);
+    assert.match(pr, /rebase-conflict-resolution\.md/);
+    assert.doesNotMatch(pr, /ask the user to resolve them/);
+    assert.match(phaseB, /resolving and continuing through conflicts/);
+    assert.match(phaseB, /A rebase conflict is not a handoff or stop condition/);
+    assert.doesNotMatch(phaseB, /aborting and surfacing conflicts/);
+
+    assert.match(resolver, /A conflict is a resolution step in the PR workflow/);
+    assert.match(resolver, /Do not abort merely because Git reports\s+conflicts/);
+    assert.match(resolver, /apiRouteCatalog\.generated\.json/);
+    assert.match(resolver, /Resolve the human-authored inputs first/);
+    assert.match(resolver, /Run the repository's canonical generator/);
+    assert.match(resolver, /GIT_EDITOR=true git rebase --continue/);
+    assert.match(resolver, /only then use `git rebase --skip`/);
+    assert.match(resolver, /a resolved rebase is not a terminal status/);
+
+    for (const name of ['local-agent-review-loop.md', 'ollama-review-loop.md']) {
+      const loop = readLib(name);
+      assert.match(loop, /rebase-conflict-resolution\.md/, `${name} must use the shared resolver`);
+      assert.match(loop, /resolve and continue the rebase/, `${name} must continue after resolving`);
+    }
   });
 
   it('files issues inside the scan-only gate, not after it', () => {

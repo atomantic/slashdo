@@ -395,7 +395,7 @@ Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` fro
    ```bash
    git push origin {BRANCH_NAME}
    ```
-   If the push fails (e.g., non-fast-forward), run `git pull --rebase --autostash && git push origin {BRANCH_NAME}` once before reporting failure.
+   If the push fails (e.g., non-fast-forward), run `git pull --rebase --autostash` and then retry the push once. If the pull stops on conflicts, do not abort or report failure merely because the conflict exists: read and follow [rebase-conflict-resolution.md](./rebase-conflict-resolution.md), resolve and continue the rebase, rerun the build/tests affected by the resolution, then push. Report failure only after the completed resolution and retry still cannot publish the branch.
 
 6. **Re-loop or stop**:
    - `ITERATION=$((ITERATION + 1))`

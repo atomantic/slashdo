@@ -163,7 +163,7 @@ Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` fro
    ```bash
    git push origin {BRANCH_NAME}
    ```
-   If the push fails (non-fast-forward), run `git pull --rebase --autostash && git push origin {BRANCH_NAME}` once before reporting failure.
+   If the push fails (non-fast-forward), run `git pull --rebase --autostash` and then retry the push once. If the pull stops on conflicts, do not abort or report failure merely because the conflict exists: read and follow [rebase-conflict-resolution.md](./rebase-conflict-resolution.md), resolve and continue the rebase, rerun the build/tests affected by the resolution, then push. Report failure only after the completed resolution and retry still cannot publish the branch.
 6. **Re-loop or stop**:
    - `ITERATION=$((ITERATION + 1))`
    - **Apply the convergence gate** (`~/.claude/lib/review-convergence-gate.md`) before another round: if the round just completed made zero commits or landed only *marginal* findings (edge-case guards, hypotheticals with no concrete wrong outcome), **converge — set `STATUS=clean` (or `STATUS=incomplete` if the round had any coverage gap, `REVIEW_ERRORS + PARSE_ERRORS + TRUNCATED > 0`) and exit**, noting the diminishing-returns convergence in the report. The coverage-gap exception is the same invariant step 3 enforces: a partially-reviewed diff is never `clean`, even when the gate converges. Only a round with at least one *substantive* finding earns another pass.
