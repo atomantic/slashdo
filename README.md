@@ -144,7 +144,7 @@ Suppose it files issue `#123`. On GitHub, ship it immediately:
 /do:next --swarm=4                  # or ship up to 4 independent issues in parallel
 ```
 
-With the saved `--issues` default, every plan-aware command (`/do:next`, `/do:replan`, `/do:better`, `/do:simplify`, `/do:depfree`, `/do:review`, `/do:rpr`) reads and files tracker issues instead of PLAN.md lines. On a shared tracker, add `--self` so your agent only ever claims issues **you** filed — see [Issue mode](#issue-mode---issues).
+With the saved `--issues` default, every plan-aware command (`/do:next`, `/do:replan`, `/do:better`, `/do:simplify`, `/do:depfree`, `/do:review`, `/do:rpr`) reads and files tracker issues instead of PLAN.md lines. On a shared or public tracker, add `--collaborators` so your agent only claims issues filed by a current repo collaborator (or a `--trusted-authors` login) — `--self` is the stricter `@me`-only variant, and is too narrow when a machine user claims the owner's issues. See [Issue mode](#issue-mode---issues).
 
 ### Audit and harden
 
@@ -332,6 +332,8 @@ By default the plan lives in `PLAN.md`. Pass `--issues` (or save it — `/do:con
 /do:next --issues --swarm #12 #14 #15     # or swarm exactly the issues you name
 /do:next --issues --swarm=2 12,14,15,19   # named batch, 2 at a time (waves)
 /do:next --issues --self                  # only claim issues YOU filed (security boundary)
+/do:next --issues --collaborators         # only claim issues filed by a repo collaborator
+/do:next --issues --collaborators --trusted-authors howlingmime,Joebok
 /do:next --issues --model light           # only claim work hinted as cheap to run
 ```
 
@@ -341,12 +343,19 @@ By default the plan lives in `PLAN.md`. Pass `--issues` (or save it — `/do:con
 | `--issues-label <name>` | `plan` | The label that scopes which issues are plan items, so bug reports and questions in the same tracker aren't mistaken for the plan |
 | `--model <tier>[,…]` | off — any tier | (`/do:next`) Claim only issues hinted `model:light`/`medium`/`heavy`. `none` matches untiered issues |
 | `--effort <level>[,…]` | off — any level | (`/do:next`) Claim only issues hinted `effort:low`/`medium`/`high`/`xhigh`/`max`. `none` matches unlabelled issues |
+| `--self` / `--no-self` | off — any author | (`/do:next`) Claim only issues **you** filed (`@me`). Explicit `#<num>` for someone else is refused |
+| `--collaborators` / `--no-collaborators` | off — any author | (`/do:next`) Claim only issues filed by a live repo collaborator, union `--trusted-authors`. Explicit `#<num>` for anyone else is refused. Fail closed if the collaborator list cannot be fetched |
+| `--trusted-authors <list>` | empty | (`/do:next`) Extra GitHub/GitLab logins unioned into the collaborators gate. No effect when `--collaborators` is off. `none` clears |
 
 **Migration is automatic.** `/do:replan --issues` always reads `PLAN.md` if one exists: every open item is migrated into the tracker (one labeled issue each) and `PLAN.md` is emptied to a short note that the roadmap now lives on the Issues page. Before migrating an item, replan surfaces any open question it finds and asks you to resolve it, so every issue it files is immediately claimable. In issue mode the stable item ID is the **issue number** (e.g. `#42`); concurrent agents claim work via branch names carrying it.
 
 **`/do:next` is label-agnostic by default.** `--issues-label` scopes the commands that *file or triage* plan items, but a bare `/do:next --issues` claims the oldest open issue regardless of label (skipping only parking labels like `future`/`blocked`, epics with open children, and anything already in flight or assigned) — so a repo full of ordinary `bug`/`enhancement` issues works without stamping a `plan` label on everything. Pass `--issues-label <name>` (or save it) to restrict auto-pick to a curated queue.
 
-**Claim only your own issues (`--self`).** By default `/do:next` claims any open issue regardless of author — which on a shared tracker means acting on work items (and the instructions in their bodies) opened by anyone. `--self` restricts every claim — auto-pick, `--swarm` batches, and explicit `#<num>` — to issues authored by the running `gh` account; an explicit number for someone else's issue is **refused, not overridden**. Save it with `/do:config --self` so a multi-contributor tracker never auto-feeds third-party issues into your agent; `--no-self` on a run reverts to any-author. Issues mode only (PLAN.md items have no author).
+**Claim only your own issues (`--self`).** By default `/do:next` claims any open issue regardless of author — which on a shared tracker means acting on work items (and the instructions in their bodies) opened by anyone. `--self` restricts every claim — auto-pick, `--swarm` batches, and explicit `#<num>` — to issues authored by the running `gh` account; an explicit number for someone else's issue is **refused, not overridden**. Save it with `/do:config --self` so a multi-contributor tracker never auto-feeds third-party issues into your agent; `--no-self` on a run reverts to any-author. `--self` is too narrow when a machine user claims the owner's issues (e.g. `atomanticagent` claiming issues `atomantic` filed) — use `--collaborators` for that. Issues mode only (PLAN.md items have no author).
+
+**Claim only collaborator-authored issues (`--collaborators`).** The same security motivation as `--self` — don't auto-feed outsider issue bodies into the agent — but the trusted set is the **live** collaborator list from the host API (GitHub `repos/:owner/:repo/collaborators`; GitLab members with `access_level >= 30` Developer), not just `@me`. Auto-pick skips outsider authors (`#N filed by <author> — not a collaborator (and not on --trusted-authors)`); an explicit `#<num>` for someone who is neither a collaborator nor on `--trusted-authors` is **refused, not overridden**. Fetch fails closed if the list cannot be loaded or is empty. `--self` still wins when both are on. Save it with `/do:config --collaborators`; `--no-collaborators` on a run reverts to any-author.
+
+**Extra trusted authors (`--trusted-authors`).** A comma-separated list of GitHub/GitLab logins (e.g. `howlingmime,Joebok`) unioned into the collaborators gate so friends using the app who are not collaborators yet can still file claimable issues. Compared case-insensitively. This is extra trusted *authors* only — collaborators stay live from the API; do not treat this as a saved collaborator allowlist. **When `--collaborators` is off, the list does not restrict or widen auto-pick** — any-author remains any-author. `--self` still wins over both. Save with `/do:config --trusted-authors howlingmime,Joebok`; empty / `none` / `--unset trusted-authors` clears it; a per-run `--trusted-authors` overrides the saved default.
 
 **Dispatch hints (`model:` + `effort:`).** Issues filed by slashdo can carry a recommendation for *how to run the work*, on two independent axes: **`model:light|medium|heavy`** (how much capability the task needs) and **`effort:low|medium|high|xhigh|max`** (how much reasoning budget per step). They're deliberately not a size estimate, and the off-diagonal combinations are the useful ones — `model:light` + `effort:max` is a mechanical change across forty call sites, where no insight is needed but a silent miss is easy. `/do:plan-task` infers both from what it found in the code and shows them at the approval gate (override with `--model`/`--effort`, or suppress an axis with `none`). The other commands that file issues — `/do:better`, `/do:next`, `/do:replan` — may add a hint when the work they just did justifies one, but never stamp one on speculatively: `/do:replan` in particular is barred from labelling migrated backlog items in bulk, since a hint guessed from a one-line entry is noise that makes the deliberate ones unreadable.
 
@@ -360,7 +369,7 @@ Then `/do:next` reads them back. **`--model`/`--effort` filter the queue** — `
 
 **Swarm mode (`/do:next --issues --swarm[=N]`).** Instead of one item per run, `--swarm` claims and ships **several independent open issues at once** — each in its own worktree subagent running the normal single-issue flow — then serializes only the merge. It picks the first N independent issues off the same priority/oldest queue (skipping ones that depend on or obviously overlap another in the batch), fans out one agent per issue to implement and open a reviewed PR, then merges them one at a time, re-syncing each onto the advancing default branch. Default 3 agents; `--swarm=N` sets the count (clamped `1..6` — N agents cost ≈N× the tokens). A PR that isn't cleanly mergeable is left open rather than force-merged, and a dead agent's claim is released back to the queue.
 
-**Swarm an explicit list.** Name the issues instead of letting swarm pick them — `/do:next --swarm #12 #14 #15` (or `--swarm 12,14,15`), the natural follow-up to filing a batch with `/do:plan-task`. The named list *is* the batch, in your order, and it's a deliberate cherry-pick: parking labels, an active `--issues-label` filter, and blockers outside the list are overridden (each override is stated), while `--self` still refuses a list containing someone else's issue rather than shrinking the batch silently. Issues that are closed or already claimed are dropped with a reason and never substituted; name more than the concurrency cap and they ship in **waves** of N, each wave merging before the next begins — which is also where an issue that depends on (or obviously collides with) another in the list gets placed. The summary accounts for every number you named. `--swarm=N` still caps concurrency, but the token cost tracks the list length, not N.
+**Swarm an explicit list.** Name the issues instead of letting swarm pick them — `/do:next --swarm #12 #14 #15` (or `--swarm 12,14,15`), the natural follow-up to filing a batch with `/do:plan-task`. The named list *is* the batch, in your order, and it's a deliberate cherry-pick: parking labels, an active `--issues-label` filter, and blockers outside the list are overridden (each override is stated), while `--self` still refuses a list containing someone else's issue, and `--collaborators` still refuses a list containing a non-collaborator who is also not on `--trusted-authors`, rather than shrinking the batch silently. Issues that are closed or already claimed are dropped with a reason and never substituted; name more than the concurrency cap and they ship in **waves** of N, each wave merging before the next begins — which is also where an issue that depends on (or obviously collides with) another in the list gets placed. The summary accounts for every number you named. `--swarm=N` still caps concurrency, but the token cost tracks the list length, not N.
 
 ## Configuration (`/do:config`)
 
@@ -372,6 +381,8 @@ Rather than passing flags every time, save them once and let future commands pic
 /do:config --issues --issues-label plan
 /do:config --merge --merge-method squash
 /do:config --self
+/do:config --collaborators
+/do:config --trusted-authors howlingmime,Joebok
 /do:config                                # show what's saved and what's effective
 ```
 
@@ -382,20 +393,22 @@ Rather than passing flags every time, save them once and let future commands pic
 | `/do:config --review-models <agent>=<model>,…` | Save the default model per reviewer (`codex`/`claude`/`agy`/`grok`/`cursor`/`ollama`). Merges key-by-key — setting one agent leaves the others intact; an empty value (`codex=`) clears one agent |
 | `/do:config --issues\|--no-issues [--issues-label=<name>]` | Save the issue-mode default (and its scoping label) for every command that accepts `--issues` |
 | `/do:config --self\|--no-self` | Save the self-only issue gate for `/do:next` — claim only issues you filed |
+| `/do:config --collaborators\|--no-collaborators` | Save the collaborators-only issue gate for `/do:next` — claim only issues filed by a live repo collaborator (union `--trusted-authors`) |
+| `/do:config --trusted-authors <list>` | Save extra trusted *authors* (comma-separated logins) unioned into the collaborators gate; `none` clears |
 | `/do:config --merge\|--no-merge [--merge-method=squash\|rebase\|merge]` | Save `/do:pr`'s auto-merge default (and method); the shorthand `--merge=squash` sets both |
 | `--project` | Read/write a per-repo `.slashdo.json` at the repo root instead of the global config; per-project values override global ones key by key |
-| `--unset <key>` | Clear one saved default (`review-with`, `review-models`, `review-iterations`, `review-mode`, `reviewer-applies`, `review-stop-mode`, `issues`, `issues-label`, `self`, `merge`, `merge-method`) |
+| `--unset <key>` | Clear one saved default (`review-with`, `review-models`, `review-iterations`, `review-mode`, `reviewer-applies`, `review-stop-mode`, `issues`, `issues-label`, `self`, `collaborators`, `trusted-authors`, `merge`, `merge-method`) |
 | `--reset` | Clear all saved defaults in the chosen scope |
 
-**Precedence (highest first):** an explicit flag on the command line → per-project `.slashdo.json` → global `~/.claude/.slashdo-config.json` → the command's built-in default. Two per-run escape hatches: `--review-with none` skips external reviewers for one run, and the `--no-*` flag forms (`--no-issues`, `--no-merge`, `--no-self`) override a saved `true` for one run.
+**Precedence (highest first):** an explicit flag on the command line → per-project `.slashdo.json` → global `~/.claude/.slashdo-config.json` → the command's built-in default. Two per-run escape hatches: `--review-with none` skips external reviewers for one run, and the `--no-*` flag forms (`--no-issues`, `--no-merge`, `--no-self`, `--no-collaborators`) override a saved `true` for one run.
 
-**Masking a global default per repo:** saving `--project --review-with=none` stores an explicit "no external reviewer" tombstone that masks an inherited global reviewer list for that one repo — something `--unset` can't do (unsetting the project key just falls back to the global value). The explicit negative forms (`--no-issues`, `--no-merge`, `--no-self`, `--no-reviewer-applies`, `--review-stop-all`) exist for the same reason: a project default that overrides an inherited global `true` back off.
+**Masking a global default per repo:** saving `--project --review-with=none` stores an explicit "no external reviewer" tombstone that masks an inherited global reviewer list for that one repo — something `--unset` can't do (unsetting the project key just falls back to the global value). The explicit negative forms (`--no-issues`, `--no-merge`, `--no-self`, `--no-collaborators`, `--no-reviewer-applies`, `--review-stop-all`) exist for the same reason: a project default that overrides an inherited global `true` back off. A saved `--trusted-authors none` is the same kind of tombstone for the extra-authors list.
 
 A typical split: personal preferences go global, repo policy goes in the repo (and `.slashdo.json` can be committed so the whole team shares it):
 
 ```
 /do:config --review-with=codex --merge          # your defaults, everywhere
-/do:config --project --issues --self            # this repo: issue-tracked, self-only claims
+/do:config --project --issues --collaborators --trusted-authors howlingmime,Joebok
 ```
 
 `/do:config` shows the merged result, e.g.:
@@ -407,7 +420,9 @@ Effective (project overrides global):
   review-iterations  = 1 (built-in default)
   review-mode        = series (built-in default)
   issues             = true
-  self               = true
+  self               = false
+  collaborators      = true
+  trusted-authors    = howlingmime,Joebok
   merge              = true
   merge-method       = (repo default)
 ```
