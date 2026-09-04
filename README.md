@@ -460,6 +460,8 @@ curl -fsSL https://raw.githubusercontent.com/atomantic/slashdo/main/uninstall.sh
 npx slash-do@latest push pr release           # install specific commands only
 ```
 
+A command-only filtered install also installs whatever workflow it delegates to — `prd` pulls in `goals`, `simplify` and `pr-better` pull in `better` (and `pr-better` pulls in `pr` too) — so a wrapper never ends up pointing at a command that isn't there.
+
 ## How It Works
 
 ```

@@ -57,6 +57,7 @@ const ENVIRONMENTS = {
     ext: '.md',
     namespacing: 'flat',
     libPathPrefix: '~/.config/opencode/lib/',
+    commandsPathPrefix: '~/.config/opencode/commands/',
     supportsHooks: false,
     supportsCatInclusion: true,
     supportsTeams: false,
@@ -78,6 +79,7 @@ const ENVIRONMENTS = {
     ext: null,
     namespacing: 'directory',
     libPathPrefix: null,
+    commandsPathPrefix: '~/.gemini/antigravity-cli/skills/',
     // Agent Skills environment: no runtime `!cat`, but the installer writes lib docs
     // into each skill directory, so mutually-exclusive libs can be cited by
     // path and read on demand instead of inlined into every SKILL.md.
@@ -98,6 +100,7 @@ const ENVIRONMENTS = {
     ext: null,
     namespacing: 'directory',
     libPathPrefix: null,
+    commandsPathPrefix: '~/.codex/skills/',
     // Agent Skills environment: no runtime `!cat`, but the installer writes lib docs
     // into each skill directory, so mutually-exclusive libs can be cited by
     // path and read on demand instead of inlined into every SKILL.md.
@@ -122,6 +125,7 @@ const ENVIRONMENTS = {
     ext: null,
     namespacing: 'directory',
     libPathPrefix: null,
+    commandsPathPrefix: '~/.grok/skills/',
     // Agent Skills environment: no runtime `!cat`, but the installer writes lib docs
     // into each skill directory, so mutually-exclusive libs can be cited by
     // path and read on demand instead of inlined into every SKILL.md.
