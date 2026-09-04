@@ -57,15 +57,15 @@ manifest's current version and apply `{LEVEL}` to it per SemVer to get
   ```
 - **`cargo`** (Rust — `Cargo.toml`): probe in order — `cargo release version {LEVEL} --execute` if `cargo-release` is installed (`command -v cargo-release`; the bare form is a dry run), else `cargo set-version --bump {LEVEL}` if `cargo-edit` is installed (`command -v cargo-set-version`; its positional argument takes a concrete version, not a level keyword), else edit the `version = "x.y.z"` line directly to `{NEW_VERSION}` and run `cargo update -p <crate name from Cargo.toml>` to refresh the lockfile. Then:
   ```bash
-  git diff --name-only -z -- Cargo.toml Cargo.lock | xargs -0 git add
+  git diff --name-only -z -- Cargo.toml '**/Cargo.toml' Cargo.lock | xargs -0 git add
   ```
 - **`python`** (Python — `pyproject.toml`): `poetry version {LEVEL}` for a Poetry project, else edit the `[project] version = "..."` (or `[tool.poetry] version = "..."`) line directly to `{NEW_VERSION}`. Then:
   ```bash
-  git diff --name-only -z -- pyproject.toml poetry.lock | xargs -0 git add
+  git diff --name-only -z -- pyproject.toml '**/pyproject.toml' poetry.lock | xargs -0 git add
   ```
 - **`java`** (Java/Kotlin — `pom.xml` / `build.gradle` / `build.gradle.kts`): edit the `<version>` element (Maven) or `version = "..."` assignment (Gradle) directly to `{NEW_VERSION}`. Then:
   ```bash
-  git diff --name-only -z -- pom.xml build.gradle build.gradle.kts | xargs -0 git add
+  git diff --name-only -z -- pom.xml '**/pom.xml' build.gradle '**/build.gradle' build.gradle.kts '**/build.gradle.kts' | xargs -0 git add
   ```
 - **`ruby`** (Ruby — a gemspec or `lib/**/version.rb`): edit the `VERSION = "..."` constant directly to `{NEW_VERSION}` in `lib/**/version.rb` if that file exists (the common convention — the gemspec then reads `spec.version = SomeModule::VERSION`), else edit the gemspec's own `spec.version = "..."` (or `.version = "..."`) assignment directly. Then:
   ```bash
