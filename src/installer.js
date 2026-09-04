@@ -75,6 +75,31 @@ function expandWithCommandDependencies(requested, allCommands, knownNames) {
   };
 }
 
+// The uninstall-side counterpart to expandWithCommandDependencies above: finds
+// every command that (a) stays installed on disk for this env after the
+// requested removal and (b) still names one of the commands being removed as
+// a delegation dependency. Returns a Map of removed-name -> Set of dependent
+// names still installed, empty when nothing would be stranded.
+function findStrandedDependents(removing, allCommands, env, knownCommandNames) {
+  const removingNames = new Set(removing.map(c => c.name));
+  const stranded = new Map();
+
+  for (const cmd of allCommands) {
+    if (removingNames.has(cmd.name)) continue;
+    const targetPath = path.join(env.commandsDir, getTargetFilename(cmd.relPath, env));
+    if (!fs.existsSync(targetPath)) continue;
+
+    const raw = fs.readFileSync(cmd.absPath, 'utf8');
+    for (const dep of extractCommandDependencies(raw, knownCommandNames)) {
+      if (!removingNames.has(dep)) continue;
+      if (!stranded.has(dep)) stranded.set(dep, new Set());
+      stranded.get(dep).add(cmd.name);
+    }
+  }
+
+  return stranded;
+}
+
 function collectLibFiles(libDir) {
   if (!fs.existsSync(libDir)) return [];
   const files = [];
@@ -382,12 +407,29 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
     : commands;
 
   const results = { installed: 0, updated: 0, upToDate: 0, removed: 0, actions: [] };
+  const knownCommandNames = new Set(commands.map(c => c.name));
 
   if (uninstall) {
+    // A full uninstall removes every command together, so nothing can be left
+    // stranded. A filtered uninstall can remove a command other *remaining*
+    // installed commands still delegate to — check the same reference graph
+    // a filtered install already walks (expandWithCommandDependencies above),
+    // just from the other direction.
+    if (filterNames?.length) {
+      const stranded = findStrandedDependents(requested, commands, env, knownCommandNames);
+      if (stranded.size) {
+        const details = [...stranded.entries()]
+          .map(([dep, users]) => `/do:${dep} is required by ${[...users].map(u => `/do:${u}`).join(', ')}`)
+          .join('; ');
+        throw new Error(
+          `Refusing to uninstall: ${details}. Uninstall the dependent command(s) too, ` +
+          `or leave /do:${[...stranded.keys()].join(', /do:')} installed.`
+        );
+      }
+    }
     return doUninstall(requested, libFiles, hookFiles, env, results, dryRun, filterNames);
   }
 
-  const knownCommandNames = new Set(commands.map(c => c.name));
   const { commands: filtered, dependencyNames, rawContent } = filterNames?.length
     ? expandWithCommandDependencies(requested, commands, knownCommandNames)
     : { commands: requested, dependencyNames: new Set(), rawContent: new Map() };
@@ -561,21 +603,24 @@ function list({ env, packageDir }) {
   const libDir = path.join(packageDir, 'lib');
   const commands = collectCommands(commandsDir);
   const knownCommandNames = new Set(commands.map(c => c.name));
+  const byName = new Map(commands.map(c => [c.name, c]));
   const items = [];
 
   for (const cmd of commands) {
     const content = fs.readFileSync(cmd.absPath, 'utf8');
     const files = {};
-    const transformed = transformCommand(
-      content, env, libDir, cmd.relPath, { files, commandNames: knownCommandNames });
+    const commandDependencies = new Set();
+    const transformed = transformCommand(content, env, libDir, cmd.relPath,
+      { files, commandNames: knownCommandNames, commandDependencies });
     const expectedBundles = env.bundlesLibs
       ? new Map(Object.entries(files))
       : null;
     const targetRel = getTargetFilename(cmd.relPath, env);
     const targetPath = path.join(env.commandsDir, targetRel);
+    const installed = fs.existsSync(targetPath);
 
     let status;
-    if (!fs.existsSync(targetPath)) {
+    if (!installed) {
       status = 'not installed';
     } else if (filesAreEqual(targetPath, transformed)
       && (!expectedBundles
@@ -585,14 +630,36 @@ function list({ env, packageDir }) {
       status = 'changed';
     }
 
+    // A command can render/copy fine and still be unhealthy: its rendered
+    // content only proves it matches the packaged source, not that whatever
+    // it delegates to (do:prd -> do:goals, etc.) actually landed in this
+    // env's installed tree. Only meaningful once the command itself is
+    // installed — "not installed" already covers the rest.
+    const missingDependencies = installed
+      ? [...commandDependencies].filter(depName => {
+        const depCmd = byName.get(depName);
+        if (!depCmd) return false;
+        const depTargetPath = path.join(env.commandsDir, getTargetFilename(depCmd.relPath, env));
+        return !fs.existsSync(depTargetPath);
+      })
+      : [];
+    if (missingDependencies.length) {
+      // Append rather than overwrite: a command can be BOTH stale against the
+      // packaged source AND missing an installed dependency, and collapsing
+      // to a bare 'unhealthy' would silently drop the "changed" signal.
+      status = status === 'up to date' ? 'unhealthy' : `${status}, unhealthy`;
+    }
+
     const { parseFrontmatter } = require('./transformer');
     const { frontmatter } = parseFrontmatter(content);
 
-    items.push({
+    const item = {
       name: `/do:${cmd.name}`,
       status,
       description: frontmatter.description || '(no description)',
-    });
+    };
+    if (missingDependencies.length) item.missingDependencies = missingDependencies;
+    items.push(item);
   }
 
   return items;
