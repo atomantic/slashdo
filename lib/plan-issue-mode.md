@@ -210,8 +210,15 @@ handle for the orchestrator, not a plan slug (issue mode assigns no slugs, per
 Each agent's **return value** is one line per finding and nothing else:
 
 ```
-<id> | <SEVERITY> | <category> | <file:line> | <one-line title>
+<id> | <SEVERITY-or-UNCERTAIN> | <category> | <file:line> | <one-line title>
 ```
+
+If an audit reports uncertainty, preserve `UNCERTAIN` in both index and body.
+The consolidator may read those specific bodies and cited source to validate them.
+Unresolved findings remain explicitly unconfirmed investigation follow-ups: no
+confirmed severity label and no automatic remediation. Do not silently coerce
+uncertainty into a severity to fit this index.
+
 
 That is roughly a twentieth of what the bodies cost, and it is a *better* input for
 the next step than prose — dedup, severity ranking, and ownership all key off

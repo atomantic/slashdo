@@ -27,10 +27,13 @@ FINDING VALIDATION — verify before fixing:
 - Check whether the flagged code is already correct (e.g., a Promise chain that
   IS properly awaited downstream, a value that IS validated earlier in the function,
   a pattern that IS idiomatic for the framework).
-- If the existing code is already correct, SKIP the fix and report it as a
-  false positive with a brief explanation of why the original code is fine.
-- Do not make changes that are semantically equivalent to the original code
-  (e.g., wrapping a .then() chain in an async IIFE adds noise without fixing anything).
+- For a behavior/bug finding, if the code already satisfies the claimed contract,
+  SKIP it as a false positive and explain the evidence. A structural finding can
+  be valid even when runtime behavior is already correct.
+- Reject equivalent rewrites that add noise without fixing the stated problem
+  (e.g., wrapping an awaited .then() chain in an async IIFE). Useful structural
+  refactors are intentionally behavior-preserving; validate their named reduction
+  in duplication, coupling, or reader cost and honor the caller's simplify contract.
 </instructions>
 
 <guardrails>

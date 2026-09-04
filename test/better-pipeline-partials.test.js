@@ -6,7 +6,8 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const readCommand = (name) => fs.readFileSync(path.join(root, 'commands', 'do', name), 'utf8');
+const { readCommandDocs } = require('./helpers/command-docs');
+const readCommand = (name) => readCommandDocs(name);
 
 // The two audit commands run the SAME pipeline for Phases 4/4b, 5/5d, 6, and 7.
 // That used to be ~800 byte-identical lines maintained by hand in both files, and
@@ -46,7 +47,7 @@ const REVIEWER_LOOP_LIBS = [
   'ollama-review-loop',
 ];
 
-const includeIndex = (body, lib) => body.indexOf('!`cat ~/.claude/lib/' + lib + '.md`');
+const includeIndex = (body, lib) => body.indexOf('!read lib/' + lib + '.md');
 
 // A partial documents its inputs in a `### Inputs` block and then USES them in the
 // phase text below it. Only the phase text is a substitution point: a token that
@@ -108,7 +109,7 @@ describe('shared better-* pipeline partials', () => {
     // drift, since the agent then reads two versions of Phase 5 and follows one.
     // Phase 4c is the only phase heading that legitimately stays inline.
     for (const name of AUDIT_COMMANDS) {
-      const strays = readCommand(name)
+      const strays = fs.readFileSync(path.join(root, 'commands', 'do', name), 'utf8')
         .split('\n')
         .filter((l) => /^## Phase /.test(l) && !/^## Phase (0|1|2|3|4c)\b/.test(l));
       assert.deepEqual(strays, [], `${name} re-pastes a shared phase the partials own`);
@@ -116,9 +117,7 @@ describe('shared better-* pipeline partials', () => {
   });
 
   it('points Phase 6 at reviewer loops that come after it', () => {
-    // lib/better-review-loop.md tells the agent the wrapper is included "below".
-    // Hoisting the library block above the Phase 6 include leaves that pointer
-    // false while every other assertion here stays green.
+    // Reviewer details must remain downstream of the Phase 6 gate.
     for (const name of AUDIT_COMMANDS) {
       const body = readCommand(name);
       const phase6 = includeIndex(body, 'better-review-loop');
@@ -167,17 +166,12 @@ describe('shared better-* pipeline partials', () => {
     }
   });
 
-  it('keeps the reviewer loops at each command\'s top level', () => {
-    // lib/better-review-loop.md documents this requirement; without a test it is
-    // one refactor away from a Phase 6 that cats nothing.
+  it('loads reviewer libraries only from the shared review phase', () => {
     for (const name of AUDIT_COMMANDS) {
-      const body = readCommand(name);
+      const source = fs.readFileSync(path.join(root, 'commands', 'do', name), 'utf8');
       for (const lib of REVIEWER_LOOP_LIBS) {
-        assert.match(
-          body,
-          new RegExp('^!`cat ~/\\.claude/lib/' + lib + '\\.md`$', 'm'),
-          `${name} must !cat lib/${lib}.md at top level, not from inside a partial`,
-        );
+        assert.ok(!source.includes(lib + '.md'), `${name} eagerly exposes ${lib}`);
+        assert.ok(includeIndex(readCommand(name), lib) >= 0, `${name} cannot reach ${lib}`);
       }
     }
   });

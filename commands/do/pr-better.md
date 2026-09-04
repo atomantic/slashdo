@@ -37,7 +37,7 @@ Constraints applied automatically:
 Execute the full `do:better` workflow defined in `~/.claude/commands/do/better.md` with these mandatory deviations:
 
 ### Phase 0 → 4a: unchanged
-Run discovery, audit (all 8 core agents, plus the UX Consistency & Responsive Layout agent when the project ships a UI — `HAS_UI=true` — and the Structural Ambition agent when `--strict`/`--nuclear` is passed; under `--simplify-only`, the narrowed five-agent roster instead), plan generation, worktree setup, foundation utilities, parallel remediation, build/test verification, and internal code review exactly as specified in `do:better`.
+Follow do:better's phase references on demand. Run discovery, the applicable audit scopes selected for the requested paths/focus (including the narrowed structural scopes under `--simplify-only`), plan generation, worktree setup, foundation utilities, parallel remediation, build/test verification, and internal code review exactly as specified in `do:better`.
 
 ### Phase 4b: Force the "Commit directly" path
 

@@ -133,9 +133,9 @@ effects, errors, or public API. Verified by `{TEST_CMD}` passing unmodified.
 
 Record all `PR_NUMBERS` and `PR_URLS` in a map: `{category: {number, url}}`.
 
-**GATE: If `--no-merge` was passed, STOP HERE.** Print all PR URLs and summary.
+**GATE: If `--no-merge` was passed, skip CI/review/merge and proceed directly to [Phase 7 safe finalization](./better-cleanup.md).** Report all PR URLs, restore this run's stash, and retain open-PR branches and the worktree for resumption.
 
-**GATE: If `VCS_HOST` is `gitlab`, STOP HERE.** Print all MR URLs and summary. The automated Phase 6 review loop + auto-merge run on GitHub PRs only; GitLab MRs are left open for manual review and merge.
+**GATE: If `VCS_HOST` is `gitlab`, proceed directly to [Phase 7 safe finalization](./better-cleanup.md).** Report MR URLs and restore this run's stash while retaining open-MR artifacts. Automated Phase 6 review and merge run on GitHub only; GitLab MRs stay open.
 
 ## Phase 5d: CI Verification
 
@@ -148,7 +148,7 @@ After creating all PRs, verify CI passes on each one:
    ```
    Poll every 30 seconds, max 10 minutes per PR.
 
-3. If CI **passes** on all PRs → proceed to Phase 6
+3. If CI **passes** on all PRs → proceed to Phase 6. No checks reported is ambiguous: confirm the repository has no applicable CI or external required checks before treating it as green. If expected checks never attach within the wait limit, leave that PR open. Compare every result to the current pushed HEAD; stale runs cannot satisfy this gate.
 
 4. If CI **fails** on any PR:
    a. Fetch the failure logs:

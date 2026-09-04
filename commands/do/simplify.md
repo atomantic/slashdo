@@ -7,7 +7,7 @@ argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent
 
 Make the codebase easier to work in, without changing what it does.
 
-This is `/do:better` with its audit narrowed to structural quality: **refactoring, architecture, DRY, simplification, and cognitive load**. Security, runtime bugs, performance, stack-specific gotchas, dependency removal, test authoring, and UX are out of scope — they are not audited, not remediated, and not filed. Every fix must be observably behavior-preserving, and the existing test suite must keep passing **unmodified** as the proof.
+This is `/do:better` with its audit narrowed to structural quality: **refactoring, architecture, DRY, simplification, and cognitive load**. Security, runtime bugs, performance, stack-specific gotchas, dependency removal, test authoring, and UX are out of scope — do not proactively audit or remediate them. Record concrete incidental bugs as deferred follow-ups, never fix them in this run. Every fix must be observably behavior-preserving, and the existing test suite must keep passing **unmodified** as the proof.
 
 Reach for this when:
 - The code works but is expensive to read, and you want that fixed with no behavioral risk
@@ -18,13 +18,15 @@ Reach for `/do:better` instead when you also want security, bugs, performance, d
 
 ## Execution
 
-Run the workflow defined in `~/.claude/commands/do/better.md` **verbatim**, with `SIMPLIFY_ONLY=true` forced on — whether or not `--simplify-only` appears in `$ARGUMENTS`. Its [Simplify-Only Mode](better.md#simplify-only-mode---simplify-only) section is the specification for the narrowed agent roster, the finding gates, the behavior-preservation contract, and every per-phase deviation. This command adds none of its own.
+Run the workflow defined in `~/.claude/commands/do/better.md` **verbatim**, with `SIMPLIFY_ONLY=true` forced on — whether or not `--simplify-only` appears in `$ARGUMENTS`. Follow its phase references on demand. The shared simplify contract defines the narrowed scope, finding gates, behavior preservation, and phase deviations; read it before discovery:
+
+!read lib/better-simplify.md
 
 Argument handling:
 - Pass `$ARGUMENTS` through to `do:better` verbatim. It parses every flag itself, including the saved `/do:config` defaults, so there is nothing to extract or re-validate here.
 - `--simplify-only` / `--refactor-only` in `$ARGUMENTS` is redundant but harmless — do not error on it.
 - `--strict` / `--nuclear` is implied (`SIMPLIFY_ONLY=true` sets `STRICT_MODE=true`); passing it explicitly changes nothing.
-- Every other `do:better` flag works as documented: `--scan-only` stops after the narrowed plan, `--interactive` prompts at each gate, `--no-merge` stops after PR creation, and the review flags (`--review-with`, `--review-mode`, `--review-iterations`, `--review-stop-on-*`, `--reviewer-applies`) drive the Phase 6 loop.
+- Every other `do:better` flag works as documented: `--scan-only` stops after the narrowed plan, `--interactive` prompts at each gate, `--no-merge` stops publication after PR creation and safely finalizes to restore the stash, and the review flags (`--review-with`, `--review-mode`, `--review-iterations`, `--review-stop-on-*`, `--reviewer-applies`) drive the Phase 6 loop.
 - `--issues` / `--issues-label <name>` select **where** deferred findings are recorded — tracker issues instead of `PLAN.md` lines. They do **not** change what the run does: `/do:simplify --issues` still remediates in a worktree, opens per-category PRs, and runs CI — and, when `--review-with` supplies a reviewer, runs the review loop and merges. To audit and file the work without touching your code, combine with `--scan-only` — a `--scan-only` run in issue mode remediates nothing, so **every** surviving finding is filed as a labeled issue, and those issues are the run's entire output.
 
 ## Notes

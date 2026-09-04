@@ -96,6 +96,13 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
 # NOTE: keep in sync with install.sh LIBS — see comment there.
 LIBS=(
+  better-audit better-audit-architecture better-audit-bugs-perf
+  better-audit-code-quality better-audit-cognitive-load better-audit-deps
+  better-audit-dry better-audit-security better-audit-stack-specific
+  better-audit-structural better-audit-tests better-audit-ux
+  better-discovery better-options better-pipeline-inputs
+  better-plan better-remediation better-simplify
+  better-state better-test-enhancement
   better-cleanup better-pr-and-ci better-review-loop better-verification
   ci-flake-handling code-review-checklist copilot-review-loop
   empty-array-expansion enhance-loop epic-children
