@@ -225,9 +225,9 @@ the next step than prose — dedup, severity ranking, and ownership all key off
 exactly these fields. An agent that finds nothing returns an empty index and writes
 no file.
 
-### 3. The orchestrator decides on the index alone
+### 3. The orchestrator consolidates on the index
 
-Everything only the orchestrator can see happens here, against the index:
+Use the index for these consolidation decisions; targeted uncertainty validation and command-specific evidence reads are exceptions:
 
 - **Cross-agent dedup** — two agents flagging the same `file:line` is normal and
   expected; collapse to one, keeping the more specific title.
@@ -238,9 +238,10 @@ This is the step that makes per-agent filing wrong: an agent that files its own
 findings as it goes cannot dedup against agents that have not returned yet, and
 overlapping audit agents are a design feature, not an accident. The output here is a
 surviving id list grouped by category. **The orchestrator never *rewrites* a spooled
-body** — on the fan-out path it never opens the spool files at all, and on the small-run
-inline path it may only lift a block out verbatim into a `--body-file`, never retype or
-summarize it from the index line.
+body** — targeted validation and command-specific evidence reads may open the
+needed blocks, but do not expand every body into context. For filing, both fan-out
+and inline paths lift each block verbatim into a `--body-file`; never retype or
+summarize evidence from the index line.
 
 ### 4. Filer agents file, in parallel, one per category
 
