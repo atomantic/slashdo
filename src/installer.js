@@ -2,7 +2,13 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getTargetFilename, transformCommand, transformLib, BUNDLED_LIB_DIR } = require('./transformer');
+const {
+  getTargetFilename,
+  transformCommand,
+  transformLib,
+  extractCommandDependencies,
+  BUNDLED_LIB_DIR,
+} = require('./transformer');
 const { readConfig, writeConfig } = require('./config');
 const {
   registerHooksInSettings,
@@ -28,6 +34,45 @@ function collectCommands(commandsDir) {
     }
   }
   return commands.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// A filtered install of a wrapper command (do:prd, do:simplify, do:pr-better)
+// must not assume the workflow it delegates to (do:goals, do:better, do:pr)
+// is already installed alongside it — that's exactly the "portable across
+// installed hosts" gap this closes. Walk each requested command's raw source
+// for command-delegation references and pull in whatever they name, so a
+// command-only filtered install always ships its required dependencies too.
+// Returns the expanded command list, the names pulled in only as a dependency
+// (never requested directly, for status reporting), and the raw content this
+// already read from disk (every command it visits ends up in the expanded
+// set, so the install step below can reuse it instead of re-reading each file).
+function expandWithCommandDependencies(requested, allCommands, knownNames) {
+  const byName = new Map(allCommands.map(c => [c.name, c]));
+  const included = new Set(requested.map(c => c.name));
+  const dependencyNames = new Set();
+  const rawContent = new Map();
+  const queue = [...included];
+
+  while (queue.length) {
+    const name = queue.shift();
+    const cmd = byName.get(name);
+    if (!cmd) continue;
+    const raw = fs.readFileSync(cmd.absPath, 'utf8');
+    rawContent.set(name, raw);
+    for (const dep of extractCommandDependencies(raw, knownNames)) {
+      if (!included.has(dep)) {
+        included.add(dep);
+        dependencyNames.add(dep);
+        queue.push(dep);
+      }
+    }
+  }
+
+  return {
+    commands: allCommands.filter(c => included.has(c.name)),
+    dependencyNames,
+    rawContent,
+  };
 }
 
 function collectLibFiles(libDir) {
@@ -332,15 +377,20 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
   const libFiles = collectLibFiles(libDir);
   const hookFiles = env.supportsHooks ? collectHooks(hooksDir) : [];
 
-  const filtered = filterNames?.length
+  const requested = filterNames?.length
     ? commands.filter(c => filterNames.includes(c.name) || filterNames.includes(`do:${c.name}`))
     : commands;
 
   const results = { installed: 0, updated: 0, upToDate: 0, removed: 0, actions: [] };
 
   if (uninstall) {
-    return doUninstall(filtered, libFiles, hookFiles, env, results, dryRun, filterNames);
+    return doUninstall(requested, libFiles, hookFiles, env, results, dryRun, filterNames);
   }
+
+  const knownCommandNames = new Set(commands.map(c => c.name));
+  const { commands: filtered, dependencyNames, rawContent } = filterNames?.length
+    ? expandWithCommandDependencies(requested, commands, knownCommandNames)
+    : { commands: requested, dependencyNames: new Set(), rawContent: new Map() };
 
   // Compile each command once; install/list share the resulting file contents.
   const bundledByCommand = new Map();
@@ -348,13 +398,16 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
   syncFileSet(filtered, {
     getContent: (cmd) => {
       const files = {};
-      const content = transformCommand(
-        fs.readFileSync(cmd.absPath, 'utf8'), env, libDir, cmd.relPath, { files });
+      const raw = rawContent.get(cmd.name) ?? fs.readFileSync(cmd.absPath, 'utf8');
+      const content = transformCommand(raw, env, libDir, cmd.relPath,
+        { files, commandNames: knownCommandNames });
       if (env.bundlesLibs) bundledByCommand.set(cmd.relPath, files);
       return content;
     },
     getTargetPath: cmd => path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)),
-    getLabel: cmd => `/do:${cmd.name}`,
+    getLabel: cmd => dependencyNames.has(cmd.name)
+      ? `/do:${cmd.name} (dependency)`
+      : `/do:${cmd.name}`,
     dryRun,
     results,
   });
@@ -507,13 +560,14 @@ function list({ env, packageDir }) {
   const commandsDir = path.join(packageDir, 'commands');
   const libDir = path.join(packageDir, 'lib');
   const commands = collectCommands(commandsDir);
+  const knownCommandNames = new Set(commands.map(c => c.name));
   const items = [];
 
   for (const cmd of commands) {
     const content = fs.readFileSync(cmd.absPath, 'utf8');
     const files = {};
     const transformed = transformCommand(
-      content, env, libDir, cmd.relPath, { files });
+      content, env, libDir, cmd.relPath, { files, commandNames: knownCommandNames });
     const expectedBundles = env.bundlesLibs
       ? new Map(Object.entries(files))
       : null;

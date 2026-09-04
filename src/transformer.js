@@ -347,10 +347,104 @@ function getTargetFilename(relPath, env) {
   }
 }
 
+// Command-delegation reference forms mirror the library reference contract
+// above: an execution instruction citing another command's canonical
+// Claude-style path (`~/.claude/commands/do/<name>.md`, the form a wrapper
+// like do:prd/do:simplify/do:pr-better uses to name the workflow it runs),
+// and a markdown link to a sibling command doc with an optional section
+// anchor (`[label](goals.md#anchor)`). A bare `name.md` target (no leading
+// `./`) is what disambiguates a command reference from LIB_SIBLING_LINK_RE,
+// which always requires that prefix — the two never collide.
+const CMD_EXEC_RE = /~\/\.claude\/commands\/(do\/[A-Za-z0-9._-]+\.md)/g;
+const CMD_SIBLING_LINK_RE = /\[([^\]]*)\]\(([A-Za-z0-9._-]+\.md)(#[A-Za-z0-9_-]+)?\)/g;
+
+function toPosixPath(filename) {
+  return filename.replace(/\\/g, '/');
+}
+
+// The execution-instruction form always resolves against the Claude-style
+// `do/<name>.md` layout. Resolution keys off `commandsPathPrefix` the same
+// way lib-path rewriting keys off `libPathPrefix`: Claude has none (it keeps
+// this layout verbatim, and `rewriteClaudeRootPaths` — which runs right after
+// this — still relocates it for a custom config directory), every other
+// environment defines its own installed-root prefix (enforced by
+// `test/environments.test.js`).
+function resolveCommandExecRef(targetRelPath, env) {
+  const targetFilename = toPosixPath(getTargetFilename(targetRelPath, env));
+  return `${env.commandsPathPrefix || '~/.claude/commands/'}${targetFilename}`;
+}
+
+// A sibling section link resolves to whatever relative path separates the
+// two commands' INSTALLED locations for this environment — bare filename for
+// namespacing that keeps commands flat or in one shared subdirectory,
+// `../other-skill/SKILL.md` for directory-namespaced Agent Skills where each
+// command becomes its own sibling directory.
+function resolveCommandSiblingRef(sourceRelPath, targetRelPath, env) {
+  const sourceTarget = toPosixPath(getTargetFilename(sourceRelPath, env));
+  const targetTarget = toPosixPath(getTargetFilename(targetRelPath, env));
+  return path.posix.relative(path.posix.dirname(sourceTarget), targetTarget);
+}
+
+// Scans raw (untransformed) command source for the two reference forms above
+// and returns the set of referenced command names found in `knownNames`. Used
+// by the installer to pull a wrapper's required workflow into a filtered
+// install instead of assuming it is already present.
+function extractCommandDependencies(content, knownNames) {
+  const deps = new Set();
+  for (const match of content.matchAll(CMD_EXEC_RE)) {
+    const name = path.basename(match[1], '.md');
+    if (knownNames.has(name)) deps.add(name);
+  }
+  for (const match of content.matchAll(CMD_SIBLING_LINK_RE)) {
+    const name = path.basename(match[2], '.md');
+    if (knownNames.has(name)) deps.add(name);
+  }
+  return deps;
+}
+
+// Resolves both reference forms for one command's body against `env`. Throws
+// on an execution reference naming a command outside `knownNames` — a
+// stale/typo'd reference should fail loudly rather than ship a dangling path.
+// A sibling-link match that doesn't correspond to a real command (or a
+// self-reference) is left untouched, the same fallback LIB_SIBLING_LINK_RE
+// uses for a non-lib doc link. `knownNames` is the same command-name Set the
+// installer already builds from `collectCommands` — one in-memory source of
+// truth for "does this command exist," shared with `extractCommandDependencies`
+// above, rather than re-deriving it per match with a filesystem stat.
+function rewriteCommandReferences(body, env, relPath, knownNames, dependenciesOut) {
+  const sourceDir = path.dirname(relPath);
+  const selfName = path.basename(relPath, '.md');
+  const commandExists = (name) => !knownNames || knownNames.has(name);
+
+  let result = body.replace(CMD_EXEC_RE, (match, targetRelPath) => {
+    const name = path.basename(targetRelPath, '.md');
+    if (!commandExists(name)) {
+      throw new Error(`Missing required slashdo command: ${targetRelPath}`);
+    }
+    dependenciesOut?.add(name);
+    return resolveCommandExecRef(targetRelPath, env);
+  });
+
+  result = result.replace(CMD_SIBLING_LINK_RE, (match, label, filename, anchor = '') => {
+    const name = path.basename(filename, '.md');
+    if (name === selfName || !commandExists(name)) return match;
+    dependenciesOut?.add(name);
+    const targetRelPath = path.join(sourceDir, filename);
+    return `[${label}](${resolveCommandSiblingRef(relPath, targetRelPath, env)}${anchor})`;
+  });
+
+  return result;
+}
+
 function transformCommand(content, env, sourceLibDir, relPath, opts = {}) {
   const { frontmatter, body } = parseFrontmatter(content);
 
   let transformedBody = applyConditionalBlocks(body, env);
+
+  if (relPath) {
+    transformedBody = rewriteCommandReferences(
+      transformedBody, env, relPath, opts.commandNames, opts.commandDependencies);
+  }
 
   // A relocated Claude config directory owns the entire ~/.claude tree, not
   // only slashdo's libraries and saved config. Quote the custom root so the
@@ -435,6 +529,9 @@ module.exports = {
   applyConditionalBlocks,
   getSkillName,
   getTargetFilename,
+  extractCommandDependencies,
+  resolveCommandExecRef,
+  resolveCommandSiblingRef,
   transformCommand,
   transformLib,
 };

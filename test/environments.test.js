@@ -187,6 +187,22 @@ describe('environment shape', () => {
       assert.equal(typeof env.supportsTeams, 'boolean', `${name} missing supportsTeams`);
     }
   });
+
+  it('every non-subdirectory env defines commandsPathPrefix for command-delegation refs', () => {
+    // Subdirectory namespacing (Claude) needs none — its execution-reference
+    // form (`~/.claude/commands/do/<name>.md`) already matches the installed
+    // layout, and a custom config root is relocated by rewriteClaudeRootPaths
+    // instead. Every other namespacing needs its own installed-root prefix or
+    // a delegated reference (do:prd -> do:goals, etc.) resolves to a bogus
+    // Claude path on a host that has no ~/.claude at all.
+    for (const name of allEnvNames()) {
+      const env = ENVIRONMENTS[name];
+      if (env.namespacing === 'subdirectory') continue;
+      assert.ok(env.commandsPathPrefix, `${name} needs commandsPathPrefix`);
+      assert.ok(env.commandsPathPrefix.startsWith('~/'), `${name}'s commandsPathPrefix should be a tilde path`);
+      assert.ok(env.commandsPathPrefix.endsWith('/'), `${name}'s commandsPathPrefix should end with /`);
+    }
+  });
 });
 
 // ── claudeEnv parity ────────────────────────────────────────────────

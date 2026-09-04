@@ -11,6 +11,7 @@ Thanks for considering a contribution. slashdo is a small, actively-maintained p
 
 - `commands/do/*.md` — the source of truth for every `/do:*` command, written in Claude Code's native format
 - `lib/*.md` — shared partials referenced from multiple commands
+- **Wrapper commands** (`do:prd`, `do:simplify`, `do:pr-better`) delegate to another command's workflow instead of duplicating it. Cite the delegated command with `` ~/.claude/commands/do/<name>.md `` for an execution instruction (e.g. "Run the workflow defined in `~/.claude/commands/do/goals.md`"), or `[label](<name>.md#anchor)` for a link to one of its sections — never hand-roll a host-specific path. The transformer resolves both forms per environment (`src/transformer.js`'s `resolveCommandExecRef`/`resolveCommandSiblingRef`), and a filtered install (`--commands do:prd`) automatically pulls in the delegated command too.
 - `src/*.js` — the installer/transformer that converts `commands/do/` and `lib/` into each target environment's native format (Claude Code, OpenCode, Antigravity CLI, Codex, Grok Build)
 - `src/settings-hooks.js` — the single implementation of the `~/.claude/settings.json` hook/statusline mutation, shared by the npm installer and (fetched at install time) by `install.sh`/`uninstall.sh`; keep it dependency-free so the curl path can fetch it alone
 - `install.sh` / `uninstall.sh` — the no-npm curl-based install path; their `COMMANDS`/`LIBS` arrays must stay in sync with `commands/do/` and `lib/` (`test/curl-installer-allowlist.test.js` enforces this in CI)

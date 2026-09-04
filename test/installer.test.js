@@ -1001,3 +1001,91 @@ describe('bundled lib docs', () => {
     } finally { cleanup(tmpDir); }
   });
 });
+
+// ── command-delegation dependency auto-install ──────────────────────
+
+describe('command-delegation dependencies', () => {
+  it('a filtered install of do:prd also installs its do:goals dependency', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      const results = install({ env, packageDir: PACKAGE_DIR, filterNames: ['prd'], dryRun: false });
+      const cmdActions = results.actions.filter(a => a.name.startsWith('/do:'));
+      const names = cmdActions.map(a => a.name);
+      assert.ok(names.some(n => n.startsWith('/do:prd')), 'do:prd itself is installed');
+      assert.ok(names.some(n => n.startsWith('/do:goals')), 'do:goals is pulled in as a dependency');
+      const goalsAction = cmdActions.find(a => a.name.startsWith('/do:goals'));
+      assert.ok(goalsAction.name.includes('(dependency)'), 'the auto-included command is labeled');
+      assert.ok(fs.existsSync(path.join(env.commandsDir, 'do', 'goals.md')));
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('a filtered install of do:simplify also installs its do:better dependency', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      const results = install({ env, packageDir: PACKAGE_DIR, filterNames: ['simplify'], dryRun: false });
+      const names = results.actions.filter(a => a.name.startsWith('/do:')).map(a => a.name);
+      assert.ok(names.some(n => n.startsWith('/do:better')));
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('a filtered install of do:pr-better installs both do:better and do:pr', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      const results = install({ env, packageDir: PACKAGE_DIR, filterNames: ['pr-better'], dryRun: false });
+      const names = results.actions.filter(a => a.name.startsWith('/do:')).map(a => a.name);
+      assert.ok(names.some(n => n.startsWith('/do:better')));
+      assert.ok(names.some(n => n.startsWith('/do:pr ') || n === '/do:pr' || n.startsWith('/do:pr(')));
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('does not pull in anything extra for a command with no delegation references', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      const results = install({ env, packageDir: PACKAGE_DIR, filterNames: ['push'], dryRun: false });
+      const cmdActions = results.actions.filter(a => a.name.startsWith('/do:'));
+      assert.equal(cmdActions.length, 1);
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('resolves the delegated reference with no dangling ~/.claude for a Claude-less Agent Skills host', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-inst-'));
+    tempDirs.add(tmpDir);
+    const env = {
+      name: 'Codex-like test env',
+      commandsDir: path.join(tmpDir, 'skills'),
+      libDir: null,
+      hooksDir: null,
+      settingsFile: null,
+      versionFile: path.join(tmpDir, '.slashdo-version'),
+      configFile: path.join(tmpDir, '.slashdo-config.json'),
+      format: 'yaml-frontmatter',
+      ext: null,
+      namespacing: 'directory',
+      libPathPrefix: null,
+      commandsPathPrefix: '~/.codex-test/skills/',
+      bundlesLibs: true,
+      supportsHooks: false,
+      supportsCatInclusion: false,
+    };
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['prd'], dryRun: false });
+      assert.ok(fs.existsSync(path.join(env.commandsDir, 'do-goals', 'SKILL.md')),
+        'the dependency must actually be installed, not just referenced');
+      const prdBody = fs.readFileSync(path.join(env.commandsDir, 'do-prd', 'SKILL.md'), 'utf8');
+      assert.ok(prdBody.includes('~/.codex-test/skills/do-goals/SKILL.md'),
+        'the reference resolves to this host\'s installed path');
+      assert.ok(!prdBody.includes('~/.claude'), 'no dependency on a Claude installation remains');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('a full (unfiltered) install needs no expansion and installs everything anyway', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      const results = install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const names = results.actions.filter(a => a.name.startsWith('/do:')).map(a => a.name);
+      assert.ok(names.every(n => !n.includes('(dependency)')),
+        'a full install never needs the dependency-expansion label');
+      assert.ok(names.some(n => n.startsWith('/do:goals')));
+    } finally { cleanup(tmpDir); }
+  });
+});
