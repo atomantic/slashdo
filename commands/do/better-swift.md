@@ -910,7 +910,7 @@ lines printed under the table (`{SUMMARY_TABLE_FOOTER}`), at column 0 in that sa
 
 ---
 
-!`cat ~/.claude/lib/better-verification.md`
+!read lib/better-verification.md
 
 ## Phase 4c: Test Enhancement
 
@@ -1028,27 +1028,13 @@ After the test agent completes:
    - For each file not already in `FILE_OWNER_MAP`, assign it to the `tests` category
    - For each file already owned by another category, leave it in that category (co-located test changes ship with the code they test — the `tests` branch only contains standalone test files not owned by other categories)
 
-!`cat ~/.claude/lib/better-pr-and-ci.md`
+!read lib/better-pr-and-ci.md
 
-!`cat ~/.claude/lib/better-review-loop.md`
-
-### Review loop libraries
-
-The wrapper and inner loop bodies Phase 6.1 dispatches to:
-
-!`cat ~/.claude/lib/multi-reviewer-loop.md`
-
-!`cat ~/.claude/lib/copilot-review-loop.md`
-
-!`cat ~/.claude/lib/github-reviewer-loop.md`
-
-!`cat ~/.claude/lib/local-agent-review-loop.md`
-
-!`cat ~/.claude/lib/ollama-review-loop.md`
+!read lib/better-review-loop.md
 
 </verification_and_pr>
 
-!`cat ~/.claude/lib/better-cleanup.md`
+!read lib/better-cleanup.md
 
 ## Error Recovery
 

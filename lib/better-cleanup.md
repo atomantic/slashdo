@@ -19,21 +19,13 @@ In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines and
 
 ## Phase 7: Cleanup
 
-1. Remove the worktree:
+1. Refresh every created PR's remote state and head. Classify each branch as merged, open, or blocked/unpublished. A local `-d` refusal does not protect the remote branch: **never delete the remote branch for an open or unmerged PR**. Confirm remote merge and fetch the target before testing ancestry. Limit all deletion to artifacts created by this run.
+2. If any PR remains open, any commits are unpublished, or publication/verification failed, retain `WORKTREE_DIR`, the staging branch, and those category branches for resumption; report their paths and status. Otherwise remove the worktree and staging branch after confirming all staged changes reached their category PRs:
    ```bash
    git worktree remove {WORKTREE_DIR}
-   ```
-2. Delete the local staging branch and per-category branches (local + remote). Use the tracked list of branches from Phase 5 rather than a fixed list:
-   ```bash
-   git checkout {DEFAULT_BRANCH}
    git branch -D {BRANCH_PREFIX}/{DATE}
-   # CREATED_CATEGORY_SLUGS is a space-delimited string, e.g. "security code-quality tests"
-   for slug in $CREATED_CATEGORY_SLUGS; do
-     git branch -d "{BRANCH_PREFIX}/$slug" || echo "warning: local branch {BRANCH_PREFIX}/$slug not found or not fully merged — skipping (use -D to force)"
-     git push origin --delete "{BRANCH_PREFIX}/$slug" || echo "warning: remote branch {BRANCH_PREFIX}/$slug not found or already deleted"
-   done
    ```
-   `-D` (force delete) is used only for the staging branch `{BRANCH_PREFIX}/{DATE}` because it is intentionally unmerged — its file contents are cherry-picked into category branches. Category branches use `-d` (safe delete) so that unmerged work is not accidentally lost; if a category branch was not merged, the warning will surface it. The guards prevent errors from interrupting cleanup.
+   Only the intentionally unmerged staging branch may use `-D`. For each category in `CREATED_CATEGORY_SLUGS`, delete local/remote branches **only after** its PR is confirmed merged and the fetched target contains its tip. Use `git branch -d` locally and `git push origin --delete` remotely; skip a refused deletion. If the host used squash/rebase and ancestry cannot prove safety, retain the branch and report it. Do not change the user's current branch merely to make cleanup succeed.
 3. **Issue mode — remove the spool.** Phase 4c was the last reader of `SPOOL_DIR`, so remove it using the literal path from run state:
    ```bash
    rm -rf "$SPOOL_DIR"
@@ -41,9 +33,9 @@ In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines and
    **Unless any filer returned `ERROR`** — those findings were never filed, and their bodies exist nowhere else. Leave the directory and print its path so they can be filed by hand.
 4. Restore stashed changes (if stashed in Phase 3a):
    ```bash
-   git stash pop
+   git -C {REPO_DIR} stash pop
    ```
-5. Update PLAN.md:
+5. Update PLAN.md only outside issue mode (issue mode updates/reports tracker records):
    - Mark completed findings by flipping `- [ ]` → `- [x]` — **preserve the `[<slug>]` ID** on each line (only the box character changes, the slug stays). See [plan-id-format.md](./plan-id-format.md).
    - Add PR links to each category section header
    - Note any skipped findings with reasons

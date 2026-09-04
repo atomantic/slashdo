@@ -13,12 +13,6 @@ In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines and
   fix still compiles everywhere.
 - `{REVIEW_STATUS_EXTRA}` — extra line(s) for the interactive review-status
   prompt, or empty (e.g. "\n\nAll PRs verified on: {PLATFORMS}").
-- The calling command must `!cat` the five reviewer-loop libraries the wrapper
-  dispatches to (`multi-reviewer-loop.md`, `copilot-review-loop.md`,
-  `github-reviewer-loop.md`, `local-agent-review-loop.md`,
-  `ollama-review-loop.md`) at its own top level — a `!cat` nested inside an
-  included file is not expanded again — and point 6.1 at them.
-
 ## Phase 6: Review Loop (GitHub only)
 
 **GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this entire phase AND the Phase 6.4 merge.** There is no default reviewer. Leave every PR open for manual review, print the PR URLs and summary (mark the Review column `none — left open`), then proceed to Phase 7 cleanup. PRs are merged only after a clean review loop, which requires an explicit `--review-with`.
@@ -29,13 +23,35 @@ Otherwise, run each PR through the **multi-reviewer loop** over `REVIEW_AGENTS`,
 
 ### 6.1: Launch parallel sub-agents (one per PR)
 
-For each PR, spawn a general-purpose sub-agent that runs the **multi-reviewer wrapper** over `REVIEW_AGENTS` for that PR. The wrapper and the inner loop bodies it dispatches to are included by this command under **Review loop libraries** below.
+For each PR, spawn a general-purpose sub-agent that runs the **multi-reviewer wrapper** over `REVIEW_AGENTS` for that PR. Each PR worker reads the wrapper and only the inner libraries for its configured entries. Pass reference paths, not all reviewer bodies, to the worker. A missing required reference makes that review inconclusive and cannot authorize merge.
 
 Pass each sub-agent the PR-specific variables: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the GitHub-side loops' `gh api` calls hit the right host on GitHub Enterprise), `{BRANCH_PREFIX}/{CATEGORY_SLUG}` (the branch the local-agent loop checks out and reviews), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the copilot/`@<login>` iteration cap; default 1).
 
 {REVIEW_LOOP_EXTRA_INSTRUCTION}
 
 Launch all PR sub-agents in parallel. Wait for all to complete.
+
+### Required review references (PR worker only)
+
+Always read the wrapper when this phase applies:
+
+!read lib/multi-reviewer-loop.md
+
+Only for `copilot` entries:
+
+!read lib/copilot-review-loop.md
+
+Only for `@<login>` entries:
+
+!read lib/github-reviewer-loop.md
+
+Only for `codex`, `agy`, `claude`, `grok`, or `cursor` entries:
+
+!read lib/local-agent-review-loop.md
+
+Only for `ollama` entries:
+
+!read lib/ollama-review-loop.md
 
 ### 6.2: Handle sub-agent results
 
@@ -72,7 +88,7 @@ Only proceed with merging based on the user's selection.
 
 ### 6.4: Merge
 
-For each PR approved for merge (in dependency order if applicable):
+For each PR approved for merge (in dependency order if applicable), verify the current local HEAD is pushed, all expected CI checks for that HEAD passed, and its review aggregate permits merge. Missing expected CI is inconclusive; leave the PR open after the CI wait limit. Then:
 ```bash
 gh pr merge {PR_NUMBER} --merge
 ```
@@ -89,5 +105,5 @@ If merge fails (e.g., branch protection, merge conflicts from a prior PR):
   git pull --rebase origin {DEFAULT_BRANCH}
   git push --force-with-lease
   ```
-  Then re-run CI check before merging.
+  Then re-run build/tests and the configured review loop against the new HEAD, publish all fixes, and re-run CI before merging. Prior approval of a different HEAD is insufficient.
 - If branch protection: inform the user and suggest manual merge

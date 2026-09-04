@@ -103,16 +103,20 @@ fetch_file() {
 # custom root, rewrite every runtime reference and shell-quote the root so the
 # generated snippets handle whitespace and metacharacters.
 # Usage: rewrite_for_claude <source> <destination>
+# Preserve literal regex anchors and Markdown backticks.
+# shellcheck disable=SC2016
+REQUIRED_READ_REWRITE='s|^!read lib/\([A-Za-z0-9._-]*\.md\)$|Read `~/.claude/lib/\1` before performing this step; required when this step applies.|'
 rewrite_for_claude() {
   local quoted_root escaped_root
   if [ "$CLAUDE_CONFIG_CUSTOM" != true ]; then
-    cp "$1" "$2"
+    sed -e "$REQUIRED_READ_REWRITE" "$1" > "$2"
     return
   fi
   quoted_root=$(printf '%s' "$CLAUDE_CONFIG_DIR" | sed "s/'/'\\\\''/g")
   quoted_root="'$quoted_root'"
   escaped_root=$(printf '%s' "$quoted_root" | sed 's/[&|\\]/\\&/g')
-  sed -e "s|~/.claude/|$escaped_root/|g" \
+  sed -e "$REQUIRED_READ_REWRITE" \
+      -e "s|~/.claude/|$escaped_root/|g" \
       -e "s|~/.claude\([^A-Za-z0-9_-]\)|$escaped_root\1|g" \
       -e "s|~/.claude$|$escaped_root|g" "$1" > "$2"
 }
@@ -121,7 +125,8 @@ rewrite_for_claude() {
 # libs resolve under OpenCode at runtime (mirrors npm's transformLib).
 # Usage: rewrite_for_opencode <source> <destination>
 rewrite_for_opencode() {
-  sed -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
+  sed -e "$REQUIRED_READ_REWRITE" \
+      -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
       -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
       "$1" > "$2"
 }
@@ -171,6 +176,13 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 # it and the command will fail at runtime. The npm installer (src/installer.js)
 # enumerates lib/ dynamically, so it doesn't need updating.
 LIBS=(
+  better-audit better-audit-architecture better-audit-bugs-perf
+  better-audit-code-quality better-audit-cognitive-load better-audit-deps
+  better-audit-dry better-audit-security better-audit-stack-specific
+  better-audit-structural better-audit-tests better-audit-ux
+  better-discovery better-options better-pipeline-inputs
+  better-plan better-remediation better-simplify
+  better-state better-test-enhancement
   better-cleanup better-pr-and-ci better-review-loop better-verification
   ci-flake-handling code-review-checklist copilot-review-loop
   empty-array-expansion enhance-loop epic-children

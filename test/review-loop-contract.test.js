@@ -12,7 +12,8 @@ const _read = (...parts) => {
   return _readCache.get(f);
 };
 const readLib = (name) => _read("lib", name);
-const readCommand = (name) => _read("commands", "do", name);
+const { readCommandDocs } = require('./helpers/command-docs');
+const readCommand = (name) => readCommandDocs(name);
 
 // The loop partials whose invocations carry arrays that can legitimately be empty
 // (TIMEOUT_CMD when no timeout/gtimeout is installed, MODEL_FLAG when no model is
@@ -577,7 +578,7 @@ describe('review-loop parse contracts', () => {
     assert.match(partial, /gh repo view --json url --jq '\.url'/);
     assert.match(partial, /\|\| GH_HOST=github\.com/);
 
-    const GH_HOST_INCLUDE = /!`cat ~\/\.claude\/lib\/gh-host\.md`/;
+    const GH_HOST_INCLUDE = /!`cat ~\/\.claude\/lib\/gh-host\.md`|!read lib\/gh-host\.md/;
     const CAT_INCLUDE = /!`cat ~\/\.claude\/lib\/([A-Za-z0-9._-]+\.md)`/g;
     const HOSTNAME_USE = /gh api --hostname/;
 
@@ -630,7 +631,7 @@ describe('review-loop parse contracts', () => {
         assert.doesNotMatch(line, DRIFTED_DEFAULT, `${label} hand-copies the GH_HOST fallback`);
       }
     };
-    for (const name of commands) banned(readCommand(name), name);
+    for (const name of commands) banned(_read("commands", "do", name), name);
     const libsDir = path.join(__dirname, '..', 'lib');
     for (const name of fs.readdirSync(libsDir).filter((f) => f.endsWith('.md') && f !== 'gh-host.md')) {
       banned(readLib(name), `lib/${name}`);
