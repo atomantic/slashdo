@@ -53,7 +53,7 @@ manifest's current version and apply `{LEVEL}` to it per SemVer to get
 - **`npm`** (Node — `package.json`):
   ```bash
   npm version {LEVEL} --no-git-tag-version
-  git diff --name-only -z -- package.json package-lock.json | xargs -0 git add
+  git diff --name-only -z -- package.json '**/package.json' package-lock.json '**/package-lock.json' | xargs -0 git add
   ```
 - **`cargo`** (Rust — `Cargo.toml`): probe in order — `cargo release version {LEVEL} --execute` if `cargo-release` is installed (`command -v cargo-release`; the bare form is a dry run), else `cargo set-version --bump {LEVEL}` if `cargo-edit` is installed (`command -v cargo-set-version`; its positional argument takes a concrete version, not a level keyword), else edit the `version = "x.y.z"` line directly to `{NEW_VERSION}` and run `cargo update -p <crate name from Cargo.toml>` to refresh the lockfile. Then:
   ```bash
@@ -69,7 +69,7 @@ manifest's current version and apply `{LEVEL}` to it per SemVer to get
   ```
 - **`ruby`** (Ruby — a gemspec or `lib/**/version.rb`): edit the `VERSION = "..."` constant directly to `{NEW_VERSION}` in `lib/**/version.rb` if that file exists (the common convention — the gemspec then reads `spec.version = SomeModule::VERSION`), else edit the gemspec's own `spec.version = "..."` (or `.version = "..."`) assignment directly. Then:
   ```bash
-  git diff --name-only -z -- '*.gemspec' 'lib/**/version.rb' | xargs -0 git add
+  git diff --name-only -z -- '*.gemspec' 'lib/**/version.rb' '**/lib/**/version.rb' | xargs -0 git add
   ```
 - **`dotnet`** (.NET — `*.csproj`): edit the `<Version>` element directly to `{NEW_VERSION}`. Then:
   ```bash
