@@ -36,7 +36,7 @@ at all, and how:
 - `Cargo.toml` with a `[package] version` → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=cargo`
 - `pyproject.toml` with a `[project] version` or `[tool.poetry] version` → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=python`
 - `pom.xml` with a `<version>`, or `build.gradle`/`build.gradle.kts` with a `version =` → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=java`
-- A gemspec or a `lib/**/version.rb` defining a `VERSION` constant → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=ruby`
+- A gemspec (a `VERSION` constant in `lib/**/version.rb` it reads, or an inline `spec.version = "..."`) → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=ruby`
 - `*.csproj` with a `<Version>` element → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=dotnet`
 - Go (`go.mod`), or any manifest above detected with no discoverable version field, or no manifest at all → `HAS_VERSION_BUMP=false`. Go modules version by VCS tag rather than an in-repo file, and a project with no version convention of its own must not be handed an invented one.
 

@@ -141,6 +141,10 @@ Detect additional Swift project characteristics:
 
 Record as `PROJECT_TYPE` = "SwiftUI" with characteristics map.
 
+Record `HAS_VERSION_BUMP=true` — this pipeline always attempts its own
+Swift-specific **Version Bump Procedure** below (Phase 5b's shared gate,
+`lib/better-pr-and-ci.md`, otherwise expects Phase 0 to set this).
+
 ### 0c: Build & Test Command Detection
 Derive build and test commands from the build system:
 
