@@ -95,10 +95,10 @@ When compacting during this workflow, always preserve:
 Detect the project environment before any scanning or remediation.
 
 ### 0a: VCS Host Detection
-Run `gh auth status --active` to check GitHub CLI (`--active` scopes the check to the active account, so a stale token on another configured account doesn't falsely fail it). If it fails, run `glab auth status` for GitLab.
-- Set `VCS_HOST` to `github` or `gitlab`
-- Set `CLI_TOOL` to `gh` or `glab`
-- If neither is authenticated, warn the user and halt
+Resolve `VCS_HOST` and `CLI_TOOL` here, before any phase reaches for a forge CLI:
+
+!read lib/vcs-host.md
+
 - **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state, following the shared derivation (and its per-host auth precheck) included below. The Phase 6 GitHub-side reviewer loops use `gh api`, which ignores the repo remote and defaults to github.com — so on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out.
 
 **GitHub only — skip the snippet below entirely on GitLab**, whose `glab` calls resolve the host from the remote themselves and where its `gh auth` precheck would abort the run.

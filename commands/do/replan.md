@@ -98,14 +98,15 @@ GOALS.md answers: *Why does this project exist? What does success look like? Wha
 > **Issue mode (`--issues`):** Skip the entire slug-assignment pass below — the
 > issue number *is* the ID, assigned by the tracker on creation. Instead do this:
 >
-> 1. **Detect the VCS host.** Run `gh auth status --active` to check the GitHub CLI
->    (`--active` scopes the check to the active account, so a stale token on another
->    configured account doesn't falsely fail it). If it
->    fails, run `glab auth status` for GitLab. Set `VCS_HOST` to `github` or
->    `gitlab` and `CLI_TOOL` to `gh` or `glab`. **If neither is authenticated,
->    abort** with: "Issue mode needs an authenticated `gh` or `glab`. Run
->    `gh auth login` (or `glab auth login`), or drop `--issues` to plan against
->    PLAN.md instead." Do not silently fall back to PLAN.md.
+> 1. **Detect the VCS host.** Select it from the `origin` remote, then check that
+>    host's credentials — the shared rule in [lib/vcs-host.md](../../lib/vcs-host.md),
+>    which every other slashdo command follows. Probing `gh auth status` first would
+>    pick GitHub on any machine logged in to both services and file this run's issues
+>    against the wrong forge. It sets `VCS_HOST` (`github`/`gitlab`) and `CLI_TOOL`
+>    (`gh`/`glab`), and it halts the run itself when the selected CLI cannot reach
+>    this repo. **Surface its message as the abort**, and add one issue-mode line:
+>    "Or drop `--issues` to plan against PLAN.md instead." Never silently fall back
+>    to PLAN.md, and never fall back to the other CLI.
 > 2. **Ensure the scoping label exists.** `gh label create <PLAN_LABEL> --description "Tracked by /do:replan" 2>/dev/null || true` (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" 2>/dev/null || true` — glab requires a color). Creating it if absent is harmless; the `|| true` swallows the "already exists" error.
 >
 > Then proceed to Phase 1. Everything in the rest of Phase 0 is PLAN.md-only.
