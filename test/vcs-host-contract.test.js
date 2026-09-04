@@ -22,11 +22,11 @@ const partial = read('lib', 'vcs-host.md');
 // credentials. Derived from the tree so a new command cannot opt itself out.
 const selectionFiles = () => {
   const dirs = [['commands', 'do'], ['lib']];
-  return dirs.flatMap(([...segments]) =>
+  return dirs.flatMap((segments) =>
     fs
       .readdirSync(path.join(root, ...segments))
-      .filter((f) => f.endsWith('.md'))
-      .map((f) => [...segments, f].join('/'))
+      .filter((entry) => entry.endsWith('.md'))
+      .map((entry) => [...segments, entry].join('/'))
   ).filter((rel) => {
     const body = read(rel);
     return body.includes('VCS_HOST') && body.includes('auth status');
