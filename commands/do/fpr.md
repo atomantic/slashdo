@@ -8,31 +8,38 @@ Commit changes, push to your fork, and open a pull request against the upstream 
 
 ## Detect Fork Relationship
 
-1. **Resolve the fork from the `origin` remote** — by convention `origin` is the user's push target. A bare `gh repo view` can pick the wrong repo when both `origin` and `upstream` remotes exist (or when the user's default login resolves elsewhere), so always pass the origin slug explicitly:
+1. **Resolve the fork from the `origin` remote** — by convention `origin` is the user's push target. A bare `gh repo view` can pick the wrong repo when both `origin` and `upstream` remotes exist (or when the user's default login resolves elsewhere), so always pass the origin slug explicitly.
+
+   **Derive the host; never hardcode `github.com`.** A GitHub Enterprise fork lives on the customer's own domain — `github.example.com`, and just as often one with no `github` substring at all (`git.example.com`, `scm.internal`) — so matching the remote against a literal `github.com` rejects every Enterprise fork outright. Split the remote into host and slug instead, and use `gh` itself as the arbiter of whether the host is a GitHub the user is authenticated to:
    ```sh
    # Strip trailing slash first so a `.git/` suffix still gets removed; then strip `.git`.
    ORIGIN_URL=$(git remote get-url origin 2>/dev/null || true)
-   ORIGIN_SLUG=$(printf '%s\n' "$ORIGIN_URL" | sed -E 's|/+$||; s|.*github\.com[:/]||; s|\.git$||; s|/+$||')
-   # Guard (POSIX): slug must be exactly OWNER/REPO (one slash, no whitespace) AND the original
-   # URL must actually be github.com — otherwise a non-GitHub remote whose path looks like
-   # owner/repo after the sed no-op (e.g. `git@gitlab.com:foo/bar`) would slip through.
+   ORIGIN_HOST=$(printf '%s\n' "$ORIGIN_URL" | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')
+   # Anchor the strip on the derived host, not on a literal domain. Match `$ORIGIN_HOST`
+   # followed by the `:` (SSH) or `/` (HTTPS) separator — anything before it is scheme/userinfo.
+   ORIGIN_SLUG=$(printf '%s\n' "$ORIGIN_URL" | sed -E "s|/+$||; s|.*$ORIGIN_HOST[:/]||; s|\.git$||; s|/+$||")
+   # Guard (POSIX): slug must be exactly OWNER/REPO (one slash, no whitespace) AND a host must
+   # have parsed out — otherwise a remote whose path merely looks like owner/repo (a bare local
+   # path, say) would slip through.
    case "$ORIGIN_SLUG" in
      ""|*/*/*|*[[:space:]]*) VALID=no ;;
      */*)                    VALID=yes ;;
      *)                      VALID=no ;;
    esac
-   case "$ORIGIN_URL" in
-     *github.com:*|*github.com/*) ;;
-     *)                          VALID=no ;;
-   esac
-   if [ "$VALID" = "yes" ]; then
-     gh repo view "$ORIGIN_SLUG" --json isFork,parent,owner,name,defaultBranchRef
+   [ -n "$ORIGIN_HOST" ] || VALID=no
+   # A GitLab remote reaches here with a well-formed slug, so let `gh` reject it: authenticating
+   # to the host is the portable test for "this is a GitHub we can talk to", and it is the same
+   # test on github.com and on any Enterprise domain.
+   if [ "$VALID" = "yes" ] && gh auth token --hostname "$ORIGIN_HOST" >/dev/null 2>&1; then
+     GH_HOST="$ORIGIN_HOST"
+     gh repo view "$GH_HOST/$ORIGIN_SLUG" --json isFork,parent,owner,name,defaultBranchRef
    else
-     echo "ERROR: origin remote is missing or not a GitHub URL (origin URL: '$ORIGIN_URL', derived slug: '$ORIGIN_SLUG'). Add a GitHub 'origin' remote pointing at your fork." >&2
+     echo "ERROR: origin is missing, is not a repo gh can reach, or gh is not authenticated to its host (origin URL: '$ORIGIN_URL', host: '$ORIGIN_HOST', slug: '$ORIGIN_SLUG'). Add an 'origin' remote pointing at your fork and run: gh auth login --hostname $ORIGIN_HOST" >&2
      # No `exit` — this snippet may be pasted into an interactive shell; the caller should stop here.
    fi
    ```
-   - If the guard prints the ERROR above: STOP and tell the user to add a GitHub `origin` remote pointing at their fork.
+   - If the guard prints the ERROR above: STOP and relay it — the user needs an `origin` remote pointing at their fork on a GitHub host `gh` is logged in to.
+   - Carry `{GH_HOST}` for the rest of the run; every URL this command prints or writes is built from it, never from a literal `github.com`.
    - If `isFork` is `false` or `parent` is null: STOP and tell the user this repo is not a fork. Suggest using `/pr` instead.
 
 2. **Extract upstream info** from the `parent` field:
@@ -53,7 +60,9 @@ Before committing, ensure the fork is up to date with upstream:
 
 1. Add upstream remote if missing:
    ```bash
-   git remote get-url upstream 2>/dev/null || git remote add upstream "https://github.com/{UPSTREAM_OWNER}/{UPSTREAM_REPO}.git"
+   # Built from the derived {GH_HOST}, so an Enterprise fork gets an Enterprise upstream —
+   # a literal github.com here would add a remote that 404s on every Enterprise install.
+   git remote get-url upstream 2>/dev/null || git remote add upstream "https://{GH_HOST}/{UPSTREAM_OWNER}/{UPSTREAM_REPO}.git"
    ```
 2. Fetch upstream: `git fetch upstream`
 3. If on the fork's default branch and there are upstream changes, rebase:

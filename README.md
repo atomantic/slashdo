@@ -152,6 +152,7 @@ With the saved `--issues` default, every plan-aware command (`/do:next`, `/do:re
 /do:better --review-with claude,codex     # full DevSecOps audit → per-category PRs → review loop → merge
 /do:simplify                              # refactor-only pass: architecture, DRY, cognitive load — behavior unchanged
 /do:review --strict                       # deep code review of the current branch's changes
+/do:review https://git.example.com/o/r/pull/12  # review a PR on any GitHub host — fixes pushed if writable, else inline
 /do:depfree --heavy                       # remove unnecessary dependencies by writing replacement code
 /do:scan ~/Downloads/sketchy-repo         # read-only malware/safety audit of an unfamiliar directory
 ```
@@ -182,7 +183,7 @@ All commands live under the `do:` namespace:
 | `/do:fpr` | Fork PR — push to fork, PR against upstream |
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
 | `/do:release` | Create a release PR with version bump and changelog |
-| `/do:review` | Deep code review of changed files against best practices (`--strict`/`--nuclear` raise the bar) |
+| `/do:review` | Deep code review of changed files, a local branch or a PR (`--strict`/`--nuclear` raise the bar; on a PR it pushes the fixes when the head branch is writable, else comments inline) |
 | `/do:better` | Full DevSecOps audit with multi-agent scan, remediation, and per-category PRs |
 | `/do:better-swift` | SwiftUI DevSecOps audit with multi-platform coverage (iOS, macOS, watchOS, tvOS, visionOS) |
 | `/do:simplify` | Refactor-only audit — architecture, DRY, simplification, cognitive load — as per-category PRs that must not change behavior ([details](#refactor-only-dosimplify)) |
