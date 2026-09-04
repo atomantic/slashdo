@@ -99,8 +99,7 @@ Detect the project environment before any scanning or remediation.
 
 !read lib/vcs-host.md
 
-- It sets `VCS_HOST` (`github`/`gitlab`) and `CLI_TOOL` (`gh`/`glab`) from the remote, then confirms that CLI can read this repo
-- An unsupported or ambiguous remote, or credentials for only the *other* service, halts the run with an actionable message before anything is created. Never fall back to whichever CLI happens to be authenticated, and never infer GitLab from a `gh` auth failure
+- It sets `VCS_HOST` and `CLI_TOOL`, and halts the run — before anything is created — when the selected CLI cannot reach this repo
 - **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state, following the shared derivation (and its per-host auth precheck) included below. The Phase 6 GitHub-side reviewer loops use `gh api`, which ignores the repo remote and defaults to github.com — so on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out.
 
 **GitHub only — skip the snippet below entirely on GitLab**, whose `glab` calls resolve the host from the remote themselves and where its `gh auth` precheck would abort the run.
