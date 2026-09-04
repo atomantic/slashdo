@@ -81,7 +81,12 @@ If a branch fails because it references something created in another branch:
 
 ### 5b: Version Bump
 
-Only if ALL category branches pass build{VERIFY_SCOPE_SUFFIX}:
+**Skip this entire step when Phase 0b recorded `HAS_VERSION_BUMP=false`** — the
+project has no in-repo version manifest, or its ecosystem versions by VCS tag
+rather than a file (e.g. Go). Do not invent one; proceed straight to 5c with
+no version-bump commit on any branch.
+
+Only if `HAS_VERSION_BUMP=true` AND ALL category branches pass build{VERIFY_SCOPE_SUFFIX}:
 1. Set `FIRST_CATEGORY` to the first category slug that has a branch (e.g., `security` if it exists, otherwise the next in order)
 2. Analyze all commits across ALL category branches to determine the aggregate SemVer bump:
    - Any `breaking:` or `BREAKING CHANGE` → **major**

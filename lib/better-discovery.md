@@ -29,6 +29,21 @@ Check for project manifests to determine the tech stack:
 
 Record the detected stack as `PROJECT_TYPE` for agent context.
 
+Additionally, resolve **version ownership** for Phase 5b's version bump
+(`lib/better-pr-and-ci.md`) — whether this run may bump the project's version
+at all, and how:
+- `package.json` with a `version` field → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=npm`
+- `Cargo.toml` with a `[package] version` → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=cargo`
+- `pyproject.toml` with a `[project] version` or `[tool.poetry] version` → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=python`
+- `pom.xml` with a `<version>`, or `build.gradle`/`build.gradle.kts` with a `version =` → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=java`
+- A gemspec or a `lib/**/version.rb` defining a `VERSION` constant → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=ruby`
+- `*.csproj` with a `<Version>` element → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=dotnet`
+- Go (`go.mod`), or any manifest above detected with no discoverable version field, or no manifest at all → `HAS_VERSION_BUMP=false`. Go modules version by VCS tag rather than an in-repo file, and a project with no version convention of its own must not be handed an invented one.
+
+Record both. Phase 5b skips its version-bump step entirely when
+`HAS_VERSION_BUMP=false`, and otherwise dispatches on `VERSION_BUMP_CMD`
+through the calling command's `Version Bump Procedure` section.
+
 Additionally, detect whether the project ships a user-facing UI:
 - Web frontend dependencies (`react`, `vue`, `svelte`, `next`, `nuxt`, `astro`, `angular`, `solid-js`) or UI source files (`*.html`, `*.css`/`*.scss`, JSX/TSX, `*.vue`, `*.svelte`)
 - Desktop shells (Electron, Tauri) or mobile UI code (React Native, Flutter)

@@ -43,12 +43,43 @@ The checklist Phase 4b reviews the remediation diff against:
 ### Version Bump Procedure
 
 The stack-specific half of Phase 5b — run on `better/{FIRST_CATEGORY}` once the
-aggregate SemVer `{LEVEL}` has been determined:
+aggregate SemVer `{LEVEL}` has been determined. Phase 5b already gates this
+section on `HAS_VERSION_BUMP=true`, so it never runs for a project with no
+version convention of its own. Dispatch on `VERSION_BUMP_CMD` (Phase 0b). Where
+the bump is a direct file edit rather than a native command, first read the
+manifest's current version and apply `{LEVEL}` to it per SemVer to get
+`{NEW_VERSION}`, then write that value into the file:
 
-```bash
-npm version {LEVEL} --no-git-tag-version
-git add package.json package-lock.json
-```
+- **`npm`** (Node — `package.json`):
+  ```bash
+  npm version {LEVEL} --no-git-tag-version
+  git diff --name-only -z -- package.json package-lock.json | xargs -0 git add
+  ```
+- **`cargo`** (Rust — `Cargo.toml`): probe in order — `cargo release version {LEVEL}` if `cargo-release` is installed (`command -v cargo-release`), else `cargo set-version {LEVEL}` if `cargo-edit` is installed (`command -v cargo-set-version`), else edit the `version = "x.y.z"` line directly to `{NEW_VERSION}` and run `cargo update -p <crate name from Cargo.toml>` to refresh the lockfile. Then:
+  ```bash
+  git diff --name-only -z -- Cargo.toml Cargo.lock | xargs -0 git add
+  ```
+- **`python`** (Python — `pyproject.toml`): `poetry version {LEVEL}` for a Poetry project, else edit the `[project] version = "..."` (or `[tool.poetry] version = "..."`) line directly to `{NEW_VERSION}`. Then:
+  ```bash
+  git diff --name-only -z -- pyproject.toml poetry.lock | xargs -0 git add
+  ```
+- **`java`** (Java/Kotlin — `pom.xml` / `build.gradle` / `build.gradle.kts`): edit the `<version>` element (Maven) or `version = "..."` assignment (Gradle) directly to `{NEW_VERSION}`. Then:
+  ```bash
+  git diff --name-only -z -- pom.xml build.gradle build.gradle.kts | xargs -0 git add
+  ```
+- **`ruby`** (Ruby — a gemspec or `lib/**/version.rb`): edit the `VERSION = "..."` constant directly to `{NEW_VERSION}`. Then:
+  ```bash
+  git diff --name-only -z -- '*.gemspec' 'lib/**/version.rb' | xargs -0 git add
+  ```
+- **`dotnet`** (.NET — `*.csproj`): edit the `<Version>` element directly to `{NEW_VERSION}`. Then:
+  ```bash
+  git diff --name-only -z -- '*.csproj' | xargs -0 git add
+  ```
+
+Every branch stages only the files the bump actually modified via
+`git diff --name-only`, never a hardcoded path — a Node project without
+`package-lock.json` has nothing there to fail on, since an absent file simply
+never appears in that diff.
 
 ### Final Summary Table
 
