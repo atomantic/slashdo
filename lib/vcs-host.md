@@ -43,26 +43,28 @@ fi
 
 #### Confirm the selected CLI can reach this repo
 
-Two separate questions: are there credentials at all, and do they reach *this*
-repo. `--active` scopes the `gh` check to the active account — a bare
+One question, asked in two parts: are there credentials at all, and do they reach
+*this* repo. `--active` scopes the `gh` check to the active account — a bare
 `gh auth status` exits non-zero when *any* configured account holds a stale token,
 even while the active one works fine, which would abort every run on a
-multi-account machine.
+multi-account machine. The `repo view` probe then turns "some credentials exist"
+into "this checkout is reachable": both CLIs resolve the concrete host from the
+origin remote, so it also catches a self-managed instance the user has no token
+for. It is skipped when `ORIGIN_HOST` is empty — with no origin to resolve
+*through*, `repo view` always fails, and running it there would abort the very
+no-remote fallback above.
 
-The `repo view` probe is what turns "some credentials exist" into "this checkout is
-reachable": both CLIs resolve the concrete host from the origin remote, so it also
-covers a self-managed instance the user has no token for. It is skipped when
-`ORIGIN_HOST` is empty — with no origin to resolve *through*, `repo view` always
-fails, and running it there would abort the very no-remote fallback above.
+Both parts share one abort, because from the user's side they are one problem: the
+selected CLI cannot see this repo. The message names every reason that is true —
+including that a remote which is neither GitHub nor GitLab lands on the GitHub
+branch and is unsupported — instead of guessing which one applies.
 
 ```bash
 if [ "$CLI_TOOL" = gh ]; then
-  gh auth status --active >/dev/null 2>&1 || {
-    echo "{COMMAND} needs gh authenticated for this repo. Run: gh auth login${ORIGIN_HOST:+ --hostname $ORIGIN_HOST}"
-    exit 1; }
-  if [ -n "$ORIGIN_HOST" ] && ! gh repo view >/dev/null 2>&1; then
-    echo "{COMMAND} resolved origin ($ORIGIN_HOST) to GitHub but gh cannot read this repo."
-    echo "If it is a GitHub/GHES repo, run: gh auth login --hostname $ORIGIN_HOST"
+  if ! gh auth status --active >/dev/null 2>&1 \
+     || { [ -n "$ORIGIN_HOST" ] && ! gh repo view >/dev/null 2>&1; }; then
+    echo "{COMMAND} selected GitHub for origin (${ORIGIN_HOST:-none}) but gh cannot read this repo."
+    echo "If it is a GitHub/GHES repo, run: gh auth login${ORIGIN_HOST:+ --hostname $ORIGIN_HOST}"
     echo "If it is neither GitHub nor GitLab, {COMMAND} does not support this forge."
     exit 1
   fi
@@ -72,16 +74,15 @@ if [ "$CLI_TOOL" = gh ]; then
   # finish the derivation with the gh-host.md snippet, which adds the fallbacks.
   GH_HOST="$ORIGIN_HOST"
 else
-  glab auth status >/dev/null 2>&1 || {
-    echo "{COMMAND} resolved origin ($ORIGIN_HOST) to GitLab but glab is not authenticated. Run: glab auth login"
-    exit 1; }
-  if [ -n "$ORIGIN_HOST" ] && ! glab repo view >/dev/null 2>&1; then
-    echo "{COMMAND} resolved origin ($ORIGIN_HOST) to GitLab but glab cannot read this repo."
-    echo "Run: glab auth login --hostname $ORIGIN_HOST"
+  if ! glab auth status >/dev/null 2>&1 \
+     || { [ -n "$ORIGIN_HOST" ] && ! glab repo view >/dev/null 2>&1; }; then
+    echo "{COMMAND} selected GitLab for origin (${ORIGIN_HOST:-none}) but glab cannot read this repo."
+    echo "Run: glab auth login${ORIGIN_HOST:+ --hostname $ORIGIN_HOST}"
     exit 1
   fi
   # No GH_HOST-style workaround here: unlike `gh api`, `glab api` and `glab issue` /
-  # `glab mr` already resolve the host from the repo's origin remote.
+  # `glab mr` already resolve the host from the repo's origin remote. A bare
+  # `glab auth login` would default to gitlab.com, so the hint names the host.
 fi
 ```
 

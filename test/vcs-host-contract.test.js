@@ -37,22 +37,25 @@ const INLINE_IMPLEMENTERS = new Set([
 const REFERENCES_PARTIAL =
   /!read lib\/vcs-host\.md|!`cat ~\/\.claude\/lib\/vcs-host\.md`|\(\.\.\/\.\.\/lib\/vcs-host\.md\)/;
 
-// A file participates in host selection when it names the variable and either probes
-// credentials itself or defers to the partial. Derived from the tree, so a command
-// cannot drop out of the sweep by rewording its prose.
-const selectionFiles = () => {
-  const dirs = [['commands', 'do'], ['lib']];
-  return dirs
-    .flatMap((segments) =>
-      fs
-        .readdirSync(path.join(root, ...segments))
-        .filter((entry) => entry.endsWith('.md'))
-        .map((entry) => [...segments, entry].join('/')))
-    .filter((rel) => {
-      const body = read(rel);
-      return body.includes('VCS_HOST') && (body.includes('auth status') || REFERENCES_PARTIAL.test(body));
-    });
-};
+const markdownFiles = () =>
+  [['commands', 'do'], ['lib']].flatMap((segments) =>
+    fs
+      .readdirSync(path.join(root, ...segments))
+      .filter((entry) => entry.endsWith('.md'))
+      .map((entry) => [...segments, entry].join('/')));
+
+// The auth-first ban sweeps every file that probes credentials at all, whatever it
+// calls its variables — a re-typed detection that never says "VCS_HOST" is exactly
+// the drift this is meant to catch.
+const authProbingFiles = () => markdownFiles().filter((rel) => /(?:gh|glab) auth status/.test(read(rel)));
+
+// The delegation rule is narrower: a file that actually decides VCS_HOST, either by
+// probing itself or by deferring to the partial.
+const selectionFiles = () =>
+  markdownFiles().filter((rel) => {
+    const body = read(rel);
+    return body.includes('VCS_HOST') && (body.includes('auth status') || REFERENCES_PARTIAL.test(body));
+  });
 
 // ---------------------------------------------------------------------------
 // Executable harness: the partial's bash blocks, run for real.
@@ -161,10 +164,42 @@ describe('VCS host selection, executed', () => {
     assert.match(run.stdout, /gh auth login/);
   });
 
+  it('picks gh on a plain github.com checkout and seeds github.com', () => {
+    const run = runSelection({
+      remote: 'git@github.com:team/app.git',
+      ghAuthed: true, ghRepo: true, glabAuthed: true, glabRepo: true,
+    });
+    assert.equal(run.status, 0, run.stdout);
+    assert.equal(run.vcsHost, 'github');
+    assert.equal(run.ghHost, 'github.com');
+  });
+
+  it('stops on a GHES checkout the account has no token for', () => {
+    // The mirror of the GitLab case below: `gh auth status` passes on the strength of
+    // a github.com login while the Enterprise host stays unreachable.
+    const run = runSelection({
+      remote: 'https://github.acme.com/team/app.git',
+      ghAuthed: true, ghRepo: false,
+    });
+    assert.equal(run.status, 1);
+    assert.match(run.stdout, /gh auth login --hostname github\.acme\.com/);
+  });
+
   it('stops on a remote that is neither GitHub nor GitLab', () => {
     const run = runSelection({
       remote: 'git@bitbucket.org:team/app.git',
       ghAuthed: true, glabAuthed: true,
+    });
+    assert.equal(run.status, 1);
+    assert.match(run.stdout, /does not support this forge/);
+  });
+
+  it('still names the unsupported forge when GitHub credentials are missing too', () => {
+    // The abort must not degrade into "log in to GitHub" for a repo that is not on
+    // GitHub at all — both reasons share one message precisely so neither is guessed.
+    const run = runSelection({
+      remote: 'git@bitbucket.org:team/app.git',
+      glabAuthed: true, glabRepo: true,
     });
     assert.equal(run.status, 1);
     assert.match(run.stdout, /does not support this forge/);
@@ -186,6 +221,13 @@ describe('VCS host selection, executed', () => {
     assert.equal(run.status, 0, run.stdout);
     assert.equal(run.vcsHost, 'github');
     assert.equal(run.cliTool, 'gh');
+  });
+
+  it('falls back to glab when it is the only CLI authenticated and there is no remote', () => {
+    const run = runSelection({ remote: null, glabAuthed: true });
+    assert.equal(run.status, 0, run.stdout);
+    assert.equal(run.vcsHost, 'gitlab');
+    assert.equal(run.cliTool, 'glab');
   });
 
   it('stops when there is no remote and no credentials at all', () => {
@@ -222,8 +264,8 @@ describe('VCS host selection stays in one partial', () => {
   it('never lets a gh auth failure stand in for a GitLab remote, anywhere in the tree', () => {
     // The exact drifted paragraph: probe gh, and on failure declare GitLab.
     const AUTH_FIRST = /`?gh auth status[^\n]*\n?[^\n]*If it\s*\n?[^\n]*fails, run `glab auth status`/;
-    const files = selectionFiles();
-    assert.ok(files.length >= 6, `expected the host-selecting file set to stay broad, got ${files.join(', ')}`);
+    const files = authProbingFiles();
+    assert.ok(files.length >= 6, `expected the credential-probing file set to stay broad, got ${files.join(', ')}`);
     for (const rel of files) {
       assert.doesNotMatch(read(rel), AUTH_FIRST, `${rel} still selects the host from a gh auth failure`);
     }

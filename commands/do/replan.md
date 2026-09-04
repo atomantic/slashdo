@@ -103,10 +103,10 @@ GOALS.md answers: *Why does this project exist? What does success look like? Wha
 >    which every other slashdo command follows. Probing `gh auth status` first would
 >    pick GitHub on any machine logged in to both services and file this run's issues
 >    against the wrong forge. It sets `VCS_HOST` (`github`/`gitlab`) and `CLI_TOOL`
->    (`gh`/`glab`). **If the selected CLI is not authenticated, abort** with: "Issue
->    mode needs an authenticated `{CLI_TOOL}` for this {VCS_HOST} repo. Run
->    `{CLI_TOOL} auth login`, or drop `--issues` to plan against PLAN.md instead."
->    Do not silently fall back to PLAN.md, and do not fall back to the other CLI.
+>    (`gh`/`glab`), and it halts the run itself when the selected CLI cannot reach
+>    this repo. **Surface its message as the abort**, and add one issue-mode line:
+>    "Or drop `--issues` to plan against PLAN.md instead." Never silently fall back
+>    to PLAN.md, and never fall back to the other CLI.
 > 2. **Ensure the scoping label exists.** `gh label create <PLAN_LABEL> --description "Tracked by /do:replan" 2>/dev/null || true` (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" 2>/dev/null || true` — glab requires a color). Creating it if absent is harmless; the `|| true` swallows the "already exists" error.
 >
 > Then proceed to Phase 1. Everything in the rest of Phase 0 is PLAN.md-only.
