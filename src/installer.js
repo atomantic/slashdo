@@ -643,7 +643,12 @@ function list({ env, packageDir }) {
         return !fs.existsSync(depTargetPath);
       })
       : [];
-    if (missingDependencies.length) status = 'unhealthy';
+    if (missingDependencies.length) {
+      // Append rather than overwrite: a command can be BOTH stale against the
+      // packaged source AND missing an installed dependency, and collapsing
+      // to a bare 'unhealthy' would silently drop the "changed" signal.
+      status = status === 'up to date' ? 'unhealthy' : `${status}, unhealthy`;
+    }
 
     const { parseFrontmatter } = require('./transformer');
     const { frontmatter } = parseFrontmatter(content);

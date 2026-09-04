@@ -5,9 +5,21 @@ const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 
-const { parseArgs } = require('../bin/cli');
+const { parseArgs, printListTable } = require('../bin/cli');
 
 const cliPath = path.resolve(__dirname, '../bin/cli.js');
+
+function captureLog(fn) {
+  const lines = [];
+  const original = console.log;
+  console.log = (...args) => lines.push(args.join(' '));
+  try {
+    fn();
+  } finally {
+    console.log = original;
+  }
+  return lines.join('\n');
+}
 
 describe('help output', () => {
   it('preserves the separator when the home directory is the filesystem root', () => {
@@ -111,5 +123,26 @@ describe('parseArgs', () => {
     const args = parseArgs(['--unknown-flag']);
     assert.deepEqual(args.commands, []);
     assert.equal(args.help, false);
+  });
+});
+
+// ── printListTable ────────────────────────────────────────────────
+
+describe('printListTable', () => {
+  it('appends the missing-dependency note when an item is unhealthy', () => {
+    const output = captureLog(() => printListTable([
+      { name: '/do:prd', status: 'unhealthy', description: 'PRD generator', missingDependencies: ['goals'] },
+    ], 'Test Env'));
+
+    assert.match(output, /\/do:prd\s+unhealthy\s+PRD generator \(requires \/do:goals — not installed for this host\)/);
+  });
+
+  it('leaves the description untouched when there are no missing dependencies', () => {
+    const output = captureLog(() => printListTable([
+      { name: '/do:push', status: 'up to date', description: 'Push and log changes' },
+    ], 'Test Env'));
+
+    assert.match(output, /\/do:push\s+up to date\s+Push and log changes$/m);
+    assert.ok(!output.includes('requires'));
   });
 });

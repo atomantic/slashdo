@@ -1194,4 +1194,20 @@ describe('list flags a wrapper command as unhealthy when its dependency is missi
       assert.equal(goals.status, 'not installed');
     } finally { cleanup(tmpDir); }
   });
+
+  it('preserves the "changed" signal for a command that is both stale and missing a dependency', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['prd'], dryRun: false });
+      // do:prd's installed copy no longer matches the packaged source...
+      fs.appendFileSync(path.join(env.commandsDir, 'do', 'prd.md'), '\nstale edit\n');
+      // ...and its dependency is also missing.
+      fs.unlinkSync(path.join(env.commandsDir, 'do', 'goals.md'));
+
+      const items = list({ env, packageDir: PACKAGE_DIR });
+      const prd = items.find(i => i.name === '/do:prd');
+      assert.equal(prd.status, 'changed, unhealthy');
+      assert.ok(prd.missingDependencies.includes('goals'));
+    } finally { cleanup(tmpDir); }
+  });
 });
