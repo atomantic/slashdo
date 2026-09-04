@@ -69,9 +69,16 @@ const bashBlocks = () => {
 
 // `{COMMAND}` is a substitution point the invoking command fills in, the same
 // convention lib/gh-host.md uses for `{GH_HOST}`. Fill it the way a run would.
+//
+// The state line is printed from an EXIT trap, not appended after the blocks: every
+// failure path ends in `exit 1`, so a trailing printf would never run and the
+// assertions about what was SELECTED on an abort would pass vacuously against
+// whatever the last echo happened to say.
 const script = () =>
-  `${bashBlocks().join('\n')}\nprintf '%s|%s|%s\\n' "$VCS_HOST" "$CLI_TOOL" "$GH_HOST"\n`
-    .replace(/\{COMMAND\}/g, '/do:better');
+  [
+    `trap 'printf "SELECTED|%s|%s|%s\\n" "$VCS_HOST" "$CLI_TOOL" "$GH_HOST"' EXIT`,
+    ...bashBlocks(),
+  ].join('\n').replace(/\{COMMAND\}/g, '/do:better');
 
 const STUB = (tool, authedVar, repoVar) => `#!/bin/sh
 case "$1" in
@@ -110,14 +117,10 @@ function runSelection({ remote, ghAuthed = false, ghRepo = false, glabAuthed = f
         GLAB_REPO: glabRepo ? '1' : '0',
       },
     });
-    const selected = (result.stdout.trim().split('\n').pop() || '').split('|');
-    return {
-      status: result.status,
-      stdout: result.stdout,
-      vcsHost: selected[0],
-      cliTool: selected[1],
-      ghHost: selected[2],
-    };
+    const line = result.stdout.split('\n').find((l) => l.startsWith('SELECTED|'));
+    assert.ok(line, `the EXIT trap should always report the selection:\n${result.stdout}`);
+    const [, vcsHost, cliTool, ghHost] = line.trim().split('|');
+    return { status: result.status, stdout: result.stdout, vcsHost, cliTool, ghHost };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -151,7 +154,9 @@ describe('VCS host selection, executed', () => {
       ghAuthed: true, ghRepo: true,
     });
     assert.equal(run.status, 1);
-    assert.notEqual(run.vcsHost, 'github', 'a gh login must never decide a GitLab repo');
+    // The trap reports what was actually selected, so this is a real check on the
+    // decision rather than on whatever text the abort happened to print last.
+    assert.equal(run.vcsHost, 'gitlab', 'a gh login must never decide a GitLab repo');
     assert.match(run.stdout, /glab auth login/);
   });
 
@@ -264,9 +269,12 @@ describe('VCS host selection stays in one partial', () => {
   it('never lets a gh auth failure stand in for a GitLab remote, anywhere in the tree', () => {
     // The exact drifted paragraph: probe gh, and on failure declare GitLab.
     const AUTH_FIRST = /`?gh auth status[^\n]*\n?[^\n]*If it\s*\n?[^\n]*fails, run `glab auth status`/;
-    const files = authProbingFiles();
-    assert.ok(files.length >= 6, `expected the credential-probing file set to stay broad, got ${files.join(', ')}`);
-    for (const rel of files) {
+    // The floor is on the files that decide a host AT ALL, not on the shrinking
+    // subset that still probes credentials inline — every migration to the partial
+    // moves a file from the second set to the first, and must not weaken the guard.
+    const deciding = new Set([...authProbingFiles(), ...selectionFiles()]);
+    assert.ok(deciding.size >= 6, `expected the host-deciding file set to stay broad, got ${[...deciding].join(', ')}`);
+    for (const rel of authProbingFiles()) {
       assert.doesNotMatch(read(rel), AUTH_FIRST, `${rel} still selects the host from a gh auth failure`);
     }
   });

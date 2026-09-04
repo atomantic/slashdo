@@ -92,11 +92,10 @@ When compacting during this workflow, always preserve:
 ## Phase 0: Discovery & Setup
 
 ### 0a: VCS Host Detection
-**The `origin` remote selects the host; credentials are checked second.** Probing `gh auth status` first picks GitHub on any machine logged in to both services — even in a GitLab checkout — and routes default-branch lookup, issue filing, and PR/MR operations to the wrong forge. Follow the shared selection instead:
+Resolve `VCS_HOST` and `CLI_TOOL` here, before any phase reaches for a forge CLI:
 
 !read lib/vcs-host.md
 
-- It sets `VCS_HOST` and `CLI_TOOL`, and halts the run — before anything is created — when the selected CLI cannot reach this repo
 - **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state, following the shared derivation (and its per-host auth precheck) included below. The Phase 6 GitHub-side reviewer loops use `gh api`, which ignores the repo remote and defaults to github.com — so on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out.
 
 **GitHub only — skip the snippet below entirely on GitLab**, whose `glab` calls resolve the host from the remote themselves and where its `gh auth` precheck would abort the run.
