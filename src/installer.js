@@ -146,26 +146,6 @@ function assertSafeBundlePath(targetPath, expectedType) {
   return true;
 }
 
-function collectBundledLibContents(entry, libDir, env) {
-  const contents = new Map();
-  if (!entry) return contents;
-
-  const { bundled: pending, present } = entry;
-  const processed = new Set();
-  // `pending` grows while draining when a bundled lib defers another.
-  while (processed.size < pending.size) {
-    for (const filename of Array.from(pending)) {
-      if (processed.has(filename)) continue;
-      processed.add(filename);
-      const absPath = path.join(libDir, filename);
-      if (!fs.existsSync(absPath)) continue;
-      contents.set(filename, transformLib(
-        fs.readFileSync(absPath, 'utf8'), env, libDir, { bundled: pending, present }));
-    }
-  }
-  return contents;
-}
-
 function bundledLibsAreEqual(skillDir, expected) {
   const bundleDir = path.join(skillDir, BUNDLED_LIB_DIR);
   let bundleStat;
@@ -296,14 +276,13 @@ function finalizeInstall(env, hookFiles, packageDir, dryRun, filterNames, autoUp
 }
 
 // Writes the lib docs a command defers into `<skillDir>/lib/`, so the read
-// directive in SKILL.md points at a file that exists. Transitive: a bundled lib
-// may itself defer a sibling backend (local-agent cites ollama), so drain the set
-// as it grows rather than iterating a snapshot.
-function syncBundledLibs(commands, bundledByCommand, libDir, env, dryRun, results) {
+// directive in SKILL.md points at a file that exists. The shared renderer has
+// already resolved the full graph, including each file's sibling references.
+function syncBundledLibs(commands, bundledByCommand, env, dryRun, results) {
   for (const cmd of commands) {
     const entry = bundledByCommand.get(cmd.relPath);
     if (!entry) continue;
-    const contents = collectBundledLibContents(entry, libDir, env);
+    const contents = new Map(Object.entries(entry));
 
     const skillDir = path.dirname(path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)));
     const skillExists = assertSafeBundlePath(skillDir, 'directory');
@@ -363,18 +342,15 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
     return doUninstall(filtered, libFiles, hookFiles, env, results, dryRun, filterNames);
   }
 
-  // Per-command set of lib docs to write beside its SKILL.md. Filled while each
-  // command is transformed (getContent runs for every item, up-to-date ones
-  // included), then drained below.
+  // Compile each command once; install/list share the resulting file contents.
   const bundledByCommand = new Map();
 
   syncFileSet(filtered, {
     getContent: (cmd) => {
-      const bundled = new Set();
-      const present = new Set();
+      const files = {};
       const content = transformCommand(
-        fs.readFileSync(cmd.absPath, 'utf8'), env, libDir, cmd.relPath, { bundled, present });
-      if (env.bundlesLibs) bundledByCommand.set(cmd.relPath, { bundled, present });
+        fs.readFileSync(cmd.absPath, 'utf8'), env, libDir, cmd.relPath, { files });
+      if (env.bundlesLibs) bundledByCommand.set(cmd.relPath, files);
       return content;
     },
     getTargetPath: cmd => path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)),
@@ -384,12 +360,12 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
   });
 
   if (env.bundlesLibs) {
-    syncBundledLibs(filtered, bundledByCommand, libDir, env, dryRun, results);
+    syncBundledLibs(filtered, bundledByCommand, env, dryRun, results);
   }
 
   if (env.libDir) {
     syncFileSet(libFiles, {
-      getContent: lib => transformLib(fs.readFileSync(lib.absPath, 'utf8'), env),
+      getContent: lib => transformLib(fs.readFileSync(lib.absPath, 'utf8'), env, libDir),
       getTargetPath: lib => path.join(env.libDir, lib.relPath),
       getLabel: lib => `lib/${lib.name}`,
       dryRun,
@@ -535,12 +511,11 @@ function list({ env, packageDir }) {
 
   for (const cmd of commands) {
     const content = fs.readFileSync(cmd.absPath, 'utf8');
-    const bundled = new Set();
-    const present = new Set();
+    const files = {};
     const transformed = transformCommand(
-      content, env, libDir, cmd.relPath, { bundled, present });
+      content, env, libDir, cmd.relPath, { files });
     const expectedBundles = env.bundlesLibs
-      ? collectBundledLibContents({ bundled, present }, libDir, env)
+      ? new Map(Object.entries(files))
       : null;
     const targetRel = getTargetFilename(cmd.relPath, env);
     const targetPath = path.join(env.commandsDir, targetRel);

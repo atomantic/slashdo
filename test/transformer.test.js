@@ -813,7 +813,7 @@ describe('backticked lib citations', () => {
         { bundlesLibs: true });
       assert.ok(!result.includes('SHARED-BODY-SENTINEL'), 'see-also must pull in nothing');
       assert.ok(!result.includes('Referenced libraries'), 'no appendix for a mere mention');
-      assert.ok(result.includes('`shared`'), 'reads as a doc name, not a path');
+      assert.ok(result.includes('`lib/shared.md`'), 'citation points at a bundled file');
     });
   });
 

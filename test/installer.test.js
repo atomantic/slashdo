@@ -840,11 +840,18 @@ describe('bundled lib docs', () => {
       for (const skill of fs.readdirSync(env.commandsDir)) {
         const skillFile = path.join(env.commandsDir, skill, 'SKILL.md');
         if (!fs.existsSync(skillFile)) continue;
-        const body = fs.readFileSync(skillFile, 'utf8');
-        const cited = [...body.matchAll(/`(lib\/[A-Za-z0-9._-]+\.md)`/g)].map(m => m[1]);
-        for (const ref of new Set(cited)) {
-          assert.ok(fs.existsSync(path.join(env.commandsDir, skill, ref)),
-            `${skill}/SKILL.md cites ${ref}, which was not written`);
+        const bundleDir = path.join(env.commandsDir, skill, BUNDLED_LIB_DIR);
+        const files = [skillFile, ...(fs.existsSync(bundleDir)
+          ? fs.readdirSync(bundleDir).map(name => path.join(bundleDir, name)) : [])];
+        for (const file of files) {
+          const body = fs.readFileSync(file, 'utf8');
+          const cited = [...body.matchAll(/`((?:lib\/|\.\/)[A-Za-z0-9._-]+\.md)`/g)].map(m => m[1]);
+          for (const ref of new Set(cited)) {
+            // Ordinary project files (for example ./CLAUDE.md) are not bundles.
+            if (ref.startsWith('./') && !fs.existsSync(path.join(PACKAGE_DIR, 'lib', path.basename(ref)))) continue;
+            assert.ok(fs.existsSync(path.join(path.dirname(file), ref)),
+              `${path.basename(file)} cites ${ref}, which was not written`);
+          }
         }
       }
     } finally { cleanup(tmpDir); }

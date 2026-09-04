@@ -485,6 +485,36 @@ npx slash-do@latest push pr release           # install specific commands only
   ~/.grok/skills/do-push/SKILL.md
 ```
 
+### Embedding command prompts
+
+Hosts can use the same dependency-free renderer as the skill installer:
+
+```js
+const { buildPromptBundle, parseFrontmatter } = require('slash-do/src/transformer');
+const { body } = parseFrontmatter(commandMarkdown);
+const bundle = buildPromptBundle(body, sourceLibDirectory, {
+  teams: false,
+  skipIncludes: [], // library filenames intentionally supplied or excluded by the host
+  defer: true,
+});
+```
+
+Write `bundle.body` beside a `lib/` directory containing `bundle.files` (an object
+keyed by bare library filenames). References in the body use `lib/name.md`;
+references between supporting files use `./name.md`. Give the agent access to
+that directory. Use `defer: false` when file tools are unavailable: the returned
+body includes dependencies once and `files` is empty. Conditions are resolved
+before dependencies; missing required files fail with a named error. For legacy
+recipe consumers that intentionally include only explicit `!cat`/`!read` content,
+set `followReferences: false` to avoid traversing see-also citations. Eager mode
+also preserves bare backticked library names as citations rather than includes.
+
+In command or library source, put `!read lib/name.md` on its own line immediately
+after the phase or condition requiring it. The renderer emits a required read
+at that step, including for native Claude/OpenCode commands. Keep `!`-backticked
+`cat ~/.claude/lib/name.md` includes for content needed immediately. Deferred
+skills bundle citations instead of appending their transitive contents.
+
 ## Updating
 
 On install, slashdo asks whether to **auto-update** (default: yes, Claude Code only). When enabled, the SessionStart hook asks npm for the current version, validates the result, and runs that exact version with npm lifecycle scripts disabled whenever it detects a newer release — no manual step needed. The automatic path does not execute the mutable `@latest` tag, and it only treats the update as successful when the requested version is installed. If npm returns invalid metadata or the install fails, the statusline keeps the `⬆ /do:update` hint instead. When disabled, the statusline shows the same hint and you update manually:
