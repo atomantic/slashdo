@@ -992,10 +992,10 @@ describe('bundled lib docs', () => {
 
       assert.throws(
         () => install({
-          // pr-better delegates to pr, so it must be removed in the same call —
-          // otherwise the new stranded-dependent guard refuses first and this
-          // symlink-traversal check never runs.
-          env, packageDir: PACKAGE_DIR, filterNames: ['pr', 'pr-better'], dryRun: false, uninstall: true,
+          // pr-better and next both delegate to pr, so all three must be
+          // removed in the same call — otherwise the stranded-dependent
+          // guard refuses first and this symlink-traversal check never runs.
+          env, packageDir: PACKAGE_DIR, filterNames: ['pr', 'pr-better', 'next'], dryRun: false, uninstall: true,
         }),
         /Refusing to traverse unsafe bundled lib directory/);
       assert.equal(fs.readFileSync(victim, 'utf8'), 'must survive');
@@ -1038,6 +1038,20 @@ describe('command-delegation dependencies', () => {
       const names = results.actions.filter(a => a.name.startsWith('/do:')).map(a => a.name);
       assert.ok(names.some(n => n.startsWith('/do:better')));
       assert.ok(names.some(n => n.startsWith('/do:pr ') || n === '/do:pr' || n.startsWith('/do:pr(')));
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('a filtered install of do:next also installs its do:pr dependency', () => {
+    // do:next is not a full-workflow wrapper — it only delegates its ship
+    // phase to do:pr — but that's still a genuine runtime dependency
+    // (issue #241), so it must be cited and auto-installed like any other.
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      const results = install({ env, packageDir: PACKAGE_DIR, filterNames: ['next'], dryRun: false });
+      const names = results.actions.filter(a => a.name.startsWith('/do:')).map(a => a.name);
+      assert.ok(names.some(n => n.startsWith('/do:next')), 'do:next itself is installed');
+      assert.ok(names.some(n => n.startsWith('/do:pr ') || n === '/do:pr' || n.startsWith('/do:pr(')),
+        'do:pr is pulled in as a dependency');
     } finally { cleanup(tmpDir); }
   });
 
@@ -1110,6 +1124,21 @@ describe('uninstall refuses to strand a still-installed dependent', () => {
       // Nothing was removed.
       assert.ok(fs.existsSync(path.join(env.commandsDir, 'do', 'goals.md')), 'do:goals survives the refusal');
       assert.ok(fs.existsSync(path.join(env.commandsDir, 'do', 'prd.md')), 'do:prd is untouched');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('refuses to remove do:pr while do:next still depends on it', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['next'], dryRun: false });
+      assert.ok(fs.existsSync(path.join(env.commandsDir, 'do', 'pr.md')));
+
+      assert.throws(
+        () => install({ env, packageDir: PACKAGE_DIR, filterNames: ['pr'], uninstall: true, dryRun: false }),
+        /Refusing to uninstall.*do:pr.*do:next/s
+      );
+      assert.ok(fs.existsSync(path.join(env.commandsDir, 'do', 'pr.md')), 'do:pr survives the refusal');
+      assert.ok(fs.existsSync(path.join(env.commandsDir, 'do', 'next.md')), 'do:next is untouched');
     } finally { cleanup(tmpDir); }
   });
 
