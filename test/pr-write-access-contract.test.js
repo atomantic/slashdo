@@ -112,6 +112,11 @@ describe('VCS host portability', () => {
     assert.match(fpr, /ORIGIN_HOST=/);
     assert.match(fpr, /gh auth token --hostname "\$ORIGIN_HOST"/);
     assert.match(fpr, /git remote add upstream "https:\/\/\{GH_HOST\}\//);
+
+    // `gh pr create --repo` does not infer the host from the local remote (unlike
+    // `gh pr`/`gh repo` bare commands), so a bare OWNER/REPO here would target
+    // gh's default host instead of the derived Enterprise one.
+    assert.match(fpr, /gh pr create \\\n\s*--repo \{GH_HOST\}\/\{UPSTREAM_OWNER\}\/\{UPSTREAM_REPO\}/);
   });
 
   it('builds no URL and gates no branch on a literal github.com', () => {

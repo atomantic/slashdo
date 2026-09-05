@@ -53,6 +53,12 @@ Only for `ollama` entries:
 
 !read lib/ollama-review-loop.md
 
+The copilot and `@<login>` loops resolve review threads via raw `gh api graphql`
+mutations — read the shell-escaping rules once up front so a worker doesn't
+reach for `$variableName` GraphQL syntax the shell will mangle:
+
+!`cat ~/.claude/lib/graphql-escaping.md`
+
 ### 6.2: Handle sub-agent results
 
 Each sub-agent returns the multi-reviewer wrapper's `{OVERALL_STATUS}` for its PR:

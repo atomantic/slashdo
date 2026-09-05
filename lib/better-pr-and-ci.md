@@ -67,6 +67,7 @@ For each category that has findings:
    ```
    {COMMIT_PREFIX_RULE}
 5. Push the branch: `git push -u origin {BRANCH_PREFIX}/{CATEGORY_SLUG}`
+   - **Push failure**: `git pull --rebase --autostash` then retry the push once. If it still fails, report the branch as blocked and continue with the remaining categories rather than aborting the whole run.
 
 **File isolation rule** (one file per branch) — each file must appear in exactly ONE branch. If a file has changes from multiple categories (e.g., {MULTI_CATEGORY_FILE_EXAMPLE}), assign the whole file to one category based on the file ownership map. Do not split file-level changes across PRs.
 

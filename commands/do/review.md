@@ -261,8 +261,8 @@ In `PR_MODE` with `PR_DISPOSITION=inline`, skip the local build/test step — no
 
 When `PR_MODE=true` and `PR_DISPOSITION=apply`, run this section against the PR's branch instead of the local one, then continue to "Push fixes to the PR branch":
 
-1. `gh pr checkout {PR_NUM} --repo "{GH_HOST}/{OWNER}/{REPO}"` first (per `~/.claude/lib/pr-write-access.md`) so the tracking ref points at the PR head, not the base repo.
-2. **Refuse to start on a dirty tree.** If `git status --porcelain` is non-empty, do not check out over the user's uncommitted work — fall back to `PR_DISPOSITION=inline`, say why, and continue. Losing local edits to land a review fix is never the right trade.
+1. **Refuse to start on a dirty tree.** Before checking anything out, if `git status --porcelain` is non-empty, do not check out over the user's uncommitted work — fall back to `PR_DISPOSITION=inline`, say why, and continue. Losing local edits to land a review fix is never the right trade.
+2. `gh pr checkout {PR_NUM} --repo "{GH_HOST}/{OWNER}/{REPO}"` (per `~/.claude/lib/pr-write-access.md`) so the tracking ref points at the PR head, not the base repo.
 3. Fix only what this review found. Do not rebase the PR, reformat untouched files, or fold in unrelated cleanups — the author owns this branch and every extra commit is one they have to justify.
 4. Attribute the commits to the review, exactly as local mode does below (`address review (self): …`).
 

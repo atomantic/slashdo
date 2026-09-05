@@ -26,13 +26,34 @@ while work happens on issues.
 ## Setup — only when `ISSUE_MODE` is true
 
 1. **VCS host.** Reuse `CLI_TOOL` (`gh`/`glab`) if the command already detected it
-   in its own discovery phase. Otherwise run `gh auth status --active` (the `--active`
-   flag scopes the check to the active account, so a stale token on another configured
-   account doesn't falsely fail it), else
-   `glab auth status`, and set `CLI_TOOL` accordingly. If neither is authenticated,
-   **abort** with: "`--issues` needs an authenticated `gh` or `glab`. Run
-   `gh auth login` (or `glab auth login`), or drop `--issues` to record items in
-   PLAN.md." Never silently fall back to writing PLAN.md.
+   in its own discovery phase. Otherwise **derive it from the `origin` remote first,
+   then confirm that host's credentials** — never pick a CLI by probing its
+   credentials before looking at the remote, which is how a GitLab repo on a
+   machine also authenticated to GitHub ends up misrouted against a repository it
+   cannot see (see `~/.claude/lib/vcs-host.md`, which this mirrors):
+   ```bash
+   ORIGIN_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"
+   if printf '%s' "$ORIGIN_HOST" | grep -qi gitlab; then
+     CLI_TOOL=glab
+   elif [ -n "$ORIGIN_HOST" ]; then
+     CLI_TOOL=gh
+   elif gh auth status --active >/dev/null 2>&1; then
+     CLI_TOOL=gh
+   elif glab auth status >/dev/null 2>&1; then
+     CLI_TOOL=glab
+   else
+     echo "--issues needs an authenticated gh or glab. Run 'gh auth login' or 'glab auth login', or drop --issues to record items in PLAN.md."; exit 1
+   fi
+   ```
+   (The `--active` flag on `gh auth status` scopes the check to the active account,
+   so a stale token on another configured account doesn't falsely fail it — only
+   relevant in the no-origin-remote fallback above, since the remote-derived branches
+   confirm the selected CLI's credentials in the next step.) Then confirm the
+   selected `CLI_TOOL` is actually authenticated to `$ORIGIN_HOST` (`gh auth status
+   --active` / `glab auth status`); if it is not, **abort** with: "`--issues` needs
+   an authenticated `gh` or `glab`. Run `gh auth login` (or `glab auth login`), or
+   drop `--issues` to record items in PLAN.md." Never silently fall back to writing
+   PLAN.md.
 2. **Label.** Ensure the scoping label exists:
    `gh label create <PLAN_LABEL> --description "Tracked by slashdo" 2>/dev/null || true`
    (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" 2>/dev/null || true` — glab requires a color).

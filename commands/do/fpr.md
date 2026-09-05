@@ -138,7 +138,7 @@ Create a cross-fork PR targeting the upstream repo:
 
 ```bash
 gh pr create \
-  --repo {UPSTREAM_OWNER}/{UPSTREAM_REPO} \
+  --repo {GH_HOST}/{UPSTREAM_OWNER}/{UPSTREAM_REPO} \
   --head {FORK_OWNER}:{CURRENT_BRANCH} \
   --base {UPSTREAM_DEFAULT_BRANCH} \
   --title "PR title here" \
