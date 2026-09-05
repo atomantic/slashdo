@@ -1,0 +1,4 @@
+# Architecture & SOLID
+   Sources: structural violations, coupling analysis, modularity, API contract quality
+   Structural focus: Single Responsibility violations (god files >500 lines, functions >50 lines doing multiple things), tight coupling between modules, circular dependencies, mixed concerns in single files, dependency inversion violations, classes/modules with too many responsibilities (>20 public methods), deep nesting (>4 levels), long parameter lists, modules reaching into other modules' internals
+   API contract focus _(skip when `SIMPLIFY_ONLY=true` — these are behavior, not structure)_: inconsistent API error response shapes across endpoints, list endpoints missing pagination, missing rate limiting on public endpoints, inconsistent request/response envelope patterns, breaking response shape changes without versioning, missing deprecation headers on sunset endpoints

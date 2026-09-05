@@ -160,8 +160,11 @@ function printListTable(items, envName) {
     `  ${'-------'.padEnd(nameWidth)} ${'------'.padEnd(statusWidth)} -----------`
   );
   for (const item of items) {
+    const description = item.missingDependencies?.length
+      ? `${item.description} (requires /do:${item.missingDependencies.join(', /do:')} — not installed for this host)`
+      : item.description;
     console.log(
-      `  ${item.name.padEnd(nameWidth)} ${item.status.padEnd(statusWidth)} ${item.description}`
+      `  ${item.name.padEnd(nameWidth)} ${item.status.padEnd(statusWidth)} ${description}`
     );
   }
 }
@@ -299,4 +302,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseArgs };
+module.exports = { parseArgs, printListTable };

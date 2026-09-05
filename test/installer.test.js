@@ -840,11 +840,18 @@ describe('bundled lib docs', () => {
       for (const skill of fs.readdirSync(env.commandsDir)) {
         const skillFile = path.join(env.commandsDir, skill, 'SKILL.md');
         if (!fs.existsSync(skillFile)) continue;
-        const body = fs.readFileSync(skillFile, 'utf8');
-        const cited = [...body.matchAll(/`(lib\/[A-Za-z0-9._-]+\.md)`/g)].map(m => m[1]);
-        for (const ref of new Set(cited)) {
-          assert.ok(fs.existsSync(path.join(env.commandsDir, skill, ref)),
-            `${skill}/SKILL.md cites ${ref}, which was not written`);
+        const bundleDir = path.join(env.commandsDir, skill, BUNDLED_LIB_DIR);
+        const files = [skillFile, ...(fs.existsSync(bundleDir)
+          ? fs.readdirSync(bundleDir).map(name => path.join(bundleDir, name)) : [])];
+        for (const file of files) {
+          const body = fs.readFileSync(file, 'utf8');
+          const cited = [...body.matchAll(/`((?:lib\/|\.\/)[A-Za-z0-9._-]+\.md)`/g)].map(m => m[1]);
+          for (const ref of new Set(cited)) {
+            // Ordinary project files (for example ./CLAUDE.md) are not bundles.
+            if (ref.startsWith('./') && !fs.existsSync(path.join(PACKAGE_DIR, 'lib', path.basename(ref)))) continue;
+            assert.ok(fs.existsSync(path.join(path.dirname(file), ref)),
+              `${path.basename(file)} cites ${ref}, which was not written`);
+          }
         }
       }
     } finally { cleanup(tmpDir); }
@@ -985,12 +992,222 @@ describe('bundled lib docs', () => {
 
       assert.throws(
         () => install({
-          env, packageDir: PACKAGE_DIR, filterNames: ['pr'], dryRun: false, uninstall: true,
+          // pr-better delegates to pr, so it must be removed in the same call —
+          // otherwise the new stranded-dependent guard refuses first and this
+          // symlink-traversal check never runs.
+          env, packageDir: PACKAGE_DIR, filterNames: ['pr', 'pr-better'], dryRun: false, uninstall: true,
         }),
         /Refusing to traverse unsafe bundled lib directory/);
       assert.equal(fs.readFileSync(victim, 'utf8'), 'must survive');
       assert.ok(fs.existsSync(path.join(env.commandsDir, 'do-pr', 'SKILL.md')),
         'validation must fail before uninstall removes anything');
+    } finally { cleanup(tmpDir); }
+  });
+});
+
+// ── command-delegation dependency auto-install ──────────────────────
+
+describe('command-delegation dependencies', () => {
+  it('a filtered install of do:prd also installs its do:goals dependency', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      const results = install({ env, packageDir: PACKAGE_DIR, filterNames: ['prd'], dryRun: false });
+      const cmdActions = results.actions.filter(a => a.name.startsWith('/do:'));
+      const names = cmdActions.map(a => a.name);
+      assert.ok(names.some(n => n.startsWith('/do:prd')), 'do:prd itself is installed');
+      assert.ok(names.some(n => n.startsWith('/do:goals')), 'do:goals is pulled in as a dependency');
+      const goalsAction = cmdActions.find(a => a.name.startsWith('/do:goals'));
+      assert.ok(goalsAction.name.includes('(dependency)'), 'the auto-included command is labeled');
+      assert.ok(fs.existsSync(path.join(env.commandsDir, 'do', 'goals.md')));
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('a filtered install of do:simplify also installs its do:better dependency', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      const results = install({ env, packageDir: PACKAGE_DIR, filterNames: ['simplify'], dryRun: false });
+      const names = results.actions.filter(a => a.name.startsWith('/do:')).map(a => a.name);
+      assert.ok(names.some(n => n.startsWith('/do:better')));
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('a filtered install of do:pr-better installs both do:better and do:pr', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      const results = install({ env, packageDir: PACKAGE_DIR, filterNames: ['pr-better'], dryRun: false });
+      const names = results.actions.filter(a => a.name.startsWith('/do:')).map(a => a.name);
+      assert.ok(names.some(n => n.startsWith('/do:better')));
+      assert.ok(names.some(n => n.startsWith('/do:pr ') || n === '/do:pr' || n.startsWith('/do:pr(')));
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('does not pull in anything extra for a command with no delegation references', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      const results = install({ env, packageDir: PACKAGE_DIR, filterNames: ['push'], dryRun: false });
+      const cmdActions = results.actions.filter(a => a.name.startsWith('/do:'));
+      assert.equal(cmdActions.length, 1);
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('resolves the delegated reference with no dangling ~/.claude for a Claude-less Agent Skills host', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-inst-'));
+    tempDirs.add(tmpDir);
+    const env = {
+      name: 'Codex-like test env',
+      commandsDir: path.join(tmpDir, 'skills'),
+      libDir: null,
+      hooksDir: null,
+      settingsFile: null,
+      versionFile: path.join(tmpDir, '.slashdo-version'),
+      configFile: path.join(tmpDir, '.slashdo-config.json'),
+      format: 'yaml-frontmatter',
+      ext: null,
+      namespacing: 'directory',
+      libPathPrefix: null,
+      commandsPathPrefix: '~/.codex-test/skills/',
+      bundlesLibs: true,
+      supportsHooks: false,
+      supportsCatInclusion: false,
+    };
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['prd'], dryRun: false });
+      assert.ok(fs.existsSync(path.join(env.commandsDir, 'do-goals', 'SKILL.md')),
+        'the dependency must actually be installed, not just referenced');
+      const prdBody = fs.readFileSync(path.join(env.commandsDir, 'do-prd', 'SKILL.md'), 'utf8');
+      assert.ok(prdBody.includes('~/.codex-test/skills/do-goals/SKILL.md'),
+        'the reference resolves to this host\'s installed path');
+      assert.ok(!prdBody.includes('~/.claude'), 'no dependency on a Claude installation remains');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('a full (unfiltered) install needs no expansion and installs everything anyway', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      const results = install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      const names = results.actions.filter(a => a.name.startsWith('/do:')).map(a => a.name);
+      assert.ok(names.every(n => !n.includes('(dependency)')),
+        'a full install never needs the dependency-expansion label');
+      assert.ok(names.some(n => n.startsWith('/do:goals')));
+    } finally { cleanup(tmpDir); }
+  });
+});
+
+// ── command-delegation dependency protection (uninstall + list) ─────
+
+describe('uninstall refuses to strand a still-installed dependent', () => {
+  it('refuses to remove the last shared dependency of a command that stays installed', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      // do:prd pulls in do:goals as a dependency, so both end up installed.
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['prd'], dryRun: false });
+      assert.ok(fs.existsSync(path.join(env.commandsDir, 'do', 'goals.md')));
+
+      assert.throws(
+        () => install({ env, packageDir: PACKAGE_DIR, filterNames: ['goals'], uninstall: true, dryRun: false }),
+        /Refusing to uninstall.*do:goals.*do:prd/s
+      );
+      // Nothing was removed.
+      assert.ok(fs.existsSync(path.join(env.commandsDir, 'do', 'goals.md')), 'do:goals survives the refusal');
+      assert.ok(fs.existsSync(path.join(env.commandsDir, 'do', 'prd.md')), 'do:prd is untouched');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('allows removing a dependency once its only dependent is removed in the same call', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['prd'], dryRun: false });
+
+      // Removing both together strands nothing.
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['prd', 'goals'], uninstall: true, dryRun: false });
+      assert.ok(!fs.existsSync(path.join(env.commandsDir, 'do', 'goals.md')));
+      assert.ok(!fs.existsSync(path.join(env.commandsDir, 'do', 'prd.md')));
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('a full (unfiltered) uninstall never checks for stranded dependents', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['prd'], dryRun: false });
+      assert.doesNotThrow(() => install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false }));
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('uninstalling an unrelated command is unaffected by dependency protection', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['prd'], dryRun: false });
+      assert.doesNotThrow(
+        () => install({ env, packageDir: PACKAGE_DIR, filterNames: ['push'], uninstall: true, dryRun: false })
+      );
+    } finally { cleanup(tmpDir); }
+  });
+});
+
+describe('list flags a wrapper command as unhealthy when its dependency is missing', () => {
+  it('reports unhealthy when a dependency was never installed for this host', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['prd'], dryRun: false });
+      // Simulate a host where do:goals never made it into the installed tree
+      // (partial install, manual removal, etc.) while do:prd's own file is
+      // untouched and still matches the packaged source exactly.
+      fs.unlinkSync(path.join(env.commandsDir, 'do', 'goals.md'));
+
+      const items = list({ env, packageDir: PACKAGE_DIR });
+      const prd = items.find(i => i.name === '/do:prd');
+      assert.equal(prd.status, 'unhealthy');
+      assert.ok(prd.missingDependencies.includes('goals'));
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('is healthy when the dependency is installed alongside it', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['prd'], dryRun: false });
+      const items = list({ env, packageDir: PACKAGE_DIR });
+      const prd = items.find(i => i.name === '/do:prd');
+      assert.equal(prd.status, 'up to date');
+      assert.equal(prd.missingDependencies, undefined);
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('does not flag a command with no delegation references', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['push'], dryRun: false });
+      const items = list({ env, packageDir: PACKAGE_DIR });
+      const push = items.find(i => i.name === '/do:push');
+      assert.equal(push.status, 'up to date');
+      assert.equal(push.missingDependencies, undefined);
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('does not flag a dependency as unhealthy for its own missing status', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      // do:goals is never installed at all here, so it should read "not
+      // installed" rather than "unhealthy" — there's nothing to be unhealthy
+      // about for a command that isn't there.
+      const items = list({ env, packageDir: PACKAGE_DIR });
+      const goals = items.find(i => i.name === '/do:goals');
+      assert.equal(goals.status, 'not installed');
+    } finally { cleanup(tmpDir); }
+  });
+
+  it('preserves the "changed" signal for a command that is both stale and missing a dependency', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    try {
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['prd'], dryRun: false });
+      // do:prd's installed copy no longer matches the packaged source...
+      fs.appendFileSync(path.join(env.commandsDir, 'do', 'prd.md'), '\nstale edit\n');
+      // ...and its dependency is also missing.
+      fs.unlinkSync(path.join(env.commandsDir, 'do', 'goals.md'));
+
+      const items = list({ env, packageDir: PACKAGE_DIR });
+      const prd = items.find(i => i.name === '/do:prd');
+      assert.equal(prd.status, 'changed, unhealthy');
+      assert.ok(prd.missingDependencies.includes('goals'));
     } finally { cleanup(tmpDir); }
   });
 });

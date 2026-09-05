@@ -1,0 +1,4 @@
+# Code Quality & Style
+   Sources: code brittleness, convention violations, test workarounds, logging & observability
+   Structural focus: magic numbers, brittle conditionals, hardcoded execution paths, test-specific hacks, narrow implementations that pass specific cases but lack generality, dead/unreachable code, unused imports/variables, violations of CLAUDE.md conventions (try/catch usage, window.alert/confirm, class-based code where functional preferred), anti-patterns specific to the detected tech stack
+   Runtime focus _(skip when `SIMPLIFY_ONLY=true` — these are behavior, owned by agent 5, which is not running)_: inconsistent or missing structured logging (raw `console.log`/`print` in production code instead of a logger), missing log levels or correlation IDs, swallowed errors (empty catch blocks, `.catch(() => {})`, bare `except: pass`), missing request/response logging at API boundaries

@@ -14,6 +14,9 @@ const {
   applyConditionalBlocks,
   getSkillName,
   getTargetFilename,
+  extractCommandDependencies,
+  resolveCommandExecRef,
+  resolveCommandSiblingRef,
   transformCommand,
   transformLib,
 } = require('../src/transformer');
@@ -645,6 +648,126 @@ describe('transformCommand', () => {
   });
 });
 
+// ── command-delegation reference resolution ────────────────────────
+
+describe('command reference resolution', () => {
+  // Mirrors the four real non-claude environments' commandsPathPrefix +
+  // namespacing combinations, so the tests exercise the actual shapes
+  // wrapper commands are installed into.
+  const flatEnv = { namespacing: 'flat', ext: '.md', commandsPathPrefix: '~/.config/opencode/commands/' };
+  const skillEnv = { namespacing: 'directory', ext: null, commandsPathPrefix: '~/.codex/skills/' };
+  const claudeEnv = { namespacing: 'subdirectory', ext: '.md' };
+
+  describe('extractCommandDependencies', () => {
+    it('finds an execution-instruction reference', () => {
+      const content = 'Run the workflow defined in `~/.claude/commands/do/goals.md` verbatim.';
+      const deps = extractCommandDependencies(content, new Set(['goals', 'prd']));
+      assert.deepEqual([...deps], ['goals']);
+    });
+
+    it('finds a sibling section-link reference', () => {
+      const content = 'See [PRD.md Structure](goals.md#prdmd-structure---prd) for details.';
+      const deps = extractCommandDependencies(content, new Set(['goals', 'prd']));
+      assert.deepEqual([...deps], ['goals']);
+    });
+
+    it('finds both forms and de-duplicates', () => {
+      const content = '`~/.claude/commands/do/better.md` and `~/.claude/commands/do/pr.md` and again `~/.claude/commands/do/better.md`';
+      const deps = extractCommandDependencies(content, new Set(['better', 'pr']));
+      assert.deepEqual([...deps].sort(), ['better', 'pr']);
+    });
+
+    it('ignores a reference to a name outside the known command set', () => {
+      const content = 'See [Contributing](contributing.md) for details.';
+      const deps = extractCommandDependencies(content, new Set(['goals', 'prd']));
+      assert.equal(deps.size, 0);
+    });
+  });
+
+  describe('resolveCommandExecRef', () => {
+    it('is a no-op for claude subdirectory namespacing', () => {
+      assert.equal(resolveCommandExecRef('do/goals.md', claudeEnv), '~/.claude/commands/do/goals.md');
+    });
+
+    it('resolves to the flat installed filename for opencode', () => {
+      assert.equal(resolveCommandExecRef('do/goals.md', flatEnv), '~/.config/opencode/commands/do-goals.md');
+    });
+
+    it('resolves to the skill directory for Agent Skills envs', () => {
+      assert.equal(resolveCommandExecRef('do/goals.md', skillEnv), '~/.codex/skills/do-goals/SKILL.md');
+    });
+  });
+
+  describe('resolveCommandSiblingRef', () => {
+    it('stays a bare sibling filename for claude', () => {
+      assert.equal(resolveCommandSiblingRef('do/prd.md', 'do/goals.md', claudeEnv), 'goals.md');
+    });
+
+    it('renames to the flat sibling filename for opencode', () => {
+      assert.equal(resolveCommandSiblingRef('do/prd.md', 'do/goals.md', flatEnv), 'do-goals.md');
+    });
+
+    it('crosses into the sibling skill directory for Agent Skills envs', () => {
+      assert.equal(resolveCommandSiblingRef('do/prd.md', 'do/goals.md', skillEnv), '../do-goals/SKILL.md');
+    });
+  });
+
+  describe('transformCommand integration', () => {
+    // Existence is checked against this in-memory Set (the same one the
+    // installer builds from `collectCommands`) rather than the filesystem —
+    // no fixture directory needed.
+    const goalsKnown = new Set(['goals', 'prd']);
+
+    it('rewrites an execution reference with no dangling ~/.claude for a skill env', () => {
+      const content = '---\ndescription: PRD\n---\nRun the workflow defined in `~/.claude/commands/do/goals.md` verbatim.';
+      const result = transformCommand(content, skillEnv, null, 'do/prd.md', { commandNames: goalsKnown });
+      assert.ok(result.includes('~/.codex/skills/do-goals/SKILL.md'));
+      assert.ok(!result.includes('~/.claude'), 'no dangling ~/.claude reference for a Claude-less host');
+    });
+
+    it('rewrites a sibling section link with its anchor preserved', () => {
+      const content = '---\ndescription: PRD\n---\nIts [PRD.md Structure](goals.md#prdmd-structure---prd) section is the spec.';
+      const result = transformCommand(content, skillEnv, null, 'do/prd.md', { commandNames: goalsKnown });
+      assert.ok(result.includes('[PRD.md Structure](../do-goals/SKILL.md#prdmd-structure---prd)'));
+    });
+
+    it('collects the referenced command name into commandDependencies', () => {
+      const content = '---\ndescription: Simplify\n---\nRun the workflow defined in `~/.claude/commands/do/better.md` verbatim.';
+      const deps = new Set();
+      transformCommand(content, skillEnv, null, 'do/simplify.md',
+        { commandNames: new Set(['better', 'simplify']), commandDependencies: deps });
+      assert.deepEqual([...deps], ['better']);
+    });
+
+    it('leaves a sibling link alone when the target is not a real command', () => {
+      const content = '---\ndescription: PRD\n---\nSee [Contributing](contributing.md) for details.';
+      const result = transformCommand(content, skillEnv, null, 'do/prd.md', { commandNames: new Set(['prd']) });
+      assert.ok(result.includes('[Contributing](contributing.md)'));
+    });
+
+    it('throws on an execution reference to a command that does not exist', () => {
+      const content = '---\ndescription: PRD\n---\nRun the workflow defined in `~/.claude/commands/do/nonexistent.md` verbatim.';
+      assert.throws(
+        () => transformCommand(content, skillEnv, null, 'do/prd.md', { commandNames: new Set(['prd']) }),
+        /Missing required slashdo command/);
+    });
+
+    it('relocates a claude custom root for an execution reference too', () => {
+      const content = '---\ndescription: PRD\n---\nRun the workflow defined in `~/.claude/commands/do/goals.md` verbatim.';
+      const env = { ...claudeEnv, claudeRootPath: '/tmp/custom-root', platform: 'linux' };
+      const result = transformCommand(content, env, null, 'do/prd.md', { commandNames: goalsKnown });
+      assert.ok(result.includes("'/tmp/custom-root/commands/do/goals.md'"));
+      assert.ok(!result.includes('~/.claude'));
+    });
+
+    it('is permissive when no commandNames set is given (existence unchecked)', () => {
+      const content = '---\ndescription: PRD\n---\nRun the workflow defined in `~/.claude/commands/do/anything.md` verbatim.';
+      const result = transformCommand(content, skillEnv, null, 'do/prd.md');
+      assert.ok(result.includes('~/.codex/skills/do-anything/SKILL.md'));
+    });
+  });
+});
+
 describe('getSkillName', () => {
   it('joins namespace and basename with a hyphen', () => {
     assert.equal(getSkillName('do/better'), 'do-better');
@@ -813,7 +936,7 @@ describe('backticked lib citations', () => {
         { bundlesLibs: true });
       assert.ok(!result.includes('SHARED-BODY-SENTINEL'), 'see-also must pull in nothing');
       assert.ok(!result.includes('Referenced libraries'), 'no appendix for a mere mention');
-      assert.ok(result.includes('`shared`'), 'reads as a doc name, not a path');
+      assert.ok(result.includes('`lib/shared.md`'), 'citation points at a bundled file');
     });
   });
 

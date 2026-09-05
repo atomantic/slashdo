@@ -2,7 +2,13 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getTargetFilename, transformCommand, transformLib, BUNDLED_LIB_DIR } = require('./transformer');
+const {
+  getTargetFilename,
+  transformCommand,
+  transformLib,
+  extractCommandDependencies,
+  BUNDLED_LIB_DIR,
+} = require('./transformer');
 const { readConfig, writeConfig } = require('./config');
 const {
   registerHooksInSettings,
@@ -28,6 +34,70 @@ function collectCommands(commandsDir) {
     }
   }
   return commands.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// A filtered install of a wrapper command (do:prd, do:simplify, do:pr-better)
+// must not assume the workflow it delegates to (do:goals, do:better, do:pr)
+// is already installed alongside it — that's exactly the "portable across
+// installed hosts" gap this closes. Walk each requested command's raw source
+// for command-delegation references and pull in whatever they name, so a
+// command-only filtered install always ships its required dependencies too.
+// Returns the expanded command list, the names pulled in only as a dependency
+// (never requested directly, for status reporting), and the raw content this
+// already read from disk (every command it visits ends up in the expanded
+// set, so the install step below can reuse it instead of re-reading each file).
+function expandWithCommandDependencies(requested, allCommands, knownNames) {
+  const byName = new Map(allCommands.map(c => [c.name, c]));
+  const included = new Set(requested.map(c => c.name));
+  const dependencyNames = new Set();
+  const rawContent = new Map();
+  const queue = [...included];
+
+  while (queue.length) {
+    const name = queue.shift();
+    const cmd = byName.get(name);
+    if (!cmd) continue;
+    const raw = fs.readFileSync(cmd.absPath, 'utf8');
+    rawContent.set(name, raw);
+    for (const dep of extractCommandDependencies(raw, knownNames)) {
+      if (!included.has(dep)) {
+        included.add(dep);
+        dependencyNames.add(dep);
+        queue.push(dep);
+      }
+    }
+  }
+
+  return {
+    commands: allCommands.filter(c => included.has(c.name)),
+    dependencyNames,
+    rawContent,
+  };
+}
+
+// The uninstall-side counterpart to expandWithCommandDependencies above: finds
+// every command that (a) stays installed on disk for this env after the
+// requested removal and (b) still names one of the commands being removed as
+// a delegation dependency. Returns a Map of removed-name -> Set of dependent
+// names still installed, empty when nothing would be stranded.
+function findStrandedDependents(removing, allCommands, env, knownCommandNames) {
+  const removingNames = new Set(removing.map(c => c.name));
+  const stranded = new Map();
+
+  for (const cmd of allCommands) {
+    if (removingNames.has(cmd.name)) continue;
+    const targetPath = path.join(env.commandsDir, getTargetFilename(cmd.relPath, env));
+    if (!fs.existsSync(targetPath)) continue;
+
+    const raw = fs.readFileSync(cmd.absPath, 'utf8');
+    for (const dep of extractCommandDependencies(raw, knownCommandNames)) {
+      if (!removingNames.has(dep)) continue;
+      if (!stranded.has(dep)) stranded.set(dep, new Set());
+      stranded.get(dep).add(cmd.name);
+    }
+  }
+
+  return stranded;
 }
 
 function collectLibFiles(libDir) {
@@ -144,26 +214,6 @@ function assertSafeBundlePath(targetPath, expectedType) {
     throw new Error(`Refusing to traverse unsafe bundled lib ${expectedType}: ${targetPath}`);
   }
   return true;
-}
-
-function collectBundledLibContents(entry, libDir, env) {
-  const contents = new Map();
-  if (!entry) return contents;
-
-  const { bundled: pending, present } = entry;
-  const processed = new Set();
-  // `pending` grows while draining when a bundled lib defers another.
-  while (processed.size < pending.size) {
-    for (const filename of Array.from(pending)) {
-      if (processed.has(filename)) continue;
-      processed.add(filename);
-      const absPath = path.join(libDir, filename);
-      if (!fs.existsSync(absPath)) continue;
-      contents.set(filename, transformLib(
-        fs.readFileSync(absPath, 'utf8'), env, libDir, { bundled: pending, present }));
-    }
-  }
-  return contents;
 }
 
 function bundledLibsAreEqual(skillDir, expected) {
@@ -296,14 +346,13 @@ function finalizeInstall(env, hookFiles, packageDir, dryRun, filterNames, autoUp
 }
 
 // Writes the lib docs a command defers into `<skillDir>/lib/`, so the read
-// directive in SKILL.md points at a file that exists. Transitive: a bundled lib
-// may itself defer a sibling backend (local-agent cites ollama), so drain the set
-// as it grows rather than iterating a snapshot.
-function syncBundledLibs(commands, bundledByCommand, libDir, env, dryRun, results) {
+// directive in SKILL.md points at a file that exists. The shared renderer has
+// already resolved the full graph, including each file's sibling references.
+function syncBundledLibs(commands, bundledByCommand, env, dryRun, results) {
   for (const cmd of commands) {
     const entry = bundledByCommand.get(cmd.relPath);
     if (!entry) continue;
-    const contents = collectBundledLibContents(entry, libDir, env);
+    const contents = new Map(Object.entries(entry));
 
     const skillDir = path.dirname(path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)));
     const skillExists = assertSafeBundlePath(skillDir, 'directory');
@@ -353,43 +402,65 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
   const libFiles = collectLibFiles(libDir);
   const hookFiles = env.supportsHooks ? collectHooks(hooksDir) : [];
 
-  const filtered = filterNames?.length
+  const requested = filterNames?.length
     ? commands.filter(c => filterNames.includes(c.name) || filterNames.includes(`do:${c.name}`))
     : commands;
 
   const results = { installed: 0, updated: 0, upToDate: 0, removed: 0, actions: [] };
+  const knownCommandNames = new Set(commands.map(c => c.name));
 
   if (uninstall) {
-    return doUninstall(filtered, libFiles, hookFiles, env, results, dryRun, filterNames);
+    // A full uninstall removes every command together, so nothing can be left
+    // stranded. A filtered uninstall can remove a command other *remaining*
+    // installed commands still delegate to — check the same reference graph
+    // a filtered install already walks (expandWithCommandDependencies above),
+    // just from the other direction.
+    if (filterNames?.length) {
+      const stranded = findStrandedDependents(requested, commands, env, knownCommandNames);
+      if (stranded.size) {
+        const details = [...stranded.entries()]
+          .map(([dep, users]) => `/do:${dep} is required by ${[...users].map(u => `/do:${u}`).join(', ')}`)
+          .join('; ');
+        throw new Error(
+          `Refusing to uninstall: ${details}. Uninstall the dependent command(s) too, ` +
+          `or leave /do:${[...stranded.keys()].join(', /do:')} installed.`
+        );
+      }
+    }
+    return doUninstall(requested, libFiles, hookFiles, env, results, dryRun, filterNames);
   }
 
-  // Per-command set of lib docs to write beside its SKILL.md. Filled while each
-  // command is transformed (getContent runs for every item, up-to-date ones
-  // included), then drained below.
+  const { commands: filtered, dependencyNames, rawContent } = filterNames?.length
+    ? expandWithCommandDependencies(requested, commands, knownCommandNames)
+    : { commands: requested, dependencyNames: new Set(), rawContent: new Map() };
+
+  // Compile each command once; install/list share the resulting file contents.
   const bundledByCommand = new Map();
 
   syncFileSet(filtered, {
     getContent: (cmd) => {
-      const bundled = new Set();
-      const present = new Set();
-      const content = transformCommand(
-        fs.readFileSync(cmd.absPath, 'utf8'), env, libDir, cmd.relPath, { bundled, present });
-      if (env.bundlesLibs) bundledByCommand.set(cmd.relPath, { bundled, present });
+      const files = {};
+      const raw = rawContent.get(cmd.name) ?? fs.readFileSync(cmd.absPath, 'utf8');
+      const content = transformCommand(raw, env, libDir, cmd.relPath,
+        { files, commandNames: knownCommandNames });
+      if (env.bundlesLibs) bundledByCommand.set(cmd.relPath, files);
       return content;
     },
     getTargetPath: cmd => path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)),
-    getLabel: cmd => `/do:${cmd.name}`,
+    getLabel: cmd => dependencyNames.has(cmd.name)
+      ? `/do:${cmd.name} (dependency)`
+      : `/do:${cmd.name}`,
     dryRun,
     results,
   });
 
   if (env.bundlesLibs) {
-    syncBundledLibs(filtered, bundledByCommand, libDir, env, dryRun, results);
+    syncBundledLibs(filtered, bundledByCommand, env, dryRun, results);
   }
 
   if (env.libDir) {
     syncFileSet(libFiles, {
-      getContent: lib => transformLib(fs.readFileSync(lib.absPath, 'utf8'), env),
+      getContent: lib => transformLib(fs.readFileSync(lib.absPath, 'utf8'), env, libDir),
       getTargetPath: lib => path.join(env.libDir, lib.relPath),
       getLabel: lib => `lib/${lib.name}`,
       dryRun,
@@ -531,22 +602,25 @@ function list({ env, packageDir }) {
   const commandsDir = path.join(packageDir, 'commands');
   const libDir = path.join(packageDir, 'lib');
   const commands = collectCommands(commandsDir);
+  const knownCommandNames = new Set(commands.map(c => c.name));
+  const byName = new Map(commands.map(c => [c.name, c]));
   const items = [];
 
   for (const cmd of commands) {
     const content = fs.readFileSync(cmd.absPath, 'utf8');
-    const bundled = new Set();
-    const present = new Set();
-    const transformed = transformCommand(
-      content, env, libDir, cmd.relPath, { bundled, present });
+    const files = {};
+    const commandDependencies = new Set();
+    const transformed = transformCommand(content, env, libDir, cmd.relPath,
+      { files, commandNames: knownCommandNames, commandDependencies });
     const expectedBundles = env.bundlesLibs
-      ? collectBundledLibContents({ bundled, present }, libDir, env)
+      ? new Map(Object.entries(files))
       : null;
     const targetRel = getTargetFilename(cmd.relPath, env);
     const targetPath = path.join(env.commandsDir, targetRel);
+    const installed = fs.existsSync(targetPath);
 
     let status;
-    if (!fs.existsSync(targetPath)) {
+    if (!installed) {
       status = 'not installed';
     } else if (filesAreEqual(targetPath, transformed)
       && (!expectedBundles
@@ -556,14 +630,36 @@ function list({ env, packageDir }) {
       status = 'changed';
     }
 
+    // A command can render/copy fine and still be unhealthy: its rendered
+    // content only proves it matches the packaged source, not that whatever
+    // it delegates to (do:prd -> do:goals, etc.) actually landed in this
+    // env's installed tree. Only meaningful once the command itself is
+    // installed — "not installed" already covers the rest.
+    const missingDependencies = installed
+      ? [...commandDependencies].filter(depName => {
+        const depCmd = byName.get(depName);
+        if (!depCmd) return false;
+        const depTargetPath = path.join(env.commandsDir, getTargetFilename(depCmd.relPath, env));
+        return !fs.existsSync(depTargetPath);
+      })
+      : [];
+    if (missingDependencies.length) {
+      // Append rather than overwrite: a command can be BOTH stale against the
+      // packaged source AND missing an installed dependency, and collapsing
+      // to a bare 'unhealthy' would silently drop the "changed" signal.
+      status = status === 'up to date' ? 'unhealthy' : `${status}, unhealthy`;
+    }
+
     const { parseFrontmatter } = require('./transformer');
     const { frontmatter } = parseFrontmatter(content);
 
-    items.push({
+    const item = {
       name: `/do:${cmd.name}`,
       status,
       description: frontmatter.description || '(no description)',
-    });
+    };
+    if (missingDependencies.length) item.missingDependencies = missingDependencies;
+    items.push(item);
   }
 
   return items;

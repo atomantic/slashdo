@@ -26,13 +26,34 @@ while work happens on issues.
 ## Setup — only when `ISSUE_MODE` is true
 
 1. **VCS host.** Reuse `CLI_TOOL` (`gh`/`glab`) if the command already detected it
-   in its own discovery phase. Otherwise run `gh auth status --active` (the `--active`
-   flag scopes the check to the active account, so a stale token on another configured
-   account doesn't falsely fail it), else
-   `glab auth status`, and set `CLI_TOOL` accordingly. If neither is authenticated,
-   **abort** with: "`--issues` needs an authenticated `gh` or `glab`. Run
-   `gh auth login` (or `glab auth login`), or drop `--issues` to record items in
-   PLAN.md." Never silently fall back to writing PLAN.md.
+   in its own discovery phase. Otherwise **derive it from the `origin` remote first,
+   then confirm that host's credentials** — never pick a CLI by probing its
+   credentials before looking at the remote, which is how a GitLab repo on a
+   machine also authenticated to GitHub ends up misrouted against a repository it
+   cannot see (see `~/.claude/lib/vcs-host.md`, which this mirrors):
+   ```bash
+   ORIGIN_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"
+   if printf '%s' "$ORIGIN_HOST" | grep -qi gitlab; then
+     CLI_TOOL=glab
+   elif [ -n "$ORIGIN_HOST" ]; then
+     CLI_TOOL=gh
+   elif gh auth status --active >/dev/null 2>&1; then
+     CLI_TOOL=gh
+   elif glab auth status >/dev/null 2>&1; then
+     CLI_TOOL=glab
+   else
+     echo "--issues needs an authenticated gh or glab. Run 'gh auth login' or 'glab auth login', or drop --issues to record items in PLAN.md."; exit 1
+   fi
+   ```
+   (The `--active` flag on `gh auth status` scopes the check to the active account,
+   so a stale token on another configured account doesn't falsely fail it — only
+   relevant in the no-origin-remote fallback above, since the remote-derived branches
+   confirm the selected CLI's credentials in the next step.) Then confirm the
+   selected `CLI_TOOL` is actually authenticated to `$ORIGIN_HOST` (`gh auth status
+   --active` / `glab auth status`); if it is not, **abort** with: "`--issues` needs
+   an authenticated `gh` or `glab`. Run `gh auth login` (or `glab auth login`), or
+   drop `--issues` to record items in PLAN.md." Never silently fall back to writing
+   PLAN.md.
 2. **Label.** Ensure the scoping label exists:
    `gh label create <PLAN_LABEL> --description "Tracked by slashdo" 2>/dev/null || true`
    (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" 2>/dev/null || true` — glab requires a color).
@@ -210,17 +231,24 @@ handle for the orchestrator, not a plan slug (issue mode assigns no slugs, per
 Each agent's **return value** is one line per finding and nothing else:
 
 ```
-<id> | <SEVERITY> | <category> | <file:line> | <one-line title>
+<id> | <SEVERITY-or-UNCERTAIN> | <category> | <file:line> | <one-line title>
 ```
+
+If an audit reports uncertainty, preserve `UNCERTAIN` in both index and body.
+The consolidator may read those specific bodies and cited source to validate them.
+Unresolved findings remain explicitly unconfirmed investigation follow-ups: no
+confirmed severity label and no automatic remediation. Do not silently coerce
+uncertainty into a severity to fit this index.
+
 
 That is roughly a twentieth of what the bodies cost, and it is a *better* input for
 the next step than prose — dedup, severity ranking, and ownership all key off
 exactly these fields. An agent that finds nothing returns an empty index and writes
 no file.
 
-### 3. The orchestrator decides on the index alone
+### 3. The orchestrator consolidates on the index
 
-Everything only the orchestrator can see happens here, against the index:
+Use the index for these consolidation decisions; targeted uncertainty validation and command-specific evidence reads are exceptions:
 
 - **Cross-agent dedup** — two agents flagging the same `file:line` is normal and
   expected; collapse to one, keeping the more specific title.
@@ -231,9 +259,10 @@ This is the step that makes per-agent filing wrong: an agent that files its own
 findings as it goes cannot dedup against agents that have not returned yet, and
 overlapping audit agents are a design feature, not an accident. The output here is a
 surviving id list grouped by category. **The orchestrator never *rewrites* a spooled
-body** — on the fan-out path it never opens the spool files at all, and on the small-run
-inline path it may only lift a block out verbatim into a `--body-file`, never retype or
-summarize it from the index line.
+body** — targeted validation and command-specific evidence reads may open the
+needed blocks, but do not expand every body into context. For filing, both fan-out
+and inline paths lift each block verbatim into a `--body-file`; never retype or
+summarize evidence from the index line.
 
 ### 4. Filer agents file, in parallel, one per category
 

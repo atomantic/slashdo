@@ -1,13 +1,15 @@
 ---
 description: Deep code review of changed files against software engineering best practices
-argument-hint: "[--strict|--nuclear] [--draft] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues|--no-issues] [--issues-label <name>] [PR-URL | base-branch]"
+argument-hint: "[--strict|--nuclear] [--draft] [--apply|--no-apply] [--merge|--merge=<method>] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues|--no-issues] [--issues-label <name>] [PR-URL | base-branch]"
 ---
 
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for:
 - **`--strict`** (alias: **`--nuclear`**): raise the structural-review bar and permit the Structural Ambition lens to be selected when the diff contains structural signals; promote structural findings to blocker tier. Strict mode does not force a focused agent when the orchestrator finds no structural concern. Use for branches you want to land cleanly — flags file-size growth past 1000 lines, ad-hoc conditionals bolted onto unrelated flows, thin wrappers, boundary leaks, and missed code-judo simplifications.
-- **`--draft`** (PR mode only): write the review payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the `gh api` command to publish it manually, instead of posting the review immediately. Ignored when `PR_MODE=false`.
+- **`--draft`** (PR mode only): write the review payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the `gh api` command to publish it manually, instead of posting the review immediately. Ignored when `PR_MODE=false`. Implies `--no-apply` — a draft review publishes nothing, so it must not push commits either.
+- **`--apply` / `--no-apply`** (mutually exclusive, PR mode only): how verified findings are delivered. The default is `PR_APPLY=auto` — **commit the fixes onto the PR's head branch when we can push to it, and post inline review comments when we can't** (see "Determine write access" below). `--no-apply` forces review-only regardless of write access; `--apply` forces the fix-and-push path and aborts with `--apply was requested but the PR head branch is not writable ({reason}) — rerun without --apply to post an inline review instead.` when `CAN_PUSH_HEAD=false`, rather than silently doing something other than what was asked. Abort with `--apply and --no-apply cannot be combined` if both appear.
+- **`--merge` / `--merge=<method>`** (optional, PR mode only): after the review finishes **clean**, merge the PR. Off by default — without this flag `/do:review` never merges anything. `<method>` ∈ {`squash`, `rebase`, `merge`}; abort on anything else with `--merge=<method> must be one of squash, rebase, merge (got: {value}).` Record `MERGE_ENABLED=true` and, when given, `MERGE_METHOD`. Every gate in "Merge the PR" below must pass — the flag requests a merge, it does not authorize one.
 - **`--review-with <agent[,agent,...]>`** (optional): after the host CLI's self-review completes (the selection flow defined below), delegate **additional** review passes to the named external CLIs in order. Accepted slugs per slot: `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `grok`, `cursor` (alias `cursor-agent` — the Cursor Agent CLI), `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`; `codex`/`claude`/`agy`/`grok`/`cursor` likewise accept a `<agent>[<model>]` bracket — e.g. `codex[o3]`, `claude[claude-opus-4-8]`, `grok[grok-code-fast-1]` — stripped into a per-entry `REVIEW_MODEL`, empty → the reviewer's built-in default; `copilot` and `@<login>` take no model bracket), `copilot` (**legacy** — GitHub's cloud Copilot review; still supported when you name it, never selected implicitly), or an arbitrary GitHub login `@<login>` — any GitHub user or App/bot (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`); slashdo requests its review on the PR and waits for it (GitHub only, never posts an approval itself). Split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, dedupe preserving first-occurrence order (for a model-taking agent — `codex`/`claude`/`agy`/`grok`/`cursor`/`ollama` — the `[<model>]` bracket suffix is part of the dedup identity). Any slot may end in `~opt` (e.g. `ollama~opt`) to mark that reviewer **optional/non-blocking** — still requested and its findings still fixed, but an inconclusive result from it never contributes a merge-blocking `inconclusive` aggregate (a hard-error from it still does); strip `~opt` into a per-entry `{OPTIONAL}` flag before slug parsing, not part of the dedup identity (`ollama~opt` == `ollama`, optional-wins on collapse). A slot may also end in `~max=<n>` (e.g. `claude~max=2`, `ollama~max=1`) to cap how many review → fix → re-review cycles **that one reviewer** runs, or `~effort=<level>` (e.g. `codex[gpt-5.6-luna]~effort=max~opt`, `claude~effort=high~max=2`) to specify its reasoning effort level (`low`, `medium`, `high`, `xhigh`, `max`). Strip suffixes off the right of each token in any order before slug parsing. Deduplication preserves first-occurrence order and excludes `~` suffixes (survivor takes `~opt` if any had it, and cap/effort level from the first that carried them). Reject a malformed suffix with `Invalid --review-with suffix on {entry}: ~max must be a non-negative integer and ~effort must be one of low, medium, high, xhigh, max, each appearing at most once; the only suffixes are ~opt, ~max=<n>, and ~effort=<level>.` Abort with `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, cursor, ollama, copilot, @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).` on any unknown slug. The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no delegated reviewers (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default. If omitted, leave `REVIEW_AGENTS` **unset for now** — the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (no delegated passes — behavior matches the historical `/do:review` self-review only). **The host CLI is not implied in this list** — whichever CLI is hosting the review command (claude, codex, or agy) runs the self-review first regardless. The list names *additional* reviewers; an explicit `claude` entry while running under claude means "start a fresh claude headless session for a second-pass perspective," which is allowed.
 - **`--review-stop-on-findings` / `--review-stop-on-clean`** (mutually exclusive, optional): stop-mode for the delegated passes. Default `REVIEW_STOP_MODE=all` (run every listed agent). `on-findings` stops after the first delegated reviewer that surfaces a non-empty change set; `on-clean` stops after the first delegated reviewer that reports zero findings. Abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined` if both appear.
 - **`--review-mode <series|parallel>`** (optional): how the delegated passes are dispatched. `series` (default) runs the listed reviewers one-at-a-time so each sees the prior reviewer's committed fixes; `parallel` runs their reviews concurrently against one frozen baseline and then applies the deduped union of findings once (faster, but no reviewer sees another's fixes — `--reviewer-applies` and the stop-modes are ignored in this mode). Record as `REVIEW_MODE`; if omitted, leave it **unset for now** (the saved-defaults step fills it from the `review-mode` default; built-in default `series`). Abort with `--review-mode must be one of series, parallel (got: {value}).` on any other value.
@@ -19,12 +21,12 @@ After parsing the flags above, apply any **saved defaults** (set via `/do:config
 !`cat ~/.claude/lib/review-config-defaults.md`
 
 - **`--issues`** / **`--no-issues`** / **`--issues-label <name>`** (optional): when a finding is **deferred** (local-branch mode only — see Finding Disposition), file it as a GitHub/GitLab issue instead of a PLAN.md line. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`. If the user passes **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`. No effect in PR mode (PR mode posts comments, it doesn't defer to a plan).
-- **GitHub PR reference** — any non-flag token that looks like a PR reference. A token matches if **any** of the following holds (the rules are OR-ed; the `github` substring is sufficient but not required):
-  - Full URL: `https://github.com/{owner}/{repo}/pull/{number}` (and any subpath like `/files`, `/commits`)
-  - SSH-style URL with `github.com` host
-  - Any URL containing the substring `github` AND a `/pull/{number}` segment — covers GHES hosts like `github.example.com`
-  - Shorthand: the argument matches `^[^/]+/[^/]+#[0-9]+$` AND `gh repo view {owner}/{repo}` confirms it resolves (the shorthand form does NOT require the `github` substring — `gh` is the source of truth for whether it's a real repo)
-  - Extract `OWNER`, `REPO`, and `PR_NUM`. Set `PR_MODE=true` and `PR_URL` to the canonical URL. Also capture the URL's **host** as `{GH_HOST}` (e.g. `github.com`, or a GHES host like `github.example.com`) — the `gh api` calls below need it explicitly, because `gh api` ignores the repo remote and defaults to github.com (see `~/.claude/lib/gh-host.md`). Note the host comes from the **PR URL** here, not the local `origin` remote — a PR being reviewed by URL can live on a different host than the current checkout.
+- **PR reference** — any non-flag token that looks like a pull-request reference. **Match on URL *shape*, never on the hostname.** A self-managed GitHub Enterprise instance is routinely served from a domain with no `github` in it at all (`git.example.com`, `code.example.com`, `scm.internal`), so a hostname substring test silently misreads those PR URLs as base-branch names and reviews the wrong thing. The `/pull/{number}` path segment is what identifies a GitHub-flavored PR, and it is host-independent. A token matches if **any** of the following holds:
+  - Full URL of the shape `{scheme}://{host}/{owner}/{repo}/pull/{number}` — **any** `{host}`, including `github.com`, `github.example.com`, and a GHES host that carries no `github` substring. Trailing subpaths (`/files`, `/commits`, `/checks`) and a `#discussion_r…` fragment are allowed and ignored.
+  - SSH-style URL (`git@{host}:{owner}/{repo}`) carrying the same `/pull/{number}` segment — again on any host.
+  - Shorthand: the argument matches `^[^/]+/[^/]+#[0-9]+$` AND `gh repo view {owner}/{repo}` confirms it resolves (`gh` is the source of truth for whether it's a real repo). Take `{GH_HOST}` from the `origin` remote here — a shorthand carries no host of its own.
+  - Extract `OWNER`, `REPO`, and `PR_NUM`. Set `PR_MODE=true` and `PR_URL` to the canonical URL. Also capture the URL's **host** as `{GH_HOST}` — the `gh api` calls below need it explicitly, because `gh api` ignores the repo remote and defaults to github.com (see `~/.claude/lib/gh-host.md`). Note the host comes from the **PR URL** here, not the local `origin` remote — a PR being reviewed by URL can live on a different host than the current checkout.
+  - **GitLab-shaped URL** (a `/-/merge_requests/{number}` or `/merge_requests/{number}` segment, on `gitlab.com` or any self-managed GitLab host): PR mode is GitHub-only today, so do **not** fall through and treat it as a base branch. Abort with `/do:review cannot review a GitLab merge request yet (got: {token}). Check the branch out locally and run /do:review with no argument to review it as a local diff.`
 - Any other non-flag token: treat as the base branch override (only when `PR_MODE=false`).
 
 Set `STRICT_MODE=true` if either strict flag is present.
@@ -78,6 +80,27 @@ When a PR URL was parsed, do NOT use the local working tree as the source of tru
 6. Print: `Reviewing PR #{PR_NUM}: {title} — {N} files changed{strict_suffix}` plus a one-line note: `Author: {AUTHOR_LOGIN}{fork_suffix}` where `{fork_suffix}` is ` (cross-repo fork)` when `IS_FORK=true`.
 
 If the PR has no changed files, inform the user and stop.
+
+#### Determine write access (`{CAN_PUSH_HEAD}`)
+
+Findings are worth more landed than described. Probe whether this PR's head branch accepts
+our push, then resolve the disposition — this is what `PR_APPLY=auto` selects between:
+
+!`cat ~/.claude/lib/pr-write-access.md`
+
+Resolve `PR_DISPOSITION` from `PR_APPLY` and `CAN_PUSH_HEAD`:
+
+| `PR_APPLY` | `CAN_PUSH_HEAD` | `PR_DISPOSITION` |
+|---|---|---|
+| `auto` (default) | `true` | `apply` — fix, verify, commit, and push onto the PR head branch |
+| `auto` (default) | `false` | `inline` — post the findings as a PR review |
+| `--no-apply` (or `--draft`) | either | `inline` |
+| `--apply` | `true` | `apply` |
+| `--apply` | `false` | abort with the `--apply` message from Parse Arguments |
+
+Print the choice with its reason on one line, e.g. `Disposition: apply — pushing fixes to
+{HEAD_OWNER}/{HEAD_REPO}:{HEAD_REF}` or `Disposition: inline — fork PR with maintainer edits
+off, posting review comments`. A `false` here is an ordinary outcome, not a failure.
 
 ## Apply Project Conventions
 
@@ -230,11 +253,18 @@ For each finding, ground it in evidence before classifying:
 
 After verifying all findings, run the project's build and test commands to confirm no false positives.
 
-In `PR_MODE`, skip the local build/test step — the PR's CI is the source of truth for that repo. Verify by reading code only.
+In `PR_MODE` with `PR_DISPOSITION=inline`, skip the local build/test step — nothing is checked out and the PR's CI is the source of truth for that repo. Verify by reading code only. With `PR_DISPOSITION=apply` the branch **is** checked out and we are about to push to someone else's PR, so the build/test step is mandatory there: it runs after the fixes, in "Fix Issues" below, and a failure blocks the push.
 
-## Fix Issues (local branch mode only)
+## Fix Issues (local branch mode, and PR mode when `PR_DISPOSITION=apply`)
 
-**Skip this section entirely when `PR_MODE=true`** — in PR mode, jump to "Post Review to GitHub PR" below. The whole point of PR mode is to publish review comments on the remote PR, not to mutate the local working tree (the PR may be on a fork or a branch we can't push to).
+**Skip this section when `PR_MODE=true` and `PR_DISPOSITION=inline`** — there, jump to "Post Review to GitHub PR" below, because a branch we cannot push to can only receive comments.
+
+When `PR_MODE=true` and `PR_DISPOSITION=apply`, run this section against the PR's branch instead of the local one, then continue to "Push fixes to the PR branch":
+
+1. **Refuse to start on a dirty tree.** Before checking anything out, if `git status --porcelain` is non-empty, do not check out over the user's uncommitted work — fall back to `PR_DISPOSITION=inline`, say why, and continue. Losing local edits to land a review fix is never the right trade.
+2. `gh pr checkout {PR_NUM} --repo "{GH_HOST}/{OWNER}/{REPO}"` (per `~/.claude/lib/pr-write-access.md`) so the tracking ref points at the PR head, not the base repo.
+3. Fix only what this review found. Do not rebase the PR, reformat untouched files, or fold in unrelated cleanups — the author owns this branch and every extra commit is one they have to justify.
+4. Attribute the commits to the review, exactly as local mode does below (`address review (self): …`).
 
 !`cat ~/.claude/lib/finding-disposition.md`
 
@@ -249,9 +279,19 @@ For each verified finding (local branch mode):
 6. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
 7. Commit fixes: `address review (self): <summary>` — the parenthesized agent name (here `self` for the host CLI's own self-review) records which reviewer surfaced the finding, matching the convention used by delegated `--review-with` passes.
 
-## Post Review to GitHub PR (`PR_MODE=true` only)
+## Push fixes to the PR branch (`PR_MODE=true` and `PR_DISPOSITION=apply`)
 
-Skip this section when `PR_MODE=false`. When `PR_MODE=true`, this is the **primary output** of the command — package the verified findings as a single GitHub PR review with inline comments containing code suggestions, just like Copilot.
+Skip this section in every other mode. This is the **primary output** when the head branch is writable — the findings land as commits the author gets for free instead of comments they have to re-apply.
+
+1. **Gate on the tests.** The build/test run from "Fix Issues" must have passed. If it failed and you cannot fix it inside the scope of this review, push nothing: fall back to `PR_DISPOSITION=inline` and post the findings as comments, saying the fixes were prepared but did not pass the project's checks.
+2. **Push with a bare `git push`** — no remote, no refspec — so it follows the tracking ref `gh pr checkout` set up. `git push origin {branch}` is wrong here: on a cross-repo PR the local branch name is not the remote one, and that form invents a branch on the wrong repository while the real PR head stays stale.
+3. **A rejected push is a downgrade, not an abort** (see `~/.claude/lib/pr-write-access.md`). On a non-fast-forward — the author pushed while we were reviewing — run `git pull --rebase` once and retry; if it still fails, or fails with a permission error, keep the commits locally and switch to `PR_DISPOSITION=inline`.
+4. **Post a short PR comment describing what was pushed** (`gh pr comment`), not a `REQUEST_CHANGES` review — the findings are already fixed, so a change request would be stale the moment it posts. List the commits and the findings they address, and add any finding you did **not** fix (out-of-scope, architectural, `UNCERTAIN`) so nothing silently disappears.
+5. Print the pushed SHAs and the PR URL.
+
+## Post Review to GitHub PR (`PR_MODE=true` and `PR_DISPOSITION=inline`)
+
+Skip this section when `PR_MODE=false`, and when `PR_DISPOSITION=apply` succeeded in pushing. When we cannot write to the head branch, this is the primary output — package the verified findings as a single GitHub PR review with inline comments containing code suggestions, just like Copilot.
 
 ### Classify findings for posting
 
@@ -328,6 +368,24 @@ Print the review URL returned by the API (`html_url`) so the user can open it.
 
 If the user wants to inspect comments before publishing, support a `--draft` flag: instead of `POST .../reviews`, write the payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the path plus the `gh api` command needed to publish it manually — include the `--hostname {GH_HOST}` flag in that printed command so it targets the right host on GitHub Enterprise. (Default behavior remains: publish immediately.)
 
+## Merge the PR (`--merge`, `PR_MODE=true` only)
+
+Only when `MERGE_ENABLED=true`. **Merge only when the PR is actually good** — the flag asks for a merge, every gate below has to agree to one. Skip the merge and print the failing gate by name whenever any of these does not hold:
+
+1. **No unresolved blocker from this run.** Zero CRITICAL findings remain — either none were found, or every one was fixed and pushed in `PR_DISPOSITION=apply`. A CRITICAL finding that was only *commented* is unresolved by definition, so `PR_DISPOSITION=inline` can never merge. `--strict` promotes structural findings to blocker tier, so those count here too. `UNCERTAIN` findings do not block, but name them in the merge report.
+2. **We can merge it.** `BASE_PUSH=true` (from `~/.claude/lib/pr-write-access.md`) and the PR is not a draft.
+3. **GitHub says it is mergeable.** `gh pr view {PR_NUM} --repo "{GH_HOST}/{OWNER}/{REPO}" --json mergeable,mergeStateStatus,reviewDecision,isDraft` reports `mergeable=MERGEABLE` and `reviewDecision` is not `CHANGES_REQUESTED`. A `mergeStateStatus` of `BLOCKED` or `DIRTY` stops the merge — report it and leave the PR open rather than trying to force past branch protection.
+4. **Required CI is green.** `gh pr checks {PR_NUM} --repo "{GH_HOST}/{OWNER}/{REPO}" --required --watch --fail-fast`. Scope to `--required` so an optional job cannot block a merge branch protection would allow. On a failure, apply the one-conservative-re-run routine in `~/.claude/lib/ci-flake-handling.md`; if it fails again, do not merge — report which check failed.
+5. **The head is what we reviewed.** Re-read `headRefOid` and compare it to the `HEAD_SHA` this review ran against (plus any commits we pushed ourselves). If the author pushed something else meanwhile, the review no longer covers the PR — do not merge; say the head moved and stop.
+
+When every gate passes:
+
+```bash
+gh pr merge {PR_NUM} --repo "{GH_HOST}/{OWNER}/{REPO}" --{MERGE_METHOD}
+```
+
+`{MERGE_METHOD}` defaults to `squash` when `--merge` carried no method. **Never pass `--delete-branch` here** — on a cross-repo PR the head branch belongs to the contributor's fork, and on a same-repo PR the local checkout may be a linked worktree where `gh`'s implicit default-branch checkout fails and reports an already-successful merge as an error. Read the PR's state back and confirm it is `MERGED` before saying so: `gh pr merge` exits zero on a repo with a merge queue while the PR is only *queued*.
+
 ## Report
 
 Print a summary table of what was reviewed and found. The table is dynamic: always
@@ -356,7 +414,12 @@ Omit all focused-lens rows when none were selected.
 
 If no issues were found, confirm the code is clean and ready for PR.
 
-In `PR_MODE`, replace "Issues Fixed" with **Inline Suggestions Posted** (count and list with `file:line` + one-line gist) and **Out-of-diff Findings** (list — these went into the summary body), and add a final line with the posted review URL.
+In `PR_MODE`, open the report with the disposition line (`apply` or `inline`, and the reason), then:
+
+- **`PR_DISPOSITION=inline`** — replace "Issues Fixed" with **Inline Suggestions Posted** (count and list with `file:line` + one-line gist) and **Out-of-diff Findings** (list — these went into the summary body), and add a final line with the posted review URL.
+- **`PR_DISPOSITION=apply`** — keep "Issues Fixed" (they really were), list the pushed commit SHAs, and add **Left for the author** for anything not fixed. If the push was refused and the run fell back to comments, say so explicitly and report as `inline` instead — a silent fallback would read as a successful push.
+
+When `MERGE_ENABLED=true`, close with the merge outcome: `Merged #{PR_NUM} ({MERGE_METHOD})`, or the name of the gate that stopped it.
 
 ## Convention Encoding
 
@@ -370,7 +433,7 @@ After the report is printed and fixes are committed (local branch mode), run the
 
 ## PR Comment Policy
 
-**This section applies only when `PR_MODE=false`.** When `PR_MODE=true`, posting the review IS the deliverable — the user invoked the command with a PR URL specifically to publish review feedback, so the self-vs-other-author check is skipped and the review is always posted (per "Post Review to GitHub PR" above).
+**This section applies only when `PR_MODE=false`.** When `PR_MODE=true`, delivering the findings to the PR IS the deliverable — the user named a PR specifically to act on it — so the self-vs-other-author check is skipped: `PR_DISPOSITION=apply` pushes the fixes and `PR_DISPOSITION=inline` always posts the review (per the two sections above).
 
 For local branch mode, after the review and any fixes, determine whether to post review comments on the PR/MR:
 

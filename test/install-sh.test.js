@@ -59,7 +59,14 @@ function rewriteForOpencode(text) {
     .split('~/.claude/.slashdo-config.json').join('~/.config/opencode/.slashdo-config.json');
 }
 
-const readRepo = (...segments) => fs.readFileSync(path.join(REPO_ROOT, ...segments), 'utf8');
+const readRepo = (...segments) => {
+  const text = fs.readFileSync(path.join(REPO_ROOT, ...segments), 'utf8');
+  // !read is portable source syntax; native hosts receive actionable read paths.
+  return segments.at(-1).endsWith('.md')
+    ? text.replace(/^!read lib\/([\w.-]+\.md)$/gm,
+      'Read `~/.claude/lib/$1` before performing this step; required when this step applies.')
+    : text;
+};
 
 // ── Sandbox helpers ─────────────────────────────────────────────────
 
@@ -203,7 +210,7 @@ describe('install.sh — Claude Code fresh install', () => {
     assert.ok(!result.stdout.includes('\\033'), 'no uninterpreted escape sequences in the output');
   });
 
-  it('installs every command in commands/do verbatim', () => {
+  it('installs every command with native required-read paths', () => {
     for (const cmd of COMMANDS) {
       const file = path.join(home, '.claude', 'commands', 'do', `${cmd}.md`);
       assert.ok(fs.existsSync(file), `${cmd}.md should be installed`);
@@ -211,7 +218,7 @@ describe('install.sh — Claude Code fresh install', () => {
     }
   });
 
-  it('installs every lib in lib/ verbatim', () => {
+  it('installs every library with native required-read paths', () => {
     for (const lib of LIBS) {
       const file = path.join(home, '.claude', 'lib', `${lib}.md`);
       assert.ok(fs.existsSync(file), `${lib}.md should be installed`);

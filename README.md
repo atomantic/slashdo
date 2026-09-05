@@ -152,6 +152,7 @@ With the saved `--issues` default, every plan-aware command (`/do:next`, `/do:re
 /do:better --review-with claude,codex     # full DevSecOps audit → per-category PRs → review loop → merge
 /do:simplify                              # refactor-only pass: architecture, DRY, cognitive load — behavior unchanged
 /do:review --strict                       # deep code review of the current branch's changes
+/do:review https://git.example.com/o/r/pull/12  # review a PR on any GitHub host — fixes pushed if writable, else inline
 /do:depfree --heavy                       # remove unnecessary dependencies by writing replacement code
 /do:scan ~/Downloads/sketchy-repo         # read-only malware/safety audit of an unfamiliar directory
 ```
@@ -182,7 +183,7 @@ All commands live under the `do:` namespace:
 | `/do:fpr` | Fork PR — push to fork, PR against upstream |
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
 | `/do:release` | Create a release PR with version bump and changelog |
-| `/do:review` | Deep code review of changed files against best practices (`--strict`/`--nuclear` raise the bar) |
+| `/do:review` | Deep code review of changed files, a local branch or a PR (`--strict`/`--nuclear` raise the bar; on a PR it pushes the fixes when the head branch is writable, else comments inline) |
 | `/do:better` | Full DevSecOps audit with multi-agent scan, remediation, and per-category PRs |
 | `/do:better-swift` | SwiftUI DevSecOps audit with multi-platform coverage (iOS, macOS, watchOS, tvOS, visionOS) |
 | `/do:simplify` | Refactor-only audit — architecture, DRY, simplification, cognitive load — as per-category PRs that must not change behavior ([details](#refactor-only-dosimplify)) |
@@ -460,6 +461,8 @@ curl -fsSL https://raw.githubusercontent.com/atomantic/slashdo/main/uninstall.sh
 npx slash-do@latest push pr release           # install specific commands only
 ```
 
+A command-only filtered install also installs whatever workflow it delegates to — `prd` pulls in `goals`, `simplify` and `pr-better` pull in `better` (and `pr-better` pulls in `pr` too) — so a wrapper never ends up pointing at a command that isn't there.
+
 ## How It Works
 
 ```
@@ -484,6 +487,36 @@ npx slash-do@latest push pr release           # install specific commands only
   ~/.codex/skills/do-push/SKILL.md
   ~/.grok/skills/do-push/SKILL.md
 ```
+
+### Embedding command prompts
+
+Hosts can use the same dependency-free renderer as the skill installer:
+
+```js
+const { buildPromptBundle, parseFrontmatter } = require('slash-do/src/transformer');
+const { body } = parseFrontmatter(commandMarkdown);
+const bundle = buildPromptBundle(body, sourceLibDirectory, {
+  teams: false,
+  skipIncludes: [], // library filenames intentionally supplied or excluded by the host
+  defer: true,
+});
+```
+
+Write `bundle.body` beside a `lib/` directory containing `bundle.files` (an object
+keyed by bare library filenames). References in the body use `lib/name.md`;
+references between supporting files use `./name.md`. Give the agent access to
+that directory. Use `defer: false` when file tools are unavailable: the returned
+body includes dependencies once and `files` is empty. Conditions are resolved
+before dependencies; missing required files fail with a named error. For legacy
+recipe consumers that intentionally include only explicit `!cat`/`!read` content,
+set `followReferences: false` to avoid traversing see-also citations. Eager mode
+also preserves bare backticked library names as citations rather than includes.
+
+In command or library source, put `!read lib/name.md` on its own line immediately
+after the phase or condition requiring it. The renderer emits a required read
+at that step, including for native Claude/OpenCode commands. Keep `!`-backticked
+`cat ~/.claude/lib/name.md` includes for content needed immediately. Deferred
+skills bundle citations instead of appending their transitive contents.
 
 ## Updating
 

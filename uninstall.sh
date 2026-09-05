@@ -96,19 +96,27 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
 # NOTE: keep in sync with install.sh LIBS — see comment there.
 LIBS=(
+  better-audit better-audit-architecture better-audit-bugs-perf
+  better-audit-code-quality better-audit-cognitive-load better-audit-deps
+  better-audit-dry better-audit-security better-audit-stack-specific
+  better-audit-structural better-audit-tests better-audit-ux
+  better-discovery better-options better-pipeline-inputs
+  better-plan better-remediation better-simplify
+  better-state better-test-enhancement
   better-cleanup better-pr-and-ci better-review-loop better-verification
   ci-flake-handling code-review-checklist copilot-review-loop
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
   gh-host github-reviewer-loop graphql-escaping
   local-agent-review-loop model-tiers multi-reviewer-loop next-swarm ollama-review-loop
-  per-finding-root-cause plan-id-format plan-issue-mode
+  per-finding-root-cause plan-id-format plan-issue-mode pr-write-access
   post-review-doc-recommendations rebase-conflict-resolution remediation-agent-template
   review-agent-selection review-config-defaults review-convergence-gate
   swift-review-checklist swift-gotchas
   review-surface-scan review-surface-quality review-security-audit
   review-cross-file-tracing review-cross-file-contract
   review-structural-ambition
+  vcs-host
 )
 
 HOOKS=(slashdo-check-update slashdo-statusline)

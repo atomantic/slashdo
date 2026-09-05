@@ -67,6 +67,7 @@ For each category that has findings:
    ```
    {COMMIT_PREFIX_RULE}
 5. Push the branch: `git push -u origin {BRANCH_PREFIX}/{CATEGORY_SLUG}`
+   - **Push failure**: `git pull --rebase --autostash` then retry the push once. If it still fails, report the branch as blocked and continue with the remaining categories rather than aborting the whole run.
 
 **File isolation rule** (one file per branch) — each file must appear in exactly ONE branch. If a file has changes from multiple categories (e.g., {MULTI_CATEGORY_FILE_EXAMPLE}), assign the whole file to one category based on the file ownership map. Do not split file-level changes across PRs.
 
@@ -81,7 +82,12 @@ If a branch fails because it references something created in another branch:
 
 ### 5b: Version Bump
 
-Only if ALL category branches pass build{VERIFY_SCOPE_SUFFIX}:
+**Skip this entire step when Phase 0b recorded `HAS_VERSION_BUMP=false`** — the
+project has no in-repo version manifest, or its ecosystem versions by VCS tag
+rather than a file (e.g. Go). Do not invent one; proceed straight to 5c with
+no version-bump commit on any branch.
+
+Only if `HAS_VERSION_BUMP=true` AND ALL category branches pass build{VERIFY_SCOPE_SUFFIX}:
 1. Set `FIRST_CATEGORY` to the first category slug that has a branch (e.g., `security` if it exists, otherwise the next in order)
 2. Analyze all commits across ALL category branches to determine the aggregate SemVer bump:
    - Any `breaking:` or `BREAKING CHANGE` → **major**
@@ -133,9 +139,9 @@ effects, errors, or public API. Verified by `{TEST_CMD}` passing unmodified.
 
 Record all `PR_NUMBERS` and `PR_URLS` in a map: `{category: {number, url}}`.
 
-**GATE: If `--no-merge` was passed, STOP HERE.** Print all PR URLs and summary.
+**GATE: If `--no-merge` was passed, skip CI/review/merge and proceed directly to [Phase 7 safe finalization](./better-cleanup.md).** Report all PR URLs, restore this run's stash, and retain open-PR branches and the worktree for resumption.
 
-**GATE: If `VCS_HOST` is `gitlab`, STOP HERE.** Print all MR URLs and summary. The automated Phase 6 review loop + auto-merge run on GitHub PRs only; GitLab MRs are left open for manual review and merge.
+**GATE: If `VCS_HOST` is `gitlab`, proceed directly to [Phase 7 safe finalization](./better-cleanup.md).** Report MR URLs and restore this run's stash while retaining open-MR artifacts. Automated Phase 6 review and merge run on GitHub only; GitLab MRs stay open.
 
 ## Phase 5d: CI Verification
 
@@ -148,7 +154,7 @@ After creating all PRs, verify CI passes on each one:
    ```
    Poll every 30 seconds, max 10 minutes per PR.
 
-3. If CI **passes** on all PRs → proceed to Phase 6
+3. If CI **passes** on all PRs → proceed to Phase 6. No checks reported is ambiguous: confirm the repository has no applicable CI or external required checks before treating it as green. If expected checks never attach within the wait limit, leave that PR open. Compare every result to the current pushed HEAD; stale runs cannot satisfy this gate.
 
 4. If CI **fails** on any PR:
    a. Fetch the failure logs:
