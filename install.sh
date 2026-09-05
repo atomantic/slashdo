@@ -127,6 +127,7 @@ rewrite_for_claude() {
 rewrite_for_opencode() {
   sed -e "$REQUIRED_READ_REWRITE" \
       -e 's|~/.claude/lib/|~/.config/opencode/lib/|g' \
+      -e 's|~/.claude/commands/do/\([A-Za-z0-9._-]*\)\.md|~/.config/opencode/commands/do-\1.md|g' \
       -e 's|~/.claude/.slashdo-config.json|~/.config/opencode/.slashdo-config.json|g' \
       "$1" > "$2"
 }
