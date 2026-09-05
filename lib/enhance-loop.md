@@ -155,36 +155,20 @@ as a positional argument (never via stdin) and prints the improved draft to stdo
 <!-- if:teams -->
 | `claude` | Dispatch an in-process sub-agent via the `Agent` tool (`subagent_type: "general-purpose"`, prompt `$ENHANCE_PROMPT`, `model` = `{ENH_MODEL}` when set) — **not** `claude -p`, so it stays on the host session's plan billing instead of hitting the API. Its returned message is the agent's stdout. |
 <!-- else -->
-| `claude` | `claude -p "$ENHANCE_PROMPT" ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} --dangerously-skip-permissions` |
+| `claude` | `claude -p "$ENHANCE_PROMPT" ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} --permission-mode plan --tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --settings '{"disableAllHooks":true}' --no-chrome --no-session-persistence` |
 <!-- /if:teams -->
-| `codex` | `codex ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} --sandbox read-only -a never exec "$ENHANCE_PROMPT"` — `exec` (free-form prompt) is the right subcommand here, not `codex review`; `-m`/`--model`, `--sandbox`, and `-a` are all top-level flags that MUST precede `exec`. `--sandbox read-only` enforces the read-only contract at the sandbox level while still allowing tree reads and git queries — the same posture `lib/local-agent-review-loop.md` uses for its review-only codex pass (only its *reviewer-applies* path needs `danger-full-access`). |
-| `agy` | `agy --dangerously-skip-permissions --model "$AGY_ENH_MODEL" --print-timeout 30m -p "$ENHANCE_PROMPT"` |
-| `grok` | `grok --permission-mode bypassPermissions ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} -p "$ENHANCE_PROMPT"` |
-| `cursor` | `"$REVIEW_BIN" -p --trust --mode=ask --output-format text ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} "$ENHANCE_PROMPT"` — `{REVIEW_BIN}` is resolved by the Cursor binary probe in `lib/local-agent-review-loop.md` (prefer `cursor-agent`; fall back to `agent` only when it identifies as Cursor). `--mode=ask` is Cursor's read-only exploration mode; `--trust` is required for headless untrusted workspaces; omit `--force` so print mode cannot apply edits. Do **not** pass `--effort` (Cursor has no such flag). |
+| `codex` | `codex ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} --sandbox read-only -a never exec "$ENHANCE_PROMPT"` |
+| `agy` | Verified invocation-local read-only profile or tool-free fallback as defined in `lib/local-agent-review-loop.md`; unavailable if neither is enforceable |
+| `grok` | Verified tool-free fallback; unavailable if tools/MCP/hooks cannot be isolated |
+| `cursor` | Verified tool-free fallback; unavailable if tools/MCP/hooks cannot be isolated |
 
-**Grok flag rationale.** `grok -p`/`--single <PROMPT>` runs a single-turn headless
-prompt, prints the response to stdout, and exits — the grok analog of `claude -p` /
-`agy -p`. `--permission-mode bypassPermissions` is what reliably auto-approves grok's
-tool executions for an unattended run; the nominally lighter `dontAsk` mode is NOT a
-safe substitute here — it does not dependably auto-approve headless tool calls, so a
-background pass can sit waiting on an approval that never comes and degrade to a
-timeout/no-op. Grok therefore keeps the full-bypass posture even though enhancement
-is contractually read-only (unlike codex, it has no read-only sandbox mode); the
-step-4 git contract check is the enforcement backstop. `-m`/`--model` pins the model
-for the `grok[<model>]` bracket (empty → grok's own default). Output is grok's
-default `plain` format — the improved draft on stdout. Like the other `-p` CLIs, grok
-takes the prompt as the positional argument, **not** from stdin — do not pipe into it.
-
-**Cursor flag rationale.** `"$REVIEW_BIN" -p --trust --mode=ask` is Cursor Agent's
-headless read-only posture — the analog of `codex --sandbox read-only` for a CLI
-that has no sandbox flag of that shape. `--mode=ask` is Cursor's read-only
-exploration mode and `--force` is omitted, so print mode only proposes changes;
-`--trust` skips the workspace-trust prompt that would otherwise fail a headless
-run. Resolve `{REVIEW_BIN}` with the same Cursor binary probe the review loop
-uses: prefer `cursor-agent`, and accept `agent` only after an identity check
-(Grok Build also ships an `agent` binary). The prompt is a positional argument
-to `-p`, not stdin. The step-4 git contract check is still the backstop — Ask
-mode is a request the CLI can ignore.
+**Required isolation:** follow the enforced reviewer permissions and tool-free
+fallback in `lib/local-agent-review-loop.md` before any invocation, including an
+in-process sub-agent. The Agent API must enforce a read-only tool set; otherwise
+use the scoped subprocess. Missing isolation is an inconclusive enhancement, not
+permission to run an unrestricted CLI. Keep the original draft and report it.
+No provider settings are modified. Network tools, installers and write tools
+remain disabled. Supply the draft and relevant source context as quoted data.
 
 ### Loop
 
@@ -275,9 +259,7 @@ one's output):
      On `STILL_RUNNING`, immediately reissue the same call until `$DONE_FILE` appears,
      then read `EXIT_CODE=$(cat "$DONE_FILE")` and `$OUTPUT=$(cat "$LOG_FILE")`.
 
-4. **Verify the read-only contract, then parse the output.** Not every CLI can be
-   sandboxed read-only (`claude`/`agy` have no such mode), so the "must not modify
-   files" contract needs teeth: recompute `git status --porcelain`, `git rev-parse
+4. **Verify the read-only contract, then parse the output.** After the enforced isolation preflight, independently recompute `git status --porcelain`, `git rev-parse
    HEAD`, `git diff HEAD | git hash-object --stdin`, and the untracked-files hash
    (same pipeline as `UNTRACKED_BASELINE`) and compare all four against the step-2
    baselines (the diff hash catches an edit to a *tracked* file that was already

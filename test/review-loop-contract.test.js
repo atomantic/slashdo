@@ -25,6 +25,24 @@ const LOOPS_WITH_OPTIONAL_ARRAYS = [
 ];
 
 describe('review-loop parse contracts', () => {
+  it('never grants blanket permissions to feedback or applying reviewers', () => {
+    for (const name of ['local-agent-review-loop.md', 'enhance-loop.md']) {
+      const body = readLib(name);
+      assert.doesNotMatch(body, /--dangerously-skip-permissions|danger-full-access|bypassPermissions|--yolo|--force\b|--sandbox disabled/);
+      assert.match(body, /--tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep"/);
+      assert.match(body, /--strict-mcp-config/);
+      assert.match(body, /disableAllHooks/);
+    }
+    const body = readLib('local-agent-review-loop.md');
+    assert.match(body, /sandbox_workspace_write.network_access=false -c features.shell_tool=false/);
+    assert.match(body, /Inlining a\s+diff alone is not tool isolation/);
+    assert.match(body, /no per-invocation settings-file selector/);
+    assert.match(body, /"write_file\(\*\)"/);
+    assert.match(body, /"command\(\*\)"/);
+    assert.match(body, /"mcp\(\*\)"/);
+    assert.match(body, /required reviewers remain\s+unsatisfied/);
+  });
+
   it('lets the host orchestrator select focused review lenses from the diff', () => {
     const command = readCommand('review.md');
     const selection = readLib('review-agent-selection.md');
@@ -520,16 +538,13 @@ describe('review-loop parse contracts', () => {
     assert.match(loop, /Cursor binary probe/);
     assert.match(loop, /command -v cursor-agent/);
     assert.match(loop, /Grok Build also installs an `agent` binary/);
-    assert.match(loop, /--mode=ask/);
-    assert.match(loop, /--force --trust/);
+    assert.match(loop, /plan\/ask by itself does not enforce/);
     assert.match(loop, /\| `cursor` \| folded into `--model` as `\[effort=<level>\]`/);
     // ~effort must actually change Cursor inference: fold into --model as
     // [effort=<level>], matching cursor[gpt-5]~effort=max and a saved
     // review-models cursor=gpt-5 plus cursor~effort=max. Never pass --effort.
     assert.match(loop, /CURSOR_MODEL="\$\{REVIEW_MODEL\}\[effort=\$\{REVIEW_EFFORT\}\]"/);
-    assert.match(loop, /gpt-5\[effort=max\]/);
-    // Review-only must not grant --force; reviewer-applies must.
-    assert.match(loop, /omits `--force`/);
+    assert.match(loop, /Tool-free fallback; otherwise `STATUS=no-verdict`/);
 
     // Config and docs must advertise the same model + effort grammar as the
     // other reviewers — a saved review-models entry and a ~effort suffix.
@@ -544,8 +559,7 @@ describe('review-loop parse contracts', () => {
     assert.match(wrapper, /Cursor binary probe/);
 
     const enhance = readLib('enhance-loop.md');
-    assert.match(enhance, /`cursor` \| `"\$REVIEW_BIN" -p --trust --mode=ask/);
-    assert.match(enhance, /Cursor binary probe/);
+    assert.match(enhance, /`cursor` \| Verified tool-free fallback/);
 
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'rpr.md', 'config.md']) {
       const body = readCommand(name);
