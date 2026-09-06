@@ -247,6 +247,7 @@ Requirement IDs are stable across `--refresh` runs — unchanged requirements ke
 | `agy` | The Antigravity CLI (`agy` binary; aliases: `gemini`, `antigravity`) | yes |
 | `grok` | The Grok CLI in headless mode, reviewing locally | yes |
 | `cursor` | The Cursor Agent CLI in headless mode (`cursor-agent`, alias of `cursor`; never a generic `agent` that is actually Grok) | yes |
+| `opencode` | The OpenCode CLI in headless mode (`opencode`, aliases: `zen`, `opencode-zen`) | yes |
 | `ollama` | A local Ollama model — review-only (non-agentic). Bare `ollama` auto-selects your most capable installed coding model | yes |
 | `@<login>` | Any GitHub user or App/bot (e.g. `@octocat`, `@some-app[bot]`): slashdo requests their review on the PR, waits for it, and fixes what it surfaces. GitHub only; slashdo never posts an approval itself | no |
 | `copilot` | **Legacy.** GitHub's cloud Copilot review on the PR (GitHub only). Still fully supported when you name it, but no command selects it for you | no |
@@ -258,6 +259,7 @@ Reviewers run **in the order listed**, and whatever you list is exactly what run
 /do:pr --review-with codex,agy                      # codex, then Antigravity — each sees the prior's fixes
 /do:pr --review-with claude[claude-opus-4-8],codex[o3]   # pin the model per reviewer
 /do:pr --review-with cursor[gpt-5]~effort=max       # Cursor Agent, pinned model + reasoning effort
+/do:pr --review-with opencode[muse-1.3]             # OpenCode Zen model via friendly alias
 /do:pr --review-with ollama[qwen2.5-coder:32b]      # pin a specific installed Ollama model
 /do:pr --review-with codex,@org-review-bot          # codex, then request a review from a GitHub bot
 /do:pr --review-with codex,ollama~opt               # ollama is optional — it runs, but can't block the merge
@@ -265,13 +267,13 @@ Reviewers run **in the order listed**, and whatever you list is exactly what run
 /do:pr --review-with none                           # skip external review for this run (overrides a saved default)
 ```
 
-**Model pinning** (`<agent>[<model>]`) works per run as shown, or save per-reviewer defaults with `/do:config --review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5` so runs can omit the bracket. An explicit bracket always wins over the saved default. Cursor also accepts a model string that already encodes effort (`cursor[claude-opus-4-7[thinking=true,effort=high]]`) — that is Cursor's native variant syntax and is passed through as `--model` unchanged.
+**Model pinning** (`<agent>[<model>]`) works per run as shown, or save per-reviewer defaults with `/do:config --review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5,opencode=muse-1.3` so runs can omit the bracket. An explicit bracket always wins over the saved default. Cursor also accepts a model string that already encodes effort (`cursor[claude-opus-4-7[thinking=true,effort=high]]`) — that is Cursor's native variant syntax and is passed through as `--model` unchanged. OpenCode accepts friendly aliases (`muse-1.3`, `zen/muse-1.3`, bare model names) normalized to the installed Zen models (built-in default: `opencode/muse-spark-1.3-contributor-free`).
 
 **Optional reviewers** (`~opt` suffix): the reviewer runs and its findings get fixed, but an *inconclusive* result (timeout / skipped / no verdict) is excluded from the merge gate, so it never blocks `--merge`. A hard error from it (broken build / failed tests) still blocks. Use it for a second-opinion reviewer that doesn't reliably return a verdict, such as a local Ollama model.
 
-**Per-reviewer iteration caps** (`~max=<n>` suffix): caps how many **review → fix → re-review cycles** that one reviewer runs. It is the per-entry form of `--review-iterations`, and unlike that flag it reaches every reviewer type — including `codex`/`agy`/`claude`/`grok`/`cursor` and `ollama`, whose caps are otherwise fixed at 3 — so a single run can budget each reviewer separately: `--review-with claude~max=2,ollama~max=1,codex~max=3`. `<n>` is a non-negative integer; `0` means "loop until clean", bounded by a 10-iteration safety guardrail. A reviewer that stops because it spent a cap *you* set reports `capped`, which counts as clean for the merge gate — as opposed to `guardrail`, which is what a *built-in* cap reports when it cuts off a reviewer that was still finding real problems, and which blocks the merge.
+**Per-reviewer iteration caps** (`~max=<n>` suffix): caps how many **review → fix → re-review cycles** that one reviewer runs. It is the per-entry form of `--review-iterations`, and unlike that flag it reaches every reviewer type — including `codex`/`agy`/`claude`/`grok`/`cursor`/`opencode` and `ollama`, whose caps are otherwise fixed at 3 — so a single run can budget each reviewer separately: `--review-with claude~max=2,ollama~max=1,codex~max=3`. `<n>` is a non-negative integer; `0` means "loop until clean", bounded by a 10-iteration safety guardrail. A reviewer that stops because it spent a cap *you* set reports `capped`, which counts as clean for the merge gate — as opposed to `guardrail`, which is what a *built-in* cap reports when it cuts off a reviewer that was still finding real problems, and which blocks the merge.
 
-**Per-reviewer reasoning effort** (`~effort=<level>` suffix): specifies the reasoning effort level (`low`, `medium`, `high`, `xhigh`, `max`) for that reviewer: `--review-with codex[gpt-5.6-luna]~effort=max~opt`, `--review-with claude~effort=high~max=2`, `--review-with cursor[gpt-5]~effort=max`. Each reviewer receives it in the form its own CLI accepts — `--effort` is **not** universal. `claude` and `grok` take the flag; **codex** takes `-c model_reasoning_effort=<level>`; **Cursor** folds it into `--model` as `[effort=<level>]`, so pair that one with a `cursor[<model>]` bracket or a saved `--review-models cursor=…` default; and **agy** picks the matching model variant from whatever `agy models` lists. Where a reviewer offers no such control — or no level matching what you asked — the effort falls back to prompt guidance rather than failing the review.
+**Per-reviewer reasoning effort** (`~effort=<level>` suffix): specifies the reasoning effort level (`low`, `medium`, `high`, `xhigh`, `max`) for that reviewer: `--review-with codex[gpt-5.6-luna]~effort=max~opt`, `--review-with claude~effort=high~max=2`, `--review-with cursor[gpt-5]~effort=max`, `--review-with opencode[muse-1.3]~effort=high`. Each reviewer receives it in the form its own CLI accepts — `--effort` is **not** universal. `claude` and `grok` take the flag; **codex** takes `-c model_reasoning_effort=<level>`; **opencode** takes `--variant <level>`; **Cursor** folds it into `--model` as `[effort=<level>]`, so pair that one with a `cursor[<model>]` bracket or a saved `--review-models cursor=…` default; and **agy** picks the matching model variant from whatever `agy models` lists. Where a reviewer offers no such control — or no level matching what you asked — the effort falls back to prompt guidance rather than failing the review.
 
 `~max` applies in `series` mode (the default). In `--review-mode parallel` each reviewer runs a single review-only pass and the orchestrator applies the union once, so there are no per-reviewer cycles to cap — `~max` is ignored there with a warning.
 
@@ -282,11 +284,11 @@ All three suffixes chain in any order and are shell-safe: `codex[gpt-5.6-luna]~e
 | Flag | Default | What it does |
 |:---|:---|:---|
 | `--review-with <list>` | none — no external reviewer | Comma-list of reviewers, run in order (see above). Each entry may carry `~opt` and/or `~max=<n>` |
-| `--review-iterations <n>` | `1` | Cap review-and-fix cycles for a `copilot` or `@<login>` pass: request one review, apply every fix, stop (exiting early on 0 comments). `0` restores loop-until-clean, bounded by a 10-iteration guardrail. No effect on `codex`/`agy`/`claude`/`grok`/`cursor` (fixed 3-iteration cap) or `ollama` (own fixed cap) — use the per-entry `~max=<n>` suffix to move those, or to budget each reviewer separately |
-| `--review-mode <series\|parallel>` | `series` | `series` runs each reviewer to completion before the next starts, so later reviewers see earlier reviewers' committed fixes (list order matters). `parallel` runs every review concurrently against one frozen baseline and applies the deduped union of findings in a single pass — faster, but no reviewer sees another's fixes, and `--reviewer-applies`, the stop-mode flags, and per-entry `~max=<n>` are ignored. `/do:rpr` ignores this flag |
+| `--review-iterations <n>` | `1` | Cap review-and-fix cycles for a `copilot` or `@<login>` pass: request one review, apply every fix, stop (exiting early on 0 comments). `0` restores loop-until-clean, bounded by a 10-iteration guardrail. No effect on `codex`/`agy`/`claude`/`grok`/`cursor`/`opencode` (fixed 3-iteration cap) or `ollama` (own fixed cap) — use the per-entry `~max=<n>` suffix to move those, or to budget each reviewer separately |
+| `--review-mode <series\|parallel>` | `series` | `series` runs each reviewer to completion before the next starts, so later reviewers see earlier reviewers' committed fixes (list order matters). `parallel` runs every review concurrently against one baseline and applies the deduped union of findings in a single pass — faster, but no reviewer sees another's fixes, and `--reviewer-applies`, the stop-mode flags, and per-entry `~max=<n>` are ignored. `/do:rpr` ignores this flag |
 | `--review-stop-on-findings` | off | Stop the loop after the first reviewer that fixes at least one finding; skip the rest. Mutually exclusive with `--review-stop-on-clean` |
 | `--review-stop-on-clean` | off | Stop after the first reviewer that reports zero findings |
-| `--reviewer-applies` | off | Let the reviewing CLI edit the working tree directly, instead of the orchestrator applying its findings. Applies to `codex`/`agy`/`claude`/`grok`/`cursor` passes; no effect on `copilot`, `@<login>` (both review read-only cloud-side), or `ollama` (always review-only) |
+| `--reviewer-applies` | off | Let the reviewing CLI edit the working tree directly, instead of the orchestrator applying its findings. Applies to `codex`/`agy`/`claude`/`grok`/`cursor`/`opencode` passes; no effect on `copilot`, `@<login>` (both review read-only cloud-side), or `ollama` (always review-only) |
 
 By default the orchestrator that opened the PR applies every reviewer's fixes itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking Antigravity to both find and patch its own concerns).
 
@@ -377,8 +379,8 @@ Then `/do:next` reads them back. **`--model`/`--effort` filter the queue** — `
 Rather than passing flags every time, save them once and let future commands pick them up automatically.
 
 ```
-/do:config --review-with=claude,codex,cursor[gpt-5]~effort=max,ollama[qwen2.5-coder:32b]
-/do:config --review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5
+/do:config --review-with=claude,codex,cursor[gpt-5]~effort=max,opencode[muse-1.3],ollama[qwen2.5-coder:32b]
+/do:config --review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5,opencode=muse-1.3
 /do:config --issues --issues-label plan
 /do:config --merge --merge-method squash
 /do:config --self
@@ -391,7 +393,7 @@ Rather than passing flags every time, save them once and let future commands pic
 |:---|:---|
 | `/do:config` (or `--show`) | Print the current global + per-project defaults and the effective merged values |
 | `/do:config --review-with=… [--review-iterations=N] [--review-mode=series\|parallel] [--reviewer-applies\|--no-reviewer-applies] [--review-stop-on-findings\|--review-stop-on-clean\|--review-stop-all]` | Save review-loop defaults (validated with the same rules the review commands use) |
-| `/do:config --review-models <agent>=<model>,…` | Save the default model per reviewer (`codex`/`claude`/`agy`/`grok`/`cursor`/`ollama`). Merges key-by-key — setting one agent leaves the others intact; an empty value (`codex=`) clears one agent |
+| `/do:config --review-models <agent>=<model>,…` | Save the default model per reviewer (`codex`/`claude`/`agy`/`grok`/`cursor`/`opencode`/`ollama`). Merges key-by-key — setting one agent leaves the others intact; an empty value (`codex=`) clears one agent |
 | `/do:config --issues\|--no-issues [--issues-label=<name>]` | Save the issue-mode default (and its scoping label) for every command that accepts `--issues` |
 | `/do:config --self\|--no-self` | Save the self-only issue gate for `/do:next` — claim only issues you filed |
 | `/do:config --collaborators\|--no-collaborators` | Save the collaborators-only issue gate for `/do:next` — claim only issues filed by a live repo collaborator (union `--trusted-authors`) |

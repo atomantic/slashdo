@@ -1,24 +1,25 @@
 ## Local Agent Code Review Loop
 
-Run a local agent to review the PR branch, then either let that agent apply fixes itself (`--reviewer-applies`) or read its findings back into the orchestrating thread which applies the fixes (default). Either way, verify in the main thread before pushing. This is the primary review path — selected via `--review-with codex|agy|claude|grok|cursor` (the `agy` slug also accepts the aliases `gemini` and `antigravity`; the `cursor` slug also accepts the alias `cursor-agent`).
+Run a local agent to review the PR branch, then either let that agent apply fixes itself (`--reviewer-applies`) or read its findings back into the orchestrating thread which applies the fixes (default). Either way, verify in the main thread before pushing. This is the primary review path — selected via `--review-with codex|agy|claude|grok|cursor|opencode` (the `agy` slug also accepts the aliases `gemini` and `antigravity`; the `cursor` slug also accepts the alias `cursor-agent`; the `opencode` slug also accepts the aliases `zen` and `opencode-zen`).
 
-The reviewer is a headless CLI subprocess (`codex` / `agy` / `grok` / `cursor`, and `claude` on non-Claude-Code hosts).<!-- if:teams --> The one exception is the `claude` reviewer under Claude Code: it runs as an **in-process sub-agent** (via the `Agent` tool), not a `claude -p` subprocess. A headless `claude -p` invocation bills against the Anthropic API even when the host session is already on a plan; an in-process sub-agent runs under the host session's plan instead, so it incurs no extra API billing. See the invocation table and Step 2.<!-- /if:teams -->
+The reviewer is a headless CLI subprocess (`codex` / `agy` / `grok` / `cursor` / `opencode`, and `claude` on non-Claude-Code hosts).<!-- if:teams --> The one exception is the `claude` reviewer under Claude Code: it runs as an **in-process sub-agent** (via the `Agent` tool), not a `claude -p` subprocess. A headless `claude -p` invocation bills against the Anthropic API even when the host session is already on a plan; an in-process sub-agent runs under the host session's plan instead, so it incurs no extra API billing. See the invocation table and Step 2.<!-- /if:teams -->
 
 When to use this:
 - The work isn't on a GitHub PR yet, or the repo has no cloud review configured
-- You want a specific reviewer's perspective (Codex, Antigravity, Grok, Cursor Agent, or a separate Claude reviewer — an in-process sub-agent under Claude Code, or a headless `claude -p` session on other hosts)
+- You want a specific reviewer's perspective (Codex, Antigravity, Grok, Cursor Agent, OpenCode, or a separate Claude reviewer — an in-process sub-agent under Claude Code, or a headless `claude -p` session on other hosts)
 - You want the review to happen entirely locally, before pushing
 
 ### Pre-flight
 
-1. Confirm `{REVIEW_AGENT}` is one of `claude`, `codex`, `agy`, `grok`, `cursor` — the aliases `gemini` and `antigravity` normalize to `agy` (the Antigravity CLI's binary, successor to the Gemini CLI), and the alias `cursor-agent` normalizes to `cursor` (the Cursor Agent CLI). Otherwise abort with a usage error. After this check, treat `{REVIEW_AGENT}` as the normalized value (`gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`).
+1. Confirm `{REVIEW_AGENT}` is one of `claude`, `codex`, `agy`, `grok`, `cursor`, `opencode` — the aliases `gemini` and `antigravity` normalize to `agy` (the Antigravity CLI's binary, successor to the Gemini CLI), the alias `cursor-agent` normalizes to `cursor` (the Cursor Agent CLI), and the aliases `zen` and `opencode-zen` normalize to `opencode` (the OpenCode CLI). Otherwise abort with a usage error. After this check, treat `{REVIEW_AGENT}` as the normalized value (`gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, `zen`/`opencode-zen` → `opencode`).
 2. Resolve `{REVIEW_BIN}` (the executable):
    - `claude` → bin `claude`
    - `codex` → bin `codex` (uses the built-in `codex review` subcommand)
    - `agy` → bin `agy`
    - `grok` → bin `grok` (driven headlessly via `grok -p`, like `agy`)
    - `cursor` → resolve via the **Cursor binary probe** below (the slug is `cursor`; the binary is **not** always named `cursor`)
-   This loop drives `claude`/`agy`/`grok`/`cursor` with a self-contained inline-review prompt (`$LOCAL_PROMPT`), so it does **not** depend on slashdo's `/do-review` review skill being installed — only on the binary. (The skill is deliberately avoided: its multi-sub-agent fan-out never resolves under a headless/print-mode invocation — see the `$LOCAL_PROMPT` rationale below.)
+   - `opencode` → bin `opencode` (driven headlessly via `opencode run`)
+   This loop drives `claude`/`agy`/`grok`/`cursor`/`opencode` with a self-contained inline-review prompt (`$LOCAL_PROMPT`), so it does **not** depend on slashdo's `/do-review` review skill being installed — only on the binary. (The skill is deliberately avoided: its multi-sub-agent fan-out never resolves under a headless/print-mode invocation — see the `$LOCAL_PROMPT` rationale below.)
 
    **Cursor binary probe.** Prefer the unambiguous `cursor-agent` name (only Cursor ships it). Fall back to `agent` **only** when that binary identifies as the Cursor CLI — Grok Build also installs an `agent` binary on `$PATH`, and treating it as Cursor would silently review with the wrong CLI:
 
@@ -45,7 +46,7 @@ When to use this:
    - **Interactive mode (`--interactive`)**: ask the user whether to install or skip. If install succeeds, proceed normally; if skip, record `STATUS=skipped` per the default-mode rule. Do not offer a Copilot fallback — substituting a reviewer the user didn't request is exactly what the no-default-reviewer policy forbids.
 4. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
 5. Record `{REVIEWER_APPLIES}` — boolean, defaults to `false`. Set to `true` when the orchestrating command was invoked with `--reviewer-applies`. This flag selects which side of the loop holds the editor: when `false` (default), the orchestrator applies fixes from the CLI's findings log; when `true`, the headless CLI applies fixes directly in the working tree and the orchestrator only verifies.
-6. Record `{REVIEW_MODEL}` — the model to run this reviewer on, resolved by the caller (the multi-reviewer loop: explicit `<agent>[<model>]` bracket → saved `review-models[slug]` default → empty). **May be empty**, which means "use the reviewer's built-in default" — for `codex`/`claude`/`grok`/`cursor` that is the CLI's own default model (no `--model` flag passed); for `agy` it is the pinned `AGY_REVIEW_MODEL` default resolved below. When set, it is passed through to the reviewer's invocation (`codex --model`, `claude --model` / the in-process `Agent` tool's `model`, `agy --model`, `grok --model`, or `cursor --model`) so a run/config can pin which model reviews. The value is free-form (model names churn and may contain spaces/parens, e.g. `Gemini 3.5 Flash (High)`) — do not validate it against an allowlist; pass it verbatim.
+6. Record `{REVIEW_MODEL}` — the model to run this reviewer on, resolved by the caller (the multi-reviewer loop: explicit `<agent>[<model>]` bracket → saved `review-models[slug]` default → empty). **May be empty**, which means "use the reviewer's built-in default" — for `codex`/`claude`/`grok`/`cursor` that is the CLI's own default model (no `--model` flag passed); for `agy` it is the pinned `AGY_REVIEW_MODEL` default resolved below; for `opencode` it is the pinned `OPENCODE_REVIEW_MODEL` default resolved below. When set, it is passed through to the reviewer's invocation (`codex --model`, `claude --model` / the in-process `Agent` tool's `model`, `agy --model`, `grok --model`, `cursor --model`, or `opencode --model`) so a run/config can pin which model reviews. The value is free-form (model names churn and may contain spaces/parens, e.g. `Gemini 3.5 Flash (High)`) — do not validate it against an allowlist; pass it verbatim.
 7. Record `{MAX_ITERATIONS}` — how many review → fix → re-review cycles this reviewer may run, resolved by the caller (the multi-reviewer loop: a per-entry `~max=<n>` suffix on the `--review-with` token → this loop's built-in default of `3`). **Defaults to `3`** when the caller passes nothing, which is the historical behavior. `0` means **unlimited** — loop until the reviewer is clean or the convergence gate converges, bounded by the 10-iteration safety guardrail in Step 6. Also record `{MAX_EXPLICIT}` — boolean, `true` only when the cap came from a `~max=<n>` the user typed (or saved), `false` when it is this loop's built-in `3`. Step 6 uses it to decide whether exhausting the cap is `capped` (a budget the user chose — clean-equivalent for the merge gate) or `guardrail` (a built-in ceiling nobody vouched for — inconclusive). Note the `--review-iterations` flag never reaches this loop; `~max` is the only way to move this cap.
 8. Record `{REVIEW_EFFORT}` — optional reasoning effort string for this reviewer (`low`, `medium`, `high`, `xhigh`, `max`), resolved by the caller (the multi-reviewer loop: explicit `~effort=<level>` suffix on the `--review-with` token → empty). **Defaults to empty** when unset. When set, it is appended as advisory reasoning effort to the prompt preamble and *also* passed to the CLI in whatever form that CLI accepts. The carriers differ per agent — see the effort-carrier table below, which the pre-flight `case` implements. Never assume `--effort` is universal.
 
@@ -69,7 +70,7 @@ Review-only is the default because it keeps the edit author and the verifier in 
 
 The orchestrating agent runs the chosen CLI directly via Bash and captures output to a log file so it can be summarized without flooding context.<!-- if:teams --> The sole exception is the `claude` reviewer under Claude Code: shelling out to `claude -p` would bill against the API even though the host session already runs on a plan, so the orchestrator instead dispatches an in-process **sub-agent** (via the `Agent` tool) to perform the review — see the invocation table and Step 2.<!-- /if:teams --> Either way, the **verification** step (Step 4) is always performed by the main thread and is never delegated to a sub-agent.
 
-For `claude`, `agy`, `grok`, and `cursor`, this loop drives the CLI with a **self-contained review prompt** (`$LOCAL_PROMPT`, built below) rather than triggering slashdo's `/do-review` (`/do:review`) skill. The skill is a multi-sub-agent fan-out that a headless print-mode CLI cannot wait on (see the `$LOCAL_PROMPT` rationale below); the self-contained prompt asks the CLI to review inline as a single agent, which is what works under `agy -p` / `grok -p` / `cursor-agent -p` and the in-process Claude sub-agent. (slashdo still needs to be installed in the environment for the *other* `/do:*` commands, but this loop no longer depends on the review skill being present.) For `codex`, we use codex's **built-in `codex review` subcommand** in review-only mode (codex ships a first-class review experience, more authentic than re-prompting through `codex exec`) and switch to `codex exec` only when `REVIEWER_APPLIES=true` (since `codex review` doesn't apply fixes — see notes below).
+For `claude`, `agy`, `grok`, `cursor`, and `opencode`, this loop drives the CLI with a **self-contained review prompt** (`$LOCAL_PROMPT`, built below) rather than triggering slashdo's `/do-review` (`/do:review`) skill. The skill is a multi-sub-agent fan-out that a headless print-mode CLI cannot wait on (see the `$LOCAL_PROMPT` rationale below); the self-contained prompt asks the CLI to review inline as a single agent, which is what works under `agy -p` / `grok -p` / `cursor-agent -p` / `opencode run` and the in-process Claude sub-agent. (slashdo still needs to be installed in the environment for the *other* `/do:*` commands, but this loop no longer depends on the review skill being present.) For `codex`, we use codex's **built-in `codex review` subcommand** in review-only mode (codex ships a first-class review experience, more authentic than re-prompting through `codex exec`) and switch to `codex exec` only when `REVIEWER_APPLIES=true` (since `codex review` doesn't apply fixes — see notes below).
 
 The CLI invocations run in **reckless / non-interactive mode** — they run unattended and must not stop to ask for permission. The flags below disable each CLI's interactive approval gates.<!-- if:teams --> (The Claude-Code sub-agent path needs no such flag: a spawned `Agent` inherits the host session's tool-approval settings and runs unattended within it.)<!-- /if:teams -->
 
@@ -136,6 +137,26 @@ elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_CMD=(gtimeout 1800); fi
 # (built-in default), so its flag is never empty.
 MODEL_FLAG=()
 [ -n "$REVIEW_MODEL" ] && MODEL_FLAG=(--model "$REVIEW_MODEL")
+# opencode only: resolve the review model. OpenCode expects models in provider/model format
+# (e.g. opencode/muse-spark-1.3-contributor-free for OpenCode Zen Muse 1.3).
+# Precedence: bracket/config-resolved {REVIEW_MODEL} > OPENCODE_REVIEW_MODEL env > built-in default.
+# Friendly aliases (muse-1.3, zen/muse-1.3, etc.) normalize to the full OpenCode Zen model ID.
+if [ "$REVIEW_AGENT" = opencode ]; then
+  OPENCODE_RAW_MODEL="${REVIEW_MODEL:-${OPENCODE_REVIEW_MODEL:-opencode/muse-spark-1.3-contributor-free}}"
+  case "$OPENCODE_RAW_MODEL" in
+    muse-1.3|zen/muse-1.3|opencode/muse-1.3|muse-spark-1.3|zen)
+      OPENCODE_REVIEW_MODEL="opencode/muse-spark-1.3-contributor-free" ;;
+    muse-1.2|zen/muse-1.2|opencode/muse-1.2|muse-spark-1.2)
+      OPENCODE_REVIEW_MODEL="opencode/muse-spark-1.2-contributor-free" ;;
+    zen/*)
+      OPENCODE_REVIEW_MODEL="opencode/${OPENCODE_RAW_MODEL#zen/}" ;;
+    */*)
+      OPENCODE_REVIEW_MODEL="$OPENCODE_RAW_MODEL" ;;
+    *)
+      OPENCODE_REVIEW_MODEL="opencode/$OPENCODE_RAW_MODEL" ;;
+  esac
+  MODEL_FLAG=(--model "$OPENCODE_REVIEW_MODEL")
+fi
 # Reasoning effort carrier. Each reviewer CLI takes effort in a DIFFERENT form,
 # so build it per agent -- and default to NO flag, not to `--effort`. That
 # default matters: `--effort` is correct for only two of these CLIs, and the
@@ -149,6 +170,7 @@ if [ -n "$REVIEW_EFFORT" ]; then
   case "$REVIEW_AGENT" in
     claude|grok) EFFORT_FLAG=(--effort "$REVIEW_EFFORT") ;;
     codex)       EFFORT_FLAG=(-c "model_reasoning_effort=$REVIEW_EFFORT") ;;
+    opencode)    EFFORT_FLAG=(--variant "$REVIEW_EFFORT") ;;
     cursor)
       # Effort is a model-variant parameter; fold it into --model. A model
       # string that already carries `effort=` is left alone, and effort with no
@@ -205,6 +227,7 @@ Run the pre-flight block above verbatim. The `TIMEOUT_CMD` resolution is determi
 | `claude` (in-process sub-agent) | prompt-advisory only — the `Agent` tool has no effort parameter |
 | `codex` | `-c model_reasoning_effort=<level>` (top-level config override; **no** `--effort` flag exists) |
 | `cursor` | folded into `--model` as `[effort=<level>]` |
+| `opencode` | `--variant <level>` |
 | `agy` | a model **variant** picked from `agy models` (see below) |
 | anything else | prompt-advisory only — never guess a flag |
 
@@ -258,6 +281,9 @@ browse, install packages, or access the network.
   and no-write boundary. Use the tool-free fallback unless a verified,
   invocation-local tool allowlist also disables shell, write, web and MCP tools.
   Do not infer safety from a successful dry run or from a prompt asking for it.
+- OpenCode: run headless via `opencode run --pure` with stdin from `/dev/null`.
+  `--pure` disables external plugins. Use the tool-free fallback unless a
+  verified, invocation-local tool allowlist disables shell, write, web and MCP tools.
 
 Antigravity profile for a CLI with a verified isolated-settings selector
 (`<review-root>` is the explicitly selected source root, not a real path to
@@ -301,6 +327,7 @@ Pick the invocation only after the isolation preflight above succeeds:
 | `agy` | Verified scoped profile above, else tool-free fallback; otherwise `STATUS=no-verdict` without invoking | Same read-only fallback; orchestrator applies |
 | `grok` | Tool-free fallback; otherwise `STATUS=no-verdict` without invoking | Same read-only fallback; orchestrator applies |
 | `cursor` | Tool-free fallback; otherwise `STATUS=no-verdict` without invoking | Same read-only fallback; orchestrator applies |
+| `opencode` | Tool-free fallback (`opencode run --pure ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"} "$LOCAL_PROMPT" < /dev/null`); otherwise `STATUS=no-verdict` without invoking | Same read-only fallback; orchestrator applies |
 
 Claude hosts may keep the in-process billing path ONLY when their Agent API
 enforces the same read-only tool set. A general-purpose sub-agent with an
@@ -358,10 +385,10 @@ Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` fro
    - **Capture the result into the log** so Step 3's parsing and the final report's `Log:` line work unchanged: `LOG_FILE="$(mktemp -t local-review-claude.XXXXXX.log)"`, write the sub-agent's returned message to `$LOG_FILE`, and set `EXIT_CODE=0` (use a non-zero `EXIT_CODE` only if the sub-agent reports it could not complete the review).
    - Skip the Bash invocation below and proceed to Step 3.
 
-   **For `codex`, `agy` (`gemini`), `grok`, and `cursor`** (and for `claude` only if this loop somehow runs outside Claude Code), use the Bash invocation:
+   **For `codex`, `agy` (`gemini`), `grok`, `cursor`, and `opencode`** (and for `claude` only if this loop somehow runs outside Claude Code), use the Bash invocation:
 <!-- /if:teams -->
 
-   **Run the invocation in the BACKGROUND, not as a blocking foreground Bash call.** This is the single most important detail in this step. A real multi-file review by `agy`/`codex`/`grok`/`cursor`/`claude -p` routinely runs longer than ten minutes, and **the host CLI's Bash tool caps a single foreground command at ~10 minutes** (Claude Code's Bash tool `timeout` parameter maxes out at 600000 ms; other hosts impose a similar foreground ceiling). A blocking foreground call is therefore killed at the 10-minute mark *by the host*, before the reviewer prints its findings — regardless of `TIMEOUT_CMD` (`timeout 1800`) or agy's `--print-timeout 30m`, which are both 30-minute bounds the host never lets the foreground call reach. The 10-minute cap is **not** in this loop's shell logic; it is the host tool ceiling, so the only way around it is to not block on a foreground call. Launch the reviewer detached and poll its log instead:
+   **Run the invocation in the BACKGROUND, not as a blocking foreground Bash call.** This is the single most important detail in this step. A real multi-file review by `agy`/`codex`/`grok`/`cursor`/`opencode`/`claude -p` routinely runs longer than ten minutes, and **the host CLI's Bash tool caps a single foreground command at ~10 minutes** (Claude Code's Bash tool `timeout` parameter maxes out at 600000 ms; other hosts impose a similar foreground ceiling). A blocking foreground call is therefore killed at the 10-minute mark *by the host*, before the reviewer prints its findings — regardless of `TIMEOUT_CMD` (`timeout 1800`) or agy's `--print-timeout 30m`, which are both 30-minute bounds the host never lets the foreground call reach. The 10-minute cap is **not** in this loop's shell logic; it is the host tool ceiling, so the only way around it is to not block on a foreground call. Launch the reviewer detached and poll its log instead:
 
    - **Claude Code / hosts with a backgroundable Bash tool**: invoke the command below with the host's background mode (Claude Code: set `run_in_background: true` on the Bash tool call). The host returns immediately with a task/shell id — there is no foreground timeout to hit. Capture the command to the log exactly as shown; the trailing `; echo $? > "$DONE_FILE"` records the real exit code where the wait loop can read it:
 
@@ -425,15 +452,15 @@ Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` fro
      Then print a warning naming the agent (`{REVIEW_AGENT} modified the working tree during a review-only pass — reverted; findings kept`) and **continue with the findings**. This is a deliberate divergence from `enhance-loop.md`, which discards a contract-violating pass's output: an enhancer's *product* is the text it returns, so a violating enhancer is untrustworthy end-to-end, whereas a reviewer's product is its findings list, which stays useful even if it also (wrongly) tried to apply the fixes itself. The orchestrator re-derives and re-applies every fix in this session regardless, so nothing the reviewer wrote is needed.
 
      Gitignored files stay outside this guarantee (hashing `node_modules/` is unbounded), exactly as in `enhance-loop.md`.
-   - Read `$LOG_FILE` and extract the findings. **For `claude`, `agy`, `grok`, and `cursor` in review-only mode, parse a verdict before considering the findings:** after stripping blank lines, the result must be either exactly `NO FINDINGS`, or only one or more complete `FINDING <N>:` blocks. Every block must contain non-empty `file`, numeric `line`, `severity` (`CRITICAL`, `IMPROVEMENT`, or `NIT`), `description`, and `fix` fields. Treat a missing, malformed, or contradictory result (for example, a prose response, an incomplete block, or both `NO FINDINGS` and a finding) as `STATUS=no-verdict`, print the log path, and exit the loop. **Never infer a clean result from prose or an empty log.**
+   - Read `$LOG_FILE` and extract the findings. **For `claude`, `agy`, `grok`, `cursor`, and `opencode` in review-only mode, parse a verdict before considering the findings:** after stripping blank lines, the result must be either exactly `NO FINDINGS`, or only one or more complete `FINDING <N>:` blocks. Every block must contain non-empty `file`, numeric `line`, `severity` (`CRITICAL`, `IMPROVEMENT`, or `NIT`), `description`, and `fix` fields. Treat a missing, malformed, or contradictory result (for example, a prose response, an incomplete block, or both `NO FINDINGS` and a finding) as `STATUS=no-verdict`, print the log path, and exit the loop. **Never infer a clean result from prose or an empty log.**
 
      `no-verdict` is **inconclusive, not a hard error** — the reviewer ran, the tree is fine, it just didn't answer in the contract's format. That distinction is load-bearing in two places. It must not be `cli-error`, because a hard error fires the wrapper's short-circuit whose stated rationale is "the branch is in a state subsequent reviewers shouldn't run against" — false here, and it would skip every remaining reviewer in the list over one chatty CLI. And `~opt` explicitly promises to excuse a "no-verdict" result from the merge gate while never excusing a hard error, so classifying this as `cli-error` would break that promise outright. A required reviewer's `no-verdict` still blocks the merge (the caller's aggregate treats it as inconclusive); an `~opt` one doesn't.
-   - For `claude`, `agy`, `grok`, and `cursor`, set `STATUS=clean` only for the exact `NO FINDINGS` sentinel described above. Otherwise hand the validated finding blocks to the orchestrator.
+   - For `claude`, `agy`, `grok`, `cursor`, and `opencode`, set `STATUS=clean` only for the exact `NO FINDINGS` sentinel described above. Otherwise hand the validated finding blocks to the orchestrator.
    - For `codex`, retain its native severity-tagged output handling: a native clean verdict (`NO FINDINGS` or `no issues`) is `STATUS=clean`; otherwise hand its actionable findings to the orchestrator. This Codex-specific fallback must not be used for the structured reviewers above.
    - Otherwise, the orchestrator applies each fix in this session:
      - For each finding, read the cited file at the cited line, apply the proposed fix (using the structured `fix:` field as a starting point; if the proposal is wrong or imprecise, the orchestrator's judgment overrides — this is *your* commit, not the CLI's).
      - After each cohesive set of fixes, run `{BUILD_CMD}` (skip when empty) and `{TEST_CMD}`. If either fails, fix forward (don't push a broken state) — if the failure stems from a bad finding, drop that finding and continue.
-     - Commit each fix (or coherent group of fixes) as `address review (<agent>): <summary>` where `<agent>` is `$REVIEW_AGENT` (the reviewing CLI's slug — `codex` / `agy` / `claude` / `grok` / `cursor`). The parenthesized agent name records which reviewer surfaced the finding. Do not include co-author or "Generated with" lines.
+     - Commit each fix (or coherent group of fixes) as `address review (<agent>): <summary>` where `<agent>` is `$REVIEW_AGENT` (the reviewing CLI's slug — `codex` / `agy` / `claude` / `grok` / `cursor` / `opencode`). The parenthesized agent name records which reviewer surfaced the finding. Do not include co-author or "Generated with" lines.
    - After the apply pass, **recompute** the change counts — the orchestrator's commits since `$LOOP_START_SHA` are what step 4 must verify and step 5 must push. Reusing the pre-apply values here would falsely report `clean` while leaving the orchestrator's fixes unverified and unpushed:
      ```bash
      NEW_COMMITS=$(git rev-list "$LOOP_START_SHA..HEAD" --count)
