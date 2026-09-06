@@ -533,7 +533,7 @@ describe('review-loop parse contracts', () => {
     const loop = readLib('local-agent-review-loop.md');
     const wrapper = readLib('multi-reviewer-loop.md');
 
-    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|cursor`/);
+    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|cursor\|opencode`/);
     assert.match(loop, /`cursor-agent` normalizes to `cursor`/);
     assert.match(loop, /Cursor binary probe/);
     assert.match(loop, /command -v cursor-agent/);
@@ -555,7 +555,7 @@ describe('review-loop parse contracts', () => {
 
     assert.match(wrapper, /`cursor` \(alias `cursor-agent`\)/);
     assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `cursor`/);
-    assert.match(wrapper, /Use one of: codex, agy, claude, grok, cursor, ollama, copilot/);
+    assert.match(wrapper, /Use one of: codex, agy, claude, grok, cursor, opencode, ollama, copilot/);
     assert.match(wrapper, /Cursor binary probe/);
 
     const enhance = readLib('enhance-loop.md');
@@ -578,6 +578,43 @@ describe('review-loop parse contracts', () => {
     assert.match(rpr, /forwarding `REVIEWER_APPLIES`.+\{REVIEW_EFFORT\}/s);
     assert.match(rpr, /Pass `\{REVIEW_AGENT\}`.+\{REVIEW_EFFORT\}/s);
     assert.match(rpr, /\{OLLAMA_EFFORT\}/);
+  });
+
+  it('accepts opencode (and zen aliases) as a local-agent reviewer and probes the OpenCode CLI', () => {
+    // OpenCode is a model-taking local reviewer. The slug is `opencode`
+    // (aliases `zen`, `opencode-zen`). The binary is `opencode`.
+    // Default model is opencode/muse-spark-1.3-contributor-free, with friendly
+    // aliases muse-1.3, zen/muse-1.3, etc. Reasoning effort maps to --variant.
+    const loop = readLib('local-agent-review-loop.md');
+    const wrapper = readLib('multi-reviewer-loop.md');
+
+    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|cursor\|opencode`/);
+    assert.match(loop, /`zen` and `opencode-zen` normalize to `opencode`/);
+    assert.match(loop, /`opencode` → bin `opencode`/);
+    assert.match(loop, /opencode\/muse-spark-1\.3-contributor-free/);
+    assert.match(loop, /\| `opencode` \| `--variant <level>`/);
+    assert.match(loop, /opencode\)\s+EFFORT_FLAG=\(--variant "\$REVIEW_EFFORT"\) ;;/);
+    assert.match(loop, /opencode run --pure/);
+    assert.match(loop, /< \/dev\/null/);
+
+    // Config and docs must advertise opencode review-models and effort grammar.
+    assert.match(readCommand('config.md'), /opencode=muse-1\.3/);
+    assert.match(_read('README.md'), /opencode\[muse-1\.3\]/);
+    assert.match(_read('README.md'), /--review-models .*opencode=muse-1\.3/);
+
+    assert.match(wrapper, /`opencode` \(aliases `zen` \/ `opencode-zen`\)/);
+    assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `cursor` \| `opencode`/);
+    assert.match(wrapper, /Use one of: codex, agy, claude, grok, cursor, opencode, ollama, copilot/);
+    assert.match(wrapper, /`zen`\/`opencode-zen` both probe the `opencode` binary/);
+
+    for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'rpr.md', 'config.md']) {
+      const body = readCommand(name);
+      assert.match(
+        body,
+        /`opencode`/,
+        `${name} must accept the opencode reviewer slug`,
+      );
+    }
   });
 
   it('derives GH_HOST from the one lib partial, never a hand-copied snippet', () => {
