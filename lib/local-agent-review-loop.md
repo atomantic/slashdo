@@ -63,9 +63,9 @@ The loop has two editing modes, selected by `{REVIEWER_APPLIES}`:
 | Mode | `REVIEWER_APPLIES` | Who applies fixes | Who commits |
 |------|--------------------|-------------------|-------------|
 | Review-only (default) | `false` | Orchestrator reads the CLI's findings log and applies fixes in this session | Orchestrator |
-| Reviewer-applies | `true` | The headless CLI applies fixes in the working tree as it reviews | Orchestrator |
+| Reviewer-applies | `true` | The headless CLI applies fixes in the working tree as it reviews **— only for a reviewer with a verified write-isolated profile** (currently `codex`; see "Enforced reviewer permissions" below) | Orchestrator |
 
-Review-only is the default because it keeps the edit author and the verifier in the same session — the agent that ratifies the diff is the one that wrote it, which simplifies attribution and shrinks the risk surface of granting a second autonomous CLI write access to the working tree. Use `--reviewer-applies` when you specifically want the reviewing agent's *judgment* applied to the fix — e.g., asking `agy` to both find and patch its own concerns so the final code reflects Antigravity's style, not the orchestrator's interpretation of its findings.
+Review-only is the default because it keeps the edit author and the verifier in the same session — the agent that ratifies the diff is the one that wrote it, which simplifies attribution and shrinks the risk surface of granting a second autonomous CLI write access to the working tree. Use `--reviewer-applies` when you specifically want the reviewing agent's *judgment* applied to the fix — e.g., asking `codex` to both find and patch its own concerns so the final code reflects its own read of the fix, not the orchestrator's interpretation of its findings. Pre-flight step 9 forces `REVIEWER_APPLIES=false` for any reviewer without a verified write-isolated profile, so `agy`/`grok`/`pi`/`cursor`/`opencode` always run review-only today regardless of the flag, until each CLI exposes one.
 
 ### Headless invocation per agent
 
