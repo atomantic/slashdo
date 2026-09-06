@@ -19,7 +19,7 @@ becomes the next agent's input.
 
 - `{ENHANCE_AGENTS}` — the ordered, deduped agent list the caller parsed from
   `--enhance-with` (see the caller's Parse Arguments). Each entry is a slug —
-  `codex`, `claude`, `agy`, `grok`, or `cursor` — optionally carrying a `[<model>]` bracket
+  `codex`, `claude`, `agy`, `grok`, `pi`, or `cursor` — optionally carrying a `[<model>]` bracket
   (`codex[o3]`, `grok[grok-code-fast-1]`), stripped by the caller into a per-entry
   `{ENH_MODEL}` (empty → the agent's built-in default). `gemini`/`antigravity`
   normalize to `agy`; `cursor-agent` normalizes to `cursor`. `ollama` and `copilot` are **not** valid here — they are
@@ -160,6 +160,7 @@ as a positional argument (never via stdin) and prints the improved draft to stdo
 | `codex` | `codex ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} --sandbox read-only -a never exec "$ENHANCE_PROMPT"` |
 | `agy` | Verified invocation-local read-only profile or tool-free fallback as defined in `lib/local-agent-review-loop.md`; unavailable if neither is enforceable |
 | `grok` | Verified tool-free fallback; unavailable if tools/MCP/hooks cannot be isolated |
+| `pi` | Pi enhancement runner below; enforced tool-free with model and thinking pins |
 | `cursor` | Verified tool-free fallback; unavailable if tools/MCP/hooks cannot be isolated |
 
 **Required isolation:** follow the enforced reviewer permissions and tool-free
@@ -177,7 +178,7 @@ sequential by design; do not parallelize, since each agent enhances the previous
 one's output):
 
 1. **Normalize and pre-flight the binary.** Normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`.
-   Resolve the binary (`claude`/`codex`/`agy`/`grok`/`cursor` — the `[<model>]` bracket never
+   Resolve the binary (`claude`/`codex`/`agy`/`grok`/`pi`/`cursor` — the `[<model>]` bracket never
    changes which binary is required; for `cursor` use the Cursor binary probe in
    `lib/local-agent-review-loop.md`, not `command -v cursor`). `command -v {binary}`
    for the other agents. **If it is missing:**
@@ -232,7 +233,7 @@ one's output):
      sub-agent runs on the host session's plan (no API billing) rather than as a
      `claude` subprocess.
 <!-- /if:teams -->
-   - **`codex` / `agy` / `grok` / `cursor`<!-- if:teams --><!-- else --> / `claude`<!-- /if:teams -->:**
+   - **`codex` / `agy` / `grok` / `pi` / `cursor`<!-- if:teams --><!-- else --> / `claude`<!-- /if:teams -->:**
      run in the **background**, not as a blocking foreground call — a large-draft pass
      on a heavy model can exceed the host's ~10-minute foreground cap. **The snippet
      below is not self-detaching — launch it with the host's background mode** (Claude
@@ -333,3 +334,13 @@ Enhancement pipeline (codex[o3] → agy → grok): codex enhanced · agy skipped
 The caller presents the **enhanced** draft at its approval gate (and under `--yes`
 files it; under `--dry-run` prints it without filing). Enhancement never bypasses the
 gate — a human still approves the final text.
+
+### Pi enhancement runner
+
+`pi` accepts the same model brackets and per-entry suffixes as local reviewers.
+Resolve its binary with `command -v pi`. Follow the Pi tool-free isolation
+recipe in `lib/local-agent-review-loop.md`, supplying `$ENHANCE_PROMPT` instead
+of `$LOCAL_PROMPT` and the entry's model and `--thinking` effort. Include all
+source material in the prompt; do not grant tools or project trust to enhance a
+draft. Verify the installed binary supports every isolation flag or report the
+entry unavailable. Its stdout is the enhanced draft.

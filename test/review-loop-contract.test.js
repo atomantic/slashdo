@@ -533,7 +533,7 @@ describe('review-loop parse contracts', () => {
     const loop = readLib('local-agent-review-loop.md');
     const wrapper = readLib('multi-reviewer-loop.md');
 
-    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|cursor\|opencode`/);
+    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode`/);
     assert.match(loop, /`cursor-agent` normalizes to `cursor`/);
     assert.match(loop, /Cursor binary probe/);
     assert.match(loop, /command -v cursor-agent/);
@@ -554,8 +554,8 @@ describe('review-loop parse contracts', () => {
     assert.match(_read("README.md"), /--review-models cursor=/);
 
     assert.match(wrapper, /`cursor` \(alias `cursor-agent`\)/);
-    assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `cursor`/);
-    assert.match(wrapper, /Use one of: codex, agy, claude, grok, cursor, opencode, ollama, copilot/);
+    assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor`/);
+    assert.match(wrapper, /Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot/);
     assert.match(wrapper, /Cursor binary probe/);
 
     const enhance = readLib('enhance-loop.md');
@@ -588,7 +588,7 @@ describe('review-loop parse contracts', () => {
     const loop = readLib('local-agent-review-loop.md');
     const wrapper = readLib('multi-reviewer-loop.md');
 
-    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|cursor\|opencode`/);
+    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode`/);
     assert.match(loop, /`zen` and `opencode-zen` normalize to `opencode`/);
     assert.match(loop, /`opencode` → bin `opencode`/);
     assert.match(loop, /opencode\/muse-spark-1\.3-contributor-free/);
@@ -603,8 +603,8 @@ describe('review-loop parse contracts', () => {
     assert.match(_read('README.md'), /--review-models .*opencode=muse-1\.3/);
 
     assert.match(wrapper, /`opencode` \(aliases `zen` \/ `opencode-zen`\)/);
-    assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `cursor` \| `opencode`/);
-    assert.match(wrapper, /Use one of: codex, agy, claude, grok, cursor, opencode, ollama, copilot/);
+    assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode`/);
+    assert.match(wrapper, /Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot/);
     assert.match(wrapper, /`zen`\/`opencode-zen` both probe the `opencode` binary/);
 
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'rpr.md', 'config.md']) {
