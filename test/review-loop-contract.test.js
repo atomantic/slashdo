@@ -617,6 +617,41 @@ describe('review-loop parse contracts', () => {
     }
   });
 
+  it('accepts pi as a model-taking local reviewer with a --thinking effort carrier', () => {
+    // Pi is review-only (never reviewer-applies), takes `pi[provider/model]`,
+    // and carries effort via --thinking, not --effort or a model variant.
+    const loop = readLib('local-agent-review-loop.md');
+    const wrapper = readLib('multi-reviewer-loop.md');
+
+    assert.match(loop, /`pi` → bin `pi`/);
+    assert.match(loop, /pi\)\s+EFFORT_FLAG=\(--thinking "\$REVIEW_EFFORT"\) ;;/);
+    assert.match(loop, /\| `pi` \| `--thinking <level>`/);
+    assert.match(loop, /pi --print --no-approve --no-tools/);
+    assert.match(loop, /never enable reviewer-applies for Pi/);
+
+    // Config and docs must advertise the pi reviewer slug and its grammar.
+    assert.match(_read('README.md'), /`pi`/);
+    assert.match(_read('README.md'), /--review-with pi/);
+    assert.match(readCommand('config.md'), /`pi`/);
+
+    assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor`/);
+    assert.match(wrapper, /Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot/);
+
+    // Every command dispatching the multi-reviewer loop, AND /do:better's
+    // separate reviewer-grammar path (lib/better-options.md +
+    // lib/better-review-loop.md), must accept pi — a slug documented in one
+    // command's prose but unrecognized by the shared dispatch/validation libs
+    // would make `--review-with pi` silently unsupported there.
+    for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'better-swift.md', 'rpr.md', 'config.md']) {
+      const body = readCommand(name);
+      assert.match(
+        body,
+        /`pi`/,
+        `${name} must accept the pi reviewer slug`,
+      );
+    }
+  });
+
   it('derives GH_HOST from the one lib partial, never a hand-copied snippet', () => {
     // lib/gh-host.md exists so the Enterprise-safe API host is derived ONCE, with its
     // full 3-step fallback chain. Eight sites used to re-type a shortened 2-step copy

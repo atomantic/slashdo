@@ -221,7 +221,7 @@ fi
 
 Run the pre-flight block above verbatim. The `TIMEOUT_CMD` resolution is deterministic — do NOT think out loud about whether `timeout`/`gtimeout` is installed or about falling back; just execute it and move on.
 
-**Effort carriers.** `{REVIEW_EFFORT}` reaches each reviewer in the one form its CLI accepts. The pre-flight `case` above builds it; this table is the rule, and the per-agent bullets under "Flag rationale" below record the verified failures behind it. **Never assume `--effort` is universal** — three of these reject it outright, and a rejected flag is a non-zero exit before the review runs, not a weaker review.
+**Effort carriers.** `{REVIEW_EFFORT}` reaches each reviewer in the one form its CLI accepts. The pre-flight `case` above builds it; this table is the rule. **Never assume `--effort` is universal** — several of these reject it outright, and a rejected flag is a non-zero exit before the review runs, not a weaker review.
 
 | Agent | Effort carrier |
 |-------|----------------|
@@ -230,6 +230,7 @@ Run the pre-flight block above verbatim. The `TIMEOUT_CMD` resolution is determi
 | `codex` | `-c model_reasoning_effort=<level>` (top-level config override; **no** `--effort` flag exists) |
 | `cursor` | folded into `--model` as `[effort=<level>]` |
 | `opencode` | `--variant <level>` |
+| `pi` | `--thinking <level>` (see the Pi review runner section below) |
 | `agy` | a model **variant** picked from `agy models` (see below) |
 | anything else | prompt-advisory only — never guess a flag |
 

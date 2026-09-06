@@ -21,7 +21,7 @@ Parse `$ARGUMENTS` before discovery. Record explicit flags separately so saved d
 entry := (agent[model]? | @login) (~opt | ~max=n | ~effort=level)*
 ```
 
-Supported agents: `codex`, `agy`, `claude`, `grok`, `cursor`, `opencode`, `ollama`, `copilot`, and `@<login>`. Normalize `gemini`/`antigravity` to `agy`, `cursor-agent` to `cursor`, `zen`/`opencode-zen` to `opencode`. The first seven accept `[<model>]`; `copilot` and `@login` do not (`[bot]` may be part of a GitHub login). Bare Ollama auto-selects an installed coding model; local CLIs use their own model default (or pinned default for agy/opencode) when no explicit or saved model exists.
+Supported agents: `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, `ollama`, `copilot`, and `@<login>`. Normalize `gemini`/`antigravity` to `agy`, `cursor-agent` to `cursor`, `zen`/`opencode-zen` to `opencode`. The first eight accept `[<model>]`; `copilot` and `@login` do not (`[bot]` may be part of a GitHub login). Bare Ollama auto-selects an installed coding model; local CLIs use their own model default (or pinned default for agy/opencode) when no explicit or saved model exists.
 
 Strip suffixes from the right in any order before parsing the slug. Each suffix may occur at most once:
 
