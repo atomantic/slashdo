@@ -25,6 +25,24 @@ const LOOPS_WITH_OPTIONAL_ARRAYS = [
 ];
 
 describe('review-loop parse contracts', () => {
+  it('never grants blanket permissions to feedback or applying reviewers', () => {
+    for (const name of ['local-agent-review-loop.md', 'enhance-loop.md']) {
+      const body = readLib(name);
+      assert.doesNotMatch(body, /--dangerously-skip-permissions|danger-full-access|bypassPermissions|--yolo|--force\b|--sandbox disabled/);
+      assert.match(body, /--tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep"/);
+      assert.match(body, /--strict-mcp-config/);
+      assert.match(body, /disableAllHooks/);
+    }
+    const body = readLib('local-agent-review-loop.md');
+    assert.match(body, /sandbox_workspace_write.network_access=false -c features.shell_tool=false/);
+    assert.match(body, /Inlining a\s+diff alone is not tool isolation/);
+    assert.match(body, /no per-invocation settings-file selector/);
+    assert.match(body, /"write_file\(\*\)"/);
+    assert.match(body, /"command\(\*\)"/);
+    assert.match(body, /"mcp\(\*\)"/);
+    assert.match(body, /required reviewers remain\s+unsatisfied/);
+  });
+
   it('lets the host orchestrator select focused review lenses from the diff', () => {
     const command = readCommand('review.md');
     const selection = readLib('review-agent-selection.md');
@@ -515,21 +533,18 @@ describe('review-loop parse contracts', () => {
     const loop = readLib('local-agent-review-loop.md');
     const wrapper = readLib('multi-reviewer-loop.md');
 
-    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|cursor`/);
+    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode`/);
     assert.match(loop, /`cursor-agent` normalizes to `cursor`/);
     assert.match(loop, /Cursor binary probe/);
     assert.match(loop, /command -v cursor-agent/);
     assert.match(loop, /Grok Build also installs an `agent` binary/);
-    assert.match(loop, /--mode=ask/);
-    assert.match(loop, /--force --trust/);
+    assert.match(loop, /plan\/ask by itself does not enforce/);
     assert.match(loop, /\| `cursor` \| folded into `--model` as `\[effort=<level>\]`/);
     // ~effort must actually change Cursor inference: fold into --model as
     // [effort=<level>], matching cursor[gpt-5]~effort=max and a saved
     // review-models cursor=gpt-5 plus cursor~effort=max. Never pass --effort.
     assert.match(loop, /CURSOR_MODEL="\$\{REVIEW_MODEL\}\[effort=\$\{REVIEW_EFFORT\}\]"/);
-    assert.match(loop, /gpt-5\[effort=max\]/);
-    // Review-only must not grant --force; reviewer-applies must.
-    assert.match(loop, /omits `--force`/);
+    assert.match(loop, /Tool-free fallback; otherwise `STATUS=no-verdict`/);
 
     // Config and docs must advertise the same model + effort grammar as the
     // other reviewers — a saved review-models entry and a ~effort suffix.
@@ -539,13 +554,12 @@ describe('review-loop parse contracts', () => {
     assert.match(_read("README.md"), /--review-models cursor=/);
 
     assert.match(wrapper, /`cursor` \(alias `cursor-agent`\)/);
-    assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `cursor`/);
-    assert.match(wrapper, /Use one of: codex, agy, claude, grok, cursor, ollama, copilot/);
+    assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor`/);
+    assert.match(wrapper, /Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot/);
     assert.match(wrapper, /Cursor binary probe/);
 
     const enhance = readLib('enhance-loop.md');
-    assert.match(enhance, /`cursor` \| `"\$REVIEW_BIN" -p --trust --mode=ask/);
-    assert.match(enhance, /Cursor binary probe/);
+    assert.match(enhance, /`cursor` \| Verified tool-free fallback/);
 
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'rpr.md', 'config.md']) {
       const body = readCommand(name);
@@ -564,6 +578,78 @@ describe('review-loop parse contracts', () => {
     assert.match(rpr, /forwarding `REVIEWER_APPLIES`.+\{REVIEW_EFFORT\}/s);
     assert.match(rpr, /Pass `\{REVIEW_AGENT\}`.+\{REVIEW_EFFORT\}/s);
     assert.match(rpr, /\{OLLAMA_EFFORT\}/);
+  });
+
+  it('accepts opencode (and zen aliases) as a local-agent reviewer and probes the OpenCode CLI', () => {
+    // OpenCode is a model-taking local reviewer. The slug is `opencode`
+    // (aliases `zen`, `opencode-zen`). The binary is `opencode`.
+    // Default model is opencode/muse-spark-1.3-contributor-free, with friendly
+    // aliases muse-1.3, zen/muse-1.3, etc. Reasoning effort maps to --variant.
+    const loop = readLib('local-agent-review-loop.md');
+    const wrapper = readLib('multi-reviewer-loop.md');
+
+    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode`/);
+    assert.match(loop, /`zen` and `opencode-zen` normalize to `opencode`/);
+    assert.match(loop, /`opencode` → bin `opencode`/);
+    assert.match(loop, /opencode\/muse-spark-1\.3-contributor-free/);
+    assert.match(loop, /\| `opencode` \| `--variant <level>`/);
+    assert.match(loop, /opencode\)\s+EFFORT_FLAG=\(--variant "\$REVIEW_EFFORT"\) ;;/);
+    assert.match(loop, /opencode run --pure/);
+    assert.match(loop, /< \/dev\/null/);
+
+    // Config and docs must advertise opencode review-models and effort grammar.
+    assert.match(readCommand('config.md'), /opencode=muse-1\.3/);
+    assert.match(_read('README.md'), /opencode\[muse-1\.3\]/);
+    assert.match(_read('README.md'), /--review-models .*opencode=muse-1\.3/);
+
+    assert.match(wrapper, /`opencode` \(aliases `zen` \/ `opencode-zen`\)/);
+    assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode`/);
+    assert.match(wrapper, /Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot/);
+    assert.match(wrapper, /`zen`\/`opencode-zen` both probe the `opencode` binary/);
+
+    for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'rpr.md', 'config.md']) {
+      const body = readCommand(name);
+      assert.match(
+        body,
+        /`opencode`/,
+        `${name} must accept the opencode reviewer slug`,
+      );
+    }
+  });
+
+  it('accepts pi as a model-taking local reviewer with a --thinking effort carrier', () => {
+    // Pi is review-only (never reviewer-applies), takes `pi[provider/model]`,
+    // and carries effort via --thinking, not --effort or a model variant.
+    const loop = readLib('local-agent-review-loop.md');
+    const wrapper = readLib('multi-reviewer-loop.md');
+
+    assert.match(loop, /`pi` → bin `pi`/);
+    assert.match(loop, /pi\)\s+EFFORT_FLAG=\(--thinking "\$REVIEW_EFFORT"\) ;;/);
+    assert.match(loop, /\| `pi` \| `--thinking <level>`/);
+    assert.match(loop, /pi --print --no-approve --no-tools/);
+    assert.match(loop, /never enable reviewer-applies for Pi/);
+
+    // Config and docs must advertise the pi reviewer slug and its grammar.
+    assert.match(_read('README.md'), /`pi`/);
+    assert.match(_read('README.md'), /--review-with pi/);
+    assert.match(readCommand('config.md'), /`pi`/);
+
+    assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor`/);
+    assert.match(wrapper, /Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot/);
+
+    // Every command dispatching the multi-reviewer loop, AND /do:better's
+    // separate reviewer-grammar path (lib/better-options.md +
+    // lib/better-review-loop.md), must accept pi — a slug documented in one
+    // command's prose but unrecognized by the shared dispatch/validation libs
+    // would make `--review-with pi` silently unsupported there.
+    for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'better-swift.md', 'rpr.md', 'config.md']) {
+      const body = readCommand(name);
+      assert.match(
+        body,
+        /`pi`/,
+        `${name} must accept the pi reviewer slug`,
+      );
+    }
   });
 
   it('derives GH_HOST from the one lib partial, never a hand-copied snippet', () => {

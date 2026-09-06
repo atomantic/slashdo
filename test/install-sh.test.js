@@ -56,6 +56,7 @@ const HOOKS = fs
 function rewriteForOpencode(text) {
   return text
     .split('~/.claude/lib/').join('~/.config/opencode/lib/')
+    .replace(/~\/\.claude\/commands\/do\/([A-Za-z0-9._-]+)\.md/g, '~/.config/opencode/commands/do-$1.md')
     .split('~/.claude/.slashdo-config.json').join('~/.config/opencode/.slashdo-config.json');
 }
 
@@ -288,6 +289,28 @@ describe('install.sh — OpenCode fresh install', () => {
       ).includes('~/.config/opencode/lib/')),
       'at least one command should carry a rewritten lib path (guards a no-op rewrite)'
     );
+  });
+
+  it('rewrites command execution references to installed OpenCode filenames', () => {
+    const home = makeHome(['.claude', '.config/opencode']);
+    const result = runInstall({ home });
+    assert.equal(result.status, 0, result.stdout);
+
+    let sawExecRef = false;
+    for (const cmd of COMMANDS) {
+      const file = path.join(home, '.config', 'opencode', 'commands', `do-${cmd}.md`);
+      const content = fs.readFileSync(file, 'utf8');
+      assert.doesNotMatch(
+        content, /~\/\.claude\/commands\/do\//,
+        `do-${cmd}.md should not contain a dangling ~/.claude/commands/do/ reference`
+      );
+      for (const match of content.matchAll(/~\/\.config\/opencode\/commands\/(do-[A-Za-z0-9._-]+\.md)/g)) {
+        sawExecRef = true;
+        const targetFile = path.join(home, '.config', 'opencode', 'commands', match[1]);
+        assert.ok(fs.existsSync(targetFile), `${match[1]} referenced by do-${cmd}.md should exist`);
+      }
+    }
+    assert.ok(sawExecRef, 'at least one command should carry a resolved execution reference (guards a no-op assertion)');
   });
 });
 

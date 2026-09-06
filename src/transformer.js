@@ -110,7 +110,7 @@ const ON_DEMAND_LIBS = new Map([
   ['github-reviewer-loop.md',
     { what: 'GitHub-reviewer loop', when: 'the reviewer list includes an `@<login>` reviewer' }],
   ['local-agent-review-loop.md',
-    { what: 'local-agent reviewer loop', when: 'the reviewer list includes `codex`, `claude`, `agy`, `grok`, or `cursor`' }],
+    { what: 'local-agent reviewer loop', when: 'the reviewer list includes `codex`, `claude`, `agy`, `grok`, `pi`, `cursor`, or `opencode`' }],
   ['ollama-review-loop.md',
     { what: 'Ollama reviewer loop', when: 'the reviewer list includes `ollama`' }],
 

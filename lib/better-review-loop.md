@@ -45,7 +45,7 @@ Only for `@<login>` entries:
 
 !read lib/github-reviewer-loop.md
 
-Only for `codex`, `agy`, `claude`, `grok`, or `cursor` entries:
+Only for `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, or `opencode` entries:
 
 !read lib/local-agent-review-loop.md
 
