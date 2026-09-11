@@ -112,16 +112,26 @@ second release workflow that reloads saved reviewer defaults.
    commit-to-prepared-head diff, replacing its promotion-only
    `git diff {target}...{source}` command with that range. A version-bump PR diff
    alone does not cover the release. Include the previous-tag comparison in the
-   PR description. After step 5, run the configured review loops from **Run the Review Loop**
-   below once their required PR exists; preserve their verdict and optionality
-   rules from **Merge the PR**. Those sections' promotion-specific delivery
-   commands are replaced by steps 5–7 here.
+   PR description. For a **PR workflow**, run the configured review loops from
+   **Run the Review Loop** below after step 5 creates the PR and before step 6
+   merges it, preserving their verdict and optionality rules from **Merge the
+   PR**. For a **tool-managed or tag-only workflow** — which never creates a
+   PR — run every configured **local-agent and Ollama** reviewer (`codex`,
+   `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, `ollama`) against this
+   same prepared diff **before** step 5's submission command, enforcing their
+   aggregate verdict exactly as **Merge the PR** would gate a merge; a
+   configured `copilot` or `@<login>` reviewer has no PR to attach to on this
+   path; a required (non-`~opt`) one is not requestable at all here, so report
+   INCOMPLETE naming it rather than publishing ungated, while an `~opt` one is
+   skipped. Those sections' promotion-specific delivery commands are replaced
+   by steps 5–7 here.
 5. **Publish the preparation.** For a PR workflow, push its head and read back the
    exact remote SHA, create or reuse the matching head/base PR, and read back its
    URL, head SHA, base, and state. For tool-managed or tag-only workflows, run the
-   documented submission command and verify its equivalent remote preparation.
-   Do not fabricate a PR for a process that does not use one. Empty, failed, or
-   mismatched readback is INCOMPLETE; preserve the prepared state for retry.
+   documented submission command — only once step 4's review gate is clean —
+   and verify its equivalent remote preparation. Do not fabricate a PR for a
+   process that does not use one. Empty, failed, or mismatched readback is
+   INCOMPLETE; preserve the prepared state for retry.
 6. **Deliver through the project's gates.** For an open PR, wait for the expected
    CI on the current head and satisfy the configured review gate before merging
    with a repository-supported method. No reported checks is not green when CI

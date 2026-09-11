@@ -107,8 +107,11 @@ describe('/do:release documented project delivery', () => {
   it('carries native release recovery and publication ownership through delivery', () => {
     assert.match(selection, /Resume an existing\s+prepared version or interrupted publication/);
     assert.match(selection, /Keep the running application's checkout, branch, dirty\s+files, and data untouched/);
-    assert.match(selection, /After step 5, run the configured review loops/);
-    assert.match(selection, /preserve their verdict and optionality/);
+    assert.match(selection, /run the configured review loops from\s+\*\*Run the Review Loop\*\*\s+below after step 5 creates the PR/);
+    assert.match(selection, /run every configured \*\*local-agent and Ollama\*\*\s+reviewer/);
+    assert.match(selection, /\*\*before\*\* step 5's submission command/);
+    assert.match(selection, /preserv(?:e|ing) their verdict and optionality/);
+    assert.match(selection, /report\s+INCOMPLETE naming it rather than publishing ungated/);
     assert.match(selection, /full previous-release\s+commit-to-prepared-head diff/);
     assert.match(selection, /No reported checks is not green when CI/);
     assert.match(selection, /Squash\/rebase merges need verification/);
