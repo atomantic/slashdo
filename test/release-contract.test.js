@@ -89,3 +89,30 @@ describe('/do:release remote promotion contracts', () => {
     assert.match(body, /GitHub Release is unverified after the bounded wait/);
   });
 });
+
+
+describe('/do:release documented project delivery', () => {
+  const selection = body.slice(body.indexOf('## Select the Project Release Procedure'), body.indexOf('## Detect Release Workflow'));
+
+  it('selects the native procedure before any promotion branch mutation', () => {
+    assert.match(selection, /docs\/RELEASING\.md/);
+    assert.match(selection, /documented project procedure\s+wins/);
+    assert.match(selection, /temporary `release\/vX\.Y\.Z` branch into `main`/);
+    assert.match(selection, /Do not run the generic branch detection/);
+    assert.match(selection, /Do not fall through into the generic promotion workflow/);
+    // Preserve the self-PR guard for repositories using generic promotion.
+    assert.match(body.slice(body.indexOf('## Detect Release Workflow')), /target == source.*abort/);
+  });
+
+  it('carries native release recovery and publication ownership through delivery', () => {
+    assert.match(selection, /Resume an existing\s+prepared version or interrupted publication/);
+    assert.match(selection, /Keep the running application's checkout, branch, dirty\s+files, and data untouched/);
+    assert.match(selection, /After step 5, run the configured review loops/);
+    assert.match(selection, /preserve their verdict and optionality/);
+    assert.match(selection, /full previous-release\s+commit-to-prepared-head diff/);
+    assert.match(selection, /No reported checks is not green when CI/);
+    assert.match(selection, /Squash\/rebase merges need verification/);
+    assert.match(selection, /When automation creates the tag or release, wait for it; do not pre-create/);
+    assert.match(selection, /first\s+unverified checkpoint as INCOMPLETE/);
+  });
+});
