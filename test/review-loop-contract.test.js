@@ -231,6 +231,27 @@ describe('review-loop parse contracts', () => {
     assert.match(block, /never the bare base/);
   });
 
+  it("gates enhance-loop's agy roster probe to agy entries only, and pins a leveled default", () => {
+    // The per-entry model block in the enhancement loop runs once per agent, so an
+    // unguarded `agy models` call there fires a network probe -- and dumps an
+    // irrelevant model roster into the orchestrator's shell -- on every codex,
+    // claude, grok, cursor and pi pass too. It must be gated on the entry's agent,
+    // matching the review loop's own `[ "$REVIEW_AGENT" = agy ]` guard, and the
+    // pinned default must be resolved against agy's live roster rather than a
+    // remembered literal (same rule, same reason as local-agent-review-loop.md's
+    // agy block).
+    const enhance = readLib('enhance-loop.md');
+    const block = enhance.slice(enhance.indexOf('# agy always pins a model'), enhance.indexOf('### Per-agent invocation'));
+    assert.match(
+      block,
+      /\[ "\$AGENT" = agy \] && agy models\b/,
+      'the roster probe must only fire for an agy entry, not every agent',
+    );
+    assert.match(block, /agy block in `lib\/local-agent-review-loop\.md`/);
+    assert.match(block, /never a bare base/, 'the pinned default must be a leveled model name');
+    assert.match(block, /validate AGY_ENH_MODEL against this; fall back to the newest Flash \(High\)/);
+  });
+
   it('tells the in-process claude reviewer what to do with ~effort, and what not to reach for', () => {
     // The Agent tool takes a model but no reasoning effort, so a dispatching agent
     // handed `claude~effort=xhigh` has no parameter to put it in. Left unsaid, it
