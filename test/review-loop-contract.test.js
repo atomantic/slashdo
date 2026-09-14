@@ -163,8 +163,10 @@ describe('review-loop parse contracts', () => {
     // merge-gate slot holds a launch failure rather than a verdict:
     //   codex-cli 0.149.1: no --effort at any level (top-level, `review`, `exec`)
     //     -> error: unexpected argument '--effort' found
-    //   agy 1.1.22: --effort is mutually exclusive with --model, which this loop
-    //     always pins -> --effort is not supported for model "..."
+    //   agy 1.2.2: --effort is only ever redundant-or-fatal next to --model, which
+    //     this loop always pins -- a level that disagrees with the pinned variant is
+    //     `--model gemini-3.8-flash-high conflicts with --effort=low`, and a model
+    //     without variants is `--effort is not supported for model "..."`
     // The pre-flight therefore dispatches per agent and defaults to NO flag; an
     // agent nobody wrote an arm for must degrade to prompt-advisory effort, not
     // inherit `--effort`. That inheritance is what broke codex and agy.
@@ -210,6 +212,23 @@ describe('review-loop parse contracts', () => {
     assert.match(loop, /\| `agy` \| a model \*\*variant\*\* picked from `agy models`/);
     assert.match(loop, /not from a remembered table/);
     assert.match(loop, /AGY_MODEL_RESOLVED/, 'the agy choice must persist across loop iterations');
+  });
+
+  it("resolves the agy review model against the live roster, not a hardcoded name", () => {
+    // agy exits non-zero on a model it does not list, and its roster churns between
+    // releases (the Gemini 3.5 tier this loop once pinned is gone in 1.2.2). So the
+    // pre-flight must print `agy models` for EVERY agy review -- not only when
+    // ~effort asked for a level -- and the selection step must fall back when the
+    // requested name (stale env var, stale saved review-models.agy, typo'd bracket)
+    // is absent, rather than handing that reviewer's merge-gate slot a launch failure.
+    const loop = readLib('local-agent-review-loop.md');
+    const block = loop.slice(loop.indexOf('# agy only: pin the review model'), loop.indexOf('### Enforced reviewer permissions'));
+    assert.match(block, /if \[ "\$REVIEW_AGENT" = agy \] && \[ -z "\$AGY_MODEL_RESOLVED" \]; then/, 'the roster must be fetched for every agy review, not only when an effort level was requested');
+    assert.match(block, /\bagy models\b/);
+    assert.match(block, /Validate the requested model first/);
+    assert.match(block, /Never pass `--effort` alongside `--model`/);
+    // Leveled names only: a bare base name is not a model agy accepts.
+    assert.match(block, /never the bare base/);
   });
 
   it('tells the in-process claude reviewer what to do with ~effort, and what not to reach for', () => {
