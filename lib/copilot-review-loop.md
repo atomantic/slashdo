@@ -2,9 +2,9 @@
 
 After the PR is created, run the Copilot review-and-fix loop. **This loop only runs when `copilot` is explicitly in `REVIEW_AGENTS`** — no command selects it for you. The local-agent loop (`local-agent-review-loop.md`) and the generalized GitHub-reviewer loop (`github-reviewer-loop.md`) are the actively-developed paths; this one is kept for the `copilot` slug and unchanged in behavior.
 
-**Note on `--reviewer-applies`**: the `--reviewer-applies` flag (which routes edits through the reviewing CLI rather than the orchestrator) is a no-op on this path. Copilot reviews are read-only by design — they generate comments cloud-side without working-tree access — so there is no reviewer-side edit path to enable. If the calling command saw `--reviewer-applies` alongside `--review-with copilot`, it should have already printed a warning and continued; this loop's behavior is unchanged either way. Fixes are always applied by the sub-agent the parent spawns (see "Sub-agent prompt template" below), reading from Copilot's comments.
+**`--reviewer-applies` is a no-op on this path**: Copilot reviews are read-only cloud-side, so there is no reviewer-side edit path to enable. The calling command should already have warned and continued; fixes are always applied by the sub-agent the parent spawns, reading from Copilot's comments.
 
-**IMPORTANT — Sub-agent delegation**: To prevent context exhaustion on long review cycles, delegate the entire review loop to a **general-purpose sub-agent** via the Agent tool. The sub-agent runs the full loop (request → wait → check → fix → re-request) autonomously and returns only the final status. This keeps the parent agent's context clean.
+**Sub-agent delegation**: delegate the entire loop to a **general-purpose sub-agent** via the Agent tool so long review cycles don't exhaust the parent's context. The sub-agent runs the full loop (request → wait → check → fix → re-request) autonomously and returns only the final status.
 
 ### Sub-agent prompt template:
 
@@ -15,53 +15,46 @@ PR: {PR_NUMBER} in {OWNER}/{REPO}
 Branch: {BRANCH_NAME}
 Build command: {BUILD_CMD}
 GitHub API host: {GH_HOST}   (pass `--hostname {GH_HOST}` on EVERY `gh api` call
-  below — `gh api` defaults to github.com and does NOT read the repo remote, so on a
-  GitHub Enterprise repo an unqualified call polls the wrong host and this loop times
-  out. See `~/.claude/lib/gh-host.md`. If {GH_HOST} is empty/unset, omit the flag.)
+  below — `gh api` defaults to github.com and does NOT read the repo remote, so on
+  GitHub Enterprise an unqualified call polls the wrong host and times out. See
+  `~/.claude/lib/gh-host.md`. If {GH_HOST} is empty/unset, omit the flag.)
 Max iterations: {REVIEW_ITERATIONS} (default 1). Run at most this many
-  review-and-fix cycles. The loop still exits early the moment a review
-  returns 0 comments. The default of 1 means: request one review, fix
-  everything it surfaced, and stop — without spending another cycle to
-  re-confirm. A value of 0 means "loop until Copilot returns 0 comments"
-  (the legacy behavior), bounded by the safety guardrail below.
+  review-and-fix cycles, exiting early the moment a review returns 0 comments.
+  The default of 1 means: request one review, fix everything it surfaced, and
+  stop without spending another cycle to re-confirm. 0 means "loop until
+  Copilot returns 0 comments" (legacy), bounded by the safety guardrail below.
   The caller resolves this value: a per-entry `~max=<n>` suffix on the
   `--review-with` token (e.g. `copilot~max=3`) wins over the run's
-  `--review-iterations`, which wins over the default of 1. Either source
-  is user-configured, so reaching the cap here is "capped", never
-  "guardrail". See `~/.claude/lib/multi-reviewer-loop.md`.
-Safety guardrail: this applies only in unlimited mode ({REVIEW_ITERATIONS}
-  is 0). After 10 iterations, report back and — in interactive mode — ask
-  the user whether to continue or stop; never loop indefinitely without
-  confirmation. When {REVIEW_ITERATIONS} is a positive number, that count
-  IS the cap: the loop stops there with status "capped" (see the status
-  list below — treated as clean-equivalent for merge purposes).
+  `--review-iterations`, which wins over the default of 1. Either source is
+  user-configured, so reaching the cap here is "capped", never "guardrail".
+  See `~/.claude/lib/multi-reviewer-loop.md`.
+Safety guardrail: applies only in unlimited mode ({REVIEW_ITERATIONS} is 0).
+  After 10 iterations, report back and — in interactive mode — ask the user
+  whether to continue or stop; never loop indefinitely without confirmation.
+  When {REVIEW_ITERATIONS} is positive, that count IS the cap: the loop stops
+  there with status "capped" (clean-equivalent for merge purposes).
 
 TIMEOUT SCHEDULE:
-When running parallel PR reviews (do:better), use shorter waits to avoid
-blocking other PRs:
+Parallel PR reviews (do:better) — shorter waits so other PRs aren't blocked,
+with a 15-second poll interval:
 - Iteration 1: max wait 3 minutes
 - Iteration 2: max wait 2 minutes
 - Iteration 3: max wait 90 seconds
 - Iteration 4: max wait 60 seconds
 - Iteration 5+: max wait 45 seconds
-When running a single-PR review (do:pr, do:release), use dynamic timing:
-check the previous Copilot review duration on this PR. If no prior
-review exists, default to 60 seconds. Set max wait to 3x the expected
-duration (minimum 90 seconds, maximum 5 minutes); only large diffs
-(200+ changed lines) should approach the max. Copilot reviews on small
-diffs typically land in 30-90 seconds; large diffs may take longer.
-Use progressive poll intervals: 5s, 5s, 10s, 10s, then 15s thereafter —
-an early first check avoids burning a full minute on a review that's
-already sitting in the API. For parallel PR reviews (do:better), use
-the decreasing timeout schedule above with a 15-second poll interval.
+Single-PR reviews (do:pr, do:release) — dynamic timing: check the previous
+Copilot review duration on this PR (default 60 seconds if none). Set max wait
+to 3x the expected duration (minimum 90 seconds, maximum 5 minutes); only
+large diffs (200+ changed lines) should approach the max. Use progressive poll
+intervals: 5s, 5s, 10s, 10s, then 15s thereafter.
 
-Run the following loop for at most {REVIEW_ITERATIONS} review-and-fix
-cycles (default 1), exiting early the moment a review returns zero new
-comments. When {REVIEW_ITERATIONS} is 0, loop until zero new comments
-(bounded by the 10-iteration safety guardrail):
+Run the following loop for at most {REVIEW_ITERATIONS} review-and-fix cycles
+(default 1), exiting early the moment a review returns zero new comments. When
+{REVIEW_ITERATIONS} is 0, loop until zero new comments (bounded by the
+10-iteration safety guardrail):
 
-1. CAPTURE the latest Copilot review submittedAt timestamp (so you can
-   detect when a NEW review arrives):
+1. CAPTURE the latest Copilot review submittedAt timestamp (to detect when a
+   NEW review arrives):
    echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { nodes { author { login } submittedAt } } } } }"}' | gh api --hostname {GH_HOST} graphql --input -
    Record the most recent submittedAt from copilot-pull-request-reviewer[bot].
    Then REQUEST a Copilot review:
@@ -76,13 +69,7 @@ comments. When {REVIEW_ITERATIONS} is 0, loop until zero new comments
      echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { reviews(last: 5) { totalCount nodes { state body author { login } submittedAt } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api --hostname {GH_HOST} graphql --input -
    - The review is complete when a new Copilot review node appears with a
      submittedAt after the timestamp captured in step 1
-   - For parallel PR reviews (do:better): use the DECREASING TIMEOUT for
-     the current iteration number
-   - For single-PR reviews (do:pr, do:release): use dynamic timing based on
-     the previous Copilot review duration on this PR (3x that, min 90 sec,
-     max 5 min). If no prior review exists, default expected duration to
-     60 seconds. Use progressive poll intervals (5s, 5s, 10s, 10s, then
-     15s thereafter)
+   - Use the TIMEOUT SCHEDULE above for the current mode and iteration
    - Error detection: if the review body contains "exceeds the maximum
      number of lines", treat this as a terminal complete state — do NOT
      re-request, do NOT retry. Report status "too-large" and exit the loop
@@ -95,8 +82,8 @@ comments. When {REVIEW_ITERATIONS} is 0, loop until zero new comments
 
 3. CHECK for unresolved comments:
    - Filter review threads for isResolved: false
-   - First verify the review was successful: check that the latest Copilot
-     review body does NOT contain error text. If it does, go back to step 1.
+   - First verify the review was successful: if the latest Copilot review
+     body contains error text, go back to step 1.
    - If zero comments (body says "generated 0 comments" or no unresolved
      threads): PR is clean — report success and exit
    - If unresolved comments exist: proceed to step 4
@@ -105,25 +92,22 @@ comments. When {REVIEW_ITERATIONS} is 0, loop until zero new comments
    For each unresolved thread:
    - Read the referenced file and understand the feedback
    - Evaluate if the finding is a real issue — if it is, fix it regardless of whether the current PR modified that code. Never dismiss findings as "out of scope" or "pre-existing."
-   - A real issue is a logic/behavior bug, security hole, broken contract, or missing-coverage gap — something the project's linter/type-checker/formatter/build does NOT already catch. If a comment is a pure style/formatting/lint nit (already covered by tooling) or a bare rename/extract-a-helper preference with no behavior consequence, resolve the thread without a code change rather than churning the diff for it. Spend fix effort on findings that name a concrete wrong outcome.
+   - A real issue is a logic/behavior bug, security hole, broken contract, or missing-coverage gap — something the project's linter/type-checker/formatter/build does NOT already catch. If a comment is a pure style/formatting/lint nit (already covered by tooling) or a bare rename/extract-a-helper preference with no behavior consequence, resolve the thread without a code change rather than churning the diff.
    - Make the code fix
    - IDENTIFY THE ROOT CAUSE of why the issue landed (missing lint rule, missing comment at the canonical site, misleading name, API that invites the mistake, etc.) per `~/.claude/lib/per-finding-root-cause.md` and apply the smallest matching action in the same change. Defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
    - Run the build command
    - If build passes, commit: address review (copilot): <summary>
-     The parenthesized agent name records which reviewer surfaced the finding — useful when scanning the log of a release that ran multiple reviewers.
+     (the parenthesized agent name records which reviewer surfaced the finding)
    - Resolve the thread via GraphQL mutation using stdin JSON piping:
      echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api --hostname {GH_HOST} graphql --input -
    - After all threads resolved, push all commits to remote
    - Increment iteration counter
    - If {REVIEW_ITERATIONS} > 0 and the iteration counter reaches
-     {REVIEW_ITERATIONS}: stop the loop and report back with status
-     "capped" — the configured review-iteration cap was reached after
-     applying every fix the review surfaced. This is the default path (1
-     iteration). Treated as clean-equivalent for merge purposes: you
-     applied all the fixes, you just didn't spend another cycle
-     re-confirming zero comments.
+     {REVIEW_ITERATIONS}: stop the loop and report status "capped" — the
+     configured cap was reached after applying every fix the review surfaced
+     (the default 1-iteration path). Clean-equivalent for merge purposes.
    - If {REVIEW_ITERATIONS} is 0 (unlimited) and the iteration counter
-     reaches 10: stop the loop and report back with status "guardrail".
+     reaches 10: stop the loop and report status "guardrail".
      **Default mode**: auto-stop and mark as best-effort.
      **Interactive mode (`--interactive`)**: ask the user whether to continue or stop
    - CONVERGENCE GATE (unlimited mode, {REVIEW_ITERATIONS}=0, before the
@@ -133,8 +117,7 @@ comments. When {REVIEW_ITERATIONS} is 0, loop until zero new comments
      concrete wrong outcome), converge — stop and report "clean", noting the
      diminishing-returns convergence, rather than re-requesting to mine more.
      Only a round that resolved at least one *substantive* comment earns
-     another request. (No effect when {REVIEW_ITERATIONS} is a fixed positive
-     cap — that path already stops at the cap.)
+     another request. (No effect when {REVIEW_ITERATIONS} is a positive cap.)
    - Otherwise, go back to step 1
 
 When done, report back:
@@ -147,11 +130,11 @@ When done, report back:
 - Total iterations completed
 - List of commits made (if any)
 - Any unresolved threads remaining
-- **Convention encoding**: if the loop addressed any non-nitpick findings, run the Convention Encoding phase from `~/.claude/lib/post-review-doc-recommendations.md` against the issues fixed across all iterations. For each recurring pattern, apply the smallest code-level action that makes the convention self-evident (in-tree comment, clarifying rename, or surgical refactor). CLAUDE.md / AGENTS.md additions are a fallback only — used when the convention can't be expressed locally. Include the encoded actions (and any fallback suggestions) in the final report under a "Conventions Encoded" heading. If all findings were nitpicks (or no findings landed), omit the section.
+- **Convention encoding**: if the loop addressed any non-nitpick findings, run the Convention Encoding phase from `~/.claude/lib/post-review-doc-recommendations.md` against the issues fixed across all iterations. For each recurring pattern, apply the smallest code-level action that makes the convention self-evident (in-tree comment, clarifying rename, or surgical refactor); CLAUDE.md / AGENTS.md additions are a fallback only. Include the encoded actions (and any fallback suggestions) in the final report under a "Conventions Encoded" heading. If all findings were nitpicks (or no findings landed), omit the section.
 ```
 
 Launch the sub-agent and wait for its result.
 
-**Default mode**: If the sub-agent reports a timeout or error, skip the timed-out review and continue autonomously.
+**Default mode**: on a sub-agent timeout or error, skip the timed-out review and continue autonomously.
 
-**Interactive mode (`--interactive`)**: If the sub-agent reports a timeout or error, ask the user whether to continue waiting, re-request the review, or skip.
+**Interactive mode (`--interactive`)**: on a sub-agent timeout or error, ask the user whether to continue waiting, re-request the review, or skip.

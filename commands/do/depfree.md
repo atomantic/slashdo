@@ -7,28 +7,26 @@ argument-hint: "[--interactive] [--scan-only] [--no-merge] [--heavy] [--review-w
 
 Audit all third-party dependencies, classify them as acceptable (large, widely-audited) or suspect (small, replaceable), analyze actual usage of suspect dependencies, and replace them with owned code where feasible.
 
-Every small library is an attack surface. Supply chain compromises are real and common. In default mode, large, widely-audited libraries (express, react, d3, three.js, next, vue, fastify, lodash-es, etc.) are acceptable. But for smaller libraries or libraries where only one helper function is used, we should write the code ourselves. In heavy mode, the acceptability bar is much higher — see the Heavy Mode section below.
+Every small library is an attack surface. In default mode, large, widely-audited libraries (express, react, d3, three.js, next, vue, fastify, lodash-es, etc.) are acceptable; smaller ones, or ones where only a helper function is used, get replaced with owned code. Heavy mode raises the bar much higher.
 
-**Default mode: fully autonomous.** Uses Balanced model profile, proceeds through all phases without prompting.
-
-**`--interactive` mode:** Pauses for classification approval, replacement review, and merge confirmation.
+**Default mode: fully autonomous.** Balanced model profile, no prompting. **`--interactive`** pauses for classification approval, replacement review, and merge confirmation.
 
 Parse `$ARGUMENTS` for:
 - **`--interactive`**: pause at each decision point for user approval
-- **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation — no worktree, no code changes, no PRs. **When `ISSUE_MODE` is also true, this is the "audit and file the work, don't touch my code" combination**: every surviving finding is filed as a labelled tracker issue before the run exits, not just the deferred subset (see the Phase 2 gate). `--scan-only` is the flag that stops the pipeline; `--issues` only chooses where findings are recorded
+- **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation — no worktree, no code changes, no PRs. **When `ISSUE_MODE` is also true**, every surviving finding is filed as a labelled tracker issue before the run exits, not just the deferred subset (see the Phase 2 gate). `--scan-only` stops the pipeline; `--issues` only chooses where findings are recorded
 - **`--no-merge`**: run through PR creation, skip the review loop and merge
-- **`--heavy`**: aggressive mode — only keep foundational frameworks and language runtimes; replace everything else that is feasibly replaceable (see Heavy Mode below)
-- **`--review-with <agent[,agent,...]>`**: which reviewer(s) run the Phase 5c review loop on the PR. Accepted slugs: `codex`, `agy` (aliases `gemini` / `antigravity` — all run the Antigravity CLI's `agy` binary), `claude`, `grok`, `pi`, `cursor` (alias `cursor-agent` — the Cursor Agent CLI), `opencode` (aliases `zen` / `opencode-zen` — the OpenCode CLI), `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins a specific installed model, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`; `codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode` likewise accept a `<agent>[<model>]` bracket — e.g. `codex[o3]`, `claude[claude-opus-4-8]`, `grok[grok-code-fast-1]`, `opencode[muse-1.3]` — stripped into a per-entry `REVIEW_MODEL`, empty → the reviewer's built-in default; `copilot` and `@<login>` take no model bracket), `copilot` (**legacy** — GitHub's cloud Copilot review; still supported when you name it, never selected implicitly), or an arbitrary GitHub login `@<login>` — any GitHub user or App/bot (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`); slashdo requests its review on the PR and waits for it (GitHub only, never posts an approval itself) (comma-separated, ordered list; split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, `zen`/`opencode-zen` → `opencode`, dedupe preserving first-occurrence order, with each model-taking agent's (`codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`ollama`) `[<model>]` bracket suffix part of the dedup identity). Record as `REVIEW_AGENTS`. **There is no built-in default** — if omitted, leave `REVIEW_AGENTS` **unset for now**; the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (Phase 5c skipped, PR left open without merging — see Phase 5c/5d). `copilot` is never added implicitly. Any slot may end in `~opt` (e.g. `ollama~opt`, `ollama[qwen2.5-coder:32b]~opt`) to mark that reviewer **optional/non-blocking** — still requested and its findings still fixed, but an inconclusive result from it (timeout/skipped/incomplete/no-verdict) never blocks the PR merge (a hard-error from it still does); strip `~opt` into a per-entry `{OPTIONAL}` flag before slug parsing, and it is **not** part of the dedup identity (`ollama~opt` == `ollama`, optional-wins on collapse). A slot may also end in `~max=<n>` (e.g. `claude~max=2`, `ollama~max=1`) to cap how many review → fix → re-review cycles **that one reviewer** runs, or `~effort=<level>` (e.g. `codex[gpt-5.6-luna]~effort=max~opt`, `claude~effort=high~max=2`) to specify its reasoning effort level (`low`, `medium`, `high`, `xhigh`, `max`). Strip suffixes off the right of each token in any order before slug parsing. Deduplication preserves first-occurrence order and excludes `~` suffixes (survivor takes `~opt` if any had it, and cap/effort level from the first that carried them). Reject a malformed suffix with `Invalid --review-with suffix on {entry}: ~max must be a non-negative integer and ~effort must be one of low, medium, high, xhigh, max, each appearing at most once; the only suffixes are ~opt, ~max=<n>, and ~effort=<level>.` Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot, @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).` The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no reviewer (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default.
+- **`--heavy`**: aggressive mode — only keep foundational frameworks and language runtimes; replace everything else that is feasibly replaceable (see Heavy Mode)
+- **`--review-with <agent[,agent,...]>`**: which reviewer(s) run the Phase 5c review loop on the PR. Accepted slugs: `codex`, `agy` (aliases `gemini` / `antigravity` — the Antigravity CLI's `agy` binary), `claude`, `grok`, `pi`, `cursor` (alias `cursor-agent`), `opencode` (aliases `zen` / `opencode-zen`), `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins one, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`), `copilot` (**legacy** — GitHub's cloud Copilot review; supported when named, never selected implicitly), or an arbitrary GitHub login `@<login>` — any GitHub user or App/bot (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`); slashdo requests its review on the PR and waits for it (GitHub only, never posts an approval itself). `codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode` likewise accept a `<agent>[<model>]` bracket — e.g. `codex[o3]`, `claude[claude-opus-4-8]`, `grok[grok-code-fast-1]`, `opencode[muse-1.3]` — stripped into a per-entry `REVIEW_MODEL` (empty → the reviewer's built-in default); `copilot` and `@<login>` take no model bracket. Comma-separated, ordered list: split on `,`, trim whitespace, normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, `zen`/`opencode-zen` → `opencode`, dedupe preserving first-occurrence order, with the `[<model>]` bracket part of the dedup identity. Record as `REVIEW_AGENTS`. **There is no built-in default** — if omitted, leave `REVIEW_AGENTS` **unset for now**; the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (Phase 5c skipped, PR left open without merging). `copilot` is never added implicitly. Suffixes, strippable off the right of each token in any order before slug parsing: `~opt` (e.g. `ollama~opt`, `ollama[qwen2.5-coder:32b]~opt`) marks the reviewer **optional/non-blocking** — still requested and its findings still fixed, but an inconclusive result (timeout/skipped/incomplete/no-verdict) never blocks the merge (a hard-error still does); record as a per-entry `{OPTIONAL}` flag. `~max=<n>` (e.g. `claude~max=2`, `ollama~max=1`) caps how many review → fix → re-review cycles **that one reviewer** runs. `~effort=<level>` (e.g. `codex[gpt-5.6-luna]~effort=max~opt`, `claude~effort=high~max=2`) sets its reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`). Deduplication excludes `~` suffixes (`ollama~opt` == `ollama`; survivor takes `~opt` if any had it, and cap/effort from the first that carried them). Reject a malformed suffix with `Invalid --review-with suffix on {entry}: ~max must be a non-negative integer and ~effort must be one of low, medium, high, xhigh, max, each appearing at most once; the only suffixes are ~opt, ~max=<n>, and ~effort=<level>.` Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot, @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).` The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no reviewer (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default.
 - **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to the multi-reviewer loop; control when the reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
 - **`--review-mode <series|parallel>`**: forwarded to the multi-reviewer loop. `series` (default) runs the reviewers one-at-a-time so each sees the prior's committed fixes; `parallel` runs their reviews concurrently against one baseline and applies the deduped union once (`--reviewer-applies` and the stop-modes are ignored in parallel). Set `REVIEW_MODE`; if omitted, leave it **unset for now** (saved-defaults fills it from `review-mode`; built-in default `series`). Abort with `--review-mode must be one of series, parallel (got: {value}).` on any other value.
 - **`--reviewer-applies`**: forwarded to the review loop — the reviewing CLI applies fixes directly instead of the orchestrator (no effect on copilot or `@<login>` passes, which are read-only cloud-side reviews). Record `REVIEWER_APPLIES=true`/`false`.
-- **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** or **`@<login>`** pass runs (Phase 5c); no effect on `codex`/`agy`/`claude`/`grok`/`pi`/`cursor`/`opencode`/`ollama` passes (their own fixed iteration caps). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass, exiting early on 0 comments). `0` = loop until that reviewer returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).` To move the local-agent / `ollama` caps — or to give each reviewer a different budget in one run — use the per-entry `--review-with <agent>~max=<n>` suffix, which overrides this flag for the entry that carries it.
+- **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** or **`@<login>`** pass runs (Phase 5c); no effect on `codex`/`agy`/`claude`/`grok`/`pi`/`cursor`/`opencode`/`ollama` passes (their own fixed iteration caps). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass, exiting early on 0 comments). `0` = loop until that reviewer returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).` To move the local-agent / `ollama` caps — or give each reviewer a different budget — use the per-entry `--review-with <agent>~max=<n>` suffix, which overrides this flag for the entry that carries it.
 
 After parsing the review flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the review flags **and** `--issues` / `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
-- **`--issues`** / **`--no-issues`** / **`--issues-label <name>`**: selects **where deferred removals are recorded** — GitHub/GitLab issues instead of PLAN.md lines (see Phase 2). **It does NOT change what the run does**: remediation, PRs, CI, the review loop, and merge all proceed exactly as normal. To audit and file work *without* remediating, combine it with **`--scan-only`**. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`. If the user passes **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`.
+- **`--issues`** / **`--no-issues`** / **`--issues-label <name>`**: selects **where deferred removals are recorded** — GitHub/GitLab issues instead of PLAN.md lines (see Phase 2). **It does NOT change what the run does** (remediation, PRs, CI, review loop, and merge all proceed); to audit and file work *without* remediating, combine it with **`--scan-only`**. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`; if **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`.
 - **Specific packages**: limit audit scope to named packages (e.g., "chalk dotenv")
 
 Set `HEAVY_MODE` to `true` if `--heavy` was passed, `false` otherwise.
@@ -60,21 +58,19 @@ Record the selection as `MODEL_PROFILE` and derive two **tiers**:
 - `AUDIT_MODEL_TIER`: `heavy` / `medium` / `light` based on profile
 - `REMEDIATION_MODEL_TIER`: `heavy` / `medium` / `medium` based on profile
 
-**These are tiers, not model names — resolve each against the host you're running on**, per [lib/model-tiers.md](../../lib/model-tiers.md). In particular `heavy` means **this host's strongest available model, named by its alias** (on Claude Code, `model: "opus"`) — an alias resolves to whatever version the org has configured, so it upgrades the work without going stale or overriding a pinned deployment. Never write a fully-qualified version ID. A host that can't set a per-agent model runs everything at the session default — state it and continue. If a `heavy` dispatch is rejected because the account lacks that tier, retry once with `model` omitted so the agent inherits the session, note the degrade, and continue — never block on it.
+**These are tiers, not model names — resolve each against the host you're running on**, per [lib/model-tiers.md](../../lib/model-tiers.md). `heavy` means **this host's strongest available model, named by its alias** (on Claude Code, `model: "opus"`); never write a fully-qualified version ID. A host that can't set a per-agent model runs at the session default — state it and continue. If a `heavy` dispatch is rejected because the account lacks that tier, retry once with `model` omitted, note the degrade, and continue.
 
-> **Three unrelated things in this command are called "tier" or "heavy" — keep them apart.** `AUDIT_MODEL_TIER`/`REMEDIATION_MODEL_TIER` (`light`/`medium`/`heavy`) select **which model an agent runs on**. The dependency **Tier 1/2/3** classification (Phase 1b) rates **how replaceable a package is**. And `HEAVY_MODE` (`--heavy`) sets **how aggressive the removal bar is**. They are independent: `--heavy` does *not* raise the model tier, and a Tier 1 dependency has nothing to do with a `heavy` model.
+> **Three unrelated things here are called "tier" or "heavy":** `AUDIT_MODEL_TIER`/`REMEDIATION_MODEL_TIER` select **which model an agent runs on**; dependency **Tier 1/2/3** (Phase 1b) rates **how replaceable a package is**; `HEAVY_MODE` (`--heavy`) sets **how aggressive the removal bar is**. `--heavy` does *not* raise the model tier.
 
 ## Heavy Mode (`--heavy`)
 
-Heavy mode shifts the philosophy from "remove obvious attack surface" to "own everything we feasibly can." The only dependencies that survive are foundational frameworks, core platform tooling, and language-level runtimes — the kind maintained by large teams with dedicated security processes. Everything else is a candidate for replacement.
+"Own everything we feasibly can": only foundational frameworks, core platform tooling, and language-level runtimes survive. When `HEAVY_MODE` is `true`:
 
-Key behavioral changes when `HEAVY_MODE` is `true`:
-
-1. **Tier 1 is narrowed** to only foundational frameworks and language runtimes (see Phase 1b overrides below). Libraries like lodash, chalk, dotenv, commander, yargs, uuid, axios, etc. are NOT Tier 1 in heavy mode — they move to Tier 2 or 3.
-2. **EVALUATE recommendations become REMOVE** — the bias flips from "when in doubt, keep" to "when in doubt, replace."
-3. **Complexity ceiling rises** — replacements up to 300 lines are acceptable (vs the default where agents bail at ~2x estimate). Only truly infeasible replacements (deep domain expertise, crypto primitives, protocol parsers) are skipped.
-4. **Maintenance status is irrelevant** — even well-maintained small libraries are candidates. The question is "can we own this code?" not "is this library risky?"
-5. **DevDependencies get equal priority** — build tools and test utilities are audited with the same aggression as production dependencies (overriding the default Phase 1a deprioritization of devDependencies).
+1. **Tier 1 is narrowed** to foundational frameworks and runtimes (see Phase 1b); lodash, chalk, dotenv, commander, yargs, uuid, axios, etc. move to Tier 2 or 3.
+2. **EVALUATE recommendations become REMOVE** — when in doubt, replace.
+3. **Complexity ceiling rises** to 300 lines per replacement (default: agents bail at ~2x estimate). Only truly infeasible replacements (deep domain expertise, crypto primitives, protocol parsers) are skipped.
+4. **Maintenance status is irrelevant** — the question is "can we own this code?"
+5. **DevDependencies get equal priority** with production dependencies (overriding the Phase 1a deprioritization).
 
 ## Compaction Guidance
 
@@ -96,7 +92,7 @@ Resolve `VCS_HOST` and `CLI_TOOL` here, before any phase reaches for a forge CLI
 
 !read lib/vcs-host.md
 
-- **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state, following the shared derivation (and its per-host auth precheck) included below. The Phase 6 GitHub-side reviewer loops use `gh api`, which ignores the repo remote and defaults to github.com — so on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out.
+- **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state, following the shared derivation (and its per-host auth precheck) included below. The Phase 6 GitHub-side reviewer loops use `gh api`, which ignores the repo remote and defaults to github.com — on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out.
 
 **GitHub only — skip the snippet below entirely on GitLab**, whose `glab` calls resolve the host from the remote themselves and where its `gh auth` precheck would abort the run.
 
@@ -132,7 +128,7 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 
 ### 0e: Load Prior Decisions
 
-Read `{REPO_DIR}/docs/DEPS.md` if it exists. This file records decisions from prior `/do:depfree` runs and is used to skip re-evaluation of dependencies that have already been audited.
+Read `{REPO_DIR}/docs/DEPS.md` if it exists — the decision record from prior `/do:depfree` runs, used to skip re-evaluation of already-audited dependencies.
 
 Parse the file into `PRIOR_DECISIONS` — a map keyed by package name, with values:
 - `decision`: one of `KEPT_TIER1`, `KEPT_AUDITED`, `KEPT_TRANSITIVE`, `REMOVED`, `REVERTED`, `SKIPPED_INFEASIBLE`
@@ -141,7 +137,7 @@ Parse the file into `PRIOR_DECISIONS` — a map keyed by package name, with valu
 - `reason`: the rationale recorded
 - `decision_date`: ISO date the decision was made
 
-If the file does not exist, set `PRIOR_DECISIONS` to an empty map. The file will be created in Phase 4c only when remediation runs proceed past the scan-only phases (i.e., `--scan-only` was not passed).
+If the file does not exist, set `PRIOR_DECISIONS` to an empty map. The file is created in Phase 4c only when remediation runs (i.e., `--scan-only` was not passed).
 
 A prior decision is **valid for skipping re-evaluation** when ALL of these are true:
 1. The package is still in the manifest at the same major version
@@ -185,7 +181,7 @@ For each dependency, first check `PRIOR_DECISIONS` (from Phase 0e). If a valid p
 
 Record carried-forward decisions in `DEPENDENCY_MAP` with a `from_prior: true` flag. Print one line per skipped dependency: `↻ {package}@{major} — carrying forward prior {decision} ({decision_date})`.
 
-For all other dependencies (no prior decision, major version bump, or mode escalation from default → heavy), classify it into one of three tiers:
+For all other dependencies (no prior decision, major version bump, or mode escalation from default → heavy), classify into one of three tiers:
 
 **Tier 1 — ACCEPTABLE (keep without question):**
 Large, widely-audited, foundational libraries. Examples by ecosystem:
@@ -264,7 +260,7 @@ Record the full classification as `DEPENDENCY_MAP`.
 
 ### 1c: Usage Analysis (Tier 2 & 3 only)
 
-Skip any dependency with `from_prior: true` (carried forward from Phase 1b). For all remaining Tier 2 and Tier 3 dependencies, launch parallel Explore agents (using `AUDIT_MODEL_TIER`) to determine actual usage:
+Skip any dependency with `from_prior: true`. For all remaining Tier 2 and Tier 3 dependencies, launch parallel Explore agents (using `AUDIT_MODEL_TIER`) to determine actual usage:
 
 Each agent should:
 1. Search all source files for imports/requires of the package
@@ -277,7 +273,7 @@ Each agent should:
    - **Infeasible** (300+ lines or requires deep domain expertise): keep the dependency
 5. Check if the package has known vulnerabilities: `npm audit`, `cargo audit`, `pip-audit`, etc.
 6. Check last publish date and maintenance status
-7. Check for **consolidation opportunities**: does this package overlap in purpose with another dependency in the project? (e.g., two state managers, two HTTP clients, two date libraries, two test runners). If so, flag which kept dependency could absorb this one's usage
+7. Check for **consolidation opportunities**: does this package overlap in purpose with another dependency (two state managers, two HTTP clients, two date libraries, two test runners)? If so, flag which kept dependency could absorb this one's usage
 
 Report format:
 ```
@@ -296,23 +292,21 @@ Wait for all agents to complete before proceeding.
 
 ### 1d: Transitive Dependency Check
 
-Before planning replacements, check whether any REMOVE candidate is also a transitive dependency of a package we are keeping. Removing a direct dependency that remains in the lock file as a transitive dep of a kept package provides zero supply chain benefit — the code is still downloaded, installed, and executable.
+Removing a direct dependency that remains in the lock file as a transitive dep of a kept package provides zero supply chain benefit — the code is still installed and executable. For each REMOVE candidate:
 
-For each REMOVE candidate:
-
-1. Check if it appears as a transitive dependency of any Tier 1 or kept Tier 2 package:
-   - **Node.js (npm)**: `npm ls {package}` — check the output for dependents *other than the project root*. Since REMOVE candidates are direct dependencies, they always appear at the top level; the signal is whether a kept dependency *also* depends on them (shown as a nested entry under that kept package's tree)
-   - **Node.js (yarn)**: `yarn why {package}` — check if any kept dependency requires it
-   - **Node.js (pnpm)**: `pnpm why {package}` — same check
-   - **Rust**: `cargo tree -i {package}` — check if a kept crate depends on it
-   - **Python**: use a reverse dependency tree, e.g. `pipdeptree -r -p {package}` or `uv pip tree --invert | grep {package}`, and check whether any kept package depends on it (record the full chain)
-   - **Go**: `go mod graph | grep {package}` — check if a kept module requires it
-   - **Ruby**: `bundle why {gem}` — shows the dependency chain explaining why the gem is in the bundle; check if any kept gem appears in the chain
-2. If the package IS a transitive dependency of a kept package, determine the **removal motivation**:
-   - **Supply chain only** — the package was flagged purely for attack surface reduction (e.g., small/unmaintained utility). Downgrade to **KEEP (transitive)** because removing the direct entry doesn't remove the code from the lock file or the runtime.
-   - **Consolidation** — the package overlaps in purpose with another kept dependency and removal unifies the codebase around one solution (e.g., zustand→redux, moment→dayjs, lodash→native utils). Keep the **REMOVE** recommendation — the value is in eliminating redundant usage from *our* code, not in shrinking the lock file. Record the consolidation target (e.g., "consolidate state management into redux").
+1. Check if it appears as a transitive dependency of any Tier 1 or kept Tier 2 package (a nested entry under a kept package's tree, not just the project root):
+   - **Node.js (npm)**: `npm ls {package}`
+   - **Node.js (yarn)**: `yarn why {package}`
+   - **Node.js (pnpm)**: `pnpm why {package}`
+   - **Rust**: `cargo tree -i {package}`
+   - **Python**: `pipdeptree -r -p {package}` or `uv pip tree --invert | grep {package}` (record the full chain)
+   - **Go**: `go mod graph | grep {package}`
+   - **Ruby**: `bundle why {gem}`
+2. If it IS transitive of a kept package, determine the **removal motivation**:
+   - **Supply chain only** (flagged purely for attack surface reduction) → downgrade to **KEEP (transitive)** — removing the direct entry doesn't remove the code from the lock file or the runtime.
+   - **Consolidation** (overlaps in purpose with another kept dependency, e.g., zustand→redux, moment→dayjs, lodash→native utils) → keep the **REMOVE** recommendation — the value is eliminating redundant usage from *our* code. Record the consolidation target (e.g., "consolidate state management into redux").
    - Record the dependency chain in either case, root-to-leaf (e.g., `@react-three/fiber → tunnel-rat → zustand`)
-3. Exception: if the direct dependency pulls a **different major version** than the transitive one, removal still eliminates that version from the dependency tree. In this case, keep the REMOVE recommendation but note the version difference.
+3. Exception: if the direct dependency pulls a **different major version** than the transitive one, keep the REMOVE recommendation but note the version difference.
 
 Update `DEPENDENCY_MAP` with transitive check results before proceeding to Phase 2.
 
@@ -320,13 +314,11 @@ Update `DEPENDENCY_MAP` with transitive check results before proceeding to Phase
 ## Phase 2: Replacement Plan
 
 > **Issue mode (`--issues`):** Keep the replacement plan (steps 2–5 below) as your
-> **in-run working plan in context** — do **not** create or write the
-> `## Depfree Audit` section to `PLAN.md`, and skip step 1's "read/create PLAN.md".
-> Remediation proceeds from that in-context plan as normal. For any removal you
-> **defer** (don't carry out this run), file a labeled tracker issue instead of a
-> PLAN.md line — see the disposition partial below. Report the created issue
-> numbers (`#<n>`) in the Phase 2 summary where you'd report slugs. Setup (VCS host
-> + label) is already covered: reuse `CLI_TOOL` from Phase 0.
+> **in-run working plan in context** — do **not** write the `## Depfree Audit`
+> section to `PLAN.md`, and skip step 1. For any removal you **defer**, file a
+> labeled tracker issue instead of a PLAN.md line — see the disposition partial
+> below. Report the created issue numbers (`#<n>`) in the Phase 2 summary where
+> you'd report slugs. Reuse `CLI_TOOL` from Phase 0.
 
 1. Read the existing `PLAN.md` (create if it doesn't exist)
 2. Filter to only REMOVE recommendations from Phase 1c/1d (exclude any downgraded to KEEP (transitive) in Phase 1d)
@@ -369,13 +361,13 @@ For each dependency to remove:
 - [ ] [drop-{package-slug}] **{package}** — {strategy}. Replace {N} call sites in {M} files. Write {utility name} ({est. lines} lines). Complexity: {level}.
 ```
 
-**Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct removals via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case, ≤50 chars, unique against every `[slug]` already in PLAN.md. Recommended pattern: `drop-<package-name-kebabed>` (e.g. `[drop-uuid]`, `[drop-chalk]`); collide-suffix with `-2`/`-3` if the same package was removed in a prior audit and re-added. _(Issue mode skips slugs entirely — the issue number is the ID.)_
+**Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents can claim distinct removals via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case, ≤50 chars, unique against every `[slug]` already in PLAN.md. Pattern: `drop-<package-name-kebabed>` (e.g. `[drop-uuid]`, `[drop-chalk]`); collide-suffix with `-2`/`-3` if the same package was removed in a prior audit and re-added. _(Issue mode skips slugs — the issue number is the ID.)_
 
 Only when `ISSUE_MODE=true`:
 
 !read lib/plan-issue-mode.md
 
-**Scoped npm packages** (e.g. `@types/node`, `@scope/pkg`) lose their leading `@` to the kebab-case rule and collapse `/` to `-`, so a naïve `drop-<package-name-kebabed>` would produce `drop-types-node` for both `@types/node` and any hypothetical `@othertypes/node`. Preserve the scope explicitly in the slug: `drop-<scope>-<pkg>` (so `@types/node` → `[drop-types-node]`, `@scope/pkg` → `[drop-scope-pkg]`). If a non-scoped package with the same shape already owns that slug, fall through to the standard `-2`/`-3` collision suffix.
+**Scoped npm packages** (e.g. `@types/node`, `@scope/pkg`) lose their leading `@` to the kebab-case rule and collapse `/` to `-`, so a naïve slug would produce `drop-types-node` for both `@types/node` and any hypothetical `@othertypes/node`. Preserve the scope explicitly: `drop-<scope>-<pkg>` (so `@types/node` → `[drop-types-node]`, `@scope/pkg` → `[drop-scope-pkg]`). If a non-scoped package already owns that slug, fall through to the standard `-2`/`-3` collision suffix.
 
 7. Print summary table:
 ```
@@ -389,7 +381,7 @@ Only when `ISSUE_MODE=true`:
 
 **GATE: If `--scan-only` was passed, STOP HERE** — but not before doing the one thing a scan-only run in issue mode exists to do: **when `ISSUE_MODE` is also true, file every surviving finding as an issue first**, then print the summary and exit. (When `ISSUE_MODE` is false, just print the summary and exit.)
 
-**Filing every surviving finding** means all of them — not just the ones the disposition rules would defer. A scan-only run remediates nothing, so "deferred" covers the whole set; the filed issues ARE the run's output. Apply the same labels, dedup-against-`EXISTING_ISSUES`, and title/body rules the disposition partial specifies, and report the created and reused `#<number>`s in the summary. Do not open a worktree or write any code.
+**Filing every surviving finding** means all of them, not just the ones the disposition rules would defer — the filed issues ARE the run's output. Apply the disposition partial's labels, dedup-against-`EXISTING_ISSUES`, and title/body rules, and report the created and reused `#<number>`s in the summary. Do not open a worktree or write any code.
 
 **GATE: If no removable dependencies were found, print "All dependencies are justified" and exit.**
 
@@ -461,7 +453,7 @@ Steps:
 </guardrails>
 ```
 
-**Parallelization**: Launch up to 5 agents in parallel. If >5 dependencies to remove, batch them. Assign each agent a non-overlapping set of dependencies (no two agents should modify the same files — if overlap exists, group those dependencies into one agent).
+**Parallelization**: Launch up to 5 agents in parallel; batch if >5 dependencies. Assign each agent a non-overlapping set of dependencies (if two would modify the same files, group them into one agent).
 
 ### 3c: Lock File Update
 
@@ -711,11 +703,11 @@ Only for `ollama` entries:
 
 !read lib/ollama-review-loop.md
 
-Pass: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the GitHub-side loops' `gh api` calls hit the right host on GitHub Enterprise), `depfree/{DATE}` (the branch the local-agent loop checks out and reviews), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the copilot/`@<login>` iteration cap; default 1 — one review pass, returning `capped`, which counts as clean for the merge gate below). When `{REVIEW_ITERATIONS}` is 0, a copilot or `@<login>` pass runs until 0 comments (bounded by the 10-iteration guardrail).
+Pass: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the GitHub-side loops' `gh api` calls hit the right host on GitHub Enterprise), `depfree/{DATE}` (the branch the local-agent loop checks out), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (default 1 — one pass, returning `capped`, which counts as clean for the merge gate below; 0 = run until 0 comments, bounded by the 10-iteration guardrail).
 
 ### 5d: Merge
 
-Reached only when a review loop ran (`REVIEW_AGENTS` non-empty); the empty case stopped at 5c with the PR left open. Consume the multi-reviewer wrapper's `{OVERALL_STATUS}`:
+Reached only when a review loop ran (`REVIEW_AGENTS` non-empty). Consume the multi-reviewer wrapper's `{OVERALL_STATUS}`:
 
 **Default mode**: Auto-merge when `{OVERALL_STATUS}` is `clean` (or `partial` under an explicit stop-mode). On `inconclusive` (a requested reviewer timed out, errored, hit its guardrail, or was skipped — including a missing CLI binary) or `dirty` (broken build / failed tests / reject), leave the PR open and report the status.
 **Interactive mode**: Ask the user for merge approval, showing `{OVERALL_STATUS}`.
@@ -746,7 +738,7 @@ gh pr merge {PR_NUMBER} --merge
    git stash pop
    ```
 4. Update PLAN.md:
-   - Mark completed removals by flipping `- [ ]` → `- [x]` — **preserve the `[<slug>]` ID** on each line (only the box character changes, the slug stays). See [lib/plan-id-format.md](../../lib/plan-id-format.md).
+   - Mark completed removals by flipping `- [ ]` → `- [x]` — **preserve the `[<slug>]` ID** on each line. See [lib/plan-id-format.md](../../lib/plan-id-format.md).
    - Add PR link
    - Note any packages that were reverted
 5. Print the final summary:
@@ -780,13 +772,9 @@ Transitive deps eliminated: ~{count} (estimated)
 
 ## Notes
 
-- This command complements `/do:better` — run `depfree` for dependency hygiene, `better` for code quality
+- This command complements `/do:better` — `depfree` for dependency hygiene, `better` for code quality
 - All remediation happens in an isolated worktree — the user's working directory is never modified
-- `docs/DEPS.md` is the persistent decision log. It is read at the start of every run (Phase 0e) to skip re-evaluation of unchanged dependencies, and rewritten at the end of Phase 4c with the merged set of prior + current decisions. Major version bumps and heavy-mode escalations bypass the cache. Manually delete an entry to force re-audit on the next run
-- **Default mode**: the threshold for "acceptable" libraries is deliberately generous — the goal is to remove obvious attack surface, not to rewrite everything
-- **Heavy mode**: the threshold narrows to foundational frameworks only — the goal is to own as much code as feasibly possible, eliminating supply chain risk from individual maintainers and small projects
-- Replacement code should be minimal and focused — don't over-engineer utilities that replace single-purpose packages
-- **Default mode**: when in doubt, keep the dependency. A maintained library is better than a buggy reimplementation
-- **Heavy mode**: when in doubt, replace it. Write owned code unless the replacement requires crypto primitives, binary protocol parsing, or deep domain expertise that would be unsafe to reimplement
-- **Default mode**: devDependencies are lower priority since they don't ship to production. **Heavy mode**: devDependencies are audited on par with production deps — unmaintained build tools still pose supply chain risk
+- `docs/DEPS.md` is the persistent decision log (read in Phase 0e, rewritten in Phase 4c). Major version bumps and heavy-mode escalations bypass it; manually delete an entry to force re-audit
+- **Default mode**: when in doubt, keep the dependency. **Heavy mode**: when in doubt, replace it, unless the replacement needs crypto primitives, binary protocol parsing, or deep domain expertise
+- Replacement code should be minimal — don't over-engineer utilities that replace single-purpose packages
 - For monorepos, audit the root manifest and each workspace package manifest

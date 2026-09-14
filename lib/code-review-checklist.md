@@ -1,13 +1,9 @@
 <!--
-  Code Review Checklist — canonical reference.
-
-  This document is the human-readable catalog of what the /do:review system
+  Code Review Checklist — canonical reference for what the /do:review system
   watches for. The per-agent instruction files (review-surface-scan.md,
   review-surface-quality.md, review-security-audit.md, review-cross-file-
-  tracing.md, review-cross-file-contract.md) are focused extracts that
-  prime the reviewing agent's attention during the actual review.
-
-  Use this file to learn the system. Update agent files for runtime impact.
+  tracing.md, review-cross-file-contract.md) are focused extracts; update
+  those for runtime impact.
 
   Triage: Tier 1 and Tier 4 apply to every file. Tier 2 and Tier 3 apply
   only when the file's role matches.
@@ -15,9 +11,9 @@
 
 # How to review
 
-**Review logic, not lint.** A linter, type-checker, compiler, formatter, and test suite already run on this code separately and catch syntax errors, lint violations, formatting, import order, unused variables, and build breakage. A reviewer that re-finds those adds nothing and buries the findings that matter. Spend every bit of attention on what only a reader reasoning about behavior can catch — the items in this checklist. Do NOT raise pure-style/formatting nits, rename suggestions, or "extract a helper/constant" refactors unless they are the *root cause* of a behavior bug; every finding should name a concrete wrong outcome (a crash, a wrong value, a leak, a missing-coverage gap, a broken contract), not a preference.
+**Review logic, not lint.** A linter, type-checker, compiler, formatter, and test suite already run on this code and catch syntax errors, lint violations, formatting, import order, unused variables, and build breakage; re-finding those buries the findings that matter. Do NOT raise pure-style/formatting nits, rename suggestions, or "extract a helper/constant" refactors unless they are the *root cause* of a behavior bug; every finding must name a concrete wrong outcome (a crash, a wrong value, a leak, a missing-coverage gap, a broken contract), not a preference.
 
-The most expensive misses are not pattern misses — they are *consequence-reasoning* misses. A test asserts a symptom (HTTP status) instead of the contract (status + code + body shape). A fallback path returns a different shape than the happy path. An encoder corrupts the downstream parser. An auto-assign ignores pre-existing state on re-run. These are findable only by reasoning from principles, not by matching against bullets.
+The most expensive misses are *consequence-reasoning* misses, findable only by reasoning from principles: a test asserts a symptom (HTTP status) instead of the contract (status + code + body shape); a fallback path returns a different shape than the happy path; an encoder corrupts the downstream parser; an auto-assign ignores pre-existing state on re-run.
 
 **Reason first, checklist second.** For each change, ask:
 - What's the smallest input that breaks this?
@@ -30,7 +26,7 @@ The most expensive misses are not pattern misses — they are *consequence-reaso
 
 **A test pins the contract it names.** Assertions that would still pass when the named behavior regresses are not coverage.
 
-**The LLM prompt is a data path.** User content flowing into a template (fenced blocks, template-engine substitution) is subject to corruption / injection / fence escape exactly like any other untrusted-input → structured-output boundary.
+**The LLM prompt is a data path.** User content flowing into a template (fenced blocks, template-engine substitution) is an untrusted-input → structured-output boundary, subject to corruption / injection / fence escape.
 
 ---
 
@@ -99,8 +95,7 @@ The most expensive misses are not pattern misses — they are *consequence-reaso
 ## Tier 2 — Check When Relevant
 
 **Async & state consistency** _[async/await, Promises, UI state]_
-- Optimistic UI state never reverted on failure
-- Generation/sequence counter guarding optimistic async resolution: must gate the REVERT (failure) path, not only success — else an earlier op's late failure yanks a display a newer op (even one targeting the SAME id, where `current === id` still matches) now owns; must NOT gate the server-confirmation/success write on generation — record EVERY accepted result (the confirmed value tracks server-RESPONSE order, which serialized writes already order, not client-INTENT order; gating it drops a superseded-but-accepted result and a later failure reverts to a stale value); must bump the counter at the actual mutation point, not before an intervening `await` (e.g. a save that precedes the switch — a still-in-flight/failing pre-step prematurely supersedes unrelated in-flight ops)
+- Generation/sequence counter guarding optimistic async resolution: must gate the REVERT (failure) path, not only success — else an earlier op's late failure yanks a display a newer op now owns (even one targeting the SAME id, where `current === id` still matches); must NOT gate the server-confirmation/success write on generation — record EVERY accepted result (the confirmed value tracks server-RESPONSE order, which serialized writes already order, not client-INTENT order); must bump the counter at the actual mutation point, not before an intervening `await` (e.g. a save that precedes the switch prematurely supersedes unrelated in-flight ops)
 - Multiple coupled state variables updated independently; selection sets not pruned on data refresh/filter/sort
 - Component state initialized from props via `useState(prop)` doesn't sync on prop change — use effect keyed on all identity discriminators
 - Periodic operations with skip conditions not advancing timing state — re-trigger loop
@@ -150,7 +145,6 @@ The most expensive misses are not pattern misses — they are *consequence-reaso
 - Data migrations silently changing runtime behavior — unsupported values flagged, not defaulted
 - Update endpoints with field allowlists not covering new model fields
 - Client-side input limits inconsistent with server-side enforcement — confusing 400/413 errors
-- Sample configs / README examples reference keys the loader doesn't read
 - Subprocess invocations not inheriting parent's config source via `env` option
 - Config values validated only at first use — misconfiguration surfaces as cryptic runtime error
 - Summary/aggregation endpoints using different filters than detail views they link to
@@ -165,7 +159,6 @@ The most expensive misses are not pattern misses — they are *consequence-reaso
 - LLM-emitted fields where prompt advertises a controlled vocab but validator falls through to a different default
 - New API client functions must use same encoding/escaping as existing ones
 - Architectural pattern divergence — every new module addresses a class of concern; new code MUST adopt the established pattern
-- Cross-module constants kept "in sync by comment" — extract to a shared module
 
 **Concurrency & data integrity** _[shared state, DB writes, multi-step mutations]_
 - Shared mutable state without locking; lock granularity matching resource granularity (per-item lock on shared blob still interleaves)
@@ -260,7 +253,7 @@ The most expensive misses are not pattern misses — they are *consequence-reaso
 - Comment / JSDoc references a function or symbol that doesn't exist
 - Sample-config / README examples use keys the loader doesn't read
 - Inline code examples or command templates not syntactically valid
-- Canonical command/flag invocation string changed in one place but not its copies — when a required flag is added (e.g. `--sandbox read-only`), grep the whole file AND sibling docs for every literal occurrence of the old command form (table cells, inline examples, AND prose rationale bullets) and update them in one pass; a primary reference and its explanatory examples must never diverge (a reader can copy any of them)
+- Canonical command/flag invocation string changed in one place but not its copies — when a required flag is added (e.g. `--sandbox read-only`), grep the whole file AND sibling docs for every literal occurrence of the old form (table cells, inline examples, prose rationale bullets) and update them in one pass; a reader can copy any of them
 - Sequential numbering with gaps after edits
 - Template/prompt variables referenced but never assigned
 - LLM prompt promises downstream behavior the code doesn't deliver
@@ -281,7 +274,7 @@ The most expensive misses are not pattern misses — they are *consequence-reaso
 
 **Configuration & hardcoding**
 - Hardcoded values when config/env var exists; dead config fields; unused parameters
-- Duplicated constants across modules — extract to shared
+- Duplicated constants across modules (including ones "kept in sync by comment") — extract to a shared module
 - CI pipelines without lockfile pinning
 - Production code paths with no structured logging at entry/exit
 - Error logs missing reproduction context (request ID, input params)
