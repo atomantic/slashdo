@@ -3,23 +3,17 @@
 Several commands record deferred work as **plan items**. By default each item is
 appended to `PLAN.md` as a `- [ ]` checkbox with a unique kebab-slug `[<id>]` (per
 [plan-id-format.md](./plan-id-format.md)). When the command resolves
-**`ISSUE_MODE=true`** — set by the `--issues` flag **or** a saved `issues=true`
-default (each command resolves this in its own argument parsing; the `(--issues)`
-labels below are shorthand for "this branch runs when `ISSUE_MODE` is true," whether
-the flag was typed or the default supplied it) — file the item as a labeled issue in
-the GitHub/GitLab tracker **instead of** writing to `PLAN.md` — the same model
-`/do:replan --issues` uses, so the two stay consistent and `PLAN.md` doesn't churn
-while work happens on issues.
+**`ISSUE_MODE=true`** — `--issues` **or** a saved `issues=true` default; each
+command resolves this in its own argument parsing — file the item as a labeled
+issue in the GitHub/GitLab tracker **instead of** writing to `PLAN.md`.
 
 ## Flags
 
 - **`--issues`**: file plan items as tracker issues instead of `PLAN.md` lines.
   Record `ISSUE_MODE=true` (default `false`). A saved `issues=true` default resolves
   to the same `ISSUE_MODE=true` when neither `--issues` nor `--no-issues` is typed.
-  **This flag selects a destination, not a run mode.** It changes *where* items are
-  recorded and nothing else — a command that remediates, opens PRs, or merges still
-  does all of that. In a command that also offers `--scan-only`, that is the flag
-  which stops the pipeline; see "Recording every finding under `--scan-only`" below.
+  **This flag selects a destination, not a run mode** — remediation, PRs, and merges
+  still run. `--scan-only` is what stops the pipeline; see below.
 - **`--issues-label <name>`**: the label that scopes plan-tracking issues. Record
   `PLAN_LABEL` (default `plan`). Only meaningful when `ISSUE_MODE` is true.
 
@@ -45,15 +39,13 @@ while work happens on issues.
      echo "--issues needs an authenticated gh or glab. Run 'gh auth login' or 'glab auth login', or drop --issues to record items in PLAN.md."; exit 1
    fi
    ```
-   (The `--active` flag on `gh auth status` scopes the check to the active account,
-   so a stale token on another configured account doesn't falsely fail it — only
-   relevant in the no-origin-remote fallback above, since the remote-derived branches
-   confirm the selected CLI's credentials in the next step.) Then confirm the
-   selected `CLI_TOOL` is actually authenticated to `$ORIGIN_HOST` (`gh auth status
-   --active` / `glab auth status`); if it is not, **abort** with: "`--issues` needs
-   an authenticated `gh` or `glab`. Run `gh auth login` (or `glab auth login`), or
-   drop `--issues` to record items in PLAN.md." Never silently fall back to writing
-   PLAN.md.
+   (`gh auth status --active` scopes to the active account so a stale token on
+   another account doesn't falsely fail it — only the no-origin fallback above;
+   remote-derived branches confirm credentials next.) Then confirm the selected
+   `CLI_TOOL` is authenticated to `$ORIGIN_HOST` (`gh auth status --active` /
+   `glab auth status`); if not, **abort** with: "`--issues` needs an authenticated
+   `gh` or `glab`. Run `gh auth login` (or `glab auth login`), or drop `--issues`
+   to record items in PLAN.md." Never silently fall back to writing PLAN.md.
 2. **Label.** Ensure the scoping label exists:
    `gh label create <PLAN_LABEL> --description "Tracked by slashdo" 2>/dev/null || true`
    (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" 2>/dev/null || true` — glab requires a color).
@@ -78,8 +70,7 @@ run: no worktree, no code changes, no PRs. Apply the same dedup, labels, and
 title/body rules below to all of them, and report the created and reused `#<number>`s
 in the command's summary.
 
-This is the combination to reach for when the intent is "audit and file the work,
-don't touch my code" — `--issues` alone does not do it.
+`--issues` alone does not do it.
 
 ## Recording a plan item
 
@@ -165,26 +156,18 @@ as one scale:
 Reused (deduped) issues keep whatever labels they already have — don't re-label an
 existing issue unless the new finding genuinely changes its category or severity.
 
-Everything else about the command is unchanged: in issue mode it simply files
-labeled issues wherever it would have written `PLAN.md` lines.
-
 ## Bulk filing — spool the bodies, dedup on an index
 
-Everything above describes filing **one** item, and a run that files a handful — a
-review that deferred two findings, a depfree run with six removable packages —
-should just do that inline and stop reading here.
+Everything above files **one** item. A run that files a handful should do that
+inline and stop reading here.
 
-**Apply this section only when a run expects to file more than ~20 issues at once**
-— an audit whose parallel agents each return dozens of findings. Below that
-threshold the inline path is simpler and this machinery costs more than it saves.
+**Apply this section only when a run expects to file more than ~20 issues at once.**
+Below that threshold the inline path is simpler.
 
-At that scale the naïve shape has the orchestrator hold every finding's full body in
-context and then re-emit each one into a `gh issue create` call. **The re-emission
-is both the expensive part and the inaccurate part**: the body was already written
-once, by the agent that did the investigation, and regenerating a hundred of them
-serially is where bodies get truncated, evidence gets paraphrased away, and findings
-get silently dropped off the end. The fix is to split each finding into a **key** and
-a **body**, and never let the body reach the orchestrator at all.
+At that scale, do not hold every finding body in orchestrator context and re-emit
+it into `gh issue create` — that truncates bodies, paraphrases evidence, and drops
+findings. Split each finding into a **key** and a **body**, and never let the body
+reach the orchestrator.
 
 ### 1. Producing agents spool bodies to disk
 
@@ -240,11 +223,8 @@ Unresolved findings remain explicitly unconfirmed investigation follow-ups: no
 confirmed severity label and no automatic remediation. Do not silently coerce
 uncertainty into a severity to fit this index.
 
-
-That is roughly a twentieth of what the bodies cost, and it is a *better* input for
-the next step than prose — dedup, severity ranking, and ownership all key off
-exactly these fields. An agent that finds nothing returns an empty index and writes
-no file.
+Dedup, severity ranking, and ownership key off these fields. An agent that finds
+nothing returns an empty index and writes no file.
 
 ### 3. The orchestrator consolidates on the index
 
@@ -255,10 +235,8 @@ Use the index for these consolidation decisions; targeted uncertainty validation
 - **Dedup against `EXISTING_ISSUES`**, per "Recording a plan item" above.
 - Any severity adjustment, ownership mapping, or ordering the command specifies.
 
-This is the step that makes per-agent filing wrong: an agent that files its own
-findings as it goes cannot dedup against agents that have not returned yet, and
-overlapping audit agents are a design feature, not an accident. The output here is a
-surviving id list grouped by category. **The orchestrator never *rewrites* a spooled
+Per-agent filing cannot dedup against agents that have not returned yet. The output
+here is a surviving id list grouped by category. **The orchestrator never *rewrites* a spooled
 body** — targeted validation and command-specific evidence reads may open the
 needed blocks, but do not expand every body into context. For filing, both fan-out
 and inline paths lift each block verbatim into a `--body-file`; never retype or
@@ -285,12 +263,11 @@ body** — it moves bytes from the spool to the tracker. If a block is malformed
 id is missing from the spool, the filer reports `<id> -> ERROR: <reason>` and moves
 on rather than inventing a replacement.
 
-Category is the right partition because step 3 already assigned each surviving
-finding to exactly one category, so no two filers can race on the same finding.
+Step 3 already assigned each surviving finding to exactly one category, so no two
+filers can race on the same finding.
 
-**Rate limits.** Issue creation is subject to GitHub/GitLab secondary rate limits,
-which parallel filers trip far more easily than a serial loop does. Give every filer
-this rule verbatim: on a `403` mentioning a secondary rate limit, or a `429`, sleep
+**Rate limits.** Parallel filers trip GitHub/GitLab secondary rate limits easily.
+Give every filer this rule verbatim: on a `403` mentioning a secondary rate limit, or a `429`, sleep
 60s and retry that one issue, up to 3 attempts; on the third failure report the id as
 `ERROR: rate-limited` and continue with the rest. Keep the fan-out modest — one agent
 per category is already bounded, so never shard a single category across agents.
@@ -311,52 +288,40 @@ is printed.
 ## The dispatch hint (`model:` + `effort:`)
 
 Two optional labels that record **how to run the work**, not how big it is. They are
-a recommendation to whoever (or whatever) claims the issue — not a size estimate, not
-a priority, and never a gate.
+a recommendation to whoever claims the issue — not a size estimate, not a priority,
+and never a gate.
 
-- **`model:light` / `model:medium` / `model:heavy`** — the **capability tier** the
-  task needs. `light` is mechanical: a rename, a config bump, a doc fix, a port of an
-  established pattern. `heavy` is genuinely hard reasoning: a concurrency bug, an API
-  redesign, anything where the first plausible answer is usually wrong.
+- **`model:light` / `model:medium` / `model:heavy`** — the **capability tier**.
+  `light` is mechanical (rename, config bump, doc fix, established pattern). `heavy`
+  is hard reasoning (concurrency bug, API redesign, first plausible answer is usually wrong).
 - **`effort:low` / `effort:medium` / `effort:high` / `effort:xhigh` / `effort:max`** —
   the **reasoning budget** per step. High when the work is wide, fiddly, or easy to
-  get subtly wrong, independent of how hard the underlying thinking is.
+  get subtly wrong, independent of how hard the thinking is.
 
-**The two axes are independent, and the off-diagonal combinations are the point.**
-`model:light` + `effort:max` is the right hint for a mechanical change across forty
-call sites — no insight required, plenty of chances to miss one. `model:heavy` +
-`effort:low` fits a two-line change that hinges on one good idea. A hint that always
-moves both axes together is a size estimate wearing a costume.
+**The two axes are independent.** `model:light` + `effort:max` is a mechanical change
+across forty call sites; `model:heavy` + `effort:low` is a two-line change that hinges
+on one good idea. Moving both axes together is a size estimate, not a hint.
 
-**Tier names, not model names — the label is host-neutral.** A concrete slug like
-`opus` or `gpt-5` is wrong on two independent time scales: it ages out while the
-issues outlive it, and it is meaningless to the *other* CLIs that read the same
-tracker. slashdo runs under Claude Code, OpenCode, Antigravity, Codex, and Grok
-Build, against local Ollama models too — an issue filed from one is routinely claimed
-from another, and none of them share a model namespace. So the label records **only
-the tier**, and the consumer resolves it against its own host's lineup at dispatch
-time, per [model-tiers.md](./model-tiers.md) — the same tier vocabulary `/do:better`,
-`/do:depfree`, `/do:review`, and `/do:rpr` use for their own agents. Read that file
-for the resolution rules, including why `heavy` means "inherit the session's model"
-rather than a pinned slug, and how a host with a coarser effort scale clamps.
+**Tier names, not model names — the label is host-neutral.** A slug like `opus` or
+`gpt-5` ages out and is meaningless to other CLIs on the same tracker. Record **only
+the tier**; the consumer resolves it against its own host at dispatch time per
+[model-tiers.md](./model-tiers.md) — the same vocabulary `/do:better`, `/do:depfree`,
+`/do:review`, and `/do:rpr` use. `heavy` means "inherit the session's model" rather
+than a pinned slug; a coarser effort scale clamps.
 
 **Applying one is optional; an unlabeled issue is normal** and stays fully claimable.
-Only apply a hint you can justify from the work you actually investigated — a
-reflexive `model:medium` + `effort:medium` on everything is noise that makes the real
-signals unreadable. Prefer leaving an axis off to guessing it.
+Only apply a hint you can justify from the work you investigated. Prefer leaving an
+axis off to guessing it. A reflexive `model:medium` + `effort:medium` on everything
+is noise.
 
-**Not to be confused with `/do:config --review-models`**, which pins the model each
-*reviewer* runs on. The dispatch hint is about the *implementer*.
+**Not `/do:config --review-models`**, which pins each *reviewer*. The dispatch hint
+is about the *implementer*.
 
-**Consumer:** `/do:next` reads both — its `--model` / `--effort` flags filter the
-queue by them, and in `--swarm` mode it sets each worker agent's model from the
-claimed issue's tier.
+**Consumer:** `/do:next` reads both — `--model` / `--effort` filter the queue, and
+`--swarm` sets each worker's model from the claimed issue's tier.
 
-**Filtering is the primary use of both labels**, and it works on every host: it is
-label matching, nothing more. Choosing *which* issue to pick up — "give me something
-cheap", "give me the careful work" — is what these labels are for. Dispatch is a
-bonus applied where the host supports it: the model tier maps to a real parameter on
-most hosts, while `effort:` is advisory and an agent **may** pass it to a sub-agent
-where such a control exists. A host that can't spawn sub-agents, or can't set their
-model, simply reports the labels — which costs nothing, since they stay accurate for
-whoever reads the issue next.
+**Filtering is the primary use** and works on every host (label matching). Dispatch
+is a bonus where the host supports it: the model tier maps to a real parameter on
+most hosts; `effort:` is advisory and an agent **may** pass it to a sub-agent where
+such a control exists. A host that can't spawn sub-agents, or can't set their model,
+reports the labels.
