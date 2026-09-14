@@ -91,7 +91,7 @@ describe('writeConfig', () => {
   it('round-trips a per-agent review-models object (do:config schema)', () => {
     const { dir, file } = tmpFile();
     // review-models is a nested object keyed by agent slug; model strings are
-    // free-form and may contain spaces/parens (e.g. agy's "Gemini 3.5 Flash (High)").
+    // free-form and may contain spaces/parens (e.g. agy's "Gemini 3.8 Flash (High)").
     // The storage layer must round-trip the whole object verbatim.
     const cfg = {
       defaults: {
@@ -99,14 +99,14 @@ describe('writeConfig', () => {
         'review-models': {
           codex: 'o3',
           claude: 'claude-opus-4-8',
-          agy: 'Gemini 3.5 Flash (High)',
+          agy: 'Gemini 3.8 Flash (High)',
           ollama: 'qwen2.5-coder:32b',
         },
       },
     };
     writeConfig(file, cfg);
     assert.deepEqual(readConfig(file), cfg);
-    assert.equal(readConfig(file).defaults['review-models'].agy, 'Gemini 3.5 Flash (High)');
+    assert.equal(readConfig(file).defaults['review-models'].agy, 'Gemini 3.8 Flash (High)');
     fs.rmSync(dir, { recursive: true });
   });
 

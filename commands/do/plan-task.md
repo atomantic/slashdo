@@ -76,10 +76,10 @@ free.
   (hand the draft to Grok for a second pass); `--enhance-with=codex[o3],grok` (Codex on
   model `o3` enhances first, then Grok enhances Codex's result — sequential, left to
   right). **Tokenize bracket-aware, never by naive whitespace split**: model
-  selectors may contain spaces and parens (e.g. `--enhance-with 'agy[Gemini 3.5
+  selectors may contain spaces and parens (e.g. `--enhance-with 'agy[Gemini 3.8
   Flash (High)]' fix the login bug`), and in this command the rest of `$ARGUMENTS`
   is free-form task text — a whitespace-first split would consume only
-  `agy[Gemini` as the value and leak `3.5 Flash (High)]` into the task
+  `agy[Gemini` as the value and leak `3.8 Flash (High)]` into the task
   description, failing validation or drafting the wrong issue. The value ends at
   the first whitespace *outside* any `[...]` bracket (an opened bracket runs to
   its matching `]`, whatever it contains). Then parse the value exactly as

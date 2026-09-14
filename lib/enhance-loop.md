@@ -136,8 +136,16 @@ all four:
 MODEL_FLAG=()
 [ -n "$ENH_MODEL" ] && MODEL_FLAG=(--model "$ENH_MODEL")
 # agy always pins a model (its default may be a heavy "Thinking" tier that looks hung
-# for 20-30 min), so it is handled separately and never left unpinned:
-AGY_ENH_MODEL="${ENH_MODEL:-${AGY_REVIEW_MODEL:-Gemini 3.5 Flash (High)}}"
+# for 20-30 min), so it is handled separately and never left unpinned. agy rejects any
+# name not in its live roster, and that roster churns between releases, so resolve the
+# pinned name against `agy models` rather than trusting the literal below — same rule,
+# same reason, as the agy block in `lib/local-agent-review-loop.md`. Names must be a
+# LEVELED entry (`Gemini 3.8 Flash (High)` / `gemini-3.8-flash-high`), never a bare base.
+AGY_ENH_MODEL="${ENH_MODEL:-${AGY_REVIEW_MODEL:-Gemini 3.8 Flash (High)}}"
+# Print the roster ONLY for an agy entry: this block runs once per agent, and an
+# unconditional `agy models` would fire a network call (and dump an irrelevant roster)
+# on every codex/claude/grok/cursor/pi pass too.
+[ "$AGENT" = agy ] && agy models 2>/dev/null   # validate AGY_ENH_MODEL against this; fall back to the newest Flash (High)
 ```
 
 ### Per-agent invocation
