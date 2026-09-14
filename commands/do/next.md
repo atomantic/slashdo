@@ -51,9 +51,9 @@ Collect targets into an ordered list `TARGETS` in three steps, **in this order**
 
 **When `--swarm` is absent — the default — skip this section entirely and run Phases 1–7 below.**
 
-When `SWARM` is true the swarm flow **replaces Phases 1–7** for the run: it claims and ships up to `SWARM_N` independent open issues at once, each in its own worktree subagent running the normal single-issue flow, and serializes only the merge. Its preconditions, the four swarm phases (A triage/partition, B fan-out, C merge queue, D reconcile), and the batch-abort rules all live in one file:
+When `SWARM` is true the swarm flow **replaces Phases 1–7** for the run: it claims and ships up to `SWARM_N` independent open issues at once, each in its own worktree subagent running the normal single-issue flow, and serializes only the merge. Its preconditions, the four swarm phases (A triage/partition, B fan-out, C merge queue, D reconcile), and the batch-abort rules all live in one file — read it only when `SWARM` is true:
 
-!`cat ~/.claude/lib/next-swarm.md`
+!read lib/next-swarm.md
 
 ## Phase 1: Pick
 
@@ -136,9 +136,9 @@ For every ref, split on `/` and collect each segment — that's the raw in-fligh
 
 ### Phase 1 — issues mode (`--issues`)
 
-Run the shared issue-mode setup — it reuses the `CLI_TOOL` (`gh`/`glab`) the Pre-flight above already detected, ensures `PLAN_LABEL` exists, and aborts if neither host is authenticated (this file is inlined at install time, so it's available in every environment — not a dead link):
+Run the shared issue-mode setup — it reuses the `CLI_TOOL` (`gh`/`glab`) the Pre-flight above already detected, ensures `PLAN_LABEL` exists, and aborts if neither host is authenticated. Read it only when `ISSUE_MODE=true`:
 
-!`cat ~/.claude/lib/plan-issue-mode.md`
+!read lib/plan-issue-mode.md
 
 > **Issue mode works on GitHub or GitLab.** `/do:next`'s claim mechanics (Phase 2) use the tracker's **assignee** field as the cross-machine marker on either host — GitHub via `gh issue edit --add-assignee`/`--remove-assignee`, GitLab via `glab issue update --assignee "+<user>"`/`--assignee "-<user>"` (the `+`/`-` prefix adds/removes one assignee without clobbering any others already on the issue, which matters for the race read-back below). Every `gh issue`/`gh api` call in this phase has a `glab issue`/`glab api` equivalent alongside it, selected by `$CLI_TOOL`. One structural gap to know about: GitHub exposes a native, project-scoped **sub-issues** API for epic/child resolution (step 3) that GitLab does not — GitLab's closest analog (group-level Epics) is a different, tier-gated feature, so on GitLab the **convention fallback** (body task-lists + `Part of #N` back-references, per [lib/epic-children.md](../../lib/epic-children.md)) is the primary path rather than a fallback of last resort. It's fully host-agnostic once every `gh` call in it is paired with its `glab` form, which it already is.
 
@@ -285,9 +285,9 @@ Then:
    ```
    Omit the `map` for an inactive axis entirely rather than emitting `select(true)`. **This filter runs before every other skip**, so an issue it excludes is never even considered for the parking-label / dependency / epic checks — and, unlike those skips, exclusion here means "not what you asked for," not "not workable." Report it that way in step 7: if the unfiltered queue had eligible work and the filter emptied it, say which filter did it — and **write the flags space-separated, exactly as they'd be typed** (`no eligible issue matching --model light --effort max — 14 open issues carry no dispatch hint; add `none` to include them`); joining them with a comma would render as one axis's OR-list in this flag's own grammar, telling the user a nonsensical invocation caused the empty queue, because a bare "nothing to do" on a barely-labelled tracker reads as a broken command.
 2. **Determine in-flight issues.** Issue `N` is in flight if EITHER `issue-N` appears in the raw in-flight set, OR the issue **already has an assignee** (someone took it via the Phase 2 marker, possibly on another machine). The assignee check is the cross-machine half of the claim — a local-only `next/issue-N` branch on a sibling machine is invisible here, but its assignee is not.
-3. **Resolve epics before picking (child-aware).** An epic (umbrella issue) is **not** a single claimable unit — its done-ness depends on its children, not on code evidence. For any candidate that is an epic (carries `epic`/a repo umbrella label, has native sub-issues, or whose body task-lists other issues), classify it with the shared epic logic (inlined here so it's available in every environment — not a dead link):
+3. **Resolve epics before picking (child-aware).** An epic (umbrella issue) is **not** a single claimable unit — its done-ness depends on its children, not on code evidence. For any candidate that is an epic (carries `epic`/a repo umbrella label, has native sub-issues, or whose body task-lists other issues), classify it with the shared epic logic — read it only when a candidate is an epic:
 
-!`cat ~/.claude/lib/epic-children.md`
+!read lib/epic-children.md
 
    Act on the resulting state:
    - `epic-open` (≥1 child still OPEN) → **skip** as not-yet-workable; note `epic #N: X/Y children open`.

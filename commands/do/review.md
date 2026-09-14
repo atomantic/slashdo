@@ -153,7 +153,9 @@ strict mode is active; use the selection protocol and record the decision.
 
 Catches per-file RUNTIME bugs: crashes, type/coercion errors, async/state, error handling, streaming, plus domain-specific runtime patterns (SQL, shell, wire protocols, accessibility).
 
-!`cat ~/.claude/lib/review-surface-scan.md`
+Lens body — read only if this lens was selected:
+
+!read lib/review-surface-scan.md
 
 </surface_scan_agent>
 
@@ -163,7 +165,9 @@ Catches per-file RUNTIME bugs: crashes, type/coercion errors, async/state, error
 
 Catches per-file QUALITY issues: intent-vs-implementation drift, AI-generated code patterns, dead config, missing tests, supply chain hygiene, style.
 
-!`cat ~/.claude/lib/review-surface-quality.md`
+Lens body — read only if this lens was selected:
+
+!read lib/review-surface-quality.md
 
 </surface_quality_agent>
 
@@ -173,7 +177,9 @@ Catches per-file QUALITY issues: intent-vs-implementation drift, AI-generated co
 
 Catches trust boundary violations, injection, SSRF, data exposure, and access control gaps.
 
-!`cat ~/.claude/lib/review-security-audit.md`
+Lens body — read only if this lens was selected:
+
+!read lib/review-security-audit.md
 
 </security_agent>
 
@@ -183,7 +189,9 @@ Catches trust boundary violations, injection, SSRF, data exposure, and access co
 
 Catches STATE/LIFECYCLE issues across files: stale state propagation, lifecycle gaps (mount/unmount, init/cleanup, started/completed), resource leaks, lock/flag exit paths, concurrent-mutation races.
 
-!`cat ~/.claude/lib/review-cross-file-tracing.md`
+Lens body — read only if this lens was selected:
+
+!read lib/review-cross-file-tracing.md
 
 </cross_file_tracing_agent>
 
@@ -193,7 +201,9 @@ Catches STATE/LIFECYCLE issues across files: stale state propagation, lifecycle 
 
 Catches CONTRACT issues across files: schema/shape agreements, validation parity, error classification, field-set enumerations, intent-vs-implementation claims spanning files, architectural-pattern adherence.
 
-!`cat ~/.claude/lib/review-cross-file-contract.md`
+Lens body — read only if this lens was selected:
+
+!read lib/review-cross-file-contract.md
 
 </cross_file_contract_agent>
 
@@ -208,7 +218,9 @@ unrelated flows, thin wrappers, boundary leaks, bespoke duplicates of canonical
 helpers, cast-heavy/optional-soup contracts. Push the bar to "this works AND the
 implementation feels inevitable in hindsight."
 
-!`cat ~/.claude/lib/review-structural-ambition.md`
+Lens body — read only if this lens was selected:
+
+!read lib/review-structural-ambition.md
 
 </structural_ambition_agent>
 
@@ -268,7 +280,9 @@ When `PR_MODE=true` and `PR_DISPOSITION=apply`, run this section against the PR'
 
 !`cat ~/.claude/lib/finding-disposition.md`
 
-!`cat ~/.claude/lib/plan-issue-mode.md`
+Only when `ISSUE_MODE=true` and a finding is being deferred:
+
+!read lib/plan-issue-mode.md
 
 For each verified finding (local branch mode):
 1. Classify severity: **CRITICAL** (runtime crash, data leak, security) vs **IMPROVEMENT** (consistency, robustness, conventions)
@@ -470,17 +484,29 @@ Per-agent dispatch inside the wrapper:
 
 ### Multi-reviewer wrapper
 
-!`cat ~/.claude/lib/multi-reviewer-loop.md`
+Read when `REVIEW_AGENTS` is non-empty:
+
+!read lib/multi-reviewer-loop.md
 
 ### Inner loop bodies (referenced by the wrapper)
 
-!`cat ~/.claude/lib/copilot-review-loop.md`
+Read only the bodies for reviewer kinds present in the agent list.
 
-!`cat ~/.claude/lib/github-reviewer-loop.md`
+Only for `copilot` entries:
 
-!`cat ~/.claude/lib/local-agent-review-loop.md`
+!read lib/copilot-review-loop.md
 
-!`cat ~/.claude/lib/ollama-review-loop.md`
+Only for `@<login>` entries:
+
+!read lib/github-reviewer-loop.md
+
+Only for `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, or `opencode` entries:
+
+!read lib/local-agent-review-loop.md
+
+Only for `ollama` entries:
+
+!read lib/ollama-review-loop.md
 
 ### Final report (when delegated passes ran)
 

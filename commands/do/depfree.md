@@ -371,7 +371,9 @@ For each dependency to remove:
 
 **Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct removals via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case, ≤50 chars, unique against every `[slug]` already in PLAN.md. Recommended pattern: `drop-<package-name-kebabed>` (e.g. `[drop-uuid]`, `[drop-chalk]`); collide-suffix with `-2`/`-3` if the same package was removed in a prior audit and re-added. _(Issue mode skips slugs entirely — the issue number is the ID.)_
 
-!`cat ~/.claude/lib/plan-issue-mode.md`
+Only when `ISSUE_MODE=true`:
+
+!read lib/plan-issue-mode.md
 
 **Scoped npm packages** (e.g. `@types/node`, `@scope/pkg`) lose their leading `@` to the kebab-case rule and collapse `/` to `-`, so a naïve `drop-<package-name-kebabed>` would produce `drop-types-node` for both `@types/node` and any hypothetical `@othertypes/node`. Preserve the scope explicitly in the slug: `drop-<scope>-<pkg>` (so `@types/node` → `[drop-types-node]`, `@scope/pkg` → `[drop-scope-pkg]`). If a non-scoped package with the same shape already owns that slug, fall through to the standard `-2`/`-3` collision suffix.
 
@@ -685,17 +687,29 @@ Record `PR_NUMBER` and `PR_URL`.
 
 **GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this phase AND the Phase 5d merge.** There is no default reviewer. Leave the PR open for manual review, print its URL and summary, then proceed to Phase 6 cleanup.
 
-Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (series default — reviewers run one-at-a-time so each sees the prior's fixes; `parallel` collects reviews concurrently then applies the union once), `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot and `@<login>` passes only; local-agent and ollama passes use their own fixed iteration caps). The wrapper `!cat`s the inner loop bodies it dispatches to:
+Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (series default — reviewers run one-at-a-time so each sees the prior's fixes; `parallel` collects reviews concurrently then applies the union once), `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot and `@<login>` passes only; local-agent and ollama passes use their own fixed iteration caps). Read the wrapper, then only the inner loop bodies it dispatches to for the reviewer kinds in `REVIEW_AGENTS`:
 
-!`cat ~/.claude/lib/multi-reviewer-loop.md`
+!read lib/multi-reviewer-loop.md
 
-!`cat ~/.claude/lib/copilot-review-loop.md`
+### Inner loop bodies (referenced by the wrapper)
 
-!`cat ~/.claude/lib/github-reviewer-loop.md`
+Read only the bodies for reviewer kinds present in the agent list.
 
-!`cat ~/.claude/lib/local-agent-review-loop.md`
+Only for `copilot` entries:
 
-!`cat ~/.claude/lib/ollama-review-loop.md`
+!read lib/copilot-review-loop.md
+
+Only for `@<login>` entries:
+
+!read lib/github-reviewer-loop.md
+
+Only for `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, or `opencode` entries:
+
+!read lib/local-agent-review-loop.md
+
+Only for `ollama` entries:
+
+!read lib/ollama-review-loop.md
 
 Pass: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the GitHub-side loops' `gh api` calls hit the right host on GitHub Enterprise), `depfree/{DATE}` (the branch the local-agent loop checks out and reviews), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the copilot/`@<login>` iteration cap; default 1 — one review pass, returning `capped`, which counts as clean for the merge gate below). When `{REVIEW_ITERATIONS}` is 0, a copilot or `@<login>` pass runs until 0 comments (bounded by the 10-iteration guardrail).
 

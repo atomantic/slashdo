@@ -216,10 +216,9 @@ Skip this phase entirely when `--enhance-with` is absent or resolved to `none` â
 Phase 3 draft goes straight to labeling and the gate. When an agent list was parsed,
 route the draft through the **sequential enhancement pipeline** before labels are
 inferred (so labels reflect the *enhanced* body) and before the gate (so the human
-approves the sharpened draft). The shared loop is inlined here at install time so it's
-available in every environment â€” not a dead link:
+approves the sharpened draft). Read the shared loop only when `--enhance-with` produced a non-empty agent list:
 
-!`cat ~/.claude/lib/enhance-loop.md`
+!read lib/enhance-loop.md
 
 Drive that loop with `{ENHANCE_AGENTS}` = the parsed list, `{DRAFT_TITLE}` /
 `{DRAFT_BODY}` = the Phase 3 draft, and `{REPO_CONTEXT}` = the task description and

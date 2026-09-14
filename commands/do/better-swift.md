@@ -655,7 +655,9 @@ For each file touched by multiple categories, document why it was assigned to on
 
 **Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct findings via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case derived from the title text, ≤50 chars, unique against every `[slug]` already in PLAN.md. Recommended pattern for audit findings: `<category-prefix>-<file-basename>-<short-hint>` (e.g. `[sec-keychain-token-leak]`, `[swift-mainactor-binding]`). _(Issue mode skips slugs entirely — the issue number is the ID.)_
 
-!`cat ~/.claude/lib/plan-issue-mode.md`
+Only when `ISSUE_MODE=true`:
+
+!read lib/plan-issue-mode.md
 
 6. Print a summary table (short labels → full category → branch slug):
    - Security → Security & Secrets → `security`

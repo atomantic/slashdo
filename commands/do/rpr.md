@@ -118,7 +118,9 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 
 !`cat ~/.claude/lib/finding-disposition.md`
 
-!`cat ~/.claude/lib/plan-issue-mode.md`
+Only when `ISSUE_MODE=true` and a finding is being deferred:
+
+!read lib/plan-issue-mode.md
 
 !`cat ~/.claude/lib/per-finding-root-cause.md`
 
@@ -130,13 +132,17 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 
 When `REVIEW_AGENTS` names a local CLI, step 2 (and the step-8 re-request) runs that agent's review against the PR branch via the shared local-agent loop. Pass `{REVIEW_AGENT}`, `{REVIEWER_APPLIES}`, that entry's resolved `{REVIEW_MODEL}` (the `<agent>[<model>]` bracket if the token carried one, else the saved `review-models[slug]` default resolved above — project over global, else empty → the reviewer's built-in default), that entry's `{REVIEW_EFFORT}` (from its `~effort=<level>`; empty when unset — the loop's effort-carrier table maps it to each CLI's accepted form), the PR branch (`headRefName`), the base branch (`baseRefName`), and the project `{BUILD_CMD}`. Forwarding `{REVIEW_MODEL}` is what makes `--review-with=codex[o3]` and a saved `review-models` default actually pin the model on rpr's local passes — without it those passes would silently run the CLI's default model. The loop verifies build + tests in the main thread before pushing; afterward, continue to step 3 to resolve any pre-existing threads.
 
-!`cat ~/.claude/lib/local-agent-review-loop.md`
+Read only when `REVIEW_AGENTS` contains one of those slugs:
+
+!read lib/local-agent-review-loop.md
 
 ## Ollama Review Loop (for `--review-with ollama[<model>]`)
 
 When `REVIEW_AGENTS` names `ollama`, step 2 (and the step-8 re-request) runs the Ollama review loop against the locally checked-out PR branch. Pass `{OLLAMA_MODEL}` (empty = auto-select), `{OLLAMA_EFFORT}` (from the entry's `~effort=<level>`; empty when unset), the PR branch (`headRefName`) checked out locally, the base branch (`baseRefName`), and the project `{BUILD_CMD}`. The loop is always review-only (Ollama is non-agentic): it emits findings, the orchestrator applies them, and the main thread verifies build + tests before pushing.
 
-!`cat ~/.claude/lib/ollama-review-loop.md`
+Read only when `REVIEW_AGENTS` contains `ollama`:
+
+!read lib/ollama-review-loop.md
 
 ## Requesting GitHub Copilot Code Review (legacy — only when `copilot` is in `REVIEW_AGENTS`)
 

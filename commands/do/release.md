@@ -473,21 +473,35 @@ Each pass uses the matching single-reviewer loop:
 
 ### Multi-reviewer wrapper
 
-!`cat ~/.claude/lib/multi-reviewer-loop.md`
+Read when `REVIEW_AGENTS` is non-empty:
+
+!read lib/multi-reviewer-loop.md
 
 ### Inner loop bodies (referenced by the wrapper)
 
-!`cat ~/.claude/lib/copilot-review-loop.md`
+Read only the bodies for reviewer kinds present in the agent list.
 
-!`cat ~/.claude/lib/github-reviewer-loop.md`
+Only for `copilot` entries:
 
-!`cat ~/.claude/lib/local-agent-review-loop.md`
+!read lib/copilot-review-loop.md
 
-!`cat ~/.claude/lib/ollama-review-loop.md`
+Only for `@<login>` entries:
+
+!read lib/github-reviewer-loop.md
+
+Only for `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, or `opencode` entries:
+
+!read lib/local-agent-review-loop.md
+
+Only for `ollama` entries:
+
+!read lib/ollama-review-loop.md
 
 ### CI flake handling (referenced by the merge gate)
 
-!`cat ~/.claude/lib/ci-flake-handling.md`
+Only when the in-session merge gate sees a required check fail:
+
+!read lib/ci-flake-handling.md
 
 ## Merge the PR (only after a CLEAN multi-reviewer result)
 
