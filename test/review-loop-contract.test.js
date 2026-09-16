@@ -227,8 +227,12 @@ describe('review-loop parse contracts', () => {
     assert.match(block, /\bagy models\b/);
     assert.match(block, /Validate the requested model first/);
     assert.match(block, /Never pass `--effort` alongside `--model`/);
-    // Leveled names only: a bare base name is not a model agy accepts.
-    assert.match(block, /never the bare base/);
+    // A bare base name must never be passed straight to --model (agy rejects it)...
+    assert.match(block, /agy itself rejects the bare base/);
+    // ...but it is completable against a same-base leveled sibling using ~effort,
+    // not simply unrecognized -- issue #258.
+    assert.match(block, /a bare base is not automatically unrecognized/);
+    assert.match(block, /resolved agy\[gemini-3\.8-flash\]~effort=low -> gemini-3\.8-flash-low/);
   });
 
   it("gates enhance-loop's agy roster probe to agy entries only, and pins a leveled default", () => {
