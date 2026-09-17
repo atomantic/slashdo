@@ -16,7 +16,7 @@ Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>` (full mechanics in `l
 - **Reserved value `none`** (case-insensitive): not a slug. `--review-with none` means no external reviewer this run — set `REVIEW_AGENTS=[]`, skip the slug validation below, and skip applying any saved `review-with` default (the explicit escape hatch over a `/do:config` default).
 - The value may be a single agent or a comma-separated, ordered list (e.g. `--review-with codex,agy,copilot`). Split on `,`, trim whitespace. Normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, `zen`/`opencode-zen` → `opencode`.
 - Record the list as `REVIEW_AGENTS`. **There is no built-in default reviewer.** If `--review-with` is omitted, leave `REVIEW_AGENTS` unset for now — the saved-defaults step fills it from `/do:config`; only if still unset after that does `REVIEW_AGENTS=[]` apply (no external review pass; the Local Code Review gate still runs). Exactly the listed reviewers run, in order; copilot is never added implicitly.
-- Dedupe preserving first-occurrence order on the normalized slug: for a model-taking agent the `[<model>]` bracket is part of the identity (`codex[a]` and `codex[b]` are distinct; two bare `ollama`s collapse); for `@<login>` the login is the identity, compared lowercased; no `~` suffix is part of the identity (`ollama~opt`, `ollama~max=2`, `ollama~effort=high` all collapse with `ollama` — the survivor is optional if any occurrence had `~opt`, and takes its cap and effort from the first occurrence that carried them). If duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
+- Dedupe preserving first-occurrence order on the normalized slug: for a model-taking agent the `[<model>]` bracket is part of the identity (`codex[a]` and `codex[b]` are distinct; two bare `ollama`s collapse); for `cmd`, the verbatim `[<invocation>]` is the identity (two different invocations are distinct reviewers, never collapsed); for `@<login>` the login is the identity, compared lowercased; no `~` suffix is part of the identity (`ollama~opt`, `ollama~max=2`, `ollama~effort=high` all collapse with `ollama` — the survivor is optional if any occurrence had `~opt`, and takes its cap and effort from the first occurrence that carried them). If duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
 - If any value is not in the accepted set, abort with: `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot, cmd[<invocation>], @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).`
 
 Parse `$ARGUMENTS` for the stop-mode flags (mutually exclusive):
@@ -317,7 +317,7 @@ Only for `@<login>` entries:
 
 !read lib/github-reviewer-loop.md
 
-Only for `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, or `opencode` entries:
+Only for an entry that is none of `copilot`, `ollama`, or `@<login>` (every other slug — the fixed CLIs and `cmd[<invocation>]` alike — dispatches through this one loop; a future addition needs no new gate here):
 
 !read lib/local-agent-review-loop.md
 

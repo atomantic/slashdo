@@ -18,10 +18,10 @@ Parse `$ARGUMENTS` before discovery. Record explicit flags separately so saved d
 `--review-with <entry[,entry...]>` sets ordered `REVIEW_AGENTS`. `none` (case-insensitive, alone) sets an empty list and overrides saved defaults. Otherwise split on commas, trim, and parse:
 
 ```
-entry := (agent[model]? | @login) (~opt | ~max=n | ~effort=level)*
+entry := (agent[model]? | cmd[invocation] | @login) (~opt | ~max=n | ~effort=level)*
 ```
 
-Supported agents: `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, `ollama`, `copilot`, and `@<login>`. Normalize `gemini`/`antigravity` to `agy`, `cursor-agent` to `cursor`, `zen`/`opencode-zen` to `opencode`. The first eight accept `[<model>]`; `copilot` and `@login` do not (`[bot]` may be part of a GitHub login). Bare Ollama auto-selects an installed coding model; local CLIs use their own model default (or pinned default for agy/opencode) when no explicit or saved model exists.
+Supported agents: `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, `ollama`, `copilot`, `cmd[<invocation>]`, and `@<login>`. Normalize `gemini`/`antigravity` to `agy`, `cursor-agent` to `cursor`, `zen`/`opencode-zen` to `opencode`. The first eight accept `[<model>]`; `copilot` and `@login` do not (`[bot]` may be part of a GitHub login). `cmd` requires a non-empty `[<invocation>]` instead — an operator-authored shell command run with the review prompt on stdin, an escape hatch for any harness not in the fixed list; it always reviews read-only, and any model/effort tuning it needs is already inside the invocation. Bare Ollama auto-selects an installed coding model; local CLIs use their own model default (or pinned default for agy/opencode) when no explicit or saved model exists.
 
 Strip suffixes from the right in any order before parsing the slug. Each suffix may occur at most once:
 
