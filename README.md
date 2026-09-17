@@ -294,7 +294,7 @@ All three suffixes chain in any order and are shell-safe: `codex[gpt-5.6-luna]~e
 | `--review-stop-on-clean` | off | Stop after the first reviewer that reports zero findings |
 | `--reviewer-applies` | off | Let the reviewing CLI edit the working tree directly, instead of the orchestrator applying its findings. Applies to `codex` passes — the one reviewer with a verified write-isolated profile; every other local reviewer (`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`cmd`) is forced back to review-only, and it has no effect on `copilot`, `@<login>` (both review read-only cloud-side) or `ollama` (non-agentic) |
 
-By default the orchestrator that opened the PR applies every reviewer's fixes itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking Antigravity to both find and patch its own concerns).
+By default the orchestrator that opened the PR applies every reviewer's fixes itself. Pass `--reviewer-applies` when you want the reviewing agent's *judgment* in the final patch (e.g. asking Codex to both find and patch its own concerns — it is the only reviewer the flag reaches).
 
 **The merge gate.** Commands that merge (e.g. `/do:release`, `/do:pr --merge`) require the multi-reviewer aggregate status to be `clean` — or `partial`, if you explicitly opted into a stop-mode short-circuit. A `dirty` aggregate (build/test broken on some pass) or an `inconclusive` one (any executed pass timed out, errored, hit its guardrail, was skipped, or — for ollama — only partially reviewed the diff) blocks the merge, even if other passes returned clean.
 

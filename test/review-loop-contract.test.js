@@ -708,6 +708,18 @@ describe('review-loop parse contracts', () => {
       assert.match(body, /cmd\[<invocation>\]/, `${name} must document and accept cmd[<invocation>]`);
     }
 
+    // The invocation table is where an orchestrator READS {INVOCATION} from, so the
+    // cmd row must not fold the `printf ... |` into the cell — Step 2 wraps
+    // {INVOCATION} in TIMEOUT_CMD, and a pipe inside it leaves the timeout wrapping
+    // only the printf while the reviewer command itself runs unbounded.
+    const cmdRow = loop.split('\n').find((line) => /^\| `cmd` \|/.test(line));
+    assert.ok(cmdRow, 'local-agent-review-loop.md must carry a `cmd` invocation-table row');
+    assert.ok(
+      !/printf[^|]*\\\|\s*bash -c/.test(cmdRow),
+      'the cmd invocation row must not fold `printf ... |` into {INVOCATION} — TIMEOUT_CMD would then bound only the printf',
+    );
+    assert.match(cmdRow, /`bash -c "\$REVIEWER_CMD"` and nothing else/);
+
     // Parsing cmd is not the same as dispatching it — pr.md/release.md/review.md
     // each name the local-agent loop's actual per-agent dispatch line inline
     // (not via a shared partial), so `cmd` has to be added to each one by hand.
