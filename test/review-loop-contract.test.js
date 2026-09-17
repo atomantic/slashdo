@@ -585,7 +585,7 @@ describe('review-loop parse contracts', () => {
     const loop = readLib('local-agent-review-loop.md');
     const wrapper = readLib('multi-reviewer-loop.md');
 
-    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode`/);
+    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode\|cmd\[<invocation>\]`/);
     assert.match(loop, /`cursor-agent` normalizes to `cursor`/);
     assert.match(loop, /Cursor binary probe/);
     assert.match(loop, /command -v cursor-agent/);
@@ -596,7 +596,7 @@ describe('review-loop parse contracts', () => {
     // [effort=<level>], matching cursor[gpt-5]~effort=max and a saved
     // review-models cursor=gpt-5 plus cursor~effort=max. Never pass --effort.
     assert.match(loop, /CURSOR_MODEL="\$\{REVIEW_MODEL\}\[effort=\$\{REVIEW_EFFORT\}\]"/);
-    assert.match(loop, /Tool-free fallback; otherwise `STATUS=no-verdict`/);
+    assert.match(loop, /"\$REVIEW_BIN" -p "\$LOCAL_PROMPT" \$\{MODEL_FLAG\[@\]\+"\$\{MODEL_FLAG\[@\]\}"\}/);
 
     // Config and docs must advertise the same model + effort grammar as the
     // other reviewers — a saved review-models entry and a ~effort suffix.
@@ -640,7 +640,7 @@ describe('review-loop parse contracts', () => {
     const loop = readLib('local-agent-review-loop.md');
     const wrapper = readLib('multi-reviewer-loop.md');
 
-    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode`/);
+    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode\|cmd\[<invocation>\]`/);
     assert.match(loop, /`zen` and `opencode-zen` normalize to `opencode`/);
     assert.match(loop, /`opencode` → bin `opencode`/);
     assert.match(loop, /opencode\/muse-spark-1\.3-contributor-free/);

@@ -250,6 +250,7 @@ Requirement IDs are stable across `--refresh` runs — unchanged requirements ke
 | `cursor` | The Cursor Agent CLI in headless mode (`cursor-agent`, alias of `cursor`; never a generic `agent` that is actually Grok) | yes |
 | `opencode` | The OpenCode CLI in headless mode (`opencode`, aliases: `zen`, `opencode-zen`) | yes |
 | `ollama` | A local Ollama model — review-only (non-agentic). Bare `ollama` auto-selects your most capable installed coding model | yes |
+| `cmd[<invocation>]` | **Escape hatch.** Any harness not on this list — your own shell command, run with the review prompt piped to its stdin, expected to print the same verdict contract every reviewer here uses. Always review-only (no CLI's isolation can be verified for an opaque command); bake model/effort/provider selection into the invocation itself | n/a — it's already in the invocation |
 | `@<login>` | Any GitHub user or App/bot (e.g. `@octocat`, `@some-app[bot]`): slashdo requests their review on the PR, waits for it, and fixes what it surfaces. GitHub only; slashdo never posts an approval itself | no |
 | `copilot` | **Legacy.** GitHub's cloud Copilot review on the PR (GitHub only). Still fully supported when you name it, but no command selects it for you | no |
 
@@ -267,6 +268,7 @@ Reviewers run **in the order listed**, and whatever you list is exactly what run
 /do:pr --review-with codex,ollama~opt               # ollama is optional — it runs, but can't block the merge
 /do:pr --review-with claude~max=2,ollama~max=1,codex~max=3   # a different iteration budget per reviewer
 /do:pr --review-with none                           # skip external review for this run (overrides a saved default)
+/do:pr --review-with 'cmd[pi --harness ollama --model llama3:70b --effort high]'   # a harness not in this list
 ```
 
 **Model pinning** (`<agent>[<model>]`) works per run as shown, or save per-reviewer defaults with `/do:config --review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5,opencode=muse-1.3` so runs can omit the bracket. An explicit bracket always wins over the saved default. Cursor also accepts a model string that already encodes effort (`cursor[claude-opus-4-7[thinking=true,effort=high]]`) — that is Cursor's native variant syntax and is passed through as `--model` unchanged. OpenCode accepts friendly aliases (`muse-1.3`, `zen/muse-1.3`, bare model names) normalized to the installed Zen models (built-in default: `opencode/muse-spark-1.3-contributor-free`).
