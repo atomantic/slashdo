@@ -46,6 +46,18 @@ issue in the GitHub/GitLab tracker **instead of** writing to `PLAN.md`.
    `glab auth status`); if not, **abort** with: "`--issues` needs an authenticated
    `gh` or `glab`. Run `gh auth login` (or `glab auth login`), or drop `--issues`
    to record items in PLAN.md." Never silently fall back to writing PLAN.md.
+
+   **Derive `LABEL_SEP` from `CLI_TOOL` right after it's set:**
+   `[ "$CLI_TOOL" = glab ] && LABEL_SEP="::" || LABEL_SEP=":"`. GitLab natively
+   treats any `key::value` label as a **scoped label** — the UI renders the two
+   halves in two tones and, more importantly, **only one value per key can be
+   applied to an issue at a time** (applying a second one silently replaces the
+   first). That is exactly the semantics `severity`/`model`/`effort`/`priority`/
+   `area` want on a GitLab tracker, and GitHub has no equivalent (no special
+   rendering, no exclusivity), so it keeps the plain single colon. Every
+   prefixed label name below is built as `<key>${LABEL_SEP}<value>` — the
+   examples in this file show `:` for readability; substitute the resolved
+   `LABEL_SEP` when actually creating or matching a label.
 2. **Label.** Ensure the scoping label exists:
    `gh label create <PLAN_LABEL> --description "Tracked by slashdo" 2>/dev/null || true`
    (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" 2>/dev/null || true` — glab requires a color).
@@ -118,8 +130,9 @@ above as **repeated `--label <name>`** flags (one per label):
   named for the finding's category slug, lowercased (e.g. `security`, `dry`,
   `architecture`, `deps`, `bugs-perf`, `code-quality`, `stack-specific`, `tests`,
   `ux`, `structural`, `cognitive-load`). This replaces the `[dry]`-style title prefix.
-- **Severity** — when the finding carries one: `severity:critical`, `severity:high`,
-  `severity:medium`, or `severity:low`. This replaces the `[LOW]`-style title prefix.
+- **Severity** — when the finding carries one: `severity${LABEL_SEP}critical`,
+  `severity${LABEL_SEP}high`, `severity${LABEL_SEP}medium`, or
+  `severity${LABEL_SEP}low`. This replaces the `[LOW]`-style title prefix.
 - **Dispatch hint** — two *optional*, independent labels recommending **how to run
   the work**. See "The dispatch hint" below for what they mean and when to apply one.
 
@@ -135,7 +148,7 @@ glab label create --name <name> --color "#<hex>" 2>/dev/null || true
 
 Use these severity colors so the tags read at a glance; category labels share one
 neutral color, and each dispatch-hint axis gets its own ramp so the two never read
-as one scale:
+as one scale. (Names shown with `:` — build the real name as `<key>${LABEL_SEP}<value>`.)
 
 | Label             | Color hex |
 |-------------------|-----------|
@@ -152,6 +165,11 @@ as one scale:
 | `effort:high`       | `1D7874` |
 | `effort:xhigh`      | `0E4F4C` |
 | `effort:max`        | `05403D` |
+
+On GitLab the color is largely cosmetic anyway — the scope portion (`severity`,
+`model`, `effort`, `priority`, `area`) renders in its own tone regardless of the
+value's hex, so pick one representative color per **scope** if a repo's `glab
+label create` calls are hand-maintained rather than generated from this table.
 
 Reused (deduped) issues keep whatever labels they already have — don't re-label an
 existing issue unless the new finding genuinely changes its category or severity.
@@ -195,7 +213,7 @@ out and hand it straight to `--body-file` without rewriting a word.
 ## [<agent-slug>-01] <Title — a self-contained, claimable task>
 severity: high
 category: security
-labels: model:light, effort:medium
+labels: model${LABEL_SEP}light, effort${LABEL_SEP}medium
 files: src/routes/pr.js:142
 
 <the issue body: what is wrong, the quoted evidence, why it matters, the
@@ -289,7 +307,8 @@ is printed.
 
 Two optional labels that record **how to run the work**, not how big it is. They are
 a recommendation to whoever claims the issue — not a size estimate, not a priority,
-and never a gate.
+and never a gate. (As throughout this file, `:` below stands for the resolved
+`LABEL_SEP` — `::` on GitLab, `:` on GitHub; see "Setup" above.)
 
 - **`model:light` / `model:medium` / `model:heavy`** — the **capability tier**.
   `light` is mechanical (rename, config bump, doc fix, established pattern). `heavy`
