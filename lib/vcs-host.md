@@ -89,6 +89,25 @@ fi
 Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`, and carry `VCS_HOST` / `CLI_TOOL`
 (plus `GH_HOST` on GitHub) through every later phase rather than re-detecting.
 
+#### Derive the label separator (`LABEL_SEP`)
+
+Any command that creates or matches a prefixed label (`severity:`, `model:`,
+`effort:`, `priority:`, `area:`, …) derives one more variable from `CLI_TOOL` right
+here, before doing anything with labels:
+
+```bash
+[ "$CLI_TOOL" = glab ] && LABEL_SEP="::" || LABEL_SEP=":"
+```
+
+GitLab treats any `key::value` label name as a native **scoped label**: the UI
+renders the two halves in two tones, and — the part that matters functionally —
+**only one value per key can be applied to an issue at a time** (applying a second
+one silently replaces the first). GitHub has no equivalent feature, so it keeps the
+plain single colon. Build every prefixed label as `<key>${LABEL_SEP}<value>`, and
+match one the same way (a hardcoded `:` in a jq/grep pattern silently stops matching
+GitLab's `::` labels) — see [plan-issue-mode.md](./plan-issue-mode.md) "Setup" for
+the full convention and the label color table.
+
 #### Rules this encodes
 
 - **Never infer GitLab from a GitHub auth failure**, or the reverse. The remote picks
