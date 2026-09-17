@@ -76,7 +76,7 @@ const bashBlocks = () => {
 // whatever the last echo happened to say.
 const script = () =>
   [
-    `trap 'printf "SELECTED|%s|%s|%s\\n" "$VCS_HOST" "$CLI_TOOL" "$GH_HOST"' EXIT`,
+    `trap 'printf "SELECTED|%s|%s|%s|%s\\n" "$VCS_HOST" "$CLI_TOOL" "$GH_HOST" "$LABEL_SEP"' EXIT`,
     ...bashBlocks(),
   ].join('\n').replace(/\{COMMAND\}/g, '/do:better');
 
@@ -119,8 +119,8 @@ function runSelection({ remote, ghAuthed = false, ghRepo = false, glabAuthed = f
     });
     const line = result.stdout.split('\n').find((l) => l.startsWith('SELECTED|'));
     assert.ok(line, `the EXIT trap should always report the selection:\n${result.stdout}`);
-    const [, vcsHost, cliTool, ghHost] = line.trim().split('|');
-    return { status: result.status, stdout: result.stdout, vcsHost, cliTool, ghHost };
+    const [, vcsHost, cliTool, ghHost, labelSep] = line.trim().split('|');
+    return { status: result.status, stdout: result.stdout, vcsHost, cliTool, ghHost, labelSep };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -135,6 +135,11 @@ describe('VCS host selection, executed', () => {
     assert.equal(run.status, 0, run.stdout);
     assert.equal(run.vcsHost, 'gitlab');
     assert.equal(run.cliTool, 'glab');
+    // GitLab reads any `key::value` label as a native scoped label — two-tone, and
+    // only one value per key on an issue at a time. Every prefixed label a command
+    // builds or matches is `<key>${LABEL_SEP}<value>`, so the separator has to fall
+    // out of the same block that picks the CLI, not be re-derived per call site.
+    assert.equal(run.labelSep, '::', 'glab must derive the scoped-label separator');
   });
 
   it('picks gh on a GitHub Enterprise checkout and seeds that host', () => {
@@ -146,6 +151,7 @@ describe('VCS host selection, executed', () => {
     assert.equal(run.vcsHost, 'github');
     assert.equal(run.cliTool, 'gh');
     assert.equal(run.ghHost, 'github.acme.com');
+    assert.equal(run.labelSep, ':', 'GitHub has no scoped labels — it keeps the single colon');
   });
 
   it('stops on a GitLab checkout when only GitHub credentials exist', () => {
@@ -188,6 +194,35 @@ describe('VCS host selection, executed', () => {
     });
     assert.equal(run.status, 1);
     assert.match(run.stdout, /gh auth login --hostname github\.acme\.com/);
+  });
+
+  it('builds every prefixed-label matcher from LABEL_SEP, never a hardcoded colon', () => {
+    // The separator is only useful if the matchers actually interpolate it. A jq
+    // clause that hardcodes `:` keeps working on GitHub and silently matches NOTHING
+    // on GitLab, where the label is `priority::3` / `model::light` — no error, just a
+    // queue that quietly loses its priority ordering and a --model filter that
+    // excludes every issue. Sweep the shapes that read a prefixed label back.
+    const HARDCODED = [
+      /test\("\^priority:\[0-9\]/,
+      /ltrimstr\("priority:"\)/,
+      /startswith\("(?:model|effort|severity|area):"\)/,
+      /== "(?:model|effort|severity):[a-z]/,
+    ];
+    for (const rel of ['commands/do/next.md', 'lib/next-swarm.md', 'lib/plan-issue-mode.md', 'commands/do/plan-task.md']) {
+      const body = read(rel);
+      for (const shape of HARDCODED) {
+        assert.ok(
+          !shape.test(body),
+          `${rel} matches a prefixed label with a hardcoded ":" (${shape}) — build it from $LABEL_SEP`,
+        );
+      }
+      assert.ok(body.includes('LABEL_SEP'), `${rel} reads prefixed labels but never mentions LABEL_SEP`);
+    }
+    // ...and the one place it is derived stays inside the select block, so a command
+    // that runs the partial has it without a second step.
+    const [select] = bashBlocks();
+    assert.match(select, /LABEL_SEP="::"/);
+    assert.match(select, /LABEL_SEP=":"/);
   });
 
   it('stops on a remote that is neither GitHub nor GitLab', () => {
