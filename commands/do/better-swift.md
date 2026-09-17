@@ -995,7 +995,7 @@ After the test agent completes:
 - **CI failure on PR**: investigate logs, fix in a new commit, push, re-check (max 3 attempts per PR)
 - **Cross-PR dependency breakage**: add backward-compatible typealiases or move shared files to the PR that creates them
 - **Reviewer timeout / error / guardrail** (copilot review not received in the timeout window, a local CLI errored, or a copilot pass hit its 10-iteration limit): the per-PR sub-agent surfaces it as an `inconclusive` aggregate. **Default mode**: leave that PR open. **Interactive mode**: ask whether to merge without a clean review, re-run, or skip
-- **Missing reviewer CLI** (`--review-with codex`/`agy`/`claude`/`grok`/`pi`/`cursor`/`opencode` but the binary isn't installed): the multi-reviewer loop records that pass as `skipped` (→ inconclusive aggregate). It does NOT silently fall back to copilot
+- **Missing reviewer CLI** (`--review-with codex`/`agy`/`claude`/`grok`/`pi`/`cursor`/`opencode` but the binary isn't installed — `cmd[<invocation>]` has no fixed binary to probe, so a broken invocation surfaces as `cli-error` at dispatch instead): the multi-reviewer loop records that pass as `skipped` (→ inconclusive aggregate). It does NOT silently fall back to copilot
 - **Existing worktree found at startup**: ask user — resume (reuse worktree) or cleanup (remove and start fresh)
 - **No findings above LOW**: skip Phases 3-7, print "No actionable findings" with the LOW summary
 - **Merge conflict after prior PR merged**: rebase the branch onto the updated default branch, push with `--force-with-lease`, re-run CI

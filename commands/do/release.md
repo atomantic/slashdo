@@ -113,7 +113,7 @@ second release workflow that reloads saved reviewer defaults.
    merges it, preserving their verdict and optionality rules from **Merge the
    PR**. For a **tool-managed or tag-only workflow** — which never creates a
    PR — run every configured **local-agent and Ollama** reviewer (`codex`,
-   `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, `ollama`) against this
+   `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, `cmd`, `ollama`) against this
    same prepared diff **before** step 5's submission command, enforcing their
    aggregate verdict exactly as **Merge the PR** would gate a merge; a
    configured `copilot` or `@<login>` reviewer has no PR to attach to on this
@@ -507,7 +507,7 @@ For `dirty` or `inconclusive`:
 - **Exception — too-large**: if the Copilot review body says the PR exceeds the maximum number of lines (20 000), treat it as a clean review and merge immediately. Do NOT re-request.
 - **Never merge if** no Copilot review was ever posted (ask user first) or "Awaiting requested review" is still shown.
 
-### Local-agent-specific checks (when codex/agy/claude/grok/cursor/opencode was in the executed list)
+### Local-agent-specific checks (when an entry that is none of copilot, ollama, or @<login> — the fixed local CLIs and cmd[<invocation>] alike — was in the executed list)
 
 - The local-agent loop already verified build and tests before pushing; its `clean` status in the wrapper table means every iteration of that pass passed verification, and no separate review-comment count is required.
 
