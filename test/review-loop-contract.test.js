@@ -720,6 +720,29 @@ describe('review-loop parse contracts', () => {
     );
     assert.match(cmdRow, /`bash -c "\$REVIEWER_CMD"` and nothing else/);
 
+    // ...and the RUNNABLE templates must carry the pipe themselves. The prose rule
+    // alone is not enough: both blocks say "capture the command exactly as shown",
+    // so a cmd pass run from the plain form launches the reviewer with no stdin and
+    // blocks until the timeout or reads EOF and reports nothing.
+    const cmdStdinForm = /if \[ "\$REVIEW_AGENT" = cmd \]; then[^\n]*\n\s*printf '%s' "\$LOCAL_PROMPT" \| \$\{TIMEOUT_CMD\[@\]\+"\$\{TIMEOUT_CMD\[@\]\}"\} \{INVOCATION\}/g;
+    assert.equal(
+      (loop.match(cmdStdinForm) || []).length,
+      2,
+      'both the background and foreground Step-2 templates must pipe $LOCAL_PROMPT into a cmd invocation',
+    );
+
+    // The .git snapshot has to see a SYMLINKED hook. git executes one just the same,
+    // and `find -type f` alone skips it — so `ln -s /tmp/payload .git/hooks/pre-commit`
+    // would leave the baseline hash unchanged and survive the wholesale restore.
+    assert.match(loop, /find "\$GIT_COMMON\/hooks" \\\( -type f -o -type l \\\)/);
+    assert.match(loop, /readlink "\$f" 2>\/dev\/null \|\| cat "\$f"/);
+
+    // The restore's `rm -rf "$GIT_COMMON/hooks"` must be guarded: GIT_COMMON is a
+    // step-1 variable and step 3 is a separate shell on most hosts, so an unbound one
+    // makes that line `rm -rf /hooks`.
+    assert.match(loop, /GIT_COMMON="\$\{GIT_COMMON:-\$\(git rev-parse --git-common-dir\)\}"/);
+    assert.match(loop, /if \[ -z "\$GIT_COMMON" \] \|\| \[ -z "\$GIT_META_BAK" \]/);
+
     // Parsing cmd is not the same as dispatching it — pr.md/release.md/review.md
     // each name the local-agent loop's actual per-agent dispatch line inline
     // (not via a shared partial), so `cmd` has to be added to each one by hand.

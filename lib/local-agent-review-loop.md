@@ -347,7 +347,12 @@ Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` fro
    { tar -cf "$GIT_META_BAK/hooks.tar" -C "$GIT_COMMON" hooks 2>/dev/null; } || : > "$GIT_META_BAK/hooks.tar"
    git_meta_hash() {
      { cat "$GIT_COMMON/config"
-       find "$GIT_COMMON/hooks" -type f 2>/dev/null | sort | while IFS= read -r f; do printf '%s\n' "$f"; cat "$f"; done
+       # -type f alone misses a SYMLINKED hook, which git executes just the same:
+       # `ln -s /tmp/payload .git/hooks/pre-commit` would leave this hash unchanged
+       # and survive the restore. Match symlinks too, and hash the TARGET PATH
+       # (readlink) instead of following it — a dangling link has no content to cat,
+       # and re-pointing an existing link is itself the change worth catching.
+       find "$GIT_COMMON/hooks" \( -type f -o -type l \) 2>/dev/null | sort | while IFS= read -r f; do printf '%s\n' "$f"; readlink "$f" 2>/dev/null || cat "$f"; done
      } | git hash-object --stdin
    }
    GIT_META_BASELINE=$(git_meta_hash)
@@ -381,7 +386,16 @@ Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` fro
      LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
      ERR_FILE="${LOG_FILE}.err"
      DONE_FILE="${LOG_FILE}.exit"
-     ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"; echo $? > "$DONE_FILE"
+     # {INVOCATION} per the table below. For `cmd` it is `bash -c "$REVIEWER_CMD"`
+     # and the prompt arrives on STDIN, so the pipe goes in FRONT of the timed line —
+     # never inside {INVOCATION}, which would leave TIMEOUT_CMD bounding only the printf.
+     # Running the plain form for `cmd` gives the reviewer no stdin: it blocks until
+     # the timeout, or reads EOF and reports nothing.
+     if [ "$REVIEW_AGENT" = cmd ]; then
+       printf '%s' "$LOCAL_PROMPT" | ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"; echo $? > "$DONE_FILE"
+     else
+       ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"; echo $? > "$DONE_FILE"
+     fi
      ```
 
      **Keep stderr OUT of `$LOG_FILE` (`2> "$ERR_FILE"`, never `2>&1`).** Step 3 validates `$LOG_FILE` as a *strict* verdict document (nothing but `NO FINDINGS` or complete `FINDING <N>:` blocks), and every CLI writes non-verdict chatter to stderr — banners, auth notices, progress narration, a `timeout` kill message — so a merged stream would turn a clean review into a parse failure that blocks the merge. Same split as `lib/ollama-review-loop.md`.
@@ -401,7 +415,11 @@ Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` fro
      ```bash
      LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
      ERR_FILE="${LOG_FILE}.err"
-     ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"
+     if [ "$REVIEW_AGENT" = cmd ]; then   # same stdin rule as the background form above
+       printf '%s' "$LOCAL_PROMPT" | ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"
+     else
+       ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"
+     fi
      EXIT_CODE=$?
      ```
 
@@ -427,7 +445,19 @@ Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` fro
      } | git hash-object --stdin                     # vs $UNTRACKED_BASELINE
      git_meta_hash                                   # vs $GIT_META_BASELINE (.git/config + hooks)
      ```
-     **Compare the git-metadata hash first and, on a mismatch, restore it before running any other git command** — a planted hook or `core.pager`/`core.fsmonitor` setting would otherwise fire inside the very `git read-tree`/`git restore` that is supposed to undo it: `cp "$GIT_META_BAK/config" "$GIT_COMMON/config"; rm -rf "$GIT_COMMON/hooks"; [ -s "$GIT_META_BAK/hooks.tar" ] && tar -xf "$GIT_META_BAK/hooks.tar" -C "$GIT_COMMON"`.
+     **Compare the git-metadata hash first and, on a mismatch, restore it before running any other git command** — a planted hook or `core.pager`/`core.fsmonitor` setting would otherwise fire inside the very `git read-tree`/`git restore` that is supposed to undo it. **Re-derive and check both paths before the `rm`** — these are step-1 variables and step 3 is a separate shell invocation on most hosts, so an unbound `GIT_COMMON` turns the restore into `rm -rf /hooks`:
+
+     ```bash
+     GIT_COMMON="${GIT_COMMON:-$(git rev-parse --git-common-dir)}"
+     if [ -z "$GIT_COMMON" ] || [ -z "$GIT_META_BAK" ] || [ ! -d "$GIT_META_BAK" ]; then
+       echo "cannot restore git metadata: snapshot paths unavailable" >&2
+       exit 1   # STATUS=cli-error — never continue on a tree you failed to restore
+     fi
+     cp "$GIT_META_BAK/config" "$GIT_COMMON/config"
+     rm -rf "$GIT_COMMON/hooks"
+     [ -s "$GIT_META_BAK/hooks.tar" ] && tar -xf "$GIT_META_BAK/hooks.tar" -C "$GIT_COMMON"
+     ```
+
      **If any differ**, the reviewer applied instead of reporting. Restore the caller's entire pre-review state wholesale from the step-1 artifacts — do NOT surgically enumerate what it touched (`lib/enhance-loop.md` explains why per-path choreography produces destructive edge cases):
      1. **HEAD** — if it moved: `git reset --soft "$HEAD_BASELINE"` (never `--mixed`, which wipes the caller's staged state; never `--hard`, which destroys uncommitted work swept into the reviewer's commit).
      2. **Index** — `git read-tree "$INDEX_TREE"`.
