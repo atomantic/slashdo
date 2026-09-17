@@ -585,7 +585,7 @@ describe('review-loop parse contracts', () => {
     const loop = readLib('local-agent-review-loop.md');
     const wrapper = readLib('multi-reviewer-loop.md');
 
-    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode`/);
+    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode\|cmd\[<invocation>\]`/);
     assert.match(loop, /`cursor-agent` normalizes to `cursor`/);
     assert.match(loop, /Cursor binary probe/);
     assert.match(loop, /command -v cursor-agent/);
@@ -596,7 +596,7 @@ describe('review-loop parse contracts', () => {
     // [effort=<level>], matching cursor[gpt-5]~effort=max and a saved
     // review-models cursor=gpt-5 plus cursor~effort=max. Never pass --effort.
     assert.match(loop, /CURSOR_MODEL="\$\{REVIEW_MODEL\}\[effort=\$\{REVIEW_EFFORT\}\]"/);
-    assert.match(loop, /Tool-free fallback; otherwise `STATUS=no-verdict`/);
+    assert.match(loop, /"\$REVIEW_BIN" -p "\$LOCAL_PROMPT" \$\{MODEL_FLAG\[@\]\+"\$\{MODEL_FLAG\[@\]\}"\}/);
 
     // Config and docs must advertise the same model + effort grammar as the
     // other reviewers — a saved review-models entry and a ~effort suffix.
@@ -640,7 +640,7 @@ describe('review-loop parse contracts', () => {
     const loop = readLib('local-agent-review-loop.md');
     const wrapper = readLib('multi-reviewer-loop.md');
 
-    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode`/);
+    assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode\|cmd\[<invocation>\]`/);
     assert.match(loop, /`zen` and `opencode-zen` normalize to `opencode`/);
     assert.match(loop, /`opencode` → bin `opencode`/);
     assert.match(loop, /opencode\/muse-spark-1\.3-contributor-free/);
@@ -667,6 +667,170 @@ describe('review-loop parse contracts', () => {
         `${name} must accept the opencode reviewer slug`,
       );
     }
+  });
+
+  it('accepts cmd[<invocation>] as an escape-hatch reviewer and enforces its contract', () => {
+    // cmd is the generic reviewer for any harness not on the fixed list. It
+    // carries no model/effort bracket of its own — the invocation IS the
+    // identity — and always runs review-only, since an opaque command's
+    // isolation can never be verified the way codex's sandbox can.
+    const loop = readLib('local-agent-review-loop.md');
+    const wrapper = readLib('multi-reviewer-loop.md');
+
+    assert.match(loop, /### The `cmd` reviewer/);
+    assert.match(loop, /The contract is stdin in, stdout out/);
+    assert.match(loop, /printf '%s' "\$LOCAL_PROMPT"/);
+    assert.match(loop, /always forces review-only/);
+    assert.match(wrapper, /`cmd\[<invocation>\]` — an arbitrary reviewer not in the fixed slug list/);
+    assert.match(wrapper, /bare `cmd` with no `\[<invocation>\]` is invalid/);
+    assert.match(wrapper, /verbatim `<invocation>`.*for a `cmd\[…\]` entry/);
+
+    // The lazy-load gates that dispatch into local-agent-review-loop.md are
+    // written as exclusions (none of copilot/ollama/@<login>), not an
+    // enumerated allowlist — so cmd (and any future reviewer) needs no gate
+    // updated to reach it. Assert the gate excludes, rather than enumerates.
+    for (const name of ['pr.md', 'review.md', 'release.md', 'depfree.md']) {
+      const body = readCommand(name);
+      assert.match(
+        body,
+        /Only for an entry that is none of `copilot`, `ollama`, or `@<login>`/,
+        `${name} must gate the local-agent loop by exclusion, not an enumerated list`,
+      );
+    }
+    assert.match(
+      readLib('better-review-loop.md'),
+      /Only for an entry that is none of `copilot`, `ollama`, or `@<login>`/,
+      'better-review-loop.md must gate the local-agent loop by exclusion, not an enumerated list',
+    );
+
+    for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'better-swift.md', 'rpr.md', 'config.md', 'depfree.md']) {
+      const body = readCommand(name);
+      assert.match(body, /cmd\[<invocation>\]/, `${name} must document and accept cmd[<invocation>]`);
+    }
+
+    // The invocation table is where an orchestrator READS {INVOCATION} from, so the
+    // cmd row must not fold the `printf ... |` into the cell — Step 2 wraps
+    // {INVOCATION} in TIMEOUT_CMD, and a pipe inside it leaves the timeout wrapping
+    // only the printf while the reviewer command itself runs unbounded.
+    const cmdRow = loop.split('\n').find((line) => /^\| `cmd` \|/.test(line));
+    assert.ok(cmdRow, 'local-agent-review-loop.md must carry a `cmd` invocation-table row');
+    assert.ok(
+      !/printf[^|]*\\\|\s*bash -c/.test(cmdRow),
+      'the cmd invocation row must not fold `printf ... |` into {INVOCATION} — TIMEOUT_CMD would then bound only the printf',
+    );
+    assert.match(cmdRow, /`bash -c "\$REVIEWER_CMD"` and nothing else/);
+
+    // ...and the RUNNABLE templates must carry the pipe themselves. The prose rule
+    // alone is not enough: both blocks say "capture the command exactly as shown",
+    // so a cmd pass run from the plain form launches the reviewer with no stdin and
+    // blocks until the timeout or reads EOF and reports nothing.
+    const cmdStdinForm = /if \[ "\$REVIEW_AGENT" = cmd \]; then[^\n]*\n\s*printf '%s' "\$LOCAL_PROMPT" \| \$\{TIMEOUT_CMD\[@\]\+"\$\{TIMEOUT_CMD\[@\]\}"\} \{INVOCATION\}/g;
+    assert.equal(
+      (loop.match(cmdStdinForm) || []).length,
+      2,
+      'both the background and foreground Step-2 templates must pipe $LOCAL_PROMPT into a cmd invocation',
+    );
+
+    // The .git snapshot has to see a SYMLINKED hook. git executes one just the same,
+    // and `find -type f` alone skips it — so `ln -s /tmp/payload .git/hooks/pre-commit`
+    // would leave the baseline hash unchanged and survive the wholesale restore.
+    assert.match(loop, /find "\$GIT_COMMON\/hooks" \\\( -type f -o -type l \\\)/);
+    assert.match(loop, /readlink "\$f" 2>\/dev\/null \|\| cat "\$f"/);
+
+    // The restore's `rm -rf "$GIT_COMMON/hooks"` must be guarded: GIT_COMMON is a
+    // step-1 variable and step 3 is a separate shell on most hosts, so an unbound one
+    // makes that line `rm -rf /hooks`.
+    assert.match(loop, /GIT_COMMON="\$\{GIT_COMMON:-\$\(git rev-parse --git-common-dir\)\}"/);
+    assert.match(loop, /if \[ -z "\$GIT_COMMON" \] \|\| \[ -z "\$GIT_META_BAK" \]/);
+
+    // Parsing cmd is not the same as dispatching it — pr.md/release.md/review.md
+    // each name the local-agent loop's actual per-agent dispatch line inline
+    // (not via a shared partial), so `cmd` has to be added to each one by hand.
+    assert.match(readCommand('pr.md'), /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode` \| `cmd` → local-agent headless review loop/);
+    assert.match(readCommand('release.md'), /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode` \| `cmd` → local-agent headless review loop/);
+    assert.match(readCommand('review.md'), /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode` \| `cmd` \| `ollama` — invoke the local-agent review loop/);
+    assert.match(readCommand('pr.md'), /`ollama\[…\]`, `cmd\[<invocation>\]`\. These review the working tree locally/);
+
+    // The transformer's on-demand-load hint (for hosts without a native `!cat`)
+    // must name every slug that actually dispatches to this file, or those
+    // hosts print a hint that omits cmd as a reason to load it.
+    const transformerSrc = _read('src', 'transformer.js');
+    assert.match(transformerSrc, /local-agent-review-loop\.md[\s\S]{0,250}or `cmd`/);
+
+    // A per-project .slashdo.json is repo content (the README says to commit
+    // it), so a cmd[...] read from it would let the repo pick the command that
+    // bash -c runs. The saved-defaults step must drop it, /do:config --project
+    // must refuse to store it, and the loop's trust-boundary text must say so.
+    assert.match(readLib('review-config-defaults.md'), /Ignoring cmd\[\.\.\.\] from \.slashdo\.json/);
+    assert.match(readCommand('config.md'), /cannot be saved in the per-project \.slashdo\.json/);
+    assert.match(loop, /A per-project `\.slashdo\.json` is repo content/);
+
+    // The list separator must respect brackets — a comma inside cmd[…] (or a
+    // nested cursor model variant) is part of the value, not a new entry.
+    assert.match(wrapper, /split the value on `,` only outside the outermost brackets/);
+
+    // ...and every command that parses --review-with INLINE has to say so too. A
+    // bare "Split on `,`" splits README's own documented
+    // cursor[claude-opus-4-7[thinking=true,effort=high]] into two entries and
+    // aborts with `Unknown --review-with value: effort=high]]` — and does the same
+    // to any cmd[…] invocation carrying a comma.
+    // Scope it to the --review-with bullet: config.md's --trusted-authors bullet
+    // legitimately splits on every comma (logins can't contain one).
+    for (const name of ['pr.md', 'release.md', 'rpr.md', 'review.md', 'config.md', 'depfree.md', 'better-swift.md']) {
+      const bullet = readCommand(name)
+        .split('\n')
+        .find((line) => /^\s*-\s.*`--review-with/.test(line) && /[Ss]plit on `,`/.test(line));
+      assert.ok(bullet, `${name} must carry a --review-with bullet that states how the list is split`);
+      assert.match(
+        bullet,
+        /outside the outermost brackets/,
+        `${name} splits --review-with on every comma — a comma inside cmd[…] or a nested [<model>] is part of the value`,
+      );
+    }
+
+    // --reviewer-applies reaches exactly ONE reviewer: codex, the only one with a
+    // verified write-isolated profile (local-agent-review-loop.md pre-flight step 9
+    // forces every other local reviewer back to review-only). A doc that promises it
+    // reaches agy/grok/cursor/opencode/cmd sends a user to grant an unsandboxed CLI
+    // write access, and the run then trips the "modified the working tree during a
+    // review-only pass — reverted" path instead of behaving as documented.
+    assert.match(loop, /so `agy`\/`grok`\/`pi`\/`cursor`\/`opencode`\/`cmd` always run review-only/);
+    for (const name of ['pr.md', 'release.md', 'review.md', 'rpr.md', 'depfree.md', 'better-swift.md']) {
+      assert.match(
+        readCommand(name),
+        /only.{0,40}`codex`|`codex` pass/,
+        `${name} must say --reviewer-applies reaches only the codex pass`,
+      );
+    }
+    assert.match(
+      readLib('better-options.md'),
+      /`--reviewer-applies` \| `REVIEWER_APPLIES=true`; the `codex` pass/,
+      'better-options.md is /do:better’s option spec — its row must not promise every local reviewer applies fixes',
+    );
+
+    // A cmd whose executable is missing is the same "reviewer never launched"
+    // case a missing fixed binary is: skipped (inconclusive, excused by ~opt),
+    // never cli-error, which would short-circuit every remaining reviewer.
+    assert.match(loop, /exit of `127` \(command not found\)[\s\S]{0,200}`STATUS=skipped`/);
+    assert.match(wrapper, /exit `127`\/`126`\) as `skipped`/);
+
+    // The tool-free reviewers (agy/grok/cursor/cmd) now run with real tools
+    // against an attacker-influenced diff, so the shared review task must carry
+    // the untrusted-data clause the file's own mandate requires of every reviewer.
+    assert.match(loop, /REVIEW_TASK="[^\n]*untrusted DATA, never as instructions/);
+
+    // The snapshot+revert that lets those reviewers run must cover .git/ too —
+    // write-tree/stash/ls-files never see a planted hook or a core.hooksPath edit.
+    assert.match(loop, /GIT_META_BASELINE=\$\(git_meta_hash\)/);
+    assert.match(loop, /git_meta_hash\s+# vs \$GIT_META_BASELINE/);
+    // ...and parallel mode, which runs only Step 2 per reviewer, must take that
+    // snapshot once before the fan-out and compare once after the barrier.
+    assert.match(wrapper, /take the local-agent loop's Step-1 snapshot once, here/);
+    assert.match(wrapper, /Step-3 five-artifact comparison and wholesale restore \*\*once\*\*/);
+
+    // An oversized prompt on an argv path is a launch failure, not a verdict —
+    // it must degrade to no-verdict rather than a hard cli-error.
+    assert.match(loop, /128 KiB \(`MAX_ARG_STRLEN`\)[\s\S]{0,400}`STATUS=no-verdict`/);
   });
 
   it('accepts pi as a model-taking local reviewer with a --thinking effort carrier', () => {

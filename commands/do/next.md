@@ -98,8 +98,9 @@ When `SWARM` is true the swarm flow **replaces Phases 1–7**: it claims and shi
 >   # GitLab + PLAN.md repo that has always worked without jq. The probe lives at the
 >   # top of "Phase 1 — issues mode" instead.
 > fi
+> [ "$CLI_TOOL" = glab ] && LABEL_SEP="::" || LABEL_SEP=":"
 > ```
-> Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`. Carry `CLI_TOOL`/`VCS_HOST` (and `GH_HOST` on GitHub) through every later phase — [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md)'s own setup step reuses `CLI_TOOL` rather than re-detecting it.
+> Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`. Carry `CLI_TOOL`/`VCS_HOST` (and `GH_HOST` on GitHub) through every later phase — [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md)'s own setup step reuses `CLI_TOOL` rather than re-detecting it. **Also carry `LABEL_SEP`** — GitLab's `::` gives `model`/`effort`/`priority`/etc. native scoped-label rendering and mutual exclusivity (see [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "Setup"); every prefixed-label match below (the priority sort key, the dispatch-hint filter) is built from it, not a hardcoded `:` — a hardcoded colon would silently stop matching `priority::5` / `model::light` on a GitLab tracker.
 
 Build the in-flight set (identical in both modes):
 
@@ -206,19 +207,22 @@ Then:
    # and `gh issue list` aborts with `unknown flag: --author @me` whenever --self is on
    # (same trap for --label). An array element-appends each flag and its value as separate
    # words in BOTH bash and zsh, and expands to zero words when the filter is unset.
-   # Sort key is [priorityRank, createdAt]: a `priority:<N>` label (lower N = higher
-   # priority, e.g. priority:0 before priority:1) sorts first; an issue with NO priority
-   # label gets rank +infinity (jq `infinite`) so it falls after EVERY prioritized one —
-   # a finite sentinel like 9999 would tie a real `priority:9999` label and let unlabeled
-   # work jump ahead of it — and createdAt breaks ties. With no `priority:*` labels
-   # anywhere the order collapses to plain oldest-first — fully backward compatible.
-   # `body` is fetched here for the step-4 dependency parse.
+   # Sort key is [priorityRank, createdAt]: a `priority<SEP><N>` label (lower N = higher
+   # priority, e.g. priority0 before priority1) sorts first — SEP is $LABEL_SEP
+   # (":" on GitHub, "::" on GitLab; see the Pre-flight above), never a hardcoded
+   # colon, or this stops matching GitLab's scoped `priority::<N>` labels entirely.
+   # An issue with NO priority label gets rank +infinity (jq `infinite`) so it falls
+   # after EVERY prioritized one — a finite sentinel like 9999 would tie a real
+   # `priority<SEP>9999` label and let unlabeled work jump ahead of it — and
+   # createdAt breaks ties. With no priority labels anywhere the order collapses to
+   # plain oldest-first — fully backward compatible. `body` is fetched here for the
+   # step-4 dependency parse.
    LIST_ARGS=(--state open)
    [ -n "$LABEL_FILTER" ] && LIST_ARGS+=(--label "$LABEL_FILTER")
    [ "$SELF_MODE" = "true" ] && LIST_ARGS+=(--author "@me")
    gh issue list "${LIST_ARGS[@]}" --limit 500 \
      --json number,title,assignees,labels,createdAt,body,author \
-     -q 'sort_by([ (([.labels[].name | select(test("^priority:[0-9]+$")) | ltrimstr("priority:") | tonumber] | min) // infinite), .createdAt ]) | .[]'
+     --jq "sort_by([ (([.labels[].name | select(test(\"^priority${LABEL_SEP}[0-9]+\$\")) | ltrimstr(\"priority${LABEL_SEP}\") | tonumber] | min) // infinite), .createdAt ]) | .[]"
    ```
    The `--limit 500` avoids truncating the queue before the client-side sort (`gh issue list` defaults to 30). A repo with >500 open candidates is pathologically large (`/do:replan --issues` to prune, or `--issues-label` to scope); note the cap rather than silently dropping the overflow. **Priority is advisory ordering, not a gate** — an unprioritized issue is still claimable.
 
@@ -248,38 +252,38 @@ Then:
      LIST_ARGS+=(--author "$ME")
    fi
    glab issue list "${LIST_ARGS[@]}" --per-page 100 \
-     --jq 'sort_by([ (([.labels[] | select(test("^priority:[0-9]+$")) | ltrimstr("priority:") | tonumber] | min) // infinite), .created_at ]) | .[]'
+     --jq "sort_by([ (([.labels[] | select(test(\"^priority${LABEL_SEP}[0-9]+\$\")) | ltrimstr(\"priority${LABEL_SEP}\") | tonumber] | min) // infinite), .created_at ]) | .[]"
    ```
    GitLab's `--per-page` maxes out at 100 with no "give me everything" pagination for a plain open-issue list — same "note the cap" guidance at a lower threshold; `--issues-label` keeps a busy GitLab tracker under it.
 
-   **Dispatch-hint filter — client-side, in the same list-and-filter program.** When `MODEL_FILTER` / `EFFORT_FILTER` is non-empty, `map(select(…))` the array **before** `sort_by`, one clause per active axis. It cannot go in `LIST_ARGS`: repeated `--label` flags AND together on both hosts — the opposite of the OR this flag means. Build each clause from the **validated enum values only**, where `<axis>` is `model`/`effort` and `V1…Vn` are the requested values with the `none` sentinel removed:
+   **Dispatch-hint filter — client-side, in the same list-and-filter program.** When `MODEL_FILTER` / `EFFORT_FILTER` is non-empty, `map(select(…))` the array **before** `sort_by`, one clause per active axis. It cannot go in `LIST_ARGS`: repeated `--label` flags AND together on both hosts — the opposite of the OR this flag means. Build each clause from the **validated enum values only**, where `<axis>` is `model`/`effort`, `V1…Vn` are the requested values with the `none` sentinel removed, and `<SEP>` is `$LABEL_SEP` (`:` on GitHub, `::` on GitLab — an exact-match clause built with a hardcoded `:` never matches a GitLab issue's `model::light`):
    ```
    # GitHub (labels are {name: "..."} objects) — membership clause, present whenever
    # at least one real value was requested:
-   any(.labels[].name; . == "<axis>:V1" or . == "<axis>:V2" …)
+   any(.labels[].name; . == "<axis><SEP>V1" or . == "<axis><SEP>V2" …)
    # untiered clause — OR'd in ONLY when `none` was among the values:
-   ([.labels[].name | select(startswith("<axis>:"))] | length == 0)
+   ([.labels[].name | select(startswith("<axis><SEP>"))] | length == 0)
 
    # GitLab (labels are plain strings) — same two clauses without the `.name`:
-   any(.labels[]; . == "<axis>:V1" or . == "<axis>:V2" …)
-   ([.labels[] | select(startswith("<axis>:"))] | length == 0)
+   any(.labels[]; . == "<axis><SEP>V1" or . == "<axis><SEP>V2" …)
+   ([.labels[] | select(startswith("<axis><SEP>"))] | length == 0)
    ```
    An axis whose only value is `none` uses the untiered clause alone. Worked example — `--model light,none --effort max`:
    ```bash
-   # GitHub
+   # GitHub ($LABEL_SEP is ":")
    gh issue list "${LIST_ARGS[@]}" --limit 500 \
      --json number,title,assignees,labels,createdAt,body,author \
-     -q 'map(select(any(.labels[].name; . == "model:light")
-                    or ([.labels[].name | select(startswith("model:"))] | length == 0)))
-         | map(select(any(.labels[].name; . == "effort:max")))
-         | sort_by([ (([.labels[].name | select(test("^priority:[0-9]+$")) | ltrimstr("priority:") | tonumber] | min) // infinite), .createdAt ]) | .[]'
+     --jq "map(select(any(.labels[].name; . == \"model${LABEL_SEP}light\")
+                    or ([.labels[].name | select(startswith(\"model${LABEL_SEP}\"))] | length == 0)))
+         | map(select(any(.labels[].name; . == \"effort${LABEL_SEP}max\")))
+         | sort_by([ (([.labels[].name | select(test(\"^priority${LABEL_SEP}[0-9]+\$\")) | ltrimstr(\"priority${LABEL_SEP}\") | tonumber] | min) // infinite), .createdAt ]) | .[]"
 
-   # GitLab
+   # GitLab ($LABEL_SEP is "::")
    glab issue list "${LIST_ARGS[@]}" --output json --per-page 100 \
-     --jq 'map(select(any(.labels[]; . == "model:light")
-                   or ([.labels[] | select(startswith("model:"))] | length == 0)))
-         | map(select(any(.labels[]; . == "effort:max")))
-         | sort_by([ (([.labels[] | select(test("^priority:[0-9]+$")) | ltrimstr("priority:") | tonumber] | min) // infinite), .created_at ]) | .[]'
+     --jq "map(select(any(.labels[]; . == \"model${LABEL_SEP}light\")
+                   or ([.labels[] | select(startswith(\"model${LABEL_SEP}\"))] | length == 0)))
+         | map(select(any(.labels[]; . == \"effort${LABEL_SEP}max\")))
+         | sort_by([ (([.labels[] | select(test(\"^priority${LABEL_SEP}[0-9]+\$\")) | ltrimstr(\"priority${LABEL_SEP}\") | tonumber] | min) // infinite), .created_at ]) | .[]"
    ```
    Omit the `map` for an inactive axis entirely rather than emitting `select(true)`. **This filter runs before every other skip**, so an excluded issue is never considered for the parking-label / dependency / epic checks — and exclusion here means "not what you asked for," not "not workable." Report it that way in step 7: if the filter emptied a queue that had eligible work, say which filter did it, **writing the flags space-separated, exactly as they'd be typed** (`no eligible issue matching --model light --effort max — 14 open issues carry no dispatch hint; add `none` to include them`) — comma-joined they'd read as one axis's OR-list.
 2. **Determine in-flight issues.** Issue `N` is in flight if EITHER `issue-N` appears in the raw in-flight set, OR the issue **already has an assignee** (the Phase 2 marker — a local-only branch on a sibling machine is invisible here, but its assignee is not).
@@ -458,18 +462,18 @@ Write the code, tests, and docs the item requires, following the **target repo's
 
 **Where deferred work lands depends on the mode:**
 - **PLAN.md mode** → add a NEW `- [ ] [<slug>] **Title** — rationale` item (slug per [lib/plan-id-format.md](../../lib/plan-id-format.md)).
-- **Issues mode** → file a NEW tracker issue (never PLAN.md), with enough context to pick up cold (file paths, why split out, which issue surfaced it), tagged `PLAN_LABEL` so `/do:next --issues` and `/do:replan` treat it as queued. **Add a dispatch hint (`model:<tier>` / `effort:<level>`) when you can justify one**; leave the axis off rather than guessing, per [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "The dispatch hint". Create each hint label lazily before applying it (GitHub: `gh label create <name> --color <hex> 2>/dev/null || true`; GitLab: `glab label create --name <name> --color "#<hex>" 2>/dev/null || true`, colors in that file), then create the issue using that file's `<label flags>` form:
+- **Issues mode** → file a NEW tracker issue (never PLAN.md), with enough context to pick up cold (file paths, why split out, which issue surfaced it), tagged `PLAN_LABEL` so `/do:next --issues` and `/do:replan` treat it as queued. **Add a dispatch hint (`model${LABEL_SEP}<tier>` / `effort${LABEL_SEP}<level>`) when you can justify one**; leave the axis off rather than guessing, per [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "The dispatch hint". Create each hint label lazily before applying it (GitHub: `gh label create <name> --color <hex> 2>/dev/null || true`; GitLab: `glab label create --name <name> --color "#<hex>" 2>/dev/null || true`, colors in that file), then create the issue using that file's `<label flags>` form:
   ```bash
   # GitHub
   gh issue create --title "<concise actionable title>" --label "$PLAN_LABEL" \
-    <hint label flags — e.g. --label model:<tier> and/or --label effort:<level>; OMIT ENTIRELY when you can't justify one> \
+    <hint label flags — e.g. --label "model${LABEL_SEP}<tier>" and/or --label "effort${LABEL_SEP}<level>"; OMIT ENTIRELY when you can't justify one> \
     --body "$(printf 'Discovered while working issue #%s.\n\n<what, where (file:line), why it needs its own PR>\n' "$ISSUE_NUM")"
   # GitLab
   glab issue create --title "<concise actionable title>" --label "$PLAN_LABEL" \
     <hint label flags — same as above, same placeholder rule> \
     --description "$(printf 'Discovered while working issue #%s.\n\n<what, where (file:line), why it needs its own PR>\n' "$ISSUE_NUM")"
   ```
-  The hint flags are a **placeholder like every other `<…>` in that command, not a default** — never copy a literal `model:light` / `effort:high` through; a stamped pair on every discovered issue poisons `/do:next --model`.
+  The hint flags are a **placeholder like every other `<…>` in that command, not a default** — never copy a literal `model:light` / `effort:high` through, and always build the separator from `$LABEL_SEP`, not a hardcoded `:` — a stamped pair on every discovered issue poisons `/do:next --model`, and a hardcoded `:` silently fails to apply GitLab's scoped-label exclusivity.
 
 **Commit messages.** Reference the slug in the subject so the work is grep-able across changelog, branches, and PR titles: `feat([<slug>]): <one-line description>` (use `fix:`/`refactor:`/`chore:` per conventional prefixes).
 

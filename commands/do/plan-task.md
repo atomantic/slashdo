@@ -47,7 +47,7 @@ accept either `--flag=value` or `--flag value`. Order is free.
 - **`--model <tier>`** / **`--effort <level>`** — set the issue's **dispatch hint**
   explicitly instead of letting Phase 4 infer it. `<tier>` ∈ `light` / `medium` /
   `heavy`; `<level>` ∈ `low` / `medium` / `high` / `xhigh` / `max`. Each applies the
-  corresponding `model:<tier>` / `effort:<level>` label (see
+  corresponding `model${LABEL_SEP}<tier>` / `effort${LABEL_SEP}<level>` label (see
   [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "The dispatch hint"). A typed
   value **wins over inference** for that axis and is not re-litigated at the gate; the
   other axis is still inferred. `--model none` / `--effort none` **suppress** that
@@ -107,6 +107,15 @@ accept either `--flag=value` or `--flag value`. Order is free.
      `/do:plan-task needs an authenticated `gh` (GitHub) or `glab` (GitLab). Run `gh auth login` or `glab auth login`.`
 
    Print: `Tracker: {VCS_HOST} (via {CLI_TOOL})`.
+   - **Derive `LABEL_SEP`:** `[ "$CLI_TOOL" = glab ] && LABEL_SEP="::" || LABEL_SEP=":"`.
+     GitLab renders any `key::value` label as a two-tone **scoped label** and
+     enforces that only one value per key applies to an issue at a time; GitHub has
+     no equivalent, so it keeps `:`. Every prefixed label this command *builds*
+     (`model`, `effort`, `severity`, …) is `<key>${LABEL_SEP}<value>`, per
+     [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "Setup". A label taxonomy
+     the repo already **has** — `area`, most often — is the exception: match the
+     separator its existing labels use, per Phase 5, or the issue lands on a second,
+     unfilterable label.
 2. **Fetch existing open issues** for the dedup check (Phase 2), unless `--no-dedup`
    is set, using the **same fetch [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md)
    "Setup" step 3 defines** (so the two never drift) — it lists all open issues for
@@ -211,10 +220,13 @@ surfaced still stops to ask rather than filing a vague issue**.
 
 Suggest labels so the issue is filterable (labels, not title brackets). Keep it light —
 a **type/category label** the repo already uses when one obviously fits (`bug`,
-`enhancement`/`feature`, `docs`, `chore`, `area:<x>`), plus any from `--label`. Prefer
-labels that **already exist** in `EXISTING_ISSUES`' label set over inventing new
-taxonomy. Merge with `--label` values, dedupe. Don't force a severity label onto a
-plain feature task — severity is for audit findings.
+`enhancement`/`feature`, `docs`, `chore`, `area${LABEL_SEP}<x>`), plus any from
+`--label`. Prefer labels that **already exist** in `EXISTING_ISSUES`' label set over
+inventing new taxonomy — including matching its separator: if the repo's own `area`
+labels already use `:` (or `::`), follow that convention rather than `$LABEL_SEP`
+for this one, since a mismatched separator makes it a different, unfilterable label.
+Merge with `--label` values, dedupe. Don't force a severity label onto a plain
+feature task — severity is for audit findings.
 
 ### The dispatch hint
 
@@ -222,13 +234,13 @@ Then recommend **how to run the work** on the two independent axes defined in
 [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) ("The dispatch hint"), using
 the code Phase 1 just read:
 
-- **`model:<light|medium|heavy>`** — how much *capability* the task needs. Judge it
-  from what Phase 1 found, not the request's wording: an approach you could write out
-  line-by-line is `light` however long it is; genuine uncertainty between two designs
-  is `heavy`.
-- **`effort:<low|medium|high|xhigh|max>`** — how much *reasoning budget* per step,
-  driven by **surface area and blast radius**: call-site count, how easy a silent
-  miss is, whether a wrong move corrupts data or breaks a public contract.
+- **`model${LABEL_SEP}<light|medium|heavy>`** — how much *capability* the task needs.
+  Judge it from what Phase 1 found, not the request's wording: an approach you could
+  write out line-by-line is `light` however long it is; genuine uncertainty between
+  two designs is `heavy`.
+- **`effort${LABEL_SEP}<low|medium|high|xhigh|max>`** — how much *reasoning budget*
+  per step, driven by **surface area and blast radius**: call-site count, how easy a
+  silent miss is, whether a wrong move corrupts data or breaks a public contract.
 
 **Set the axes independently.** The off-diagonal combinations carry the most
 information (`model:light` + `effort:max` for a wide mechanical sweep; `model:heavy` +

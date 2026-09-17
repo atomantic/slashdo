@@ -45,7 +45,7 @@ Only for `@<login>` entries:
 
 !read lib/github-reviewer-loop.md
 
-Only for `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, or `opencode` entries:
+Only for an entry that is none of `copilot`, `ollama`, or `@<login>` (every other slug — the fixed CLIs and `cmd[<invocation>]` alike — dispatches through this one loop; a future addition needs no new gate here):
 
 !read lib/local-agent-review-loop.md
 

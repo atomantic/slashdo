@@ -39,6 +39,7 @@ else
     echo "{COMMAND} needs an authenticated gh (GitHub) or glab (GitLab). Run 'gh auth login' or 'glab auth login'."; exit 1
   fi
 fi
+[ "$CLI_TOOL" = glab ] && LABEL_SEP="::" || LABEL_SEP=":"
 ```
 
 #### Confirm the selected CLI can reach this repo
@@ -88,6 +89,23 @@ fi
 
 Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`, and carry `VCS_HOST` / `CLI_TOOL`
 (plus `GH_HOST` on GitHub) through every later phase rather than re-detecting.
+
+#### The label separator (`LABEL_SEP`)
+
+Any command that creates or matches a prefixed label (`severity:`, `model:`,
+`effort:`, `priority:`, `area:`, …) needs one more variable derived from
+`CLI_TOOL` — folded into the last line of the select block above
+(`[ "$CLI_TOOL" = glab ] && LABEL_SEP="::" || LABEL_SEP=":"`) rather than a
+separate step, since `CLI_TOOL` is already final by then.
+
+GitLab treats any `key::value` label name as a native **scoped label**: the UI
+renders the two halves in two tones, and — the part that matters functionally —
+**only one value per key can be applied to an issue at a time** (applying a second
+one silently replaces the first). GitHub has no equivalent feature, so it keeps the
+plain single colon. Build every prefixed label as `<key>${LABEL_SEP}<value>`, and
+match one the same way (a hardcoded `:` in a jq/grep pattern silently stops matching
+GitLab's `::` labels) — see [plan-issue-mode.md](./plan-issue-mode.md) "Setup" for
+the full convention and the label color table.
 
 #### Rules this encodes
 

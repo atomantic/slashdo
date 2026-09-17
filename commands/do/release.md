@@ -8,7 +8,7 @@ argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-i
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>` (full mechanics in `lib/multi-reviewer-loop.md`):
-- Accepted values per slot: `codex`, `agy` (aliases `gemini` / `antigravity` — the Antigravity CLI's `agy` binary), `claude`, `grok`, `pi`, `cursor` (alias `cursor-agent` — the Cursor Agent CLI), `opencode` (aliases `zen` / `opencode-zen` — the OpenCode CLI), `ollama`, `copilot` (**legacy** — GitHub's cloud Copilot review; supported when named, never selected implicitly), or an arbitrary GitHub login `@<login>`
+- Accepted values per slot: `codex`, `agy` (aliases `gemini` / `antigravity` — the Antigravity CLI's `agy` binary), `claude`, `grok`, `pi`, `cursor` (alias `cursor-agent` — the Cursor Agent CLI), `opencode` (aliases `zen` / `opencode-zen` — the OpenCode CLI), `ollama`, `copilot` (**legacy** — GitHub's cloud Copilot review; supported when named, never selected implicitly), `cmd[<invocation>]` — an escape hatch for any harness not in this list (see `lib/local-agent-review-loop.md` "The `cmd` reviewer"; always review-only, no `[<model>]`/`~effort=` — bake those into the invocation), or an arbitrary GitHub login `@<login>`
 - `ollama` reviews with a local Ollama model: bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` (e.g. `ollama[qwen2.5-coder:32b]`) pins one. Strip the bracket into a per-entry `OLLAMA_MODEL` (empty for bare `ollama`) and keep the base slug `ollama`.
 - `codex`, `claude`, `agy`, `grok`, `pi`, `cursor`, and `opencode` likewise accept `<agent>[<model>]` — e.g. `codex[o3]`, `claude[claude-opus-4-8]`, `agy[Gemini 3.8 Flash (High)]`, `grok[grok-code-fast-1]`, `cursor[gpt-5]`, `opencode[muse-1.3]`. Strip the bracket into a per-entry `REVIEW_MODEL` (empty → the reviewer's built-in default); keep the base slug. The value is free-form (validate shape, not an allowlist); `copilot` and `@<login>` take no model bracket. A saved `review-models` default (see `/do:config`) supplies the model when the token omits the bracket; an explicit bracket wins.
 - `@<login>` requests a review from any GitHub user or App/bot login (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`): slashdo requests their review on the PR, waits, and fixes what it surfaces (same flow as `copilot`); it never posts an approval itself. Strip the leading `@` into a per-entry `REVIEWER_LOGIN`; the login must match `^[A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?$`. GitHub only.
@@ -16,10 +16,10 @@ Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>` (full mechanics in `l
 - **Per-reviewer iteration cap suffix `~max=<n>`** (e.g. `claude~max=2`, `@some-bot~max=3`): caps that reviewer's review → fix → re-review cycles. Unlike `--review-iterations` it applies to every reviewer type, including local agents and `ollama` (caps otherwise fixed at 3), so one call can budget each reviewer: `--review-with claude~max=2,ollama~max=1,codex~max=3`. `<n>` is a non-negative integer; `0` means "loop until clean", bounded by each inner loop's 10-iteration safety guardrail. Strip into a per-entry `{ENTRY_MAX}`.
 - **Per-reviewer reasoning effort suffix `~effort=<level>`** (e.g. `codex[gpt-5.6-luna]~effort=max~opt`, `claude~effort=high~max=2`): `low`, `medium`, `high`, `xhigh`, or `max`. Strip into a per-entry `{ENTRY_EFFORT}`. All `~` suffixes come off the right of the token, in any order, **before** the slug/`[model]`/`@login` parsing. Reject a malformed or repeated suffix with `Invalid --review-with suffix on {entry}: ~max must be a non-negative integer and ~effort must be one of low, medium, high, xhigh, max, each appearing at most once; the only suffixes are ~opt, ~max=<n>, and ~effort=<level>.`
 - **Reserved value `none`** (case-insensitive): not a slug. `--review-with none` means no external reviewer this run — set `REVIEW_AGENTS=[]`, skip the slug validation below, and skip applying any saved `review-with` default (the explicit escape hatch over a `/do:config` default).
-- The value may be a single agent or a comma-separated, ordered list (e.g. `--review-with codex,agy,copilot`). Split on `,`, trim whitespace. Normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, `zen`/`opencode-zen` → `opencode`.
+- The value may be a single agent or a comma-separated, ordered list (e.g. `--review-with codex,agy,copilot`). Split on `,` **outside the outermost brackets** — a `,` inside a `cmd[<invocation>]` or a nested `[<model>]` (e.g. `cursor[claude-opus-4-7[thinking=true,effort=high]]`) is part of the value, not a new entry; "outermost" is the first `[` to the last `]` of the token — trim whitespace. Normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, `zen`/`opencode-zen` → `opencode`.
 - Record the list as `REVIEW_AGENTS`. **There is no built-in default reviewer.** If `--review-with` is omitted, leave `REVIEW_AGENTS` unset for now — the saved-defaults step fills it from `/do:config`; only if still unset after that does `REVIEW_AGENTS=[]` apply (no external review pass; the Local Code Review gate still runs). Exactly the listed reviewers run, in order; copilot is never added implicitly.
-- Dedupe preserving first-occurrence order on the normalized slug: for a model-taking agent the `[<model>]` bracket is part of the identity (`codex[a]` and `codex[b]` are distinct; two bare `ollama`s collapse); for `@<login>` the login is the identity, compared lowercased; no `~` suffix is part of the identity (`ollama~opt`, `ollama~max=2`, `ollama~effort=high` all collapse with `ollama` — the survivor is optional if any occurrence had `~opt`, and takes its cap and effort from the first occurrence that carried them). If duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
-- If any value is not in the accepted set, abort with: `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot, @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).`
+- Dedupe preserving first-occurrence order on the normalized slug: for a model-taking agent the `[<model>]` bracket is part of the identity (`codex[a]` and `codex[b]` are distinct; two bare `ollama`s collapse); for `cmd`, the verbatim `[<invocation>]` is the identity (two different invocations are distinct reviewers, never collapsed); for `@<login>` the login is the identity, compared lowercased; no `~` suffix is part of the identity (`ollama~opt`, `ollama~max=2`, `ollama~effort=high` all collapse with `ollama` — the survivor is optional if any occurrence had `~opt`, and takes its cap and effort from the first occurrence that carried them). If duplicates were dropped, print: `Note: deduped --review-with list to {final list}.`
+- If any value is not in the accepted set, abort with: `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot, cmd[<invocation>], @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).`
 
 Parse `$ARGUMENTS` for the stop-mode flags (mutually exclusive):
 - `--review-stop-on-findings` — stop the multi-reviewer loop after the first reviewer that fixed at least one finding.
@@ -35,7 +35,7 @@ Parse `$ARGUMENTS` for `--review-mode <series|parallel>`:
 
 Parse `$ARGUMENTS` for `--reviewer-applies` (boolean):
 - Record as `REVIEWER_APPLIES=true` if present, otherwise `REVIEWER_APPLIES=false` (default).
-- By default the orchestrating thread applies the fixes a reviewer surfaces; with `--reviewer-applies` the reviewing CLI edits the working tree directly (see `lib/local-agent-review-loop.md` "Editing mode"). It only affects the codex/agy/claude/grok/cursor/opencode passes. When `REVIEWER_APPLIES=true` and `REVIEW_AGENTS` contains `copilot` or an `@<login>` (read-only cloud reviews), print `--reviewer-applies has no effect on the copilot/@<login> passes; fixes there are always applied by the orchestrator's sub-agent` and continue; when it contains `ollama` (`ollama run` returns text and cannot edit files), print `--reviewer-applies has no effect on the ollama pass; Ollama is non-agentic, so the orchestrator always applies the fixes` and continue.
+- By default the orchestrating thread applies the fixes a reviewer surfaces; with `--reviewer-applies` the reviewing CLI edits the working tree directly (see `lib/local-agent-review-loop.md` "Editing mode"). It only affects the `codex` pass — the one reviewer with a verified write-isolated profile; the loop's pre-flight forces every other local reviewer (`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`cmd`) back to review-only. When `REVIEWER_APPLIES=true` and `REVIEW_AGENTS` contains `copilot` or an `@<login>` (read-only cloud reviews), print `--reviewer-applies has no effect on the copilot/@<login> passes; fixes there are always applied by the orchestrator's sub-agent` and continue; when it contains `ollama` (`ollama run` returns text and cannot edit files), print `--reviewer-applies has no effect on the ollama pass; Ollama is non-agentic, so the orchestrator always applies the fixes` and continue.
 
 Parse `$ARGUMENTS` for `--review-iterations <n>` (GitHub-side passes — `copilot` and `@<login>` — only):
 - Record as `REVIEW_ITERATIONS`; default `1` — one review-and-fix pass per GitHub-side reviewer.
@@ -113,7 +113,7 @@ second release workflow that reloads saved reviewer defaults.
    merges it, preserving their verdict and optionality rules from **Merge the
    PR**. For a **tool-managed or tag-only workflow** — which never creates a
    PR — run every configured **local-agent and Ollama** reviewer (`codex`,
-   `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, `ollama`) against this
+   `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, `cmd`, `ollama`) against this
    same prepared diff **before** step 5's submission command, enforcing their
    aggregate verdict exactly as **Merge the PR** would gate a merge; a
    configured `copilot` or `@<login>` reviewer has no PR to attach to on this
@@ -447,7 +447,7 @@ Each pass uses the matching single-reviewer loop:
 
 - `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`)
 - `@<login>` → GitHub-reviewer loop (`lib/github-reviewer-loop.md`), forwarding `{REVIEWER_LOGIN}`
-- `codex` | `agy` | `claude` | `grok` | `pi` | `cursor` | `opencode` → local-agent headless review loop (`lib/local-agent-review-loop.md`)
+- `codex` | `agy` | `claude` | `grok` | `pi` | `cursor` | `opencode` | `cmd` → local-agent headless review loop (`lib/local-agent-review-loop.md`)
 - `ollama` → Ollama local-model review loop (`lib/ollama-review-loop.md`)
 
 ### Multi-reviewer wrapper
@@ -468,7 +468,7 @@ Only for `@<login>` entries:
 
 !read lib/github-reviewer-loop.md
 
-Only for `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, or `opencode` entries:
+Only for an entry that is none of `copilot`, `ollama`, or `@<login>` (every other slug — the fixed CLIs and `cmd[<invocation>]` alike — dispatches through this one loop; a future addition needs no new gate here):
 
 !read lib/local-agent-review-loop.md
 
@@ -507,7 +507,7 @@ For `dirty` or `inconclusive`:
 - **Exception — too-large**: if the Copilot review body says the PR exceeds the maximum number of lines (20 000), treat it as a clean review and merge immediately. Do NOT re-request.
 - **Never merge if** no Copilot review was ever posted (ask user first) or "Awaiting requested review" is still shown.
 
-### Local-agent-specific checks (when codex/agy/claude/grok/cursor/opencode was in the executed list)
+### Local-agent-specific checks (when an entry that is none of copilot, ollama, or @<login> — the fixed local CLIs and cmd[<invocation>] alike — was in the executed list)
 
 - The local-agent loop already verified build and tests before pushing; its `clean` status in the wrapper table means every iteration of that pass passed verification, and no separate review-comment count is required.
 
