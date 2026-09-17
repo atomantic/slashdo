@@ -734,6 +734,25 @@ describe('review-loop parse contracts', () => {
     // nested cursor model variant) is part of the value, not a new entry.
     assert.match(wrapper, /split the value on `,` only outside the outermost brackets/);
 
+    // ...and every command that parses --review-with INLINE has to say so too. A
+    // bare "Split on `,`" splits README's own documented
+    // cursor[claude-opus-4-7[thinking=true,effort=high]] into two entries and
+    // aborts with `Unknown --review-with value: effort=high]]` — and does the same
+    // to any cmd[…] invocation carrying a comma.
+    // Scope it to the --review-with bullet: config.md's --trusted-authors bullet
+    // legitimately splits on every comma (logins can't contain one).
+    for (const name of ['pr.md', 'release.md', 'rpr.md', 'review.md', 'config.md']) {
+      const bullet = readCommand(name)
+        .split('\n')
+        .find((line) => /^\s*-\s.*`--review-with/.test(line) && /Split on `,`/.test(line));
+      assert.ok(bullet, `${name} must carry a --review-with bullet that states how the list is split`);
+      assert.match(
+        bullet,
+        /outside the outermost brackets/,
+        `${name} splits --review-with on every comma — a comma inside cmd[…] or a nested [<model>] is part of the value`,
+      );
+    }
+
     // A cmd whose executable is missing is the same "reviewer never launched"
     // case a missing fixed binary is: skipped (inconclusive, excused by ~opt),
     // never cli-error, which would short-circuit every remaining reviewer.
