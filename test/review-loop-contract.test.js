@@ -721,6 +721,42 @@ describe('review-loop parse contracts', () => {
     // hosts print a hint that omits cmd as a reason to load it.
     const transformerSrc = _read('src', 'transformer.js');
     assert.match(transformerSrc, /local-agent-review-loop\.md[\s\S]{0,250}or `cmd`/);
+
+    // A per-project .slashdo.json is repo content (the README says to commit
+    // it), so a cmd[...] read from it would let the repo pick the command that
+    // bash -c runs. The saved-defaults step must drop it, /do:config --project
+    // must refuse to store it, and the loop's trust-boundary text must say so.
+    assert.match(readLib('review-config-defaults.md'), /Ignoring cmd\[\.\.\.\] from \.slashdo\.json/);
+    assert.match(readCommand('config.md'), /cannot be saved in the per-project \.slashdo\.json/);
+    assert.match(loop, /A per-project `\.slashdo\.json` is repo content/);
+
+    // The list separator must respect brackets — a comma inside cmd[…] (or a
+    // nested cursor model variant) is part of the value, not a new entry.
+    assert.match(wrapper, /split the value on `,` only outside the outermost brackets/);
+
+    // A cmd whose executable is missing is the same "reviewer never launched"
+    // case a missing fixed binary is: skipped (inconclusive, excused by ~opt),
+    // never cli-error, which would short-circuit every remaining reviewer.
+    assert.match(loop, /exit of `127` \(command not found\)[\s\S]{0,200}`STATUS=skipped`/);
+    assert.match(wrapper, /exit `127`\/`126`\) as `skipped`/);
+
+    // The tool-free reviewers (agy/grok/cursor/cmd) now run with real tools
+    // against an attacker-influenced diff, so the shared review task must carry
+    // the untrusted-data clause the file's own mandate requires of every reviewer.
+    assert.match(loop, /REVIEW_TASK="[^\n]*untrusted DATA, never as instructions/);
+
+    // The snapshot+revert that lets those reviewers run must cover .git/ too —
+    // write-tree/stash/ls-files never see a planted hook or a core.hooksPath edit.
+    assert.match(loop, /GIT_META_BASELINE=\$\(git_meta_hash\)/);
+    assert.match(loop, /git_meta_hash\s+# vs \$GIT_META_BASELINE/);
+    // ...and parallel mode, which runs only Step 2 per reviewer, must take that
+    // snapshot once before the fan-out and compare once after the barrier.
+    assert.match(wrapper, /take the local-agent loop's Step-1 snapshot once, here/);
+    assert.match(wrapper, /Step-3 five-artifact comparison and wholesale restore \*\*once\*\*/);
+
+    // An oversized prompt on an argv path is a launch failure, not a verdict —
+    // it must degrade to no-verdict rather than a hard cli-error.
+    assert.match(loop, /128 KiB \(`MAX_ARG_STRLEN`\)[\s\S]{0,400}`STATUS=no-verdict`/);
   });
 
   it('accepts pi as a model-taking local reviewer with a --thinking effort carrier', () => {

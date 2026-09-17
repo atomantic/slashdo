@@ -15,7 +15,7 @@ Parse `$ARGUMENTS` before discovery. Record explicit flags separately so saved d
 
 ## Review options
 
-`--review-with <entry[,entry...]>` sets ordered `REVIEW_AGENTS`. `none` (case-insensitive, alone) sets an empty list and overrides saved defaults. Otherwise split on commas, trim, and parse:
+`--review-with <entry[,entry...]>` sets ordered `REVIEW_AGENTS`. `none` (case-insensitive, alone) sets an empty list and overrides saved defaults. Otherwise split on commas that sit outside the outermost brackets (a `,` inside `cmd[…]` or a `[<model>]` is part of the value), trim, and parse:
 
 ```
 entry := (agent[model]? | cmd[invocation] | @login) (~opt | ~max=n | ~effort=level)*
