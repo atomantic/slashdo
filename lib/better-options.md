@@ -35,7 +35,7 @@ Dedupe normalized slug + model (or verbatim invocation for `cmd`, or case-insens
 |---|---|
 | `--review-mode <series\|parallel>` | `REVIEW_MODE`; default series. Parallel reviews one baseline, then applies a deduped union; it ignores reviewer-applies and stop modes. |
 | `--review-stop-on-findings`, `--review-stop-on-clean` | `REVIEW_STOP_MODE=on-findings` / `on-clean`; mutually exclusive; default `all`. |
-| `--reviewer-applies` | `REVIEWER_APPLIES=true`; local reviewer applies fixes; cloud reviewers stay read-only. |
+| `--reviewer-applies` | `REVIEWER_APPLIES=true`; the `codex` pass lets that CLI apply fixes — it is the only reviewer with a verified write-isolated profile. Every other local reviewer (`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`cmd`) is forced back to review-only by the loop, and cloud reviewers stay read-only. |
 | `--review-iterations <n>` | Non-negative `REVIEW_ITERATIONS`, default 1; controls copilot / @login passes only unless an entry has `~max`. Zero uses the inner 10-cycle guardrail. |
 
 Leave omitted configurable values unset until saved defaults have been applied, including reviewer list, mode, stop mode, reviewer-applies, iterations, issues, and label. Explicit flags win, then project-over-global saved values, then built-in defaults. Read the shared defaults contract now:

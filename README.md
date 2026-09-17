@@ -287,7 +287,7 @@ All three suffixes chain in any order and are shell-safe: `codex[gpt-5.6-luna]~e
 
 | Flag | Default | What it does |
 |:---|:---|:---|
-| `--review-with <list>` | none — no external reviewer | Comma-list of reviewers, run in order (see above). Each entry may carry `~opt` and/or `~max=<n>` |
+| `--review-with <list>` | none — no external reviewer | Comma-list of reviewers, run in order (see above). Each entry may carry `~opt`, `~max=<n>`, and/or `~effort=<level>` |
 | `--review-iterations <n>` | `1` | Cap review-and-fix cycles for a `copilot` or `@<login>` pass: request one review, apply every fix, stop (exiting early on 0 comments). `0` restores loop-until-clean, bounded by a 10-iteration guardrail. No effect on `codex`/`agy`/`claude`/`grok`/`pi`/`cursor`/`opencode`/`cmd` (fixed 3-iteration cap) or `ollama` (own fixed cap) — use the per-entry `~max=<n>` suffix to move those, or to budget each reviewer separately |
 | `--review-mode <series\|parallel>` | `series` | `series` runs each reviewer to completion before the next starts, so later reviewers see earlier reviewers' committed fixes (list order matters). `parallel` runs every review concurrently against one baseline and applies the deduped union of findings in a single pass — faster, but no reviewer sees another's fixes, and `--reviewer-applies`, the stop-mode flags, and per-entry `~max=<n>` are ignored. `/do:rpr` ignores this flag |
 | `--review-stop-on-findings` | off | Stop the loop after the first reviewer that fixes at least one finding; skip the rest. Mutually exclusive with `--review-stop-on-clean` |

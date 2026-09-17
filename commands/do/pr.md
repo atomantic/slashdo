@@ -196,7 +196,7 @@ The stop-mode flags still apply *within* this wrapper invocation (e.g. stopping 
 - `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`)
 - `@<login>` → GitHub-reviewer loop (`lib/github-reviewer-loop.md`), forwarding `{REVIEWER_LOGIN}`
 
-**GitHub only** — both drive `gh`/GraphQL against a GitHub PR. When `VCS_HOST=gitlab` and `PR_SIDE_AGENTS` is non-empty, print a warning (`copilot and @<login> reviewers are GitHub-only and were skipped on this GitLab MR; use a local-agent reviewer (codex/agy/claude/grok/cursor/opencode) instead`) and set `PR_SIDE_OVERALL_STATUS=inconclusive`.
+**GitHub only** — both drive `gh`/GraphQL against a GitHub PR. When `VCS_HOST=gitlab` and `PR_SIDE_AGENTS` is non-empty, print a warning (`copilot and @<login> reviewers are GitHub-only and were skipped on this GitLab MR; use a local-agent reviewer (codex/agy/claude/grok/pi/cursor/opencode, or cmd[<invocation>] for anything else) instead`) and set `PR_SIDE_OVERALL_STATUS=inconclusive`.
 
 Record the result as `PR_SIDE_OVERALL_STATUS`.
 

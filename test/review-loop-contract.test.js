@@ -741,10 +741,10 @@ describe('review-loop parse contracts', () => {
     // to any cmd[…] invocation carrying a comma.
     // Scope it to the --review-with bullet: config.md's --trusted-authors bullet
     // legitimately splits on every comma (logins can't contain one).
-    for (const name of ['pr.md', 'release.md', 'rpr.md', 'review.md', 'config.md']) {
+    for (const name of ['pr.md', 'release.md', 'rpr.md', 'review.md', 'config.md', 'depfree.md', 'better-swift.md']) {
       const bullet = readCommand(name)
         .split('\n')
-        .find((line) => /^\s*-\s.*`--review-with/.test(line) && /Split on `,`/.test(line));
+        .find((line) => /^\s*-\s.*`--review-with/.test(line) && /[Ss]plit on `,`/.test(line));
       assert.ok(bullet, `${name} must carry a --review-with bullet that states how the list is split`);
       assert.match(
         bullet,
@@ -752,6 +752,26 @@ describe('review-loop parse contracts', () => {
         `${name} splits --review-with on every comma — a comma inside cmd[…] or a nested [<model>] is part of the value`,
       );
     }
+
+    // --reviewer-applies reaches exactly ONE reviewer: codex, the only one with a
+    // verified write-isolated profile (local-agent-review-loop.md pre-flight step 9
+    // forces every other local reviewer back to review-only). A doc that promises it
+    // reaches agy/grok/cursor/opencode/cmd sends a user to grant an unsandboxed CLI
+    // write access, and the run then trips the "modified the working tree during a
+    // review-only pass — reverted" path instead of behaving as documented.
+    assert.match(loop, /so `agy`\/`grok`\/`pi`\/`cursor`\/`opencode`\/`cmd` always run review-only/);
+    for (const name of ['pr.md', 'release.md', 'review.md', 'rpr.md', 'depfree.md', 'better-swift.md']) {
+      assert.match(
+        readCommand(name),
+        /only.{0,40}`codex`|`codex` pass/,
+        `${name} must say --reviewer-applies reaches only the codex pass`,
+      );
+    }
+    assert.match(
+      readLib('better-options.md'),
+      /`--reviewer-applies` \| `REVIEWER_APPLIES=true`; the `codex` pass/,
+      'better-options.md is /do:better’s option spec — its row must not promise every local reviewer applies fixes',
+    );
 
     // A cmd whose executable is missing is the same "reviewer never launched"
     // case a missing fixed binary is: skipped (inconclusive, excused by ~opt),

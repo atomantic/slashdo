@@ -110,9 +110,12 @@ accept either `--flag=value` or `--flag value`. Order is free.
    - **Derive `LABEL_SEP`:** `[ "$CLI_TOOL" = glab ] && LABEL_SEP="::" || LABEL_SEP=":"`.
      GitLab renders any `key::value` label as a two-tone **scoped label** and
      enforces that only one value per key applies to an issue at a time; GitHub has
-     no equivalent, so it keeps `:`. Every prefixed label this command builds
-     (`model`, `effort`, `area`, …) is `<key>${LABEL_SEP}<value>`, per
-     [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "Setup".
+     no equivalent, so it keeps `:`. Every prefixed label this command *builds*
+     (`model`, `effort`, `severity`, …) is `<key>${LABEL_SEP}<value>`, per
+     [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "Setup". A label taxonomy
+     the repo already **has** — `area`, most often — is the exception: match the
+     separator its existing labels use, per Phase 5, or the issue lands on a second,
+     unfilterable label.
 2. **Fetch existing open issues** for the dedup check (Phase 2), unless `--no-dedup`
    is set, using the **same fetch [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md)
    "Setup" step 3 defines** (so the two never drift) — it lists all open issues for
