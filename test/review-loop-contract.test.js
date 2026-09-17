@@ -697,11 +697,30 @@ describe('review-loop parse contracts', () => {
         `${name} must gate the local-agent loop by exclusion, not an enumerated list`,
       );
     }
+    assert.match(
+      readLib('better-review-loop.md'),
+      /Only for an entry that is none of `copilot`, `ollama`, or `@<login>`/,
+      'better-review-loop.md must gate the local-agent loop by exclusion, not an enumerated list',
+    );
 
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'better-swift.md', 'rpr.md', 'config.md', 'depfree.md']) {
       const body = readCommand(name);
       assert.match(body, /cmd\[<invocation>\]/, `${name} must document and accept cmd[<invocation>]`);
     }
+
+    // Parsing cmd is not the same as dispatching it — pr.md/release.md/review.md
+    // each name the local-agent loop's actual per-agent dispatch line inline
+    // (not via a shared partial), so `cmd` has to be added to each one by hand.
+    assert.match(readCommand('pr.md'), /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode` \| `cmd` → local-agent headless review loop/);
+    assert.match(readCommand('release.md'), /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode` \| `cmd` → local-agent headless review loop/);
+    assert.match(readCommand('review.md'), /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode` \| `cmd` \| `ollama` — invoke the local-agent review loop/);
+    assert.match(readCommand('pr.md'), /`ollama\[…\]`, `cmd\[<invocation>\]`\. These review the working tree locally/);
+
+    // The transformer's on-demand-load hint (for hosts without a native `!cat`)
+    // must name every slug that actually dispatches to this file, or those
+    // hosts print a hint that omits cmd as a reason to load it.
+    const transformerSrc = _read('src', 'transformer.js');
+    assert.match(transformerSrc, /local-agent-review-loop\.md[\s\S]{0,250}or `cmd`/);
   });
 
   it('accepts pi as a model-taking local reviewer with a --thinking effort carrier', () => {

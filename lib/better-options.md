@@ -29,7 +29,7 @@ Strip suffixes from the right in any order before parsing the slug. Each suffix 
 - `~max=<n>`: non-negative per-reviewer cycle cap; overrides `--review-iterations` for that entry. An explicit positive cap reached after applying/verifying fixes returns clean-equivalent `capped`; zero runs until clean within the inner loop's 10-cycle guardrail. Exhausting an implicit cap remains inconclusive.
 - `~effort=<level>`: `low`, `medium`, `high`, `xhigh`, or `max`.
 
-Dedupe normalized slug + model (or case-insensitive login), preserving first order. Suffixes are excluded from identity: optional wins if any duplicate is optional; cap/effort come from the first duplicate carrying each value. Forward model as `REVIEW_MODEL` or `OLLAMA_MODEL`, plus per-entry optional/cap/effort fields. Saved `REVIEW_MODELS` fills only missing model brackets.
+Dedupe normalized slug + model (or verbatim invocation for `cmd`, or case-insensitive login), preserving first order. Suffixes are excluded from identity: optional wins if any duplicate is optional; cap/effort come from the first duplicate carrying each value. Forward model as `REVIEW_MODEL` or `OLLAMA_MODEL`, plus per-entry optional/cap/effort fields. Saved `REVIEW_MODELS` fills only missing model brackets.
 
 | Option | State / validation |
 |---|---|

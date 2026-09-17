@@ -129,7 +129,7 @@ Verification — confirm before proceeding:
 
 Partition `REVIEW_AGENTS` into two ordered sublists, preserving relative order:
 
-- `LOCAL_AGENTS` — every entry that is neither `copilot` nor an `@<login>`: `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, `ollama[…]`. These review the working tree locally and need no PR.
+- `LOCAL_AGENTS` — every entry that is neither `copilot` nor an `@<login>`: `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, `ollama[…]`, `cmd[<invocation>]`. These review the working tree locally and need no PR.
 - `PR_SIDE_AGENTS` — `copilot` plus every `@<login>` entry; these review the PR cloud-side and need it to exist.
 
 **If `LOCAL_AGENTS` is non-empty**, run the multi-reviewer loop now, **before the PR is created**, over `LOCAL_AGENTS` only, so every local reviewer's fixes land before the PR opens. Pass `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (no effect on local agents, but forward for consistency). Record the result as `LOCAL_OVERALL_STATUS`.
@@ -141,7 +141,7 @@ Partition `REVIEW_AGENTS` into two ordered sublists, preserving relative order:
 
 This phase drives the **multi-reviewer wrapper** (under "Reviewer loop bodies" below) over `LOCAL_AGENTS`, dispatching:
 
-- `codex` | `agy` | `claude` | `grok` | `pi` | `cursor` | `opencode` → local-agent headless review loop (`lib/local-agent-review-loop.md`) — host-agnostic. The local CLI runs a self-contained single-agent review prompt against the branch (codex uses its built-in `codex review`) — deliberately **not** the `/do:review` multi-sub-agent skill, which hangs under a headless/print-mode invocation; this main thread then verifies its output, runs build + tests, and pushes the verified fixes
+- `codex` | `agy` | `claude` | `grok` | `pi` | `cursor` | `opencode` | `cmd` → local-agent headless review loop (`lib/local-agent-review-loop.md`) — host-agnostic. The local CLI runs a self-contained single-agent review prompt against the branch (codex uses its built-in `codex review`) — deliberately **not** the `/do:review` multi-sub-agent skill, which hangs under a headless/print-mode invocation; this main thread then verifies its output, runs build + tests, and pushes the verified fixes
 - `ollama` → Ollama local-model review loop (`lib/ollama-review-loop.md`) — host-agnostic and fully offline. The orchestrator resolves the model, feeds the per-file diff to `ollama run`, parses the findings, applies the fixes itself (Ollama is non-agentic), then verifies build + tests and pushes
 
 ## Open the PR

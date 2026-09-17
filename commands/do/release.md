@@ -447,7 +447,7 @@ Each pass uses the matching single-reviewer loop:
 
 - `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`)
 - `@<login>` → GitHub-reviewer loop (`lib/github-reviewer-loop.md`), forwarding `{REVIEWER_LOGIN}`
-- `codex` | `agy` | `claude` | `grok` | `pi` | `cursor` | `opencode` → local-agent headless review loop (`lib/local-agent-review-loop.md`)
+- `codex` | `agy` | `claude` | `grok` | `pi` | `cursor` | `opencode` | `cmd` → local-agent headless review loop (`lib/local-agent-review-loop.md`)
 - `ollama` → Ollama local-model review loop (`lib/ollama-review-loop.md`)
 
 ### Multi-reviewer wrapper
