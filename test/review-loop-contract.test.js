@@ -669,6 +669,41 @@ describe('review-loop parse contracts', () => {
     }
   });
 
+  it('accepts cmd[<invocation>] as an escape-hatch reviewer and enforces its contract', () => {
+    // cmd is the generic reviewer for any harness not on the fixed list. It
+    // carries no model/effort bracket of its own — the invocation IS the
+    // identity — and always runs review-only, since an opaque command's
+    // isolation can never be verified the way codex's sandbox can.
+    const loop = readLib('local-agent-review-loop.md');
+    const wrapper = readLib('multi-reviewer-loop.md');
+
+    assert.match(loop, /### The `cmd` reviewer/);
+    assert.match(loop, /The contract is stdin in, stdout out/);
+    assert.match(loop, /printf '%s' "\$LOCAL_PROMPT"/);
+    assert.match(loop, /always forces review-only/);
+    assert.match(wrapper, /`cmd\[<invocation>\]` — an arbitrary reviewer not in the fixed slug list/);
+    assert.match(wrapper, /bare `cmd` with no `\[<invocation>\]` is invalid/);
+    assert.match(wrapper, /verbatim `<invocation>`.*for a `cmd\[…\]` entry/);
+
+    // The lazy-load gates that dispatch into local-agent-review-loop.md are
+    // written as exclusions (none of copilot/ollama/@<login>), not an
+    // enumerated allowlist — so cmd (and any future reviewer) needs no gate
+    // updated to reach it. Assert the gate excludes, rather than enumerates.
+    for (const name of ['pr.md', 'review.md', 'release.md', 'depfree.md']) {
+      const body = readCommand(name);
+      assert.match(
+        body,
+        /Only for an entry that is none of `copilot`, `ollama`, or `@<login>`/,
+        `${name} must gate the local-agent loop by exclusion, not an enumerated list`,
+      );
+    }
+
+    for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'better-swift.md', 'rpr.md', 'config.md', 'depfree.md']) {
+      const body = readCommand(name);
+      assert.match(body, /cmd\[<invocation>\]/, `${name} must document and accept cmd[<invocation>]`);
+    }
+  });
+
   it('accepts pi as a model-taking local reviewer with a --thinking effort carrier', () => {
     // Pi is review-only (never reviewer-applies), takes `pi[provider/model]`,
     // and carries effort via --thinking, not --effort or a model variant.
