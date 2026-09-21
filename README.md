@@ -261,7 +261,7 @@ Reviewers run **in the order listed**, and whatever you list is exactly what run
 /do:pr --review-with codex,agy                      # codex, then Antigravity — each sees the prior's fixes
 /do:pr --review-with claude[claude-opus-4-8],codex[o3]   # pin the model per reviewer
 /do:pr --review-with cursor[gpt-5]~effort=max       # Cursor Agent, pinned model + reasoning effort
-/do:pr --review-with opencode[muse-1.3]             # OpenCode Zen model via friendly alias
+/do:pr --review-with opencode[provider/model]             # supported provider/model configured in OpenCode
 /do:pr --review-with pi~effort=low~max=1            # Pi, reviewed tool-free with a capped budget
 /do:pr --review-with ollama[qwen2.5-coder:32b]      # pin a specific installed Ollama model
 /do:pr --review-with codex,@org-review-bot          # codex, then request a review from a GitHub bot
@@ -271,13 +271,13 @@ Reviewers run **in the order listed**, and whatever you list is exactly what run
 /do:pr --review-with 'cmd[pi --harness ollama --model llama3:70b --effort high]'   # a harness not in this list
 ```
 
-**Model pinning** (`<agent>[<model>]`) works per run as shown, or save per-reviewer defaults with `/do:config --review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5,opencode=muse-1.3` so runs can omit the bracket. An explicit bracket always wins over the saved default. Cursor also accepts a model string that already encodes effort (`cursor[claude-opus-4-7[thinking=true,effort=high]]`) — that is Cursor's native variant syntax and is passed through as `--model` unchanged. OpenCode accepts friendly aliases (`muse-1.3`, `zen/muse-1.3`, bare model names) normalized to the installed Zen models (built-in default: `opencode/muse-spark-1.3-contributor-free`).
+**Model pinning** (`<agent>[<model>]`) works per run as shown, or save per-reviewer defaults with `/do:config --review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5,opencode=provider/model` so runs can omit the bracket. An explicit bracket always wins over the saved default. Cursor also accepts a model string that already encodes effort (`cursor[claude-opus-4-7[thinking=true,effort=high]]`) — that is Cursor's native variant syntax and is passed through as `--model` unchanged. OpenCode accepts provider/model strings and retains friendly aliases (`muse-1.3`, `zen/muse-1.3`, bare model names) for explicit compatibility requests, but slashdo no longer supplies or recommends a bundled free-tier model: headless provider admission is not verified for those aliases, so select a supported provider/model explicitly or configure one in OpenCode.
 
 **Optional reviewers** (`~opt` suffix): the reviewer runs and its findings get fixed, but an *inconclusive* result (timeout / skipped / no verdict) is excluded from the merge gate, so it never blocks `--merge`. A hard error from it (broken build / failed tests) still blocks. Use it for a second-opinion reviewer that doesn't reliably return a verdict, such as a local Ollama model.
 
 **Per-reviewer iteration caps** (`~max=<n>` suffix): caps how many **review → fix → re-review cycles** that one reviewer runs. It is the per-entry form of `--review-iterations`, and unlike that flag it reaches every reviewer type — including `codex`/`agy`/`claude`/`grok`/`pi`/`cursor`/`opencode`/`cmd` and `ollama`, whose caps are otherwise fixed at 3 — so a single run can budget each reviewer separately: `--review-with claude~max=2,ollama~max=1,codex~max=3`. `<n>` is a non-negative integer; `0` means "loop until clean", bounded by a 10-iteration safety guardrail. A reviewer that stops because it spent a cap *you* set reports `capped`, which counts as clean for the merge gate — as opposed to `guardrail`, which is what a *built-in* cap reports when it cuts off a reviewer that was still finding real problems, and which blocks the merge.
 
-**Per-reviewer reasoning effort** (`~effort=<level>` suffix): specifies the reasoning effort level (`low`, `medium`, `high`, `xhigh`, `max`) for that reviewer: `--review-with codex[gpt-5.6-luna]~effort=max~opt`, `--review-with claude~effort=high~max=2`, `--review-with cursor[gpt-5]~effort=max`, `--review-with opencode[muse-1.3]~effort=high`, `--review-with pi~effort=low`. Each reviewer receives it in the form its own CLI accepts — `--effort` is **not** universal. `claude` and `grok` take the flag; **codex** takes `-c model_reasoning_effort=<level>`; **opencode** takes `--variant <level>`; **Pi** takes `--thinking <level>`; **Cursor** folds it into `--model` as `[effort=<level>]`, so pair that one with a `cursor[<model>]` bracket or a saved `--review-models cursor=…` default; and **agy** picks the matching model variant from whatever `agy models` lists. Where a reviewer offers no such control — or no level matching what you asked — the effort falls back to prompt guidance rather than failing the review.
+**Per-reviewer reasoning effort** (`~effort=<level>` suffix): specifies the reasoning effort level (`low`, `medium`, `high`, `xhigh`, `max`) for that reviewer: `--review-with codex[gpt-5.6-luna]~effort=max~opt`, `--review-with claude~effort=high~max=2`, `--review-with cursor[gpt-5]~effort=max`, `--review-with opencode[provider/model]~effort=high`, `--review-with pi~effort=low`. Each reviewer receives it in the form its own CLI accepts — `--effort` is **not** universal. `claude` and `grok` take the flag; **codex** takes `-c model_reasoning_effort=<level>`; **opencode** takes `--variant <level>`; **Pi** takes `--thinking <level>`; **Cursor** folds it into `--model` as `[effort=<level>]`, so pair that one with a `cursor[<model>]` bracket or a saved `--review-models cursor=…` default; and **agy** picks the matching model variant from whatever `agy models` lists. Where a reviewer offers no such control — or no level matching what you asked — the effort falls back to prompt guidance rather than failing the review.
 
 `~max` applies in `series` mode (the default). In `--review-mode parallel` each reviewer runs a single review-only pass and the orchestrator applies the union once, so there are no per-reviewer cycles to cap — `~max` is ignored there with a warning.
 
@@ -385,8 +385,8 @@ Then `/do:next` reads them back. **`--model`/`--effort` filter the queue** — `
 Rather than passing flags every time, save them once and let future commands pick them up automatically.
 
 ```
-/do:config --review-with=claude,codex,cursor[gpt-5]~effort=max,opencode[muse-1.3],ollama[qwen2.5-coder:32b]
-/do:config --review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5,opencode=muse-1.3
+/do:config --review-with=claude,codex,cursor[gpt-5]~effort=max,opencode[provider/model],ollama[qwen2.5-coder:32b]
+/do:config --review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5,opencode=provider/model
 /do:config --issues --issues-label plan
 /do:config --merge --merge-method squash
 /do:config --self

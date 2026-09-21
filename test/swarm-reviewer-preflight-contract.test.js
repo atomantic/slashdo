@@ -27,6 +27,14 @@ test('availability requires one bounded realistic full-payload verdict, not a sm
   assert.match(preflight, /A prompt asking for no tools is not enforcement/);
 });
 
+test('OpenCode provider admission denial is unavailable and never a clean preflight', () => {
+  assert.match(preflight, /synthetic admission response such as `HTTP 403 \/ FreeTierError` is specifically `unavailable`/);
+  assert.match(preflight, /reason `provider admission denied`/);
+  assert.match(preflight, /remedy `select a supported reviewer\/model\/provider`/);
+  assert.match(preflight, /never classify it as a clean verdict/);
+  assert.match(preflight, /Keep raw provider output, headers, tokens, and local paths out of the diagnostic/);
+});
+
 test('optional preflight skips reach workers, both dispatch modes, recovery and summary', () => {
   const worker = swarm.split('Give each subagent exactly one issue number')[1].split('### Swarm Phase C')[0];
   assert.match(worker, /Consume the supplied `REVIEWER_PREFLIGHT`/);
