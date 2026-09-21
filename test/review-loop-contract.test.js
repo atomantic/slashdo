@@ -693,6 +693,22 @@ describe('review-loop parse contracts', () => {
     assert.doesNotMatch(loop, /FreeTierError[\s\S]{0,240}STATUS=clean/);
   });
 
+  it('preserves per-reviewer OpenCode admission outcomes across the parallel restoration barrier', () => {
+    const parallel = readLib('multi-reviewer-loop.md')
+      .split('### Parallel dispatch')[1].split('### Aggregate report')[0];
+    const [launch, barrier] = parallel.split('3. **Barrier**');
+
+    assert.match(launch, /retain `EXIT_CODE`, `LOG_FILE`, `ERR_FILE`, and `OPENCODE_ADMISSION_DENIED` \*\*per reviewer\*\*/);
+    assert.match(launch, /local-agent-review-loop\.md.*Step-2 OpenCode admission classifier \*\*before generic non-zero classification\*\*/);
+    assert.match(launch, /pending `no-verdict`, never `cli-error`/);
+    assert.match(launch, /Suppress its raw stdout\/stderr and log paths/);
+    assert.match(launch, /Defer final review-phase statuses and verdict parsing until the barrier's restoration check succeeds/);
+    assert.match(barrier, /After successful restoration, consume each reviewer's `OPENCODE_ADMISSION_DENIED=true`[\s\S]*Step-3 sanitized diagnostic, remedy, and suppressed log field; record `no-verdict`/);
+    assert.match(barrier, /Do not exit the wrapper[\s\S]*continue collecting every other reviewer's result/);
+    assert.match(barrier, /required denial remains inconclusive and merge-blocking; an optional denial stays visible and non-blocking/);
+    assert.match(barrier, /does not excuse another reviewer's `cli-error` or a failed shared restoration/);
+  });
+
   it('accepts cmd[<invocation>] as an escape-hatch reviewer and enforces its contract', () => {
     // cmd is the generic reviewer for any harness not on the fixed list. It
     // carries no model/effort bracket of its own — the invocation IS the
