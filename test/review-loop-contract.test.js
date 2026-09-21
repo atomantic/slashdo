@@ -653,14 +653,17 @@ describe('review-loop parse contracts', () => {
     assert.match(loop, /< \/dev\/null/);
 
     // Config and docs must advertise opencode review-models and effort grammar.
-    assert.match(readCommand('config.md'), /opencode=muse-1\.3/);
-    assert.match(_read('README.md'), /opencode\[muse-1\.3\]/);
-    assert.match(_read('README.md'), /--review-models .*opencode=muse-1\.3/);
+    assert.match(readCommand('config.md'), /opencode=provider\/model/);
+    assert.match(_read('README.md'), /opencode\[provider\/model\]/);
+    assert.match(_read('README.md'), /--review-models .*opencode=provider\/model/);
+    assert.doesNotMatch(_read('README.md'), /opencode(?:=|\[)muse-1\.3/);
 
     assert.match(wrapper, /`opencode` \(aliases `zen` \/ `opencode-zen`\)/);
     assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode`/);
     assert.match(wrapper, /Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot/);
     assert.match(wrapper, /`zen`\/`opencode-zen` both probe the `opencode` binary/);
+    assert.match(wrapper, /In \*\*parallel mode\*\* the same rules apply[\s\S]*no-verdict/);
+    assert.match(wrapper, /non-optional\*\* reviewer's review was inconclusive[\s\S]*no-verdict/);
 
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'rpr.md', 'config.md']) {
       const body = readCommand(name);
