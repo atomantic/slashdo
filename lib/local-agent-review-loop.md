@@ -46,7 +46,7 @@ Use this when the work isn't on a GitHub PR yet, the repo has no cloud review, y
    - **`cmd` skips this step's probe** — there is no single binary name to check up front. The missing-binary case surfaces in Step 2 instead: a `bash -c` exit of `127` (command not found) or `126` (not executable) is recorded there as `STATUS=skipped` — the same status a missing fixed binary gets here, for the same reason (the reviewer never launched, so the tree is untouched) — and any other launch failure as `cli-error`.
 4. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
 5. Record `{REVIEWER_APPLIES}` — boolean, default `false`; `true` when the orchestrating command was invoked with `--reviewer-applies`. `false`: the orchestrator applies fixes from the CLI's findings log. `true`: the headless CLI applies fixes in the working tree and the orchestrator only verifies.
-6. Record `{REVIEW_MODEL}` — resolved by the caller (multi-reviewer loop: explicit `<agent>[<model>]` bracket → saved `review-models[slug]` default → empty). **May be empty**, meaning the reviewer's built-in default: no `--model` flag for `codex`/`claude`/`grok`/`pi`/`cursor`; the `AGY_REVIEW_MODEL` / `OPENCODE_REVIEW_MODEL` defaults resolved below for `agy` / `opencode`. When set, it is passed as `codex --model`, `claude --model` (or the in-process `Agent` tool's `model`), `agy --model`, `grok --model`, `cursor --model`, or `opencode --model`. The value is free-form (names churn and may contain spaces/parens, e.g. `Gemini 3.8 Flash (High)`); parsers pass it verbatim. Only agy's pre-flight validates it, against the live `agy models` roster, because agy exits non-zero on an unknown name. **Does not apply to `cmd`** — no model bracket exists for it; any model selection is already inside `{REVIEWER_CMD}`.
+6. Record `{REVIEW_MODEL}` — resolved by the caller (multi-reviewer loop: explicit `<agent>[<model>]` bracket → saved `review-models[slug]` default → empty). **May be empty**: `codex`/`claude`/`grok`/`pi`/`cursor` use the CLI's built-in default with no `--model` flag; `agy` resolves its pinned default, while `opencode` receives no slashdo model override and uses only an operator-configured OpenCode provider/model. The optional `OPENCODE_REVIEW_MODEL` environment override is resolved below. When set, it is passed as `codex --model`, `claude --model` (or the in-process `Agent` tool's `model`), `agy --model`, `grok --model`, `cursor --model`, or `opencode --model`. The value is free-form (names churn and may contain spaces/parens, e.g. `Gemini 3.8 Flash (High)`); parsers pass it verbatim. Only agy's pre-flight validates it, against the live `agy models` roster, because agy exits non-zero on an unknown name. **Does not apply to `cmd`** — no model bracket exists for it; any model selection is already inside `{REVIEWER_CMD}`.
 7. Record `{MAX_ITERATIONS}` — how many review → fix → re-review cycles this reviewer may run, resolved by the caller (multi-reviewer loop: per-entry `~max=<n>` suffix on the `--review-with` token → this loop's built-in default of `3`). `0` means **unlimited**, bounded by the 10-iteration safety guardrail in Step 6. Also record `{MAX_EXPLICIT}` — `true` only when the cap came from a `~max=<n>` the user typed or saved. Step 6 uses it to report an exhausted cap as `capped` (user-chosen budget, clean-equivalent for the merge gate) or `guardrail` (built-in ceiling, inconclusive). The `--review-iterations` flag never reaches this loop; `~max` is the only way to move this cap. Applies to `cmd` exactly like every other reviewer.
 8. Record `{REVIEW_EFFORT}` — optional reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`), resolved by the caller (multi-reviewer loop: `~effort=<level>` suffix → empty). **Defaults to empty.** When set, it is appended as advisory effort to the prompt preamble *and* passed to the CLI in the form that CLI accepts — see the effort-carrier table below. Never assume `--effort` is universal. **Does not apply to `cmd`** — same reasoning as `{REVIEW_MODEL}`; still appended to `$LOCAL_PROMPT`'s advisory sentence if set (harmless — the sentence is prose, not a flag), just never turned into a flag.
 9. Resolve the enforced reviewer-permissions section below BEFORE building prompts. For public-forge input, or a reviewer without a verified write-only profile, set `REVIEWER_APPLIES=false` and use the feedback verdict contract. **A reviewer with no tool-restriction mechanism at all (`agy`, `grok`, `cursor`, `cmd` today) still runs, via the tool-free fallback** — the user explicitly requested that reviewer, so the loop's own working-tree snapshot + revert (Steps 1/3) is the enforcement, not a CLI flag that doesn't exist. `STATUS=no-verdict` without invoking is reserved for a reviewer that can't be driven headlessly/non-interactively at all — a genuinely unsupported CLI, not merely an unrestricted one. **`cmd` can never graduate out of this category** — its isolation is permanently unknowable since the invocation is an opaque, operator-supplied command, unlike `agy`/`grok`/`cursor`, which could someday ship a verified flag.
@@ -133,25 +133,32 @@ elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_CMD=(gtimeout 1800); fi
 # (built-in default), so its flag is never empty.
 MODEL_FLAG=()
 [ -n "$REVIEW_MODEL" ] && MODEL_FLAG=(--model "$REVIEW_MODEL")
-# opencode only: resolve the review model. OpenCode expects models in provider/model format
-# (e.g. opencode/muse-spark-1.3-contributor-free for OpenCode Zen Muse 1.3).
-# Precedence: bracket/config-resolved {REVIEW_MODEL} > OPENCODE_REVIEW_MODEL env > built-in default.
-# Friendly aliases (muse-1.3, zen/muse-1.3, etc.) normalize to the full OpenCode Zen model ID.
+# opencode only: resolve the review model. OpenCode expects models in provider/model format.
+# Precedence: bracket/config-resolved {REVIEW_MODEL} > OPENCODE_REVIEW_MODEL env > no slashdo override.
+# The former bundled free-tier model is intentionally not an implicit
+# default: headless provider admission is not verified, so the operator must select a
+# supported model/provider explicitly or configure one in OpenCode.
+# Friendly aliases (muse-1.3, zen/muse-1.3, etc.) still normalize when explicitly selected.
 if [ "$REVIEW_AGENT" = opencode ]; then
-  OPENCODE_RAW_MODEL="${REVIEW_MODEL:-${OPENCODE_REVIEW_MODEL:-opencode/muse-spark-1.3-contributor-free}}"
-  case "$OPENCODE_RAW_MODEL" in
-    muse-1.3|zen/muse-1.3|opencode/muse-1.3|muse-spark-1.3|zen)
-      OPENCODE_REVIEW_MODEL="opencode/muse-spark-1.3-contributor-free" ;;
-    muse-1.2|zen/muse-1.2|opencode/muse-1.2|muse-spark-1.2)
-      OPENCODE_REVIEW_MODEL="opencode/muse-spark-1.2-contributor-free" ;;
-    zen/*)
-      OPENCODE_REVIEW_MODEL="opencode/${OPENCODE_RAW_MODEL#zen/}" ;;
-    */*)
-      OPENCODE_REVIEW_MODEL="$OPENCODE_RAW_MODEL" ;;
-    *)
-      OPENCODE_REVIEW_MODEL="opencode/$OPENCODE_RAW_MODEL" ;;
-  esac
-  MODEL_FLAG=(--model "$OPENCODE_REVIEW_MODEL")
+  OPENCODE_RAW_MODEL="${REVIEW_MODEL:-${OPENCODE_REVIEW_MODEL:-}}"
+  if [ -n "$OPENCODE_RAW_MODEL" ]; then
+    case "$OPENCODE_RAW_MODEL" in
+      muse-1.3|zen/muse-1.3|opencode/muse-1.3|muse-spark-1.3|zen)
+        OPENCODE_REVIEW_MODEL="opencode/muse-spark-1.3-contributor-free" ;;
+      muse-1.2|zen/muse-1.2|opencode/muse-1.2|muse-spark-1.2)
+        OPENCODE_REVIEW_MODEL="opencode/muse-spark-1.2-contributor-free" ;;
+      zen/*)
+        OPENCODE_REVIEW_MODEL="opencode/${OPENCODE_RAW_MODEL#zen/}" ;;
+      */*)
+        OPENCODE_REVIEW_MODEL="$OPENCODE_RAW_MODEL" ;;
+      *)
+        OPENCODE_REVIEW_MODEL="opencode/$OPENCODE_RAW_MODEL" ;;
+    esac
+    MODEL_FLAG=(--model "$OPENCODE_REVIEW_MODEL")
+  else
+    OPENCODE_REVIEW_MODEL=""
+    MODEL_FLAG=()
+  fi
 fi
 # Reasoning effort carrier. Each reviewer CLI takes effort in a DIFFERENT form,
 # so build it per agent -- and default to NO flag, not to `--effort`. That
@@ -273,7 +280,7 @@ Before invoking a CLI, verify its installed help supports every isolation flag. 
 - Codex: use its OS-enforced `read-only` sandbox for feedback, with an isolated config without MCP servers, hooks, plugins or web search; if the harness cannot isolate those, use the tool-free fallback. Only explicit `--reviewer-applies` on trusted input may select `workspace-write`, with network disabled. The orchestrator runs tests, commits and pushes; never ask the reviewer to run installers or build scripts.
 - Antigravity: no per-invocation settings-file selector and no tool-allowlist flag (verified on agy 1.2.2 and 1.2.5 — its print-mode surface is `--print`/`--print-timeout`/`--model`/`--effort`/`--agent`/`--mode`/`--sandbox`/`--disable-slash-commands`/`--output-format`/`--json-schema` plus one blanket approve-everything switch this loop never uses). Do not invent `--settings`, rewrite global settings, or assume `--sandbox` is read-only (its workspace mount permits writes). **No installed version has ever exposed the isolated-settings selector** — don't treat that as blocking: run the tool-free fallback (prompt-only, per below) rather than returning `no-verdict`; the user chose this reviewer, and Steps 1/3's snapshot+revert is the real backstop against anything it writes into the git-tracked tree. This does not cover a network call or a destructive action outside the working tree — accepted residual risk for an explicitly-requested reviewer, not a gap to work around with a fake flag. On any agy print-mode invocation also pass `--disable-slash-commands`: without it a `/`-prefixed line in the reviewed diff can expand as a slash command in the reviewer session — prompt injection through review data. **If** a future version ships a selector, prefer it: write a private temporary JSON file with the profile below and pass it ONLY to that invocation; verify the effective policy (including disabled hooks/plugins) before providing review data, and remove the file afterwards. Never merge inherited grants into the profile.
 - Grok and Cursor: plan/ask by itself does not enforce the required no-network and no-write boundary, and as of this writing **neither ships a verified invocation-local tool allowlist** either. Prefer one if a future version adds it; until then, run the tool-free fallback anyway (same reasoning as Antigravity above — don't return `no-verdict` merely because no CLI flag can force it). Do not infer safety from a successful dry run or from a prompt asking for it.
-- OpenCode: run headless via `opencode run --pure` with stdin from `/dev/null` (`--pure` disables external plugins). Use the tool-free fallback unless a verified, invocation-local tool allowlist disables shell, write, web and MCP tools.
+- OpenCode: run headless via `opencode run --pure` with stdin from `/dev/null` (`--pure` disables external plugins). Use the tool-free fallback unless a verified, invocation-local tool allowlist disables shell, write, web and MCP tools. There is no bundled model fallback: require an explicit or configured supported provider/model. The formerly documented Zen free-tier model is not verified for headless admission.
 - `cmd`: isolation is unknowable by construction — an opaque, operator-authored invocation — so there is no scoped profile to attempt and never will be. Always the tool-free fallback (stdin/stdout contract, per "The `cmd` reviewer" above), always review-only.
 
 Antigravity profile for a CLI with a verified isolated-settings selector (`<review-root>` is the explicitly selected source root, not a real path to copy from another install):
@@ -309,7 +316,7 @@ Pick the invocation after the isolation preflight above resolves — either a ve
 | `grok` | Tool-free fallback: `grok -p "$LOCAL_PROMPT" ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"}` (unverified against a live install — check `grok --help` for the current print-mode flag and timeout default before relying on this; a wrong flag fails fast as `cli-error`, which is safe, just not silent) | Same read-only fallback; orchestrator applies |
 | `pi` | Pi tool-free runner below, with the complete `$LOCAL_PROMPT` | Review-only; orchestrator applies |
 | `cursor` | Tool-free fallback: `"$REVIEW_BIN" -p "$LOCAL_PROMPT" ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"}` (unverified — confirm `"$REVIEW_BIN" --help` still exposes `-p`/`--print` before relying on this) | Same read-only fallback; orchestrator applies |
-| `opencode` | Tool-free fallback (`opencode run --pure ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"} "$LOCAL_PROMPT" < /dev/null`); otherwise `STATUS=no-verdict` without invoking | Same read-only fallback; orchestrator applies |
+| `opencode` | Tool-free fallback (`opencode run --pure ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"} "$LOCAL_PROMPT" < /dev/null`) with an explicit model or the operator's configured OpenCode provider/model; slashdo supplies no model override when neither is set | Same read-only fallback; orchestrator applies |
 | `cmd` | Tool-free fallback, always. `{INVOCATION}` is **`bash -c "$REVIEWER_CMD"` and nothing else** — the prompt is piped in from *outside* the timed line (`printf '%s' "$LOCAL_PROMPT" \| ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION}`, per Step 2). Folding the `printf ... \|` into this cell instead leaves `TIMEOUT_CMD` wrapping only the `printf`, so the reviewer runs unbounded. See "The `cmd` reviewer" above for the stdin/stdout contract and trust boundary | Never selected — `cmd` always forces review-only; orchestrator applies |
 
 Claude hosts may keep the in-process billing path ONLY when their Agent API enforces the same read-only tool set. A general-purpose sub-agent with an instruction to avoid writes is insufficient; use the scoped subprocess otherwise. This rule overrides every in-process dispatch example below.
@@ -320,7 +327,7 @@ For reviewer-applies, replace instructions in `CODEX_APPLY_PROMPT` to run comman
 
 ### Loop
 
-Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` from Pre-flight step 7 (`MAX_ITERATIONS=3`, `MAX_EXPLICIT=false` when the caller passed nothing). When `MAX_ITERATIONS=0` (unlimited), the effective ceiling is the 10-iteration safety guardrail.
+Initialize `ITERATION=0`, `STATUS=""`, `REVIEW_DIAGNOSTIC=""`, `REVIEW_REMEDY=""`, and `REPORT_LOG_FILE=""`, plus `MAX_ITERATIONS` / `MAX_EXPLICIT` from Pre-flight step 7 (`MAX_ITERATIONS=3`, `MAX_EXPLICIT=false` when the caller passed nothing). When `MAX_ITERATIONS=0` (unlimited), the effective ceiling is the 10-iteration safety guardrail.
 
 1. **Capture baseline**: `LOOP_START_SHA=$(git rev-parse HEAD)`
 
@@ -424,7 +431,15 @@ Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` fro
      ```
 
    - `TIMEOUT_CMD` was resolved in pre-flight (`(timeout 1800)`, `(gtimeout 1800)`, or empty on stock macOS — a supported configuration, never a reviewer failure). Expand it exactly as `${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"}`: the bare form aborts under bash 3.2 + `set -u` before the reviewer starts and surfaces as a false `cli-error` (see `~/.claude/lib/empty-array-expansion.md`). Same rule for `MODEL_FLAG`.
-   - If `EXIT_CODE != 0` and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of **`$ERR_FILE`** (fall back to `$LOG_FILE` if it is empty), surface both paths, and exit the loop. A `124` exit (from `timeout`/`gtimeout`) or an empty log after the poll loop gave up means the review ran past 30 minutes — report `cli-error` with the log paths, never `clean`. **For `cmd`, an exit of `127` (command not found) or `126` (not executable) from `bash -c` is the missing-binary case the fixed slugs catch in pre-flight Step 3 — record `STATUS=skipped`, not `cli-error`**: a reviewer that never launched left the tree untouched, so it must not trip the wrapper's hard-error short-circuit (which would skip every remaining reviewer and mark the aggregate `dirty`, un-excused by `~opt`); every other non-zero exit is `cli-error` as above.
+   - **Classify OpenCode provider-admission failures before the generic non-zero branch.** A synthetic provider response such as `HTTP 403 / FreeTierError` is an unavailable reviewer, never a clean verdict and never a hard error that suppresses the next configured reviewer. Inspect only for these known markers; do not print, parse into diagnostics, or otherwise expose the provider's raw stderr/stdout, response headers, tokens, or local paths. Set a flag here, but defer the status until the review-only tree-restoration check below so a provider failure cannot bypass cleanup if the CLI changed anything:
+     ```bash
+     OPENCODE_ADMISSION_DENIED=false
+     if [ "$EXIT_CODE" -ne 0 ] && [ "$REVIEW_AGENT" = opencode ] && grep -Eiq 'FreeTierError|HTTP[[:space:]]*403|403[[:space:]]+Forbidden|free tier.{0,80}(admission|used|OpenCode)|provider.{0,40}(admission|denied)' "$ERR_FILE" "$LOG_FILE" 2>/dev/null; then
+       OPENCODE_ADMISSION_DENIED=true
+     fi
+     ```
+     This marker is consumed after review-only restoration below. Never retry by changing the pinned model, removing `--pure`, granting tools, or spoofing a client identity.
+   - If `EXIT_CODE != 0`, `OPENCODE_ADMISSION_DENIED != true`, and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of **`$ERR_FILE`** (fall back to `$LOG_FILE` if it is empty), surface both paths, and exit the loop. A `124` exit (from `timeout`/`gtimeout`) or an empty log after the poll loop gave up means the review ran past 30 minutes — report `cli-error` with the log paths, never `clean`. **For `cmd`, an exit of `127` (command not found) or `126` (not executable) from `bash -c` is the missing-binary case the fixed slugs catch in pre-flight Step 3 — record `STATUS=skipped`, not `cli-error`**: a reviewer that never launched left the tree untouched, so it must not trip the wrapper's hard-error short-circuit (which would skip every remaining reviewer and mark the aggregate `dirty`, un-excused by `~opt`); every other non-zero exit is `cli-error` as above. The provider-admission marker is the one exception: consume it after the restoration check below instead of this generic branch.
 
 3. **Detect changes and apply fixes** (logic depends on `{REVIEWER_APPLIES}`):
 
@@ -467,9 +482,20 @@ Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` fro
      Re-run the five comparisons; if the tree is not back at baseline, **stop the loop** with `STATUS=cli-error` and a loud warning naming the log — never continue reviewing on top of a tree you failed to restore.
 
      Then print `{REVIEW_AGENT} modified the working tree during a review-only pass — reverted; findings kept` and **continue with the findings**. This deliberately diverges from `enhance-loop.md`, which discards a contract-violating pass's output: a reviewer's product is its findings list, which stays useful even if it also (wrongly) tried to apply them, and the orchestrator re-derives every fix in this session regardless. Gitignored files stay outside this guarantee (hashing `node_modules/` is unbounded), as in `enhance-loop.md`.
+   - **If `OPENCODE_ADMISSION_DENIED=true` after the restoration check**, emit only the fixed, sanitized diagnostic and return `STATUS=no-verdict`; never print the raw provider output or its path:
+     ```bash
+     REVIEW_DIAGNOSTIC="OpenCode reviewer unavailable: provider admission denied (HTTP 403 / FreeTierError)."
+     REVIEW_REMEDY="Select a supported reviewer/model/provider explicitly; keep --pure and tool isolation unchanged."
+     REPORT_LOG_FILE="(suppressed: raw provider output is not user-facing)"
+     printf '%s\n' "$REVIEW_DIAGNOSTIC" >&2
+     printf 'Remedy: %s\n' "$REVIEW_REMEDY" >&2
+     STATUS=no-verdict
+     exit 0
+     ```
+     A required entry remains unsatisfied, an optional `~opt` entry is explicitly inconclusive-but-non-blocking, and series dispatch continues to the next reviewer. This path is never `clean`.
    - Read `$LOG_FILE` and extract the findings. **For `claude`, `agy`, `grok`, `pi`, `cursor`, `opencode`, and `cmd` in review-only mode, parse a verdict before considering the findings:** after stripping blank lines, the result must be either exactly `NO FINDINGS`, or only one or more complete `FINDING <N>:` blocks. Every block must contain non-empty `file`, numeric `line`, `severity` (`CRITICAL`, `IMPROVEMENT`, or `NIT`), `description`, and `fix` fields. Treat a missing, malformed, or contradictory result (for example, a prose response, an incomplete block, or both `NO FINDINGS` and a finding) as `STATUS=no-verdict`, print the log path, and exit the loop. **Never infer a clean result from prose or an empty log.**
 
-     `no-verdict` is **inconclusive, not a hard error** — the reviewer ran and the tree is fine; it just didn't answer in the contract's format. It must not be `cli-error`: a hard error fires the wrapper's short-circuit (skipping every remaining reviewer over one chatty CLI), and `~opt` promises to excuse `no-verdict` from the merge gate while never excusing a hard error. A required reviewer's `no-verdict` still blocks the merge as inconclusive; an `~opt` one doesn't.
+     `no-verdict` is **inconclusive, not a hard error** — the reviewer ran and the tree is fine; it either didn't answer in the contract's format or was denied provider admission. It must not be `cli-error`: a hard error fires the wrapper's short-circuit (skipping every remaining reviewer over one chatty CLI), and `~opt` promises to excuse `no-verdict` from the merge gate while never excusing a hard error. A required reviewer's `no-verdict` still blocks the merge as inconclusive; an `~opt` one doesn't.
    - For `claude`, `agy`, `grok`, `pi`, `cursor`, `opencode`, and `cmd`, set `STATUS=clean` only for the exact `NO FINDINGS` sentinel; otherwise hand the validated finding blocks to the orchestrator.
    - For `codex`, retain its native severity-tagged output handling: a native clean verdict (`NO FINDINGS` or `no issues`) is `STATUS=clean`; otherwise hand its actionable findings to the orchestrator. This Codex-specific fallback must not be used for the structured reviewers above.
    - Otherwise, the orchestrator applies each fix in this session:
@@ -526,7 +552,9 @@ Status: {STATUS}    # clean / capped / no-verdict / guardrail / cli-error / brok
 Iterations: {ITERATION}/{MAX_ITERATIONS}    # denominator renders as ∞ when MAX_ITERATIONS=0; `capped` means this budget was spent, `guardrail` means a built-in ceiling cut the loop off
 Commits added: {N}
 Files modified: {file list}
-Log: {LOG_FILE path}
+Diagnostic: {REVIEW_DIAGNOSTIC or none}
+Remedy: {REVIEW_REMEDY or none}
+Log: {REPORT_LOG_FILE or LOG_FILE path; suppress the raw provider path when the admission branch set REPORT_LOG_FILE}
 ```
 
 If `STATUS=clean` after the first iteration, the PR is ready for the merge gate (release flow) or hand-off back to the user (PR flow). `capped` is likewise merge-eligible. For any other status (including `guardrail` and `skipped`), the calling command decides whether to proceed, re-run, or stop — never auto-merge on a non-clean local-agent status, and never silently substitute `copilot` for a reviewer the user requested.

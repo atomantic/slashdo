@@ -635,14 +635,17 @@ describe('review-loop parse contracts', () => {
   it('accepts opencode (and zen aliases) as a local-agent reviewer and probes the OpenCode CLI', () => {
     // OpenCode is a model-taking local reviewer. The slug is `opencode`
     // (aliases `zen`, `opencode-zen`). The binary is `opencode`.
-    // Default model is opencode/muse-spark-1.3-contributor-free, with friendly
-    // aliases muse-1.3, zen/muse-1.3, etc. Reasoning effort maps to --variant.
+    // OpenCode has no slashdo-bundled model default because headless admission
+    // for the former free-tier default is not verified. Explicit/configured
+    // models still normalize friendly aliases, and effort maps to --variant.
     const loop = readLib('local-agent-review-loop.md');
     const wrapper = readLib('multi-reviewer-loop.md');
 
     assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode\|cmd\[<invocation>\]`/);
     assert.match(loop, /`zen` and `opencode-zen` normalize to `opencode`/);
     assert.match(loop, /`opencode` → bin `opencode`/);
+    assert.match(loop, /no\s+slashdo override/);
+    assert.match(loop, /headless provider admission is not verified/);
     assert.match(loop, /opencode\/muse-spark-1\.3-contributor-free/);
     assert.match(loop, /\| `opencode` \| `--variant <level>`/);
     assert.match(loop, /opencode\)\s+EFFORT_FLAG=\(--variant "\$REVIEW_EFFORT"\) ;;/);
@@ -650,14 +653,17 @@ describe('review-loop parse contracts', () => {
     assert.match(loop, /< \/dev\/null/);
 
     // Config and docs must advertise opencode review-models and effort grammar.
-    assert.match(readCommand('config.md'), /opencode=muse-1\.3/);
-    assert.match(_read('README.md'), /opencode\[muse-1\.3\]/);
-    assert.match(_read('README.md'), /--review-models .*opencode=muse-1\.3/);
+    assert.match(readCommand('config.md'), /opencode=provider\/model/);
+    assert.match(_read('README.md'), /opencode\[provider\/model\]/);
+    assert.match(_read('README.md'), /--review-models .*opencode=provider\/model/);
+    assert.doesNotMatch(_read('README.md'), /opencode(?:=|\[)muse-1\.3/);
 
     assert.match(wrapper, /`opencode` \(aliases `zen` \/ `opencode-zen`\)/);
     assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode`/);
     assert.match(wrapper, /Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot/);
     assert.match(wrapper, /`zen`\/`opencode-zen` both probe the `opencode` binary/);
+    assert.match(wrapper, /In \*\*parallel mode\*\* the same rules apply[\s\S]*no-verdict/);
+    assert.match(wrapper, /non-optional\*\* reviewer's review was inconclusive[\s\S]*no-verdict/);
 
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'rpr.md', 'config.md']) {
       const body = readCommand(name);
@@ -667,6 +673,24 @@ describe('review-loop parse contracts', () => {
         `${name} must accept the opencode reviewer slug`,
       );
     }
+  });
+
+  it('maps OpenCode provider admission denial to sanitized no-verdict and preserves reviewer aggregation', () => {
+    const loop = readLib('local-agent-review-loop.md');
+    const wrapper = readLib('multi-reviewer-loop.md');
+    const swarm = readLib('next-swarm.md');
+
+    assert.match(loop, /HTTP 403 \/ FreeTierError/);
+    assert.match(loop, /provider admission denied/);
+    assert.match(loop, /STATUS=no-verdict/);
+    assert.match(loop, /Select a supported reviewer\/model\/provider explicitly/);
+    assert.match(loop, /raw provider output is not user-facing/);
+    assert.match(loop, /Never retry by changing the pinned model, removing `--pure`, granting tools/);
+    assert.match(wrapper, /OpenCode's sanitized provider-admission diagnostic is one of these `no-verdict` outcomes/);
+    assert.match(wrapper, /optionality only removes its merge-blocking effect/);
+    assert.match(swarm, /synthetic admission response such as `HTTP 403 \/ FreeTierError` is specifically `unavailable`/);
+    assert.match(swarm, /never classify it as a clean verdict/);
+    assert.doesNotMatch(loop, /FreeTierError[\s\S]{0,240}STATUS=clean/);
   });
 
   it('accepts cmd[<invocation>] as an escape-hatch reviewer and enforces its contract', () => {
