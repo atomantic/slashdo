@@ -1,12 +1,7 @@
 ## Shared Pipeline Inputs
 
-Phases 4, 4b, 5, 5d, 6, and 7 below are the **shared `better-*` pipeline** — the
-platform-agnostic mechanics this command runs verbatim with `/do:better-swift`
-via `lib/better-*.md`. Everything that differs between the two commands arrives
-through the inputs below, so a change to the pipeline lands in both by
-construction. The substitution rules for them all (empty values drop their line;
-indented values keep their indent) are in `~/.claude/lib/better-verification.md`.
-Resolve these before Phase 4:
+Phases 4–7 are shared with `/do:better-swift`; resolve these inputs before Phase 4
+(substitution rules are in `~/.claude/lib/better-verification.md`):
 
 - `{BRANCH_PREFIX}` = `better` (staging branch `better/{DATE}`, category branches `better/{CATEGORY_SLUG}`)
 - `{PIPELINE_LABEL}` = `better audit`
@@ -42,20 +37,16 @@ The preferences Phase 4b reviews the remediation diff under:
 
 ### Version Bump Procedure
 
-The stack-specific half of Phase 5b — run on `better/{FIRST_CATEGORY}` once the
-aggregate SemVer `{LEVEL}` has been determined. Phase 5b already gates this
-section on `HAS_VERSION_BUMP=true`, so it never runs for a project with no
-version convention of its own.
+The stack-specific half of Phase 5b, run on `better/{FIRST_CATEGORY}` with the
+aggregate SemVer `{LEVEL}`.
 
 Bump `{LEVEL}` for the ecosystem `VERSION_BUMP_CMD` (Phase 0b) named — its
 native version tool (e.g. `npm version {LEVEL} --no-git-tag-version`) when one
 is installed, otherwise a direct edit of the manifest's version field to
 `{NEW_VERSION}` (current version bumped by `{LEVEL}` per SemVer), regenerating
 any lockfile the tool would have touched. Stage only the files `git
-diff --name-only` reports the bump actually changed, never a hardcoded path —
-a Node project without `package-lock.json` has nothing there to fail on, since
-an absent file simply never appears in that diff. Commit as `chore: bump
-version to {NEW_VERSION}`.
+diff --name-only` reports the bump actually changed, never a hardcoded path.
+Commit as `chore: bump version to {NEW_VERSION}`.
 
 ### Final Summary Table
 

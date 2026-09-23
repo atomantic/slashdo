@@ -1,11 +1,5 @@
 ## Better pipeline — Verification & Internal Code Review (Phases 4 / 4b)
 
-The shared build-and-review gate every `better-*` audit pipeline runs after its
-remediation agents finish and before it creates any PR. `/do:better` and
-`/do:better-swift` include this file verbatim; the differences between them are
-carried entirely by the inputs below, so a change to the gate applies to both by
-construction.
-
 ### Inputs
 
 The calling command must have resolved these before reaching Phase 4:
@@ -13,9 +7,7 @@ The calling command must have resolved these before reaching Phase 4:
 `{VERIFY_SCOPE_NOTE}`, `{VERIFY_FAILURE_SCOPE}`, `{VERIFY_FAILURE_COMMIT_SLOT}`,
 `{VERIFY_STATUS_CLAUSE}`, `{REVIEW_CHECKLIST}`, `{SIMPLIFY_ONLY}`, plus the
 pipeline's own `{WORKTREE_DIR}`, `{REPO_DIR}`, `{CURRENT_BRANCH}`,
-`{DEFAULT_BRANCH}`, `{DATE}`, `{BUILD_CMD}`, and `{TEST_CMD}`. What each one
-means and where its value comes from is documented once, in CONTRIBUTING.md's
-"Shared `better-*` pipeline placeholders" — not re-explained per partial.
+`{DEFAULT_BRANCH}`, `{DATE}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
 
 **Substitution rules for every input above, and for the other `better-*`
 partials.**
@@ -31,78 +23,39 @@ partials.**
 
 ## Phase 4: Verification
 
-After all agents complete:
+After all remediation agents return, `{BUILD_CMD}` and `{TEST_CMD}` must pass in `{WORKTREE_DIR}`{VERIFY_SCOPE_SUFFIX} before Phase 4b.
+{VERIFY_SCOPE_NOTE}
 
-1. Run the full build in the worktree{VERIFY_SCOPE_SUFFIX}:
-   ```bash
-   cd {WORKTREE_DIR} && {BUILD_CMD}
-   ```
-   {VERIFY_SCOPE_NOTE}
+On a failure{VERIFY_FAILURE_SCOPE}, find the commits that caused it and either fix it in a new commit (`fix: resolve {VERIFY_FAILURE_COMMIT_SLOT}build/test failure from {category} changes`) or revert them (`git -C {WORKTREE_DIR} revert <sha>`) and record the findings as skipped. **When `SIMPLIFY_ONLY=true`**, a failing test is a regression by definition — the run promised identical behavior. Fix the refactor or revert it; do not edit the test to match the new behavior.
 
-2. Run tests in the worktree{VERIFY_SCOPE_SUFFIX}:
-   ```bash
-   cd {WORKTREE_DIR} && {TEST_CMD}
-   ```
-3. If build or tests fail{VERIFY_FAILURE_SCOPE}:
-   - Identify which commits caused the failure via `git bisect` or manual review
-   - Attempt to fix in a new commit: `fix: resolve {VERIFY_FAILURE_COMMIT_SLOT}build/test failure from {category} changes`
-   - If unfixable, revert the problematic commit(s): `git -C {WORKTREE_DIR} revert <sha>` and note which findings were skipped
-   - **When `SIMPLIFY_ONLY=true`**, a failing test is a regression by definition — the run promised identical behavior. Fix the refactor or revert it; do not edit the test to match the new behavior
 <!-- if:teams -->
-4. Shut down all agents via `SendMessage` with `type: "shutdown_request"`
-5. Clean up team via `TeamDelete`
-<!-- else -->
-4. No teardown needed — the parallel sub-agents from Phase 3c have already returned.
+Then shut down all agents via `SendMessage` with `type: "shutdown_request"` and clean up the team via `TeamDelete`.
 <!-- /if:teams -->
 
 ## Phase 4b: Internal Code Review
 
-Before creating PRs, run a deep code review on all remediation changes to catch issues that automated agents may have introduced.
+Before any PR exists, review the whole remediation diff (`git diff {DEFAULT_BRANCH}...HEAD` in `{WORKTREE_DIR}`) against the **{REVIEW_CHECKLIST}** section of this command.
 
-1. Generate the diff of all changes in the worktree:
-   ```bash
-   cd {WORKTREE_DIR} && git diff {DEFAULT_BRANCH}...HEAD
-   ```
-2. Review the diff against the **{REVIEW_CHECKLIST}** section of this command.
+**When `SIMPLIFY_ONLY=true`**, carry one extra question through this same pass: *does any hunk change what this program does?* — different return value, different side effect, different error type or message, changed validation, changed output format, changed public API without a re-export. Every such hunk is reverted, not fixed. Then dispose of the finding behind it: if the improvement is still worth making in a run that's allowed to change behavior, **defer** it (an open PLAN.md item / tracker issue noting it needs behavior review); if the transformation cannot be done at all without changing behavior it must not change, record it as a rejection per gate 4 of the run's **Finding gates** section.<!-- Not a link: #finding-gates is an anchor in /do:better only, and this partial is shared. -->
 
-   **When `SIMPLIFY_ONLY=true`**, carry one extra question through this same pass: *does any hunk change what this program does?* — different return value, different side effect, different error type or message, changed validation, changed output format, changed public API without a re-export. Every such hunk is reverted, not fixed. Then dispose of the finding behind it: if the improvement is still worth making in a run that's allowed to change behavior, **defer** it (an open PLAN.md item / tracker issue noting it needs behavior review); if the transformation cannot be done at all without changing behavior it must not change, record it as a rejection per gate 4 of the run's **Finding gates** section.<!-- Not a link: #finding-gates is an anchor in /do:better only, and this partial is shared. -->
-3. For each issue found:
-   - Fix in a new commit: `fix: {description of review finding}`
-   - Re-run `{BUILD_CMD}` and `{TEST_CMD}`{VERIFY_SCOPE_SUFFIX} to verify
-4. **Default mode**: Print a brief summary of findings and fixes, then proceed to PR creation automatically.
-   **Interactive mode (`--interactive`)**: Present a summary to the user via `AskUserQuestion`:
-   ```
-   AskUserQuestion([{
-     question: "Code review complete. {N} issues found and fixed. {list}. {VERIFY_STATUS_CLAUSE}Proceed to PR creation?",
-     options: [
-       { label: "Proceed", description: "Create per-category PRs" },
-       { label: "Commit directly", description: "Merge worktree changes into {CURRENT_BRANCH} — no PRs, no review loops" },
-       { label: "Show diff", description: "Show the full diff for manual review before proceeding" },
-       { label: "Abort", description: "Stop here — I'll review manually" }
-     ]
-   }])
-   ```
-5. (Interactive only) If "Show diff" selected, print the diff and re-ask. If "Abort", stop and print the worktree path.
-6. If "Commit directly" selected:
-   - All remediation and review fixes are already committed incrementally in the worktree branch `{BRANCH_PREFIX}/{DATE}`. If any uncommitted changes remain, stage and commit them now:
-     ```bash
-     cd {WORKTREE_DIR}
-     git diff --quiet && git diff --cached --quiet || {
-       git add <list of remaining changed files>
-       git commit -m "fix: {PIPELINE_LABEL} remediation — remaining changes"
-     }
-     ```
-   - Return to the main repo checkout, merge the worktree branch, and clean up on success:
-     ```bash
-     cd {REPO_DIR}
-     git checkout {CURRENT_BRANCH}
-     if git merge {BRANCH_PREFIX}/{DATE}; then
-       git worktree remove {WORKTREE_DIR}
-       git branch -D {BRANCH_PREFIX}/{DATE}
-     else
-       echo "Merge conflict — resolve in {REPO_DIR}, then run:"
-       echo "  git worktree remove {WORKTREE_DIR}"
-       echo "  git branch -D {BRANCH_PREFIX}/{DATE}"
-     fi
-     ```
-   - Restore stash if needed (`git stash pop`), update PLAN.md, print final summary, then **stop** — this completes the workflow (Phases 5, 6, and 7 are skipped entirely since no PRs or category branches were created)
+Fix each review finding in its own `fix: {description of review finding}` commit, with `{BUILD_CMD}` and `{TEST_CMD}` passing again{VERIFY_SCOPE_SUFFIX} afterward.
+
+**Default mode**: print a brief summary of findings and fixes, then proceed to PR creation.
+**Interactive mode (`--interactive`)**:
+```
+AskUserQuestion([{
+  question: "Code review complete. {N} issues found and fixed. {list}. {VERIFY_STATUS_CLAUSE}Proceed to PR creation?",
+  options: [
+    { label: "Proceed", description: "Create per-category PRs" },
+    { label: "Commit directly", description: "Merge worktree changes into {CURRENT_BRANCH} — no PRs, no review loops" },
+    { label: "Show diff", description: "Show the full diff for manual review before proceeding" },
+    { label: "Abort", description: "Stop here — I'll review manually" }
+  ]
+}])
+```
+"Show diff" prints the diff and re-asks. "Abort" stops and prints the worktree path.
+
+**"Commit directly"** replaces Phases 5–7 entirely (no category branches or PRs exist). On exit:
+- Nothing is left uncommitted on `{BRANCH_PREFIX}/{DATE}` (remaining changes go in as `fix: {PIPELINE_LABEL} remediation — remaining changes`, specific files staged).
+- `{BRANCH_PREFIX}/{DATE}` is merged into `{CURRENT_BRANCH}` in `{REPO_DIR}`. Only after a clean merge are `{WORKTREE_DIR}` and the staging branch removed; on a merge conflict both are kept and the user gets the resolve-then-remove commands.
+- The stash is restored, PLAN.md is updated, and the final summary is printed. Stop there.

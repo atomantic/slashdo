@@ -96,9 +96,28 @@ describe('better progressive context', () => {
     const issueMode = read('lib/better-issue-mode.md');
     assert.match(issueMode, /targeted validation of `UNCERTAIN` findings/);
     assert.match(issueMode, /never auto-remediate them/);
-    assert.match(read('lib/remediation-agent-template.md'), /Useful structural\n  refactors are intentionally behavior-preserving/);
+    const template = read('lib/remediation-agent-template.md');
+    assert.match(template, /Confirm each finding against the code; skip false positives with evidence\./);
+    assert.match(template, /Structural refactors are intentionally behavior-preserving; honor the caller's\nsimplify contract/);
     assert.match(read('lib/better-simplify.md'), /bug encountered incidentally is recorded as deferred/);
     assert.match(read('lib/better-pr-and-ci.md'), /`--no-merge`[\s\S]{0,160}Phase 7 safe finalization/);
+  });
+
+  it('states the Phase 4c–6 gates once, as contracts rather than transcripts', () => {
+    // #323: the gates got lost among git/gh command transcripts and were repeated
+    // across better.md and the partials. Each now appears once, in one sentence.
+    const entry = read('commands/do/better.md');
+    const prAndCi = read('lib/better-pr-and-ci.md');
+    const tests = read('lib/better-test-enhancement.md');
+    assert.match(prAndCi, /\*\*At most 3 CI fix attempts per PR\.\*\*/);
+    assert.match(prAndCi, /every expected check \*\*for its current pushed HEAD\*\* has passed/);
+    assert.doesNotMatch(entry, /three attempts|3 (?:CI )?(?:fix )?attempts/);
+    assert.match(tests, /Every new test must fail against a temporarily broken implementation/);
+    assert.match(tests, /the break is never committed/);
+    assert.doesNotMatch(tests, /Rules for writing good tests|git restore/);
+    assert.doesNotMatch(prAndCi, /Poll every 30 seconds|git checkout -b/);
+    // One run-state list, not a summary in better.md plus a justified checklist.
+    assert.doesNotMatch(entry, /^Preserve phase, complete file ownership/m);
   });
 
   it('keeps open PR branches and current-head gates in the shared workflow', () => {

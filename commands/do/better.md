@@ -50,11 +50,11 @@ Only when `ISSUE_MODE=true` (resolved by `--issues` in step 0's options), read t
 
 !read lib/better-test-enhancement.md
 
-5. Publish category PRs and verify CI. `--no-merge` stops publication after PR creation; GitLab stops after MR creation. Both proceed to safe finalization to restore the stash and retain open-PR artifacts. Missing expected checks, failed pushes, and failing checks cannot authorize review or merge.
+5. Publish category PRs and verify CI. `--no-merge` stops publication after PR creation; GitLab stops after MR creation. Both proceed to safe finalization to restore the stash and retain open-PR artifacts.
 
 !read lib/better-pr-and-ci.md
 
-6. Only on GitHub, with reviewers configured and without `--no-merge`, run each PR's selected review loop. No reviewer means leave PRs open. Required inconclusive/dirty review blocks merge; explicit optional/stop/cap semantics come from the shared wrapper. Recheck current head, CI, and review status after any new commits or rebase.
+6. Only on GitHub, with reviewers configured and without `--no-merge`, run each PR's selected review loop. No reviewer means leave PRs open. Merge only what the Phase 6 merge gate permits.
 
 !read lib/better-review-loop.md
 
@@ -64,8 +64,8 @@ Only when `ISSUE_MODE=true` (resolved by `--issues` in step 0's options), read t
 
 ## Run state and recovery
 
-Preserve phase, complete file ownership, findings, flags/defaults, repository/worktree paths, model tiers, build/test commands, spool path, PR/head/review/CI outcomes, and created branches across compaction. Before compaction read the full state checklist:
+Before compaction, read the list of run state to preserve:
 
 !read lib/better-state.md
 
-Agent failure leaves a reported coverage gap. Validate uncertain findings before fixing. Try a build/CI fix only within scope; cap CI remediation at three attempts per PR and leave blocked PRs open. Do not delete or overwrite a pre-existing worktree; resume only when its ownership and matching task are proven, otherwise choose a unique run path. Preserve unrelated user changes and stop the affected phase with a resumable report if recovery is unsafe. Interactive choices apply only when `--interactive` was explicitly requested and a human is available.
+Agent failure leaves a reported coverage gap. Validate uncertain findings before fixing. Try a build/CI fix only within scope. Do not delete or overwrite a pre-existing worktree; resume only when its ownership and matching task are proven, otherwise choose a unique run path. Preserve unrelated user changes and stop the affected phase with a resumable report if recovery is unsafe. Interactive choices apply only when `--interactive` was explicitly requested and a human is available.
