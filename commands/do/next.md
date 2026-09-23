@@ -614,15 +614,23 @@ From the **main repo** (not the worktree), as a single Bash invocation, re-subst
 SLUG="<picked-slug>" && \
 WORKTREE="../next-${SLUG}" && \
 # Recompute the default branch (shell vars don't survive across snippets) and sync
-# THAT branch explicitly — not "whatever HEAD happens to be". /do:next may have been
-# launched from a feature branch in the main repo, in which case a bare `git pull`
-# would update the wrong branch and leave the merged default stale.
+# THAT branch's local ref explicitly — not "whatever HEAD happens to be" — WITHOUT
+# switching the main repo's checkout. /do:next may have been launched from a feature
+# branch in the main repo, and this phase never touches that checkout (see the
+# Phase 2 box): if the default branch is already checked out, fast-forward
+# it in place; otherwise update its ref via a plain fetch refspec, leaving whatever
+# branch the user had open untouched.
 DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)" && \
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(git remote show origin | sed -n 's/.*HEAD branch: //p')}" && \
 git worktree remove "${WORKTREE}" && \
-git fetch origin "${DEFAULT_BRANCH}" && \
-git checkout "${DEFAULT_BRANCH}" && \
-git pull --rebase --autostash && \
+if [ "$(git branch --show-current)" = "${DEFAULT_BRANCH}" ]; then
+  git pull --ff-only --autostash
+else
+  git fetch origin "${DEFAULT_BRANCH}:${DEFAULT_BRANCH}" || {
+    echo "note: local ${DEFAULT_BRANCH} could not fast-forward (or is checked out elsewhere) — leaving it alone"
+    git fetch origin "${DEFAULT_BRANCH}"
+  }
+fi && \
 git branch -d "next/${SLUG}" && \
 if ! git push origin --delete "next/${SLUG}"; then
   # A branch that is already gone is success; anything else is not — a surviving
@@ -637,7 +645,7 @@ if ! git push origin --delete "next/${SLUG}"; then
 fi
 ```
 
-(Order matters: remove the worktree, **sync the default branch, delete the local claim branch, and only THEN touch the remote** — every step is `&&`-gated, so a failure never removes the claim branch while the default branch is stale, and **the remote-delete is the LAST link**, so a failed/partial cleanup that may still hold unmerged work never retracts the remote claim. Since the merge did **not** pass `--delete-branch`, this trailing delete is the real remote deletion, and a failure must be **distinguished, not swallowed**: a blanket `|| true` would report a clean sweep while the claim branch survives on the remote, where Phase 1's in-flight scan reads the item as claimed on every machine, forever. The `git ls-remote` fallback treats an already-gone branch (GitLab's `--remove-source-branch`, or auto-deleted merged heads) as success and anything else as a failure of the chain.)
+(Order matters: remove the worktree, **sync the default branch's ref without switching the checkout, delete the local claim branch, and only THEN touch the remote** — every step is `&&`-gated, so a failure never removes the claim branch while the default branch ref is stale, and **the remote-delete is the LAST link**, so a failed/partial cleanup that may still hold unmerged work never retracts the remote claim. This phase never runs `git checkout` in the main repo: the sync step above either fast-forwards `${DEFAULT_BRANCH}` in place when it's already the checked-out branch, or updates its ref via a plain `git fetch` refspec when it isn't — leaving whatever branch the user had open untouched, and leaving a non-fast-forwardable ref alone (noted, not forced) rather than failing the whole cleanup. `git branch -d` needs none of this to be correct: it checks the claim branch against its own tracked upstream, not against `${DEFAULT_BRANCH}`, so a stale or skipped sync never blocks the delete. Since the merge did **not** pass `--delete-branch`, this trailing delete is the real remote deletion, and a failure must be **distinguished, not swallowed**: a blanket `|| true` would report a clean sweep while the claim branch survives on the remote, where Phase 1's in-flight scan reads the item as claimed on every machine, forever. The `git ls-remote` fallback treats an already-gone branch (GitLab's `--remove-source-branch`, or auto-deleted merged heads) as success and anything else as a failure of the chain.)
 
 **Abandoned a claim (Phase 3 skip / Phase 3.5 reject — no PR, work discarded)?** The branch is unmerged, so `git branch -d` won't remove it. Retract the claim explicitly (force-delete local, delete remote) and **verify the remote retract landed** — Phase 2 published this branch, and a silently failed delete leaves a phantom claim that Phase 1's in-flight scan honours forever, with no local artifact to hint at it. From the main repo:
 

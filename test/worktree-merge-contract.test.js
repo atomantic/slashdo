@@ -49,6 +49,29 @@ describe('worktree-safe merge contracts', () => {
     assert.doesNotMatch(body, /remote no-op after --delete-branch merge/);
   });
 
+  it('syncs Phase 7\'s default branch without switching the main repo\'s checkout', () => {
+    // Phase 7 runs from the MAIN repo, which may have a different branch (or a
+    // dirty tree) checked out than the default branch — an unconditional
+    // `git checkout "${DEFAULT_BRANCH}"` there switches the user's branch out from
+    // under them and, on a dirty tree, aborts outright, breaking the `&&` chain
+    // before the claim branch is ever deleted.
+    const body = readCommand('next.md');
+    assert.doesNotMatch(
+      body,
+      /git fetch origin "\$\{DEFAULT_BRANCH\}" && \\\ngit checkout "\$\{DEFAULT_BRANCH\}" && \\\ngit pull --rebase --autostash/,
+    );
+    // The replacement syncs the ref in place instead of switching to it: a
+    // fast-forward pull when the default branch is already checked out, or a
+    // plain fetch refspec update when it isn't.
+    assert.match(
+      body,
+      /if \[ "\$\(git branch --show-current\)" = "\$\{DEFAULT_BRANCH\}" \]; then\n\s+git pull --ff-only --autostash\nelse\n\s+git fetch origin "\$\{DEFAULT_BRANCH\}:\$\{DEFAULT_BRANCH\}" \|\| \{/,
+    );
+    // `git branch -d` still runs right after — the sync change must not have
+    // disturbed the pinned adjacency the prior test locks in.
+    assert.match(body, /fi && \\\ngit branch -d "next\/\$\{SLUG\}" && \\/);
+  });
+
   it('gates the swarm remote delete on a read-back MERGED state', () => {
     // An ungated delete retracts the head branch of a PR that is still open —
     // the merge failed, or a merge queue accepted it without merging yet — and
