@@ -1,6 +1,6 @@
 ---
 description: SwiftUI DevSecOps audit, remediation, test enhancement, per-category PRs, CI verification, and an optional multi-reviewer review loop with worktree isolation — optimized for multi-platform Swift/SwiftUI apps (iOS, macOS, watchOS, tvOS, visionOS)
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues|--no-issues] [--issues-label <name>] [path filter or focus areas]"
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues-label <name>] [path filter or focus areas]"
 ---
 
 # Better Swift — Unified DevSecOps Pipeline for SwiftUI Apps
@@ -13,7 +13,7 @@ Run the full DevSecOps lifecycle for Swift/SwiftUI multi-platform projects: audi
 
 Parse `$ARGUMENTS` for:
 - **`--interactive`**: pause at each decision point for user approval
-- **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan) — no worktree, no code changes, no PRs. When `ISSUE_MODE` is also true, this is the "audit and file the work, don't touch my code" combination: every surviving finding is filed as a labelled tracker issue before the run exits, not just the deferred subset (see the Phase 2 gate). `--scan-only` stops the pipeline; `--issues` only chooses where findings are recorded
+- **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan) — no worktree, no code changes, no PRs. This is the "audit and file the work, don't touch my code" combination: every surviving finding is filed as a labelled tracker issue before the run exits, not just the deferred subset (see the Phase 2 gate)
 - **`--no-merge`**: run through PR creation (Phase 5), skip the review loop and merge
 - **`--review-with <agent[,agent,...]>`**: reviewer(s) for the Phase 6 review loop on each PR. Accepted slugs: `codex`, `agy` (aliases `gemini` / `antigravity` — the Antigravity CLI's `agy` binary), `claude`, `grok`, `pi`, `cursor` (alias `cursor-agent` — the Cursor Agent CLI), `opencode` (aliases `zen` / `opencode-zen` — the OpenCode CLI), `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins one, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`; `codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode` likewise accept `<agent>[<model>]` — e.g. `codex[o3]`, `claude[claude-opus-4-8]`, `grok[grok-code-fast-1]`, `opencode[provider/model]` — stripped into a per-entry `REVIEW_MODEL`; empty uses each other CLI's default, while OpenCode receives no slashdo model override, so select an explicit or configured supported provider/model; `copilot` and `@<login>` take no model bracket), `copilot` (**legacy** — GitHub's cloud Copilot review; supported when named, never selected implicitly), `cmd[<invocation>]` — an escape hatch for any harness not in this list (operator-authored shell command, read prompt on stdin, print the same verdict contract; always review-only), or an arbitrary GitHub login `@<login>` — any GitHub user or App/bot (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`); slashdo requests its review on the PR and waits for it (GitHub only, never posts an approval itself). Comma-separated, ordered: split on `,` **outside the outermost brackets** (a `,` inside a `cmd[<invocation>]` or a nested `[<model>]` is part of the value; "outermost" is the first `[` to the last `]` of the token), trim, normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, `zen`/`opencode-zen` → `opencode`, dedupe preserving first-occurrence order (each model-taking agent's `[<model>]` bracket, and `cmd`'s verbatim `[<invocation>]`, are part of the dedup identity). Record as `REVIEW_AGENTS`. **No built-in default** — if omitted, leave `REVIEW_AGENTS` unset; the saved-defaults step below fills it from `/do:config`, and only if still unset after that is `REVIEW_AGENTS=[]` (Phase 6 skipped, PRs left open). `copilot` is never added implicitly. Any slot may end in `~opt` (e.g. `ollama~opt`, `ollama[qwen2.5-coder:32b]~opt`) to mark that reviewer **optional/non-blocking** — still requested and its findings still fixed, but an inconclusive result (timeout/skipped/incomplete/no-verdict) never blocks the merge (a hard-error still does); strip `~opt` into a per-entry `{OPTIONAL}` flag before slug parsing; it is not part of the dedup identity (`ollama~opt` == `ollama`, optional-wins on collapse). A slot may also end in `~max=<n>` (e.g. `claude~max=2`, `ollama~max=1`) to cap how many review → fix → re-review cycles that one reviewer runs, or `~effort=<level>` (e.g. `codex[gpt-5.6-luna]~effort=max~opt`, `claude~effort=high~max=2`) to set its reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`). Strip suffixes off the right of each token in any order before slug parsing; dedup excludes `~` suffixes (survivor takes `~opt` if any had it, and cap/effort from the first that carried them). Reject a malformed suffix with `Invalid --review-with suffix on {entry}: ~max must be a non-negative integer and ~effort must be one of low, medium, high, xhigh, max, each appearing at most once; the only suffixes are ~opt, ~max=<n>, and ~effort=<level>.` Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot, cmd[<invocation>], @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).` The reserved token `none` (case-insensitive) is not validated as a slug — `--review-with none` means no reviewer (`REVIEW_AGENTS=[]`) and overrides any saved `review-with` default.
 - **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to each PR's multi-reviewer loop; control when a per-PR reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
@@ -21,13 +21,15 @@ Parse `$ARGUMENTS` for:
 - **`--reviewer-applies`**: forwarded to each PR's review loop — the reviewing CLI applies fixes directly instead of the orchestrator — **only on the `codex` pass**, the one reviewer with a verified write-isolated profile; the loop forces every other local reviewer (`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`cmd`) back to review-only (and it has no effect on copilot or `@<login>` passes, which are read-only cloud-side reviews). Record `REVIEWER_APPLIES=true`/`false`.
 - **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** or **`@<login>`** pass runs per PR (Phase 6); no effect on `codex`/`agy`/`claude`/`grok`/`pi`/`cursor`/`opencode`/`cmd`/`ollama` passes (their own fixed iteration caps). Set `REVIEW_ITERATIONS`; default `1` (one pass per PR, exiting early on 0 comments). `0` = loop until that reviewer returns 0 comments (legacy, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).` To move the local-agent / `ollama` caps — or give each reviewer a different budget — use the per-entry `--review-with <agent>~max=<n>` suffix, which overrides this flag for that entry.
 
-After parsing the review flags, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the review flags **and** `--issues` / `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
+After parsing the review flags, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the review flags **and** `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
 !`cat ~/.claude/lib/config-defaults-issues-merge.md`
 
-- **`--issues`** / **`--no-issues`** / **`--issues-label <name>`**: selects **where deferred findings are recorded** — GitHub/GitLab issues instead of PLAN.md lines (see Phase 2). It does NOT change what the run does: remediation, PRs, CI, the review loop, and merge all proceed as normal; combine with `--scan-only` to audit and file without remediating. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`. If neither is passed, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`.
+- **`--issues-label <name>`**: the label on the GitHub/GitLab issues deferred findings are filed as (see Phase 2). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`. A saved `issues` key is ignored.
+- **`--issues`**: deprecated no-op; print once: `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.`
+- **`--no-issues`**: abort with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only as GitHub/GitLab issues.`
 - **Path filter**: limit scanning scope to specific directories or files
 - **Focus areas**: e.g., "security only", "platform coverage and accessibility"
 
@@ -80,7 +82,7 @@ When compacting during this workflow, always preserve:
 - The current phase number and what phases remain
 - All PR numbers and URLs created so far
 - `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR`, `REPO_DIR` values
-- `VCS_HOST`, `CLI_TOOL`, `GH_HOST`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
+- `VCS_HOST`, `CLI_TOOL`, `GH_HOST`, `TRACKER_AVAILABLE`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
 - `PLATFORMS` (list of supported platforms: iOS, macOS, etc.)
 - `DEPLOYMENT_TARGETS` (minimum OS versions per platform)
 - `BUILD_SYSTEM` (xcodebuild / swift build / xcodegen / tuist)
@@ -88,7 +90,7 @@ When compacting during this workflow, always preserve:
 - `PHASE_4C_START_SHA` (needed for FILE_OWNER_MAP update in Phase 4c.3)
 - `VACUOUS_TESTS_FIXED`, `WEAK_TESTS_STRENGTHENED`, `NEW_TEST_CASES`, `NEW_TEST_FILES`
 - `CREATED_CATEGORY_SLUGS` (list of branch slugs created in Phase 5)
-- `SPOOL_DIR` (issue mode only — the literal spool path Phase 1 created; it cannot be re-derived, and the bodies are read four times: Phase 2 step 3's Foundation grouping, the Phase 2 filer agents, the Phase 3c remediation workers, and the Phase 4c.1 triage — so it is removed in Phase 7, not before)
+- `SPOOL_DIR` (the literal spool path Phase 1 created; it cannot be re-derived, and the bodies are read four times: Phase 2 step 3's Foundation grouping, the Phase 2 filer agents, the Phase 3c remediation workers, and the Phase 4c.1 triage — so it is removed in Phase 7, not before)
 - `GOTCHA_ENTRIES_IN_SCOPE` (swift-gotchas catalogue entry numbers in scope, recorded in Phase 0e)
 
 ## Phase 0: Discovery & Setup
@@ -99,6 +101,7 @@ Resolve `VCS_HOST` and `CLI_TOOL` here, before any phase reaches for a forge CLI
 !read lib/vcs-host.md
 
 - **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state, per the shared derivation (and its per-host auth precheck) below. The Phase 6 GitHub-side reviewer loops use `gh api`, which defaults to github.com, so on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out.
+- **Record `TRACKER_AVAILABLE` once.** `true` when the confirmed `CLI_TOOL` reaches this repo and its issues feature is enabled; otherwise `false`. Deferred findings are filed as issues only when it is `true`; when `false` the run continues, files nothing, and lists every deferred finding (title, one-line rationale, `file:line`) in the Phase 7 report under "Deferred (not filed — no issue tracker available)". Never write PLAN.md as a fallback.
 
 **GitHub only — skip the snippet below entirely on GitLab**, whose `glab` calls resolve the host from the remote themselves and where its `gh auth` precheck would abort the run.
 
@@ -213,8 +216,7 @@ Launch 8 Explore agents in two batches. Each agent must report findings in this 
 - **[CRITICAL/HIGH/MEDIUM/LOW]** `file:line` - Description. Suggested fix: ... Complexity: Simple/Medium/Complex
 ```
 
-**Issue mode (`--issues`) changes where this format goes, not what it contains.**
-When `ISSUE_MODE=true`, create the spool directory before dispatching any agent:
+**Findings are spooled to disk, not returned in full.** Create the spool directory before dispatching any agent:
 
 ```bash
 SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_DIR"
@@ -505,17 +507,15 @@ Wait for ALL agents to complete before proceeding.
 
 ## Phase 2: Plan Generation
 
-> **Issue mode (`--issues`):** Keep the consolidated findings (steps 2–4 below) as
-> your **in-run working plan in context** — do **not** write the `## Better Swift
-> Audit` section to `PLAN.md`, and skip step 1. The tracker is the source of truth
+> Keep the consolidated findings (steps 2–4 below) as your **in-run working plan in
+> context** — the plan is never written to a file. The tracker is the source of truth
 > for known work: the disposition partial below fetches open issues into
 > `EXISTING_ISSUES` during setup (reuse `CLI_TOOL` from Phase 0a), and step 2 must
 > **dedup against `EXISTING_ISSUES`** as well as across agents, reusing an existing
 > issue's `#<number>` instead of filing a duplicate. Remediation (Phase 3+) proceeds
 > from the in-context plan as normal; for any finding you **defer** (per the
-> finding-disposition rules), file a labeled tracker issue instead of a PLAN.md line.
-> Report created **and** reused issue numbers (`#<n>`) in the Phase 2 summary where
-> you'd report slugs.
+> finding-disposition rules — LOW findings included), file a labeled tracker issue.
+> Report created **and** reused issue numbers (`#<n>`) in the Phase 2 summary.
 > Phase 1 spooled the finding **bodies** to `SPOOL_DIR` and returned only the
 > **index**; consolidate and dedup against those index lines without opening a
 > spool file. **Step 3 is the exception**: grouping the Foundation extractions
@@ -528,8 +528,13 @@ Wait for ALL agents to complete before proceeding.
 > still lifting each id's block verbatim out of its spool file into a `--body-file`,
 > never retyping it from the index line.
 
-1. Read the existing `PLAN.md` (create if it doesn't exist)
-2. Consolidate all findings from Phase 1, deduplicating across agents (same file:line flagged by multiple agents → keep the most specific description)
+Unless `TRACKER_AVAILABLE=false`, read the tracker setup and filing partials now:
+
+!read lib/plan-issue-setup.md
+!read lib/plan-issue-filing.md
+
+1. Fetch `EXISTING_ISSUES` per those partials (skip when `TRACKER_AVAILABLE=false`).
+2. Consolidate all findings from Phase 1, deduplicating across agents (same file:line flagged by multiple agents → keep the most specific description) and against `EXISTING_ISSUES` (a finding with an open issue reuses its `#<number>`)
 3. Identify **shared utility extractions** — patterns duplicated 3+ times that should become reusable extensions, view modifiers, or utility types. Group these as "Foundation" work for Phase 3b.
 4. **Build the file ownership map** (required by Phase 5 for conflict-free PRs):
    - For each finding, record which file(s) it touches
@@ -537,43 +542,7 @@ Wait for ALL agents to complete before proceeding.
    - If a file is touched by multiple categories, assign it to the category with the highest-severity finding for that file
    - Record the mapping as `FILE_OWNER_MAP` — no two PRs may modify the same file
    - If a module extraction creates a new file (e.g., extracting `NetworkClient.swift` from a view model), add a backward-compatible re-export (typealias or import forwarding) in the original file so other PRs don't break
-5. Add a new section to PLAN.md: `## Better Swift Audit - {YYYY-MM-DD}`
-
-```markdown
-## Better Swift Audit - {date}
-
-Summary: {N} findings across {M} files. {X} shared utilities to extract.
-Platforms: {PLATFORMS} | Deployment targets: {DEPLOYMENT_TARGETS}
-
-### Foundation — Shared Utilities
-For each utility: name, purpose, files it replaces, signature sketch.
-
-### File Ownership Map
-| File | Primary Category | Reason |
-For each file touched by multiple categories, document why it was assigned to one.
-
-### Security & Secrets
-- [ ] [sec-keychain-token-leak] **[CRITICAL]** `file:line` - Description — Fix: ... (Complexity: Simple/Medium/Complex)
-
-### Code Quality
-- [ ] [swift-mainactor-binding] **[HIGH]** `file:line` - Description — Fix: ...
-
-### DRY & YAGNI
-- [ ] [dry-view-modifier-dup] **[MEDIUM]** `file:line` - Description — Fix: ...
-
-### Architecture & SOLID
-### Bugs, Performance & Error Handling
-### Platform Coverage & SwiftUI Patterns
-### Test Quality & Coverage
-### UX Consistency & Responsive Layout
-```
-
-**Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct findings via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case from the title text, ≤50 chars, unique against every `[slug]` already in PLAN.md. Recommended pattern: `<category-prefix>-<file-basename>-<short-hint>` (e.g. `[sec-keychain-token-leak]`, `[swift-mainactor-binding]`). _(Issue mode skips slugs — the issue number is the ID.)_
-
-Only when `ISSUE_MODE=true`:
-
-!read lib/plan-issue-setup.md
-!read lib/plan-issue-filing.md
+5. **Disposition.** CRITICAL/HIGH/MEDIUM code findings go to Phase 3 (tests to Phase 4c). LOW findings, unconfirmed follow-ups, and anything else not remediated this run are **deferred** (under `--scan-only`, the gate below files everything instead): file each as a labeled issue, deduped against `EXISTING_ISSUES`, per the partials above — or, when `TRACKER_AVAILABLE=false`, hold them for the Phase 7 "Deferred (not filed — no issue tracker available)" list.
 
 6. Print a summary table (short labels → full category → branch slug):
    - Security → Security & Secrets → `security`
@@ -599,7 +568,7 @@ Only when `ISSUE_MODE=true`:
 | TOTAL                 | ...      | ...  | ...    | ... | ...   |
 ```
 
-**GATE: If `--scan-only` was passed, STOP HERE** — but first, **when `ISSUE_MODE` is also true, file every surviving finding as an issue first**, then print the summary and exit. (When `ISSUE_MODE` is false, just print the summary and exit.)
+**GATE: If `--scan-only` was passed, STOP HERE** — but first, **file every surviving finding as an issue first**, then print the summary and exit. (When `TRACKER_AVAILABLE=false`, list them under "Deferred (not filed — no issue tracker available)" instead.)
 
 **Filing every surviving finding** means all of them, not just the ones the disposition rules would defer — a scan-only run remediates nothing, so the filed issues ARE the run's output. Apply the same labels, dedup-against-`EXISTING_ISSUES`, and title/body rules the disposition partial specifies, and report the created and reused `#<number>`s in the summary. Do not open a worktree or write any code. **Then remove `SPOOL_DIR`** (`rm -rf "$SPOOL_DIR"`, same errored-filer exception) — a scan-only run has no Phase 3c or 4c to read the bodies, so filing is the last read.
 
@@ -619,7 +588,7 @@ verbatim out of the spool, never retyped from the index line.
 
 ## Phase 3: Worktree Remediation
 
-Only CRITICAL, HIGH, and MEDIUM findings are remediated; LOW findings remain tracked in PLAN.md. Test Quality & Coverage findings are handled in Phase 4c.
+Only CRITICAL, HIGH, and MEDIUM findings are remediated; LOW findings are filed as issues, not auto-remediated. Test Quality & Coverage findings are handled in Phase 4c.
 
 ### 3a: Setup
 
@@ -681,7 +650,7 @@ One worker per category that has CRITICAL, HIGH, or MEDIUM findings (only act on
 2. Launch all `Agent` calls **in parallel** (multiple tool calls in a single response) and wait for all to return. Each sub-agent returns its results directly — no task board or shutdown step is needed.
 <!-- /if:teams -->
 
-**In issue mode the finding bodies are on disk, not in this context.** Phase 1 returned
+**The finding bodies are on disk, not in this context.** Phase 1 returned
 only index lines, so a `{FINDINGS}` block built from those alone hands the worker a
 one-line title with no evidence and no suggested fix. Build `{FINDINGS}` from each
 worker's index lines **plus the literal `SPOOL_DIR` path**, and instruct the worker to
@@ -819,7 +788,7 @@ PHASE_4C_START_SHA="$(git rev-parse HEAD)"
 
 ### 4c.1: Test Audit Triage
 
-**In issue mode Agent 7's findings are on disk, not in this context.** The index
+**Agent 7's findings are on disk, not in this context.** The index
 (`<id> | <SEVERITY> | <category> | <file:line> | <title>`) carries no `[VACUOUS]`/`[WEAK]`/`[MISSING]` tag at all, so triage cannot run off it. Read `$SPOOL_DIR/tests.md` (the literal path from run state) and triage off each finding's full body; populate `{VACUOUS_AND_WEAK_FINDINGS}` / `{MISSING_FINDINGS}` from those bodies, never from the index titles.
 
 Categorize Agent 7's findings:

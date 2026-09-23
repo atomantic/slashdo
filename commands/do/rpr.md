@@ -1,6 +1,6 @@
 ---
 description: Resolve PR review feedback with parallel agents
-argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--reviewer-applies] [--issues|--no-issues] [--issues-label <name>]"
+argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--reviewer-applies] [--issues-label <name>]"
 ---
 
 **Default mode: fully autonomous.** Fetches review feedback, fixes issues, pushes, resolves threads, and loops reviews without prompting. Auto-skips on timeout/errors after retries.
@@ -20,11 +20,11 @@ Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
 
 Parse `$ARGUMENTS` for `--reviewer-applies` (boolean): record `REVIEWER_APPLIES=true`/`false` (default `false`). Forwarded to the local-agent review loop, where it reaches only the `codex` pass — the one reviewer with a verified write-isolated profile; every other local reviewer (`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`cmd`) is forced back to review-only. No effect on the Copilot path (warn if combined with a copilot-only list) or the ollama path (Ollama is non-agentic — always review-only).
 
-After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to `review-with` / `reviewer-applies` / `issues` / `issues-label` the user did not pass. Precedence: explicit flag (or `--review-with none`) > saved `review-with` default > `REVIEW_AGENTS=[]` (see step 2 and step 8). rpr ignores saved `review-iterations` / `review-stop-mode` (it does not support those flags):
+After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to `review-with` / `reviewer-applies` / `issues-label` the user did not pass. Precedence: explicit flag (or `--review-with none`) > saved `review-with` default > `REVIEW_AGENTS=[]` (see step 2 and step 8). rpr ignores saved `review-iterations` / `review-stop-mode` (it does not support those flags):
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
-Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: when a finding is **deferred** to the plan (see Finding Disposition), file it as a GitHub/GitLab issue instead of a PLAN.md line. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`. If the user passes **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`.
+Parse `$ARGUMENTS` for `--issues-label <name>`: a **deferred** finding (see Finding Disposition) is filed as a GitHub/GitLab issue. Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan` (a saved `issues` key is ignored). `--issues` is a deprecated no-op: print once `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.` `--no-issues` aborts with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only as GitHub/GitLab issues.`
 
 !`cat ~/.claude/lib/gh-host.md`
 
@@ -101,13 +101,13 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 
    **Repeated-comment dedup**: after a new Copilot round, compare each new unresolved thread's body and file/line against the previous round's intentionally-unresolved threads (replied to as non-issues or disagreements). If every new unresolved thread is a repeat of dismissed feedback, treat the review as clean and exit the loop.
 
-9. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input).
+9. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input). List deferred findings with their issue numbers, or as unfiled per `plan-issue-setup.md`'s no-tracker rule.
 
 10. **Convention encoding**: after the summary, for each recurring pattern among the issues addressed this session, apply the **smallest** code-level action that makes the convention self-evident (in-tree comment at the canonical site, a clarifying rename, or a surgical refactor that removes the footgun). CLAUDE.md / AGENTS.md additions are a **fallback** for conventions that can't be expressed locally. Encoded actions land in the same branch as the rpr fixes.
 
 !`cat ~/.claude/lib/finding-disposition.md`
 
-Only when `ISSUE_MODE=true` and a finding is being deferred:
+Only when a finding is being deferred:
 
 !read lib/plan-issue-setup.md
 !read lib/plan-issue-filing.md
@@ -244,4 +244,4 @@ The persistent monitor emits one event per CI check bucket transition — `ci: l
 
 - If feedback is unclear or incorrect, leave a reply comment instead of resolving
 - **Never dismiss findings as "out of scope" or "not modified in this PR."** If a review identifies a real issue, fix it — regardless of whether the current PR touched that code.
-- **Default to fixing findings in this PR; defer to PLAN.md only when a fix is genuinely large/architectural or too risky to land here.** See the "Finding Disposition" guidance loaded above for the fix-now / reply / defer decision.
+- **Default to fixing findings in this PR; defer to a tracker issue only when a fix is genuinely large/architectural or too risky to land here.** See the "Finding Disposition" guidance loaded above for the fix-now / reply / defer decision.

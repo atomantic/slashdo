@@ -1,6 +1,6 @@
 ---
 description: Refactor-only audit and remediation — architecture, DRY, simplification, and cognitive load — shipped as per-category PRs with a hard behavior-preservation contract
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues|--no-issues] [--issues-label <name>] [path filter or focus areas]"
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues-label <name>] [path filter or focus areas]"
 ---
 
 # Simplify — Refactor-Only Audit
@@ -27,7 +27,7 @@ Argument handling:
 - `--simplify-only` / `--refactor-only` in `$ARGUMENTS` is redundant but harmless — do not error on it.
 - `--strict` / `--nuclear` is implied (`SIMPLIFY_ONLY=true` sets `STRICT_MODE=true`); passing it explicitly changes nothing.
 - Every other `do:better` flag works as documented: `--scan-only` stops after the narrowed plan, `--interactive` prompts at each gate, `--no-merge` stops publication after PR creation and safely finalizes to restore the stash, and the review flags (`--review-with`, `--review-mode`, `--review-iterations`, `--review-stop-on-*`, `--reviewer-applies`) drive the Phase 6 loop.
-- `--issues` / `--issues-label <name>` select **where** deferred findings are recorded — tracker issues instead of `PLAN.md` lines. They do **not** change what the run does: `/do:simplify --issues` still remediates in a worktree, opens per-category PRs, and runs CI — and, when `--review-with` supplies a reviewer, runs the review loop and merges. To audit and file the work without touching your code, combine with `--scan-only` — a `--scan-only` run in issue mode remediates nothing, so **every** surviving finding is filed as a labeled issue, and those issues are the run's entire output.
+- Deferred findings are filed as tracker issues (`--issues-label <name>` sets the label). To audit and file the work without touching your code, use `--scan-only` — it remediates nothing, so **every** surviving finding is filed as a labeled issue, and those issues are the run's entire output.
 
 ## Notes
 

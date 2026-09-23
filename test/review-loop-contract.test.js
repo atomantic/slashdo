@@ -1038,3 +1038,27 @@ describe('shared review-flag parse partial (#311)', () => {
     assert.doesNotMatch(raw('release.md'), /copilot iteration cap/);
   });
 });
+
+describe('PLAN.md mode is retired (review/rpr/config)', () => {
+  const raw = (name) => _read('commands', 'do', name);
+  it('review and rpr treat --issues as a no-op and abort on --no-issues', () => {
+    for (const name of ['review.md', 'rpr.md']) {
+      const body = raw(name);
+      assert.match(body, /--issues is now the default \(PLAN\.md mode was removed\); the flag can be dropped\./, name);
+      assert.match(body, /--no-issues is no longer supported: PLAN\.md mode was removed\. slashdo records work only as GitHub\/GitLab issues\./, name);
+      assert.doesNotMatch(body, /ISSUE_MODE|\[--issues\|--no-issues\]|defer to PLAN\.md/, name);
+    }
+  });
+  it('config rejects --issues/--no-issues and no longer shows an issues key', () => {
+    const body = raw('config.md');
+    assert.match(body, /\/do:config --issues\/--no-issues was removed: PLAN\.md mode no longer exists, issues are always used\. Run \/do:config --unset issues to clean up a saved value\./);
+    assert.doesNotMatch(body, /^\s+issues\s+=/m);
+    assert.doesNotMatch(body, /\[--issues\|--no-issues\]/);
+  });
+  it('the shared issue libs carry no PLAN.md branch', () => {
+    for (const name of ['plan-issue-setup.md', 'plan-issue-filing.md', 'finding-disposition.md']) {
+      assert.doesNotMatch(readLib(name), /PLAN\.md|ISSUE_MODE|plan-id-format/, name);
+    }
+    assert.ok(!fs.existsSync(path.join(__dirname, '..', 'lib', 'plan-id-format.md')));
+  });
+});

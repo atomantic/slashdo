@@ -65,7 +65,7 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
    ```
 2. Review the diff against the **{REVIEW_CHECKLIST}** section of this command.
 
-   **When `SIMPLIFY_ONLY=true`**, carry one extra question through this same pass: *does any hunk change what this program does?* — different return value, different side effect, different error type or message, changed validation, changed output format, changed public API without a re-export. Every such hunk is reverted, not fixed. Then dispose of the finding behind it: if the improvement is still worth making in a run that's allowed to change behavior, **defer** it (an open PLAN.md item / tracker issue noting it needs behavior review); if the transformation cannot be done at all without changing behavior it must not change, record it as a rejection per gate 4 of the run's **Finding gates** section.<!-- Not a link: #finding-gates is an anchor in /do:better only, and this partial is shared. -->
+   **When `SIMPLIFY_ONLY=true`**, carry one extra question through this same pass: *does any hunk change what this program does?* — different return value, different side effect, different error type or message, changed validation, changed output format, changed public API without a re-export. Every such hunk is reverted, not fixed. Then dispose of the finding behind it: if the improvement is still worth making in a run that's allowed to change behavior, **defer** it (a tracker issue noting it needs behavior review); if the transformation cannot be done at all without changing behavior it must not change, record it as a rejection per gate 4 of the run's **Finding gates** section.<!-- Not a link: #finding-gates is an anchor in /do:better only, and this partial is shared. -->
 3. For each issue found:
    - Fix in a new commit: `fix: {description of review finding}`
    - Re-run `{BUILD_CMD}` and `{TEST_CMD}`{VERIFY_SCOPE_SUFFIX} to verify
@@ -105,4 +105,4 @@ Before creating PRs, run a deep code review on all remediation changes to catch 
        echo "  git branch -D {BRANCH_PREFIX}/{DATE}"
      fi
      ```
-   - Restore stash if needed (`git stash pop`), update PLAN.md, print final summary, then **stop** — this completes the workflow (Phases 5, 6, and 7 are skipped entirely since no PRs or category branches were created)
+   - Restore stash if needed (`git stash pop`), print final summary (with filed or deferred issues), then **stop** — this completes the workflow (Phases 5, 6, and 7 are skipped entirely since no PRs or category branches were created)

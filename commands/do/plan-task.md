@@ -18,7 +18,7 @@ host, and this command makes none).
 
 This is the **single-issue authoring** counterpart to `/do:replan` (which triages a
 whole backlog): one specific piece of work, captured as a first-class issue that
-`/do:next --issues` can then claim and ship (see Phase 6).
+`/do:next` can then claim and ship (see Phase 6).
 
 **The bar: decision-complete.** The filed issue must be a *fully specified task, not
 an open question* — the same **actionable-issues invariant** `/do:replan` holds itself
@@ -97,7 +97,7 @@ accept either `--flag=value` or `--flag value`. Order is free.
    - Confirm the matching CLI is authenticated: `gh auth status --active` for GitHub
      (`--active` scopes the check to the active account so a stale token elsewhere
      doesn't falsely fail it), `glab auth status` for GitLab. If it is **not**,
-     abort — never fall back to the other CLI (wrong host) or to PLAN.md:
+     abort — never fall back to the other CLI (wrong host):
 
      > `/do:plan-task detected a {VCS_HOST} repo but `{CLI_TOOL}` is not authenticated.
      > Run `{CLI_TOOL} auth login` for this repo's host first.`
@@ -297,14 +297,12 @@ Print the outcome plainly:
 - **Deduped:** the existing `#<number>` you pointed at instead (Phase 2).
 - **Dry run:** a note that nothing was filed, plus the draft that *would* have been.
 
-Then, when it fits, suggest `/do:next --issues #<number>` to claim and ship it
+Then, when it fits, suggest `/do:next #<number>` to claim and ship it
 immediately (GitHub or GitLab — `/do:next` detects the host the same way). Leaving it
 in the backlog is always a valid stopping point.
 
 ## Notes
 
-- **Issue-only, by design.** Unlike `/do:replan`, this command has no PLAN.md mode.
-  For a PLAN.md checkbox, add the line directly or use `/do:replan`.
 - **Custom / Enterprise hosts** need no configuration: `gh issue` / `glab issue`
   infer the host from the `origin` remote, and this command never calls raw `gh api`.
 - **No AI-attribution noise** in the issue body — write it as a human engineer would

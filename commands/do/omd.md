@@ -29,7 +29,6 @@ Glob for markdown files in the repo root and common locations:
 - `CONTRIBUTING.md`
 - `CHANGELOG.md`
 - `GOALS.md`
-- `PLAN.md`
 - `CODE_OF_CONDUCT.md`
 - `SECURITY.md`
 - `LICENSE.md`
@@ -44,6 +43,8 @@ Found {N} markdown files to audit:
 ```
 
 Skip files that are clearly generated (e.g., `node_modules/`, `vendor/`, lock files).
+
+A legacy `PLAN.md` is not a governance doc to optimize (the backlog lives in the issue tracker) — skip it, and if one exists, suggest running `/do:replan` once to migrate its items to tracker issues.
 
 ## Phase 1: File-Type Detection & Best Practices
 
@@ -103,13 +104,11 @@ Key principles:
 - Ensure version numbers match actual releases
 - Link version headers to git diffs/tags when possible
 
-### GOALS.md / PLAN.md
-**Purpose**: Strategic direction and tactical backlog.
+### GOALS.md
+**Purpose**: Strategic direction. The tactical backlog lives in the issue tracker, not a markdown file.
 
 Key principles:
-- GOALS.md: high-level vision and non-goals — should rarely change
-- PLAN.md: current work items — should reflect reality, not aspirations
-- Remove completed items from PLAN.md (they're in git history)
+- High-level vision and non-goals — should rarely change
 - Remove stale/abandoned goals
 - Ensure goals are measurable and specific, not vague
 

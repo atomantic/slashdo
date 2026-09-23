@@ -102,7 +102,7 @@ OLD_LIBS=(
   better-audit-code-quality better-audit-cognitive-load better-audit-deps
   better-audit-dry better-audit-security better-audit-stack-specific
   better-audit-structural better-audit-tests better-audit-ux
-  code-review-checklist
+  code-review-checklist plan-id-format replan-issues
 )
 
 # NOTE: keep in sync with install.sh LIBS — see comment there.
@@ -117,9 +117,9 @@ LIBS=(
   finding-disposition fix-regression-guard
   gh-host github-reviewer-loop graphql-escaping
   local-agent-review-loop model-tiers multi-reviewer-loop next-gitlab next-swarm ollama-review-loop
-  per-finding-root-cause plan-id-format plan-issue-setup plan-issue-filing pr-write-access
+  per-finding-root-cause plan-issue-setup plan-issue-filing pr-write-access
   post-review-doc-recommendations rebase-conflict-resolution remediation-agent-template
-  release-documented replan-issues review-agent-selection review-config-defaults review-convergence-gate review-flags
+  release-documented review-agent-selection review-config-defaults review-convergence-gate review-flags
   review-pr-mode
   review-preferences
   swift-review-checklist swift-gotchas

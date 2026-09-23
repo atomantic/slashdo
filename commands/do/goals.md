@@ -21,19 +21,19 @@ Parse `$ARGUMENTS` for:
 
 `--prd --refresh` re-scans and updates an existing `PRD.md`.
 
-## Boundary Rule: GOALS.md vs PRD.md vs PLAN.md
+## Boundary Rule: GOALS.md vs PRD.md vs Issue Tracker
 
-**GOALS.md is strategic. PRD.md is the requirements spec. PLAN.md is tactical.**
+**GOALS.md is strategic. PRD.md is the requirements spec. The issue tracker (GitHub/GitLab issues) is tactical.**
 
 - GOALS.md answers: *Why does this project exist? What does success look like? What will we never do?*
 - PRD.md answers: *What exactly must the product do, and not do? Who is it for? What counts as "it works"?*
-- PLAN.md answers: *What are we building next? What's the backlog? What's done?*
+- The issue tracker answers: *What are we building next? What's the backlog? What's done?*
 
 **GOALS.md must NEVER contain:**
 - Checkbox task lists (`- [ ] Add feature X`)
 - Implementation details or subtasks
 - Specific file paths, function names, or technical steps
-- "Current State" progress tables (that's PLAN.md's job)
+- "Current State" progress tables (that's the issue tracker's job)
 - Prioritized next-action lists
 
 **GOALS.md SHOULD contain:**
@@ -42,14 +42,14 @@ Parse `$ARGUMENTS` for:
 - Milestone definitions as **outcome descriptions** (what success looks like in prose, not task lists)
 - Non-goals (explicit boundaries)
 - Long-term vision (aspirational direction)
-- A footer link to PLAN.md for tactical details
+- A footer pointer to the issue tracker for tactical details
 
 Milestones describe what "done" looks like in outcome-oriented prose:
 - GOOD: "v1.0 means daily entry takes under 30 seconds and APY calculations are auditable across all edge cases"
 - BAD: "- [ ] Add date range buttons above charts / - [ ] Filter chart data to selected range"
 
 **PRD.md must NEVER contain:**
-- Checkbox task lists or sprint/iteration planning — that's PLAN.md's job
+- Checkbox task lists or sprint/iteration planning — that's the issue tracker's job
 - Specific file paths, function names, or line-level implementation detail
 - Vague, untestable statements ("the system should be fast") without a concrete acceptance criterion
 - Fabricated numeric targets the codebase doesn't evidence — an unverifiable KPI belongs in Open Questions
@@ -65,7 +65,7 @@ Milestones describe what "done" looks like in outcome-oriented prose:
 - Assumptions & constraints
 - Success metrics / KPIs
 - Risks & open questions
-- A footer link to GOALS.md (if present) and PLAN.md
+- A footer link to GOALS.md (if present) and a pointer to the issue tracker
 
 Requirement statements use RFC-2119-style keywords — **MUST/SHALL** (mandatory), **SHOULD** (recommended), **MAY** (optional) — e.g. "The system MUST reject uploads over 25MB" rather than "uploads should be limited."
 
@@ -78,7 +78,6 @@ Scan for project identity signals:
 - `README.md`, `README.*` — project description, tagline, stated purpose
 - `package.json` / `Cargo.toml` / `pyproject.toml` / `go.mod` — name, description, keywords, repository URL
 - `CLAUDE.md` — design principles, conventions, stated goals
-- `PLAN.md` — planned work, roadmap items, in-progress features
 - `LICENSE` — licensing intent (open source, proprietary, etc.)
 - `.github/FUNDING.yml`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` — community/ecosystem intent
 - Marketing or landing page content if present
@@ -104,7 +103,6 @@ Scan for trajectory signals and the author's demonstrated intent:
 - Open PRs: `gh pr list --limit 10 --state open 2>/dev/null`
 - `CHANGELOG.md` or `.changelog/` — recent changes and themes
 - `TODO` / `FIXME` / `HACK` comments in source
-- `PLAN.md` — incomplete items represent intended direction
 - Branch names: `git branch -a --list '*feature*' --list '*feat*' 2>/dev/null`
 
 Extract: recent themes, planned direction, known gaps, active work areas, and repeated decisions about what the project accepts or refuses. Do not infer a product requirement from a generic engineering practice or an isolated historical change.
@@ -129,7 +127,7 @@ Consolidate the findings into a draft goals structure:
 
 1. **Project Purpose** — one-paragraph summary of what this project is and why it exists
 2. **Core Goals / Tenets** — the 3-7 primary objectives or non-negotiable principles
-3. **Milestones** — outcome-oriented descriptions of what each version milestone means (NOT checkbox task lists — those go in PLAN.md)
+3. **Milestones** — outcome-oriented descriptions of what each version milestone means (NOT checkbox task lists — those are tracker issues)
 4. **Non-Goals** — things the project explicitly does NOT aim to do (inferred from architectural boundaries, missing features that seem intentional, stated constraints)
 5. **Target Users** — who this is for (inferred from README, API design, CLI UX, documentation tone)
 6. **Long-Term Vision** — aspirational direction in prose
@@ -264,10 +262,10 @@ Example: "Engine correctness — every fund type produces accurate calculations 
 
 ---
 
-For the tactical backlog and current work items, see [PLAN.md](./PLAN.md).
+For the tactical backlog and current work items, see the repository's open issues.
 ```
 
-The template intentionally omits "Current State" tables and "Direction" sections — those belong in PLAN.md. If the user asks for them, add a brief (1-2 sentence) summary that points to PLAN.md rather than duplicating the detail.
+The template intentionally omits "Current State" tables and "Direction" sections — those belong in the issue tracker. If the user asks for them, add a brief (1-2 sentence) summary that points to the tracker rather than duplicating the detail.
 
 ### PRD.md Structure (`--prd`)
 
@@ -363,7 +361,7 @@ The template intentionally omits "Current State" tables and "Direction" sections
 
 ---
 
-{Footer: link to [GOALS.md](./GOALS.md) if it exists, and [PLAN.md](./PLAN.md) for the tactical backlog.}
+{Footer: link to [GOALS.md](./GOALS.md) if it exists, and the repository's open issues for the tactical backlog.}
 ```
 
 Requirement IDs (`FR-`, `NFR-`, `NR-`) are assigned sequentially at generation time and are **stable across `--refresh` runs** — an existing ID must never be reassigned to a different requirement. New requirements append the next unused number per prefix; a requirement that no longer holds retires its number rather than having it reused.
@@ -376,16 +374,15 @@ If `--refresh` was passed and the target document already exists:
 3. Identify items whose status has changed (new progress, completed, abandoned — or, in `--prd` mode, requirements that no longer hold, or new behavior not yet captured)
 4. **Default mode**: update in-place, preserving user-written content and stable requirement IDs where possible; print a summary of what changed and which evidence caused each change.
    **Interactive mode (`--interactive`)**: present changes for confirmation before updating.
-5. **GOALS.md mode**: move any checkbox task lists found in the existing GOALS.md to PLAN.md automatically (default) or offer to (interactive). When inserting each item into PLAN.md, **assign it a unique `[<slug>]` ID** per [lib/plan-id-format.md](../../lib/plan-id-format.md): kebab-case slug derived from the item title, ≤50 chars, unique against every existing `[slug]` in PLAN.md.
+5. **GOALS.md mode**: remove any checkbox task lists found in the existing GOALS.md and file each item as a tracker issue automatically (default) or after confirmation (interactive): detect the host from the `origin` remote per [lib/vcs-host.md](../../lib/vcs-host.md), skip items that duplicate an open issue title, and label each with the saved `issues-label` default (or `plan`) — `gh issue create --title "<item>" --body "<context>" --label <label>` (glab: `glab issue create --title "<item>" --description "<context>" --label <label>`). If no authenticated `gh`/`glab` can reach the repo, list the items in the Phase 5 summary under "Tactical items (not filed — no issue tracker available)" instead. Never write them to PLAN.md.
 6. **PRD.md mode**: preserve existing `FR-`/`NFR-`/`NR-` IDs for requirements that still hold; assign the next unused ID (per prefix) to new ones. If a requirement no longer appears to hold, mark it `(status: removed — verify)` in place rather than deleting it, and call it out in the change summary.
 7. **PRD.md mode**: do not replace a user-authored requirement with a semantically different inference merely because current code is incomplete. Mark the conflict in the evidence notes and Risks & Open Questions, retaining the baseline wording until resolved.
 
 ## Phase 5: Finalize
 
 1. Write the target document (`GOALS.md`, or `PRD.md` in `--prd` mode) to the repo root
-2. If `PLAN.md` exists, ensure it has a reference link to the generated document (only if not already present)
-3. **GOALS.md mode**: if checkbox task lists were found in an existing GOALS.md during `--refresh`, offer to migrate them to PLAN.md
-4. Print a summary:
+2. **GOALS.md mode**: if checkbox task lists were moved out of GOALS.md during `--refresh`, list the issues filed for them (or the unfiled items) in the summary
+3. Print a summary:
 
    GOALS.md mode:
    ```
@@ -403,7 +400,7 @@ If `--refresh` was passed and the target document already exists:
    - {K} negative requirements
    - {J} open questions
    ```
-5. Do NOT commit — let the user review and commit when ready (suggest `/do:push`)
+4. Do NOT commit — let the user review and commit when ready (suggest `/do:push`)
 
 ## Notes
 
@@ -412,6 +409,6 @@ If `--refresh` was passed and the target document already exists:
 - Preserve the user's voice — if they provide rephrased goals or requirements, use their wording verbatim
 - If the project is brand new with minimal code, lean more heavily on user input and less on codebase inference
 - If `gh` CLI is not authenticated, skip issue/PR scanning gracefully — don't halt
-- **Never put checkbox task lists in GOALS.md or PRD.md** — note tactical items discovered during scanning for PLAN.md, but keep them out of both
+- **Never put checkbox task lists in GOALS.md or PRD.md** — tactical items belong in the issue tracker; keep them out of both, and never create or write PLAN.md
 - **In `--prd` mode, never fabricate numeric success metrics or KPIs** the codebase doesn't evidence — leave them as open questions, even in autonomous mode
 - **In `--prd` mode, never present an unsupported inference as an observed requirement** — include the evidence note and confidence, or place it in Risks & Open Questions

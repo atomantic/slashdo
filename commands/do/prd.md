@@ -17,4 +17,4 @@ Argument handling:
 
 ## Notes
 
-- See `/do:goals` for the full specification, including the GOALS.md vs PRD.md vs PLAN.md boundary rules.
+- See `/do:goals` for the full specification, including the GOALS.md vs PRD.md vs issue-tracker boundary rules.

@@ -1,6 +1,6 @@
 ---
 description: Deep code review of changed files against software engineering best practices
-argument-hint: "[--strict|--nuclear] [--draft] [--apply|--no-apply] [--merge|--merge=<method>] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues|--no-issues] [--issues-label <name>] [PR-URL | base-branch]"
+argument-hint: "[--strict|--nuclear] [--draft] [--apply|--no-apply] [--merge|--merge=<method>] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues-label <name>] [PR-URL | base-branch]"
 ---
 
 ## Parse Arguments
@@ -16,13 +16,13 @@ Parse `$ARGUMENTS` for:
 - **`--reviewer-applies`** (optional, boolean): forwarded to the delegated review passes to route fixes through the reviewing CLI instead of the orchestrator — in practice only the `codex` pass, the one reviewer with a verified write-isolated profile; the loop forces every other local reviewer (`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`cmd`) back to review-only (see `lib/local-agent-review-loop.md` "Editing mode"). No effect on the copilot path, the `@<login>` path, the ollama path (Ollama is non-agentic — always review-only), or the host's self-review.
 - **`--review-iterations <n>`** (optional): caps how many review-and-fix cycles a delegated **copilot** or **`@<login>`** pass runs. Record as `REVIEW_ITERATIONS`; default `1` (one pass, exiting early on 0 comments). Must be a non-negative integer — abort with `--review-iterations must be a non-negative integer (got: {value}).` otherwise. `0` means "loop until that reviewer returns 0 comments" (bounded by each loop's own 10-iteration safety guardrail). No effect on local-agent/ollama passes or the host's self-review; a per-entry `--review-with <agent>~max=<n>` suffix overrides this flag for the entry that carries it.
 
-After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the delegated-review flags **and** `--issues` / `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
+After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the delegated-review flags **and** `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
 !`cat ~/.claude/lib/config-defaults-issues-merge.md`
 
-- **`--issues`** / **`--no-issues`** / **`--issues-label <name>`** (optional): when a finding is **deferred** (local-branch mode only — see Finding Disposition), file it as a GitHub/GitLab issue instead of a PLAN.md line. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`. If the user passes **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`. No effect in PR mode.
+- **`--issues-label <name>`** (optional): a **deferred** finding (local-branch mode only — see Finding Disposition) is filed as a GitHub/GitLab issue with this label. Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan` (a saved `issues` key is ignored). No effect in PR mode. `--issues` is a deprecated no-op: print once `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.` `--no-issues` aborts with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only as GitHub/GitLab issues.`
 - **PR reference** — any non-flag token that looks like a pull-request reference. **Match on URL *shape*, never on the hostname** — a self-managed GitHub Enterprise host often carries no `github` substring; the host-independent `/pull/{number}` path segment is what identifies a GitHub-flavored PR. A token matches if **any** of the following holds:
   - Full URL of the shape `{scheme}://{host}/{owner}/{repo}/pull/{number}` — **any** `{host}`, including `github.com`, `github.example.com`, and a GHES host with no `github` substring. Trailing subpaths (`/files`, `/commits`, `/checks`) and a `#discussion_r…` fragment are allowed and ignored.
   - SSH-style URL (`git@{host}:{owner}/{repo}`) carrying the same `/pull/{number}` segment — again on any host.
@@ -87,9 +87,9 @@ Pass whichever exists to the agents instead of (or in addition to) the local one
 Before dispatching agents, understand what this change set claims to do:
 
 1. Read commit messages (`git log {base}...HEAD --oneline`)
-2. Read PLAN.md, the project's changelog (if any), and the PR description for capability claims, test counts, and "deep-links to X" / "feature Y now works" assertions
+2. Read the project docs, changelog (if any), and the PR description for capability claims, test counts, and "deep-links to X" / "feature Y now works" assertions
 3. Note the claims — verify after agents return whether the code delivers them. Concrete drift to flag:
-   - Test counts in PLAN/changelog vs `find . -name '*.test.*' -exec grep -c '^\(it\|test\)(' {} +` (or project equivalent)
+   - Test counts in docs/changelog vs `find . -name '*.test.*' -exec grep -c '^\(it\|test\)(' {} +` (or project equivalent)
    - "Deep-links to record X" claims vs whether the destination route handler actually consumes the encoded parameter
    - "Auto-prune after N days" / "scans only the page returned" claims vs the listing implementation
    - Comments in code claiming behavior the surrounding code doesn't perform
@@ -225,7 +225,7 @@ When `PR_MODE=true` and `PR_DISPOSITION=apply`, first follow "Fix Issues — PR-
 
 !`cat ~/.claude/lib/finding-disposition.md`
 
-Only when `ISSUE_MODE=true` and a finding is being deferred:
+Only when a finding is being deferred:
 
 !read lib/plan-issue-setup.md
 !read lib/plan-issue-filing.md
@@ -233,7 +233,7 @@ Only when `ISSUE_MODE=true` and a finding is being deferred:
 For each verified finding (local branch mode):
 1. Classify severity: **CRITICAL** (runtime crash, data leak, security) vs **IMPROVEMENT** (consistency, robustness, conventions)
 2. Fix all CRITICAL issues immediately
-3. Fix IMPROVEMENT issues too. Per Finding Disposition, defer to PLAN.md only when the fix is genuinely large/architectural or too risky to land in this branch
+3. Fix IMPROVEMENT issues too. Per Finding Disposition, defer to a tracker issue only when the fix is genuinely large/architectural or too risky to land in this branch
 4. **Identify the root cause** of why the issue existed (missing lint rule, missing comment at the canonical site, misleading name, API that invites the mistake, etc.) and apply the smallest matching action **in the same change**. Defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
 
 !read lib/per-finding-root-cause.md
@@ -264,6 +264,9 @@ Omit all focused-lens rows when none were selected.
 
 ### Accepted As-Is (with rationale)
 - file:line — description and why it's acceptable
+
+### Deferred
+- #<issue> — title (or, with no tracker: "Deferred (not filed — no issue tracker available)" with title, rationale, file:line)
 ```
 
 If no issues were found, confirm the code is clean and ready for PR.

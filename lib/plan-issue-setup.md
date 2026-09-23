@@ -1,18 +1,16 @@
-# Issue-Mode Setup
+# Tracker Issue Setup
 
-Shared setup for any command that resolves **`ISSUE_MODE=true`** (via `--issues`, a
-saved `issues=true` default, or an auto-redirect) before it touches the GitHub/GitLab
-tracker: reusing/deriving the VCS host and `LABEL_SEP`, creating labels lazily, and
-the `model:`/`effort:` dispatch-hint vocabulary. **This file assumes the caller's own
-argument parsing already resolved `ISSUE_MODE` and `PLAN_LABEL`** — every command
-that supports `--issues` defines that flag (and `--issues-label`) itself in its own
-Parse Arguments (see e.g. `/do:next`'s), so this file does not redefine them.
+Shared setup for any command that reads or files GitHub/GitLab tracker issues:
+reusing/deriving the VCS host and `LABEL_SEP`, creating labels lazily, and the
+`model:`/`effort:` dispatch-hint vocabulary. **This file assumes the caller's own
+argument parsing already resolved `PLAN_LABEL`** (`--issues-label`, saved
+`issues-label`, default `plan`), so this file does not redefine it.
 
 Dedup, `--scan-only` recording, severity/category labels, and bulk spool filing are
 **not** here — see [plan-issue-filing.md](./plan-issue-filing.md), which any command
 that actually files a finding as an issue should also read.
 
-## Setup — only when `ISSUE_MODE` is true
+## Setup
 
 1. **VCS host.** Reuse `CLI_TOOL` (`gh`/`glab`) if the command already detected it
    in its own discovery phase. Otherwise **derive it from the `origin` remote first,
@@ -31,16 +29,20 @@ that actually files a finding as an issue should also read.
    elif glab auth status >/dev/null 2>&1; then
      CLI_TOOL=glab
    else
-     echo "--issues needs an authenticated gh or glab. Run 'gh auth login' or 'glab auth login', or drop --issues to record items in PLAN.md."; exit 1
+     echo "No issue tracker: needs an authenticated gh or glab. Run 'gh auth login' or 'glab auth login'."; TRACKER=none
    fi
    ```
    (`gh auth status --active` scopes to the active account so a stale token on
    another account doesn't falsely fail it — only the no-origin fallback above;
    remote-derived branches confirm credentials next.) Then confirm the selected
    `CLI_TOOL` is authenticated to `$ORIGIN_HOST` (`gh auth status --active` /
-   `glab auth status`); if not, **abort** with: "`--issues` needs an authenticated
-   `gh` or `glab`. Run `gh auth login` (or `glab auth login`), or drop `--issues`
-   to record items in PLAN.md." Never silently fall back to writing PLAN.md.
+   `glab auth status`); if not, there is no tracker. Never fall back to a local backlog file.
+
+   **No tracker:** a backlog command (`/do:replan`, `/do:next`, `/do:plan-task`)
+   aborts in pre-flight with the message above. A command that only defers
+   findings continues, files nothing, and lists each deferral (title, one-line
+   rationale, file:line) in its final report under "Deferred (not filed — no issue
+   tracker available)".
 
    **Derive `LABEL_SEP` from `CLI_TOOL` right after it's set:**
    `[ "$CLI_TOOL" = glab ] && LABEL_SEP="::" || LABEL_SEP=":"`. GitLab natively

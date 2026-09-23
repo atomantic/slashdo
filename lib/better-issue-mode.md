@@ -1,26 +1,24 @@
-## Issue mode — the shared `/do:better` spool/filer contract
+## Tracker filing — the shared `/do:better` spool/filer contract
 
-`better.md` reads this file **once**, gated on `ISSUE_MODE=true`, before Phase 1
-dispatches any agent. It is the only place that reads the general tracker
+`better.md` reads this file **once**, before Phase 1 dispatches any agent. It is the only place that reads the general tracker
 mechanics; every phase below cites it instead of restating its rules.
 
 !read lib/plan-issue-setup.md
 !read lib/plan-issue-filing.md
 
 > **Phase 2 (Plan Generation):** Keep the consolidated findings (Phase 2 steps 2–4) as
-> your **in-run working plan in context** — do **not** create or write the
-> `## Better Audit` section to `PLAN.md`, and skip step 1's "read/create PLAN.md".
-> The tracker, not `PLAN.md`, is the source of truth for already-known work, so the
+> your **in-run working plan in context** — the plan is never written to a file.
+> The tracker is the source of truth for already-known work, so the
 > disposition partial above has you fetch the open issues into `EXISTING_ISSUES`
 > during setup. When consolidating findings (step 2), **dedup against
 > `EXISTING_ISSUES`** as well as across agents: a finding that already has an open
 > issue is not new — reuse that issue's `#<number>` instead of filing a duplicate.
 > Remediation (Phase 3+) proceeds from that in-context plan exactly as normal. The
 > only persistent records are issues: for any finding you **defer** (don't
-> remediate this run, per the finding-disposition rules), file a labeled tracker
-> issue instead of a PLAN.md line — see the disposition partial above. Report the
-> created **and** reused issue numbers (`#<n>`) in the Phase 2 summary where you'd
-> report slugs. Setup (VCS host + label + `EXISTING_ISSUES` fetch) is covered by
+> remediate this run, per the finding-disposition rules — LOW findings included),
+> file a labeled tracker issue — see the disposition partial above. Report the
+> created **and** reused issue numbers (`#<n>`) in the Phase 2 summary. Setup (VCS
+> host + label + `EXISTING_ISSUES` fetch) is covered by
 > [lib/plan-issue-setup.md](./plan-issue-setup.md) above: reuse `CLI_TOOL` from Phase 0a.
 > Phase 1 spooled the finding **bodies** to `SPOOL_DIR` and returned only the
 > **index**, so consolidate and dedup against those index lines — steps 2–4 need
@@ -41,6 +39,12 @@ mechanics; every phase below cites it instead of restating its rules.
 > index" section rather than running `gh issue create` yourself; at or below that, file them inline —
 > still lifting each id's block verbatim out of its spool file into a `--body-file`,
 > never retyping it from the index line.
+
+**When `TRACKER_AVAILABLE=false`** (Phase 0a), skip the setup, the `EXISTING_ISSUES`
+fetch, and every filing step below: carry each deferred finding's title, one-line
+rationale, and `file:line` from its index line into the Phase 7 report under
+"Deferred (not filed — no issue tracker available)". Spooling and remediation are
+unchanged.
 
 **Hand the filing to per-category filer agents when the surviving set exceeds ~20** —
 whether that's the normal Phase 2 deferred set or, under `--scan-only`, every
@@ -79,7 +83,7 @@ bodies stay on disk until the filer agents move them to the tracker.
 
 ### Phase 3 (Remediation) — reading a spooled body back
 
-**In issue mode the finding bodies are on disk, not in this context.** Build
+**The finding bodies are on disk, not in this context.** Build
 `{FINDINGS}` from each worker's index lines plus the literal `SPOOL_DIR` path, and
 instruct the worker to read the full body for each of its ids out of
 `$SPOOL_DIR/<slug>.md`, where `<slug>` is the category on that id's own index line —
@@ -91,7 +95,7 @@ titles.
 
 ### Phase 4c (Test Enhancement) — triage from the spool
 
-**In issue mode Agent 8's findings are on disk, not in this context.** The index
+**Agent 8's findings are on disk, not in this context.** The index
 (`<id> | <SEVERITY> | <category> | <file:line> | <title>`) carries no `[VACUOUS]`/`[WEAK]`/`[MISSING]` tag at all — triaging off it is not merely
 lossy, it is impossible. Read `$SPOOL_DIR/tests.md` (the literal path from run state) and
 triage off each finding's full body, populating `{VACUOUS_AND_WEAK_FINDINGS}` /

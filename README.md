@@ -75,7 +75,7 @@ A complete end-to-end workflow from idea to reviewed, merged PR:
 
 2. **Claim & implement the task in isolation:**
    ```
-   /do:next --issues #123
+   /do:next #123
    ```
    *Claims issue `#123`, implements the solution in an isolated git worktree, verifies tests, and opens a PR.*
 
@@ -128,23 +128,22 @@ approves the final text.
 Suppose it files issue `#123`. On GitHub, ship it immediately:
 
 ```
-/do:next --issues #123
+/do:next #123
 ```
 
 `/do:next` claims the issue (assignee + a `next/issue-123` branch as the claim marker), implements it in an isolated git worktree, opens a reviewed PR that `Closes #123`, merges, and cleans up. Add `--plan` to approve a written implementation plan before any code is written.
 
 ### Run a whole backlog
 
-`/do:replan` keeps the plan honest; `/do:next` drains it. The plan can live in `PLAN.md` (default) or your issue tracker (`--issues`):
+`/do:replan` keeps the backlog honest; `/do:next` drains it. The backlog is your GitHub/GitLab issue tracker:
 
 ```
-/do:config --project --issues       # mark this repo as issue-tracked, once
-/do:replan                          # triage: close done/stale items, file new opportunities
+/do:replan                          # triage: close done/stale issues, file new opportunities
 /do:next                            # claim + ship the next open item
 /do:next --swarm=4                  # or ship up to 4 independent issues in parallel
 ```
 
-With the saved `--issues` default, every plan-aware command (`/do:next`, `/do:replan`, `/do:better`, `/do:simplify`, `/do:depfree`, `/do:review`, `/do:rpr`) reads and files tracker issues instead of PLAN.md lines. On a shared or public tracker, add `--collaborators` so your agent only claims issues filed by a current repo collaborator (or a `--trusted-authors` login) — `--self` is the stricter `@me`-only variant, and is too narrow when a machine user claims the owner's issues. See [Issue mode](#issue-mode---issues).
+Every command that records work (`/do:next`, `/do:replan`, `/do:better`, `/do:simplify`, `/do:depfree`, `/do:review`, `/do:rpr`) reads and files tracker issues. On a shared or public tracker, add `--collaborators` so your agent only claims issues filed by a current repo collaborator (or a `--trusted-authors` login) — `--self` is the stricter `@me`-only variant, and is too narrow when a machine user claims the owner's issues. See [Work tracking](#work-tracking).
 
 ### Audit and harden
 
@@ -192,8 +191,8 @@ All commands live under the `do:` namespace:
 | `/do:goals` | Generate GOALS.md from codebase analysis — `--prd` generates a detailed PRD.md instead ([details](#prd-mode-dogoals---prd)) (autonomous by default; `--interactive` to review with you) |
 | `/do:prd` | Generate a detailed PRD.md from codebase analysis (`/do:goals --prd`) ([details](#prd-mode-dogoals---prd)) |
 | `/do:plan-task` | Investigate the codebase, draft a decision-complete issue, show it for approval, file it in the tracker ([workflow](#plan-a-task-then-let-an-agent-ship-it)) |
-| `/do:replan` | Audit/triage the plan — prune completed items, suggest new work — in `PLAN.md` or the issue tracker ([Issue mode](#issue-mode---issues)) |
-| `/do:next` | Claim the next unclaimed plan item or issue, implement it in an isolated worktree, ship a reviewed PR, clean up. `--swarm[=N]` ships several independent issues in parallel — auto-picked, or the exact numbers you name ([Issue mode](#issue-mode---issues)) |
+| `/do:replan` | Audit/triage the issue tracker — close completed issues, suggest new work; migrates a legacy `PLAN.md` once ([Work tracking](#work-tracking)) |
+| `/do:next` | Claim the next unclaimed tracker issue, implement it in an isolated worktree, ship a reviewed PR, clean up. `--swarm[=N]` ships several independent issues in parallel — auto-picked, or the exact numbers you name ([Work tracking](#work-tracking)) |
 | `/do:omd` | Audit and optimize markdown files against best practices |
 | `/do:config` | View or set saved defaults so future commands can omit their flags ([Configuration](#configuration-doconfig)) |
 | `/do:update` | Update slashdo to latest version |
@@ -205,9 +204,9 @@ All commands live under the `do:` namespace:
 
 Five audit agents run instead of eight-to-ten: Code Quality and Architecture & SOLID (each narrowed to its structural focus, dropping the runtime and API-contract halves), DRY & YAGNI, Structural Ambition (`--strict` is implied), and a Cognitive Load & Readability agent that runs only in this mode — mixed abstraction levels in one function, flag arguments, names that lie, comments standing in for a rename, action at a distance, conditional ladders a lookup table would collapse. Size thresholds (god files, over-long functions, nesting depth) stay with the architecture agent, so the two never double-report the same site.
 
-Four gates keep a refactor pass from inventing work. **The deletion test**: a proposed abstraction must concentrate complexity behind a smaller interface, not spread it across callers — the guard against a DRY pass merging three incidental look-alikes into one abstraction serving three masters. **Depth over size**: judge a module by how much behavior sits behind how small an interface, not by line count. **Churn bias**: findings are ranked against the files people actually edit, and a cleanup in dormant code drops a severity tier — a refactor nobody cashes in isn't worth a PR. **No re-litigating rejections**: reframings earlier runs tried and rejected are recorded in the plan and fed back in, so each run starts where the last one stopped.
+Four gates keep a refactor pass from inventing work. **The deletion test**: a proposed abstraction must concentrate complexity behind a smaller interface, not spread it across callers — the guard against a DRY pass merging three incidental look-alikes into one abstraction serving three masters. **Depth over size**: judge a module by how much behavior sits behind how small an interface, not by line count. **Churn bias**: findings are ranked against the files people actually edit, and a cleanup in dormant code drops a severity tier — a refactor nobody cashes in isn't worth a PR. **No re-litigating rejections**: reframings earlier runs tried and rejected are recorded in the tracker and fed back in, so each run starts where the last one stopped.
 
-The contract that makes it safe to merge: **every fix must be observably behavior-preserving**, and the existing test suite must keep passing *unmodified* as the proof. A changed assertion means the refactor moved behavior — it gets reverted, not accommodated. Findings that can only be fixed by changing behavior are deferred to `PLAN.md` (or the tracker under `--issues`) instead of applied. Test enhancement is the one phase that's skipped; everything else runs as usual.
+The contract that makes it safe to merge: **every fix must be observably behavior-preserving**, and the existing test suite must keep passing *unmodified* as the proof. A changed assertion means the refactor moved behavior — it gets reverted, not accommodated. Findings that can only be fixed by changing behavior are deferred to the tracker instead of applied. Test enhancement is the one phase that's skipped; everything else runs as usual.
 
 ```
 /do:simplify                              # audit → refactor PRs → review loop
@@ -216,7 +215,7 @@ The contract that makes it safe to merge: **every fix must be observably behavio
 /do:pr-better --simplify-only             # fold a refactor pass into the feature PR you're building
 ```
 
-Every `/do:better` flag works here — `--interactive`, `--scan-only`, `--no-merge`, `--issues`, and the whole [review loop](#review-loop) set.
+Every `/do:better` flag works here — `--interactive`, `--scan-only`, `--no-merge`, and the whole [review loop](#review-loop) set.
 
 ## PRD mode (`/do:goals --prd`)
 
@@ -326,27 +325,28 @@ By default `/do:pr` opens the PR and hands it back for manual merge. Pass `--mer
 
 Save the behavior once with `/do:config --merge` (see [Configuration](#configuration-doconfig)). Only `/do:pr` reads the saved `merge` default; the saved `merge-method` is read by `/do:pr` and by `/do:next`, which always uses it to pick the method for its own merge — `/do:better`, `/do:better-swift`, `/do:simplify`, `/do:depfree`, and `/do:release` keep their own documented merge behavior.
 
-## Issue mode (`--issues`)
+## Work tracking
 
-By default the plan lives in `PLAN.md`. Pass `--issues` (or save it — `/do:config --issues`) to track it in your GitHub/GitLab issue tracker instead. **Every command that records plan items understands it**: `/do:replan` triages issues; `/do:next` claims them; `/do:better`, `/do:better-swift`, `/do:simplify`, and `/do:depfree` file deferred findings as labeled issues; `/do:review` and `/do:rpr` file deferred findings as issues instead of PLAN.md lines. `--no-issues` on a single run overrides a saved default.
+slashdo tracks todo items as issues in your repo's tracker — we recommend GitHub or GitLab issues (automated via an authenticated `gh` / `glab`, including Enterprise/self-managed hosts), or Jira (not automated yet — see [#372](https://github.com/atomantic/slashdo/issues/372)). `/do:replan` triages issues; `/do:next` claims them; `/do:plan-task` files one; `/do:better`, `/do:better-swift`, `/do:simplify`, `/do:depfree`, `/do:review`, and `/do:rpr` file deferred findings as labeled issues (with no tracker available they list them in their final report instead). The stable item ID is the **issue number** (e.g. `#42`); concurrent agents claim work via branch names carrying it.
+
+**Legacy `PLAN.md`?** slashdo no longer reads or writes `PLAN.md`. Run `/do:replan` once: it files each open item as a labeled issue (deduped against open issues, asking you to resolve any open question first), then deletes `PLAN.md` — or, if it holds other notes, removes only the plan sections. `--issues` is now a no-op and `--no-issues` is rejected.
 
 ```
-/do:replan --issues                       # triage the tracker instead of PLAN.md
-/do:replan --issues --interactive         # approve each close/create before it happens
-/do:next --issues                         # claim + ship the oldest eligible open issue
-/do:next --issues #42                     # cherry-pick a specific issue
-/do:next --issues --swarm                 # ship 3 independent issues in parallel
-/do:next --issues --swarm #12 #14 #15     # or swarm exactly the issues you name
-/do:next --issues --swarm=2 12,14,15,19   # named batch, 2 at a time (waves)
-/do:next --issues --self                  # only claim issues YOU filed (security boundary)
-/do:next --issues --collaborators         # only claim issues filed by a repo collaborator
-/do:next --issues --collaborators --trusted-authors howlingmime,Joebok
-/do:next --issues --model light           # only claim work hinted as cheap to run
+/do:replan                            # triage the tracker (close done/stale, file new work)
+/do:replan --interactive              # approve each close/create before it happens
+/do:next                              # claim + ship the oldest eligible open issue
+/do:next #42                          # cherry-pick a specific issue
+/do:next --swarm                      # ship 3 independent issues in parallel
+/do:next --swarm #12 #14 #15          # or swarm exactly the issues you name
+/do:next --swarm=2 12,14,15,19        # named batch, 2 at a time (waves)
+/do:next --self                       # only claim issues YOU filed (security boundary)
+/do:next --collaborators              # only claim issues filed by a repo collaborator
+/do:next --collaborators --trusted-authors howlingmime,Joebok
+/do:next --model light                # only claim work hinted as cheap to run
 ```
 
 | Flag | Default | What it does |
 |:---|:---|:---|
-| `--issues` | off — plan lives in `PLAN.md` | Track plan items as tracker issues. Requires an authenticated `gh` (GitHub) or `glab` (GitLab); commands abort rather than silently falling back |
 | `--issues-label <name>` | `plan` | The label that scopes which issues are plan items, so bug reports and questions in the same tracker aren't mistaken for the plan |
 | `--model <tier>[,…]` | off — any tier | (`/do:next`) Claim only issues hinted `model:light`/`medium`/`heavy`. `none` matches untiered issues |
 | `--effort <level>[,…]` | off — any level | (`/do:next`) Claim only issues hinted `effort:low`/`medium`/`high`/`xhigh`/`max`. `none` matches unlabelled issues |
@@ -354,11 +354,9 @@ By default the plan lives in `PLAN.md`. Pass `--issues` (or save it — `/do:con
 | `--collaborators` / `--no-collaborators` | off — any author | (`/do:next`) Claim only issues filed by a live repo collaborator, union `--trusted-authors`. Explicit `#<num>` for anyone else is refused. Fail closed if the collaborator list cannot be fetched |
 | `--trusted-authors <list>` | empty | (`/do:next`) Extra GitHub/GitLab logins unioned into the collaborators gate. No effect when `--collaborators` is off. `none` clears |
 
-**Migration is automatic.** `/do:replan --issues` always reads `PLAN.md` if one exists: every open item is migrated into the tracker (one labeled issue each) and `PLAN.md` is emptied to a short note that the roadmap now lives on the Issues page. Before migrating an item, replan surfaces any open question it finds and asks you to resolve it, so every issue it files is immediately claimable. In issue mode the stable item ID is the **issue number** (e.g. `#42`); concurrent agents claim work via branch names carrying it.
+**`/do:next` is label-agnostic by default.** `--issues-label` scopes the commands that *file or triage* plan items, but a bare `/do:next` claims the oldest open issue regardless of label (skipping only parking labels like `future`/`blocked`, epics with open children, and anything already in flight or assigned) — so a repo full of ordinary `bug`/`enhancement` issues works without stamping a `plan` label on everything. Pass `--issues-label <name>` (or save it) to restrict auto-pick to a curated queue.
 
-**`/do:next` is label-agnostic by default.** `--issues-label` scopes the commands that *file or triage* plan items, but a bare `/do:next --issues` claims the oldest open issue regardless of label (skipping only parking labels like `future`/`blocked`, epics with open children, and anything already in flight or assigned) — so a repo full of ordinary `bug`/`enhancement` issues works without stamping a `plan` label on everything. Pass `--issues-label <name>` (or save it) to restrict auto-pick to a curated queue.
-
-**Claim only your own issues (`--self`).** By default `/do:next` claims any open issue regardless of author — which on a shared tracker means acting on work items (and the instructions in their bodies) opened by anyone. `--self` restricts every claim — auto-pick, `--swarm` batches, and explicit `#<num>` — to issues authored by the running `gh` account; an explicit number for someone else's issue is **refused, not overridden**. Save it with `/do:config --self` so a multi-contributor tracker never auto-feeds third-party issues into your agent; `--no-self` on a run reverts to any-author. `--self` is too narrow when a machine user claims the owner's issues (e.g. `atomanticagent` claiming issues `atomantic` filed) — use `--collaborators` for that. Issues mode only (PLAN.md items have no author).
+**Claim only your own issues (`--self`).** By default `/do:next` claims any open issue regardless of author — which on a shared tracker means acting on work items (and the instructions in their bodies) opened by anyone. `--self` restricts every claim — auto-pick, `--swarm` batches, and explicit `#<num>` — to issues authored by the running `gh` account; an explicit number for someone else's issue is **refused, not overridden**. Save it with `/do:config --self` so a multi-contributor tracker never auto-feeds third-party issues into your agent; `--no-self` on a run reverts to any-author. `--self` is too narrow when a machine user claims the owner's issues (e.g. `atomanticagent` claiming issues `atomantic` filed) — use `--collaborators` for that.
 
 **Claim only collaborator-authored issues (`--collaborators`).** The same security motivation as `--self` — don't auto-feed outsider issue bodies into the agent — but the trusted set is the **live** collaborator list from the host API (GitHub `repos/:owner/:repo/collaborators`; GitLab members with `access_level >= 30` Developer), not just `@me`. Auto-pick skips outsider authors (`#N filed by <author> — not a collaborator (and not on --trusted-authors)`); an explicit `#<num>` for someone who is neither a collaborator nor on `--trusted-authors` is **refused, not overridden**. Fetch fails closed if the list cannot be loaded or is empty. `--self` still wins when both are on. Save it with `/do:config --collaborators`; `--no-collaborators` on a run reverts to any-author.
 
@@ -366,7 +364,7 @@ By default the plan lives in `PLAN.md`. Pass `--issues` (or save it — `/do:con
 
 **Dispatch hints (`model:` + `effort:`).** Issues filed by slashdo can carry a recommendation for *how to run the work*, on two independent axes: **`model:light|medium|heavy`** (how much capability the task needs) and **`effort:low|medium|high|xhigh|max`** (how much reasoning budget per step). They're deliberately not a size estimate, and the off-diagonal combinations are the useful ones — `model:light` + `effort:max` is a mechanical change across forty call sites, where no insight is needed but a silent miss is easy. `/do:plan-task` infers both from what it found in the code and shows them at the approval gate (override with `--model`/`--effort`, or suppress an axis with `none`). The other commands that file issues — `/do:better`, `/do:next`, `/do:replan` — may add a hint when the work they just did justifies one, but never stamp one on speculatively: `/do:replan` in particular is barred from labelling migrated backlog items in bulk, since a hint guessed from a one-line entry is noise that makes the deliberate ones unreadable.
 
-Then `/do:next` reads them back. **`--model`/`--effort` filter the queue** — `/do:next --issues --model light,none --effort low,medium` claims only cheap work (`none` includes issues nobody has tiered yet; without it, untiered issues are filtered out). And in **`--swarm` mode the labels actually dispatch**: each worker agent runs at the tier its own issue asks for, so a mixed batch doesn't pay one flat rate per agent.
+Then `/do:next` reads them back. **`--model`/`--effort` filter the queue** — `/do:next --model light,none --effort low,medium` claims only cheap work (`none` includes issues nobody has tiered yet; without it, untiered issues are filtered out). And in **`--swarm` mode the labels actually dispatch**: each worker agent runs at the tier its own issue asks for, so a mixed batch doesn't pay one flat rate per agent.
 
 **Filtering is the main event; dispatch is the bonus.** Both labels are always written, always filterable, and always reported — picking *which* issue to take ("give me something cheap", "give me the careful work") is what they're for, and that works identically everywhere. On top of that, `model:` maps to a real parameter on most hosts, so swarm workers genuinely run at their issue's tier. **`effort:` is advisory**: it tells whoever takes the issue how careful it needs to be, and an agent may additionally pass it to a sub-agent where the dispatch API exposes an effort control (Claude Code's `Agent` tool doesn't — reasoning effort comes from an agent's definition, not the call).
 
@@ -374,9 +372,9 @@ Then `/do:next` reads them back. **`--model`/`--effort` filter the queue** — `
 
 **On GitLab, these labels are written as `model::light` / `effort::high` / `priority::<N>` — with double colons.** GitLab natively treats a `key::value` label as a **scoped label**: it renders in two tones and, more usefully, only one value per key can be on an issue at a time (applying a second one replaces the first) — so an issue can't carry both `effort::low` and `effort::high` at once. GitHub has no equivalent feature, so its labels stay single-colon (`model:light`). This is automatic — nothing to configure — but it means the exact label name to filter or search on differs by host.
 
-**Epics are child-aware.** An `epic` (umbrella) issue — identified by the `epic` label, native GitHub sub-issues, or a body that task-lists other issues — is judged by its **children**, not by code evidence. `/do:next --issues` skips an epic while any child is open; once every child closes it claims the epic's remaining wrap-up tasks (or closes the epic outright if nothing remains). After shipping a child, `/do:next` re-checks the parent and closes it when that child was the last. `/do:replan --issues` applies the same rule during triage.
+**Epics are child-aware.** An `epic` (umbrella) issue — identified by the `epic` label, native GitHub sub-issues, or a body that task-lists other issues — is judged by its **children**, not by code evidence. `/do:next` skips an epic while any child is open; once every child closes it claims the epic's remaining wrap-up tasks (or closes the epic outright if nothing remains). After shipping a child, `/do:next` re-checks the parent and closes it when that child was the last. `/do:replan` applies the same rule during triage.
 
-**Swarm mode (`/do:next --issues --swarm[=N]`).** Instead of one item per run, `--swarm` claims and ships **several independent open issues at once** — each in its own worktree subagent running the normal single-issue flow — then serializes only the merge. It picks the first N independent issues off the same priority/oldest queue (skipping ones that depend on or obviously overlap another in the batch), fans out one agent per issue to implement and open a reviewed PR, then merges them one at a time, re-syncing each onto the advancing default branch. Default 3 agents; `--swarm=N` sets the count (clamped `1..6` — N agents cost ≈N× the tokens). A PR that isn't cleanly mergeable is left open rather than force-merged, and a dead agent's claim is released back to the queue.
+**Swarm mode (`/do:next --swarm[=N]`).** Instead of one item per run, `--swarm` claims and ships **several independent open issues at once** — each in its own worktree subagent running the normal single-issue flow — then serializes only the merge. It picks the first N independent issues off the same priority/oldest queue (skipping ones that depend on or obviously overlap another in the batch), fans out one agent per issue to implement and open a reviewed PR, then merges them one at a time, re-syncing each onto the advancing default branch. Default 3 agents; `--swarm=N` sets the count (clamped `1..6` — N agents cost ≈N× the tokens). A PR that isn't cleanly mergeable is left open rather than force-merged, and a dead agent's claim is released back to the queue.
 
 **Swarm an explicit list.** Name the issues instead of letting swarm pick them — `/do:next --swarm #12 #14 #15` (or `--swarm 12,14,15`), the natural follow-up to filing a batch with `/do:plan-task`. The named list *is* the batch, in your order, and it's a deliberate cherry-pick: parking labels, an active `--issues-label` filter, and blockers outside the list are overridden (each override is stated), while `--self` still refuses a list containing someone else's issue, and `--collaborators` still refuses a list containing a non-collaborator who is also not on `--trusted-authors`, rather than shrinking the batch silently. Issues that are closed or already claimed are dropped with a reason and never substituted; name more than the concurrency cap and they ship in **waves** of N, each wave merging before the next begins — which is also where an issue that depends on (or obviously collides with) another in the list gets placed. The summary accounts for every number you named. `--swarm=N` still caps concurrency, but the token cost tracks the list length, not N.
 
@@ -387,7 +385,7 @@ Rather than passing flags every time, save them once and let future commands pic
 ```
 /do:config --review-with=claude,codex,cursor[gpt-5]~effort=max,opencode[provider/model],ollama[qwen2.5-coder:32b]
 /do:config --review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5,opencode=provider/model
-/do:config --issues --issues-label plan
+/do:config --issues-label plan
 /do:config --merge --merge-method squash
 /do:config --self
 /do:config --collaborators
@@ -400,7 +398,7 @@ Rather than passing flags every time, save them once and let future commands pic
 | `/do:config` (or `--show`) | Print the current global + per-project defaults and the effective merged values |
 | `/do:config --review-with=… [--review-iterations=N] [--review-mode=series\|parallel] [--reviewer-applies\|--no-reviewer-applies] [--review-stop-on-findings\|--review-stop-on-clean\|--review-stop-all]` | Save review-loop defaults (validated with the same rules the review commands use) |
 | `/do:config --review-models <agent>=<model>,…` | Save the default model per reviewer (`codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`ollama`). Merges key-by-key — setting one agent leaves the others intact; an empty value (`codex=`) clears one agent |
-| `/do:config --issues\|--no-issues [--issues-label=<name>]` | Save the issue-mode default (and its scoping label) for every command that accepts `--issues` |
+| `/do:config --issues-label=<name>` | Save the label that scopes which issues are plan items (default `plan`) |
 | `/do:config --self\|--no-self` | Save the self-only issue gate for `/do:next` — claim only issues you filed |
 | `/do:config --collaborators\|--no-collaborators` | Save the collaborators-only issue gate for `/do:next` — claim only issues filed by a live repo collaborator (union `--trusted-authors`) |
 | `/do:config --trusted-authors <list>` | Save extra trusted *authors* (comma-separated logins) unioned into the collaborators gate; `none` clears |
@@ -409,15 +407,15 @@ Rather than passing flags every time, save them once and let future commands pic
 | `--unset <key>` | Clear one saved default (`review-with`, `review-models`, `review-iterations`, `review-mode`, `reviewer-applies`, `review-stop-mode`, `issues`, `issues-label`, `self`, `collaborators`, `trusted-authors`, `merge`, `merge-method`) |
 | `--reset` | Clear all saved defaults in the chosen scope |
 
-**Precedence (highest first):** an explicit flag on the command line → per-project `.slashdo.json` → global `~/.claude/.slashdo-config.json` → the command's built-in default. Two per-run escape hatches: `--review-with none` skips external reviewers for one run, and the `--no-*` flag forms (`--no-issues`, `--no-merge`, `--no-self`, `--no-collaborators`) override a saved `true` for one run.
+**Precedence (highest first):** an explicit flag on the command line → per-project `.slashdo.json` → global `~/.claude/.slashdo-config.json` → the command's built-in default. Two per-run escape hatches: `--review-with none` skips external reviewers for one run, and the `--no-*` flag forms (`--no-merge`, `--no-self`, `--no-collaborators`) override a saved `true` for one run.
 
-**Masking a global default per repo:** saving `--project --review-with=none` stores an explicit "no external reviewer" tombstone that masks an inherited global reviewer list for that one repo — something `--unset` can't do (unsetting the project key just falls back to the global value). The explicit negative forms (`--no-issues`, `--no-merge`, `--no-self`, `--no-collaborators`, `--no-reviewer-applies`, `--review-stop-all`) exist for the same reason: a project default that overrides an inherited global `true` back off. A saved `--trusted-authors none` is the same kind of tombstone for the extra-authors list.
+**Masking a global default per repo:** saving `--project --review-with=none` stores an explicit "no external reviewer" tombstone that masks an inherited global reviewer list for that one repo — something `--unset` can't do (unsetting the project key just falls back to the global value). The explicit negative forms (`--no-merge`, `--no-self`, `--no-collaborators`, `--no-reviewer-applies`, `--review-stop-all`) exist for the same reason: a project default that overrides an inherited global `true` back off. A saved `--trusted-authors none` is the same kind of tombstone for the extra-authors list.
 
 A typical split: personal preferences go global, repo policy goes in the repo (and `.slashdo.json` can be committed so the whole team shares it):
 
 ```
 /do:config --review-with=codex --merge          # your defaults, everywhere
-/do:config --project --issues --collaborators --trusted-authors howlingmime,Joebok
+/do:config --project --collaborators --trusted-authors howlingmime,Joebok
 ```
 
 `/do:config` shows the merged result, e.g.:

@@ -1,6 +1,6 @@
 ## Phase 3: Worktree Remediation
 
-Only proceed with CRITICAL, HIGH, and MEDIUM findings for code remediation. LOW findings remain tracked in PLAN.md but are not auto-remediated. Test Quality & Coverage findings are handled separately in Phase 4c.
+Only proceed with CRITICAL, HIGH, and MEDIUM findings for code remediation. LOW findings are filed as issues, not auto-remediated. Test Quality & Coverage findings are handled separately in Phase 4c.
 
 ### 3a: Setup
 
@@ -61,7 +61,7 @@ Remediation runs in parallel, one worker per category that has CRITICAL, HIGH, o
 2. Launch all `Agent` calls **in parallel** (multiple tool calls in a single response) and wait for all to return. Each sub-agent returns its results directly — no task board or shutdown step is needed.
 <!-- /if:teams -->
 
-**In issue mode the finding bodies are on disk, not in this context.** Build `{FINDINGS}`
+**The finding bodies are on disk, not in this context.** Build `{FINDINGS}`
 from each worker's index lines **plus the literal `SPOOL_DIR` path**, and instruct the
 worker to read the full body for each of its ids out of `$SPOOL_DIR/<slug>.md`, where
 `<slug>` is the category on **that id's own index line** — **Conflict avoidance** below
