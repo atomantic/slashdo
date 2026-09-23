@@ -50,7 +50,7 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 
    **While waiting for review**: the persistent monitor ("Poll for review completion") emits CI bucket transitions as events; fix any CI failures before the review completes ("CI failure handling").
 
-3. **Fetch review comments**: Use `gh api graphql` with stdin JSON to get all unresolved review threads, per `lib/graphql-escaping.md` below. Inline values and pipe JSON via stdin:
+3. **Fetch review comments**: Use `gh api graphql` with literal values in stdin JSON to get all unresolved review threads; never put shell-expandable `$variables` in the query string:
    ```bash
    echo '{"query":"{ repository(owner: \"OWNER\", name: \"REPO\") { pullRequest(number: PR_NUM) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }"}' | gh api --hostname GH_HOST graphql --input -
    ```
@@ -90,7 +90,7 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 
    **Re-request gate (which reviewer, if any):**
    - **If `REVIEW_AGENTS` is empty, there is no reviewer to re-request.** Skip the worthiness evaluation and proceed to step 9.
-   - **Only re-request a Copilot review if Copilot is the reviewer actually in play** — `REVIEW_AGENTS` contains `copilot` **and** the threads you just resolved came from a Copilot review (`HAS_COPILOT_REVIEW`). If the round resolved only non-Copilot threads (e.g. a human review), do NOT request a Copilot review — proceed to step 9. A `copilot~max=<n>` cap bounds this re-request loop under the accounting below; rpr's Copilot loop is bespoke (not a dispatch into `lib/copilot-review-loop.md`), so nothing else enforces the budget — count each requested Copilot round and stop once `n` is spent.
+    - **Only re-request a Copilot review if Copilot is the reviewer actually in play** — `REVIEW_AGENTS` contains `copilot` **and** the threads you just resolved came from a Copilot review (`HAS_COPILOT_REVIEW`). If the round resolved only non-Copilot threads (e.g. a human review), do NOT request a Copilot review — proceed to step 9. A `copilot~max=<n>` cap bounds this re-request loop under the accounting below; rpr's Copilot loop is bespoke and does not dispatch through the shared reviewer loop, so nothing else enforces the budget — count each requested Copilot round and stop once `n` is spent.
    - For a **local CLI** (none of `ollama`, `copilot`, or `@<login>` — the fixed CLIs and `cmd[<invocation>]` alike) or `ollama` entry, "another round" means re-running that entry's loop (local-agent, or Ollama with `{OLLAMA_MODEL}` against the locally checked-out PR branch) — not a Copilot request. Each loop manages its cap (`{MAX_ITERATIONS}`, built-in `3` unless `~max=<n>` moved it) *within* one dispatch, so typically one pass suffices; loop again only if the last round made substantive fixes **and** the entry has budget left.
    - **A per-entry `~max=<n>` is a total budget, not a per-dispatch one — for every reviewer type, including `copilot` and `@<login>`.** An inner loop enforces the cap only within its own dispatch, so handing the same entry a fresh `n` every outer round would let `--review-with ollama~max=1` run unbounded. Track each entry's **rounds spent so far** across this outer loop (sum the iterations its inner loop reported on every dispatch); for an entry whose cap was explicitly configured (`{MAX_EXPLICIT}=true`, `n ≥ 1`), stop re-dispatching once the total reaches `n`, and forward the *remaining* budget (`n - spent`), not `n`, on any subsequent dispatch. An entry on its built-in default cap or on `~max=0` (unlimited) is stopped only by the worthiness evaluation below; so is an uncapped `copilot` entry, which has **no** built-in per-entry cap in rpr.
 
@@ -113,8 +113,6 @@ Only when `ISSUE_MODE=true` and a finding is being deferred:
 !read lib/plan-issue-filing.md
 
 !`cat ~/.claude/lib/review-fix-conventions.md`
-
-!`cat ~/.claude/lib/graphql-escaping.md`
 
 ## Local-Agent Review Loop (for `--review-with codex|agy|claude|grok|pi|cursor|opencode|cmd[<invocation>]`)
 
