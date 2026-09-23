@@ -25,6 +25,8 @@ After parsing the review flags, apply any **saved defaults** (set via `/do:confi
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
+!`cat ~/.claude/lib/config-defaults-issues-merge.md`
+
 - **`--issues`** / **`--no-issues`** / **`--issues-label <name>`**: selects **where deferred findings are recorded** — GitHub/GitLab issues instead of PLAN.md lines (see Phase 2). It does NOT change what the run does: remediation, PRs, CI, the review loop, and merge all proceed as normal; combine with `--scan-only` to audit and file without remediating. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`. If neither is passed, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`.
 - **Path filter**: limit scanning scope to specific directories or files
 - **Focus areas**: e.g., "security only", "platform coverage and accessibility"

@@ -102,9 +102,9 @@ describe('/do:next --merge is ignored under --swarm except for the method (#288)
   });
 });
 
-describe('lib/review-config-defaults.md documents /do:next reading the merge key (#288)', () => {
+describe('lib/config-defaults-issues-merge.md documents /do:next reading the merge key (#288)', () => {
   const defaults = require('fs').readFileSync(
-    require('path').join(__dirname, '..', 'lib', 'review-config-defaults.md'),
+    require('path').join(__dirname, '..', 'lib', 'config-defaults-issues-merge.md'),
     'utf8',
   );
 

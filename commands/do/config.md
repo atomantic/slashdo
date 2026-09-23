@@ -113,4 +113,4 @@ After a Set/Unset/Reset action, re-print this block so the result is visible, pr
 ## Notes
 
 - This command only ever writes to the config of the **CLI you run it in** (host-CLI only). It does not mirror defaults into other installed slashdo environments.
-- The review commands consume these defaults via the shared procedure in `lib/review-config-defaults.md`; the precedence and the `--review-with none` per-run escape hatch are defined there.
+- The review commands consume these defaults via the shared procedure in `lib/review-config-defaults.md`; the precedence and the `--review-with none` per-run escape hatch are defined there. The `issues`/`issues-label`/`self`/`collaborators`/`trusted-authors`/`merge`/`merge-method` keys are documented in `lib/config-defaults-issues-merge.md`, included only by the commands that accept those flags.

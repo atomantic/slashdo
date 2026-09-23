@@ -26,6 +26,8 @@ After parsing the review flags above, apply any **saved defaults** (set via `/do
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
+!`cat ~/.claude/lib/config-defaults-issues-merge.md`
+
 - **`--issues`** / **`--no-issues`** / **`--issues-label <name>`**: selects **where deferred removals are recorded** — GitHub/GitLab issues instead of PLAN.md lines (see Phase 2). **It does NOT change what the run does** (remediation, PRs, CI, review loop, and merge all proceed); to audit and file work *without* remediating, combine it with **`--scan-only`**. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`; if **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`.
 - **Specific packages**: limit audit scope to named packages (e.g., "chalk dotenv")
 
