@@ -67,8 +67,38 @@ describe('worktree-safe merge contracts', () => {
     const body = readCommand('next.md');
     assert.match(
       body,
-      /gh pr checks <pr_number> --required --watch --fail-fast && \\\n\s+gh pr merge <pr_number> --merge/,
+      /git -C "<worktree>" push && \\\n\s+gh pr checks <pr_number> --required --watch --fail-fast && \\\n\s+gh pr merge <pr_number> --"\$MERGE_METHOD"/,
     );
+  });
+
+  it('gates the single-issue merge on the pushed SHA\'s required checks', () => {
+    // /do:pr ran with --no-merge, so its CI gate never fired, and Phase 6's push
+    // publishes a NEW SHA. Merging straight after the push merges before CI on an
+    // unprotected repo — the GitLab line below it already waits, and so must this.
+    const body = readCommand('next.md');
+    assert.match(
+      body,
+      /git push && \\\n\s+gh pr checks <num> --required --watch --fail-fast && \\\n\s+gh pr merge <num> --"\$MERGE_METHOD"/,
+    );
+    // An absent required-checks set makes `gh pr checks --required` exit non-zero;
+    // without this carve-out the chain could never merge on such a repo.
+    assert.match(body, /no required checks reported/);
+  });
+
+  it('never hardcodes the merge method on a /do:next gh merge', () => {
+    // `--merge` means a merge commit, which a squash- or rebase-only repo rejects on
+    // every run — /do:next could then never merge there.
+    const body = readCommand('next.md');
+    for (const line of fencedLines(body).filter((l) => /gh pr merge /.test(l))) {
+      assert.match(line, /gh pr merge <(num|pr_number)> --"\$MERGE_METHOD"/, line.trim());
+    }
+    // Resolved like /do:pr step 3: the repo's allowed methods, squash > merge > rebase.
+    assert.match(body, /\*\*Resolve the merge method \(GitHub\) — never hardcode `--merge`\.\*\*/);
+    assert.match(
+      body,
+      /gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed[^\n]*\\\n[^\n]*"squash"\), \(select\(\.mergeCommitAllowed\) \| "merge"\), \(select\(\.rebaseMergeAllowed\) \| "rebase"\)\] \| first \/\/ empty/,
+    );
+    assert.match(body, /\*\*Merge method \(GitHub\)\.\*\* Resolve `MERGE_METHOD` \*\*once per invocation\*\*/);
   });
 
   it('reads the MR state back on the GitLab swarm path too', () => {

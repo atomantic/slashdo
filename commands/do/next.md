@@ -559,19 +559,42 @@ DEFAULT_BRANCH="$(git -C "${WORKTREE}" symbolic-ref --quiet --short refs/remotes
 cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit "origin/${DEFAULT_BRANCH}"
 ```
 
-**If that merge reports a conflict**, **STOP and resolve it by hand** under Phase 5's **deletions win** rule (and its ban on `git add -A` while paths are unmerged). Only once `git status` shows no unmerged paths is it safe to push and merge:
+**If that merge reports a conflict**, **STOP and resolve it by hand** under Phase 5's **deletions win** rule (and its ban on `git add -A` while paths are unmerged). Only once `git status` shows no unmerged paths is it safe to push and merge.
+
+**Resolve the merge method (GitHub) — never hardcode `--merge`.** A repo that allows only squash or rebase rejects `gh pr merge --merge` on every run. Resolve `MERGE_METHOD` the way `/do:pr`'s merge step 3 does. The first match wins:
+1. A method this run was explicitly given, if Parse Arguments recorded one as `MERGE_METHOD`.
+2. The saved `merge-method` default: per-project `.slashdo.json` over global `~/.claude/.slashdo-config.json`, with the precedence in [lib/review-config-defaults.md](../../lib/review-config-defaults.md). It must be `squash`, `rebase`, or `merge`; abort on anything else, as for a typed value. Read only the method here, never the saved `merge` on/off key.
+3. The repo's allowed methods, preferring `squash`, then `merge`, then `rebase`:
+   ```bash
+   MERGE_METHOD="$(gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed \
+     -q '[(select(.squashMergeAllowed) | "squash"), (select(.mergeCommitAllowed) | "merge"), (select(.rebaseMergeAllowed) | "rebase")] | first // empty')"
+   [ -n "$MERGE_METHOD" ] || { echo "Could not resolve an allowed merge method — leaving the PR open."; exit 1; }
+   echo "MERGE_METHOD=$MERGE_METHOD"
+   ```
+
+State the chosen method, then substitute it literally into the merge below, because shell variables do not survive between Bash calls. On GitLab, skip this step: `glab mr merge` takes no method flag and uses the project default, as `/do:pr` does.
+
+**Gate on required CI, then merge.** `/do:pr` ran with `--no-merge`, so its CI gate never fired, and the push below publishes a **new SHA** whose checks haven't run yet. Merging right after the push would merge before CI on an unprotected repo, and fail on pending checks on a protected one. Wait on the **required** checks first, chained with `&&` so a red gate or a failed push stops the merge:
 
 ```bash
-git push
 # Only reached when the review gate passed AND the tree is conflict-free.
 # GitHub — no `--delete-branch` (see below); Phase 7 deletes both branches:
-gh pr merge <num> --merge
+MERGE_METHOD="<resolved method>"
+git push && \
+  gh pr checks <num> --required --watch --fail-fast && \
+  gh pr merge <num> --"$MERGE_METHOD"
 # GitLab — wait for the pipeline HERE rather than handing the MR to `--auto-merge`:
 # that flag sets merge-when-pipeline-succeeds server-side and returns while the MR is
 # still `opened`, so Phase 7's state read-back below would never see `merged` and the
 # worktree, claim branch, issue, and in-progress label would be stranded on every run.
-glab ci status --wait && glab mr merge <num> --yes --remove-source-branch
+git push && glab ci status --wait && glab mr merge <num> --yes --remove-source-branch
 ```
+
+**If `gh pr checks` prints `no required checks reported`**, it still exits non-zero. The gate is vacuously satisfied, so run the `gh pr merge` line alone. Checks for a just-pushed SHA can take a few seconds to register, so re-run the watch once before treating "no checks" as vacuous.
+
+**If a required check fails**, apply the **CI flake handling** routine: one conservative re-run on the same commit. If the same SHA passes, it was a flake, so merge and log which check flaked. If it fails again, leave the PR open, report the failing check, and skip Phase 7, as for `dirty`. Read the routine only when a required check fails:
+
+!read lib/ci-flake-handling.md
 
 **Why no `--delete-branch` on the `gh` merge:** it deletes the *local* branch too, for which `gh` first checks out the default branch — which fails inside a linked worktree (`fatal: '<default>' is already used by worktree at …`), so **`gh` exits non-zero even though the merge itself succeeded** and fires any `||` fallback around the merge. Phase 7 removes the worktree, deletes the local branch from the main repo, and deletes the remote branch explicitly.
 
