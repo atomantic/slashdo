@@ -9,9 +9,9 @@ labels, and bulk filing live in [plan-issue-filing.md](./plan-issue-filing.md).
 
 1. **Host state.** This partial requires `CLI_TOOL` and `LABEL_SEP` from the caller;
    if either is unset, run [vcs-host.md](./vcs-host.md) first — never infer them from
-   ambient credentials. If `CLI_TOOL` cannot reach this repo's issues (not
-   authenticated, or issues disabled), there is no tracker; never fall back to a
-   local backlog file. **No tracker:** a backlog command (`/do:replan`, `/do:next`,
+   ambient credentials. An empty `TRACKER_CLI` (its tracker gate), or one that
+   cannot reach this repo's issues (not authenticated, or issues disabled), means
+   no tracker; never fall back to a local backlog file. **No tracker:** a backlog command (`/do:replan`, `/do:next`,
    `/do:plan-task`) aborts in pre-flight; a command that only defers findings
    continues, files nothing, and lists each deferral (title, one-line rationale,
    file:line) in its final report under "Deferred (not filed — no issue tracker

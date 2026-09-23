@@ -7,12 +7,12 @@ When dispatching agents, resolve model tiers using:
 Detect the project environment before any scanning or remediation.
 
 ### 0a: VCS Host Detection
-Resolve `VCS_HOST` and `CLI_TOOL` here, before any phase reaches for a forge CLI:
+Resolve the host here, before any phase reaches for a forge CLI:
 
 !read lib/vcs-host.md
 
 - On GitHub, carry the `GH_HOST` seed in state; Phase 6 finishes deriving it for the reviewer loops' `gh api` calls.
-- **Record `TRACKER_AVAILABLE` once.** `true` when the confirmed `CLI_TOOL` reaches this repo and its issues feature is enabled; otherwise `false`. Deferred findings are filed as issues only when it is `true`; when `false` the run continues, files nothing, and lists every deferred finding (title, one-line rationale, `file:line`) in the Phase 7 report under "Deferred (not filed — no issue tracker available)". Never write PLAN.md as a fallback.
+- **Record `TRACKER_AVAILABLE` once.** `true` when `TRACKER_CLI` is set and reaches this repo's enabled issues; otherwise `false`, and deferred findings follow the setup partial's "No tracker" rule (Phase 7 report).
 
 ### 0b: Project Type Detection
 Record the primary manifest's ecosystem as `PROJECT_TYPE`, and `HAS_UI=true`/`false` (whether the project ships web, desktop, mobile, or server-rendered UI; it gates the `ux` scope).
