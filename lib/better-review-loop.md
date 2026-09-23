@@ -59,7 +59,8 @@ AskUserQuestion([{
   ]
 }])
 ```
+The selection alone decides which PRs are approved for 6.3; every PR it does not approve stays open.
 
 ### 6.3: Merge
 
-Merge each approved PR (`gh pr merge {PR_NUMBER} --merge`, in dependency order) only when its current local HEAD is pushed, the Phase 5d CI gate holds on that HEAD, and its review aggregate permits merge; then confirm it reports merged. A merge conflict means rebasing the branch onto `{DEFAULT_BRANCH}` and force-pushing with lease; the new HEAD then needs build/tests, the configured review loop, and CI again before merging. Prior approval of a different HEAD is insufficient. A branch-protection refusal is reported for manual merge.
+Merge each approved PR (`gh pr merge {PR_NUMBER} --merge`, in dependency order) only when its current local HEAD is pushed, the Phase 5d CI gate holds on that HEAD, and 6.2 approved it (the review aggregate, or the interactive selection); then confirm it reports merged. A merge conflict means rebasing the branch onto `{DEFAULT_BRANCH}` and force-pushing with lease; the new HEAD then needs build/tests, the configured review loop, and CI again before merging. Prior approval of a different HEAD is insufficient. A branch-protection refusal is reported for manual merge.
