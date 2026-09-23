@@ -116,7 +116,8 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 
 Only when `ISSUE_MODE=true` and a finding is being deferred:
 
-!read lib/plan-issue-mode.md
+!read lib/plan-issue-setup.md
+!read lib/plan-issue-filing.md
 
 !`cat ~/.claude/lib/per-finding-root-cause.md`
 

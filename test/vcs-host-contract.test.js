@@ -208,7 +208,7 @@ describe('VCS host selection, executed', () => {
       /startswith\("(?:model|effort|severity|area):"\)/,
       /== "(?:model|effort|severity):[a-z]/,
     ];
-    for (const rel of ['commands/do/next.md', 'lib/next-swarm.md', 'lib/plan-issue-mode.md', 'commands/do/plan-task.md']) {
+    for (const rel of ['commands/do/next.md', 'lib/next-swarm.md', 'lib/plan-issue-setup.md', 'commands/do/plan-task.md']) {
       const body = read(rel);
       for (const shape of HARDCODED) {
         assert.ok(
@@ -314,18 +314,18 @@ describe('VCS host selection stays in one partial', () => {
     }
   });
 
-  it("derives lib/plan-issue-mode.md's own CLI_TOOL fallback from the remote first", () => {
+  it("derives lib/plan-issue-setup.md's own CLI_TOOL fallback from the remote first", () => {
     // This partial's issue-mode setup used to probe `gh auth status` before
     // `glab auth status` with no remote check at all when the calling command
     // (e.g. /do:review's local-branch --issues path) never pre-detects CLI_TOOL —
     // the exact bug lib/vcs-host.md exists to prevent, just re-typed with different
     // wording ("Otherwise ... else") that evaded the AUTH_FIRST regex above.
-    const issueMode = read('lib', 'plan-issue-mode.md');
+    const issueMode = read('lib', 'plan-issue-setup.md');
     const origin = issueMode.indexOf('ORIGIN_HOST="$(git remote get-url origin');
-    assert.ok(origin > -1, 'plan-issue-mode.md must derive ORIGIN_HOST from the origin remote in its fallback');
+    assert.ok(origin > -1, 'plan-issue-setup.md must derive ORIGIN_HOST from the origin remote in its fallback');
     const firstAuth = issueMode.indexOf('auth status');
-    assert.ok(firstAuth > -1, 'plan-issue-mode.md must still keep a no-remote/no-CLI_TOOL fallback');
-    assert.ok(origin < firstAuth, 'plan-issue-mode.md probes credentials before reading the remote');
+    assert.ok(firstAuth > -1, 'plan-issue-setup.md must still keep a no-remote/no-CLI_TOOL fallback');
+    assert.ok(origin < firstAuth, 'plan-issue-setup.md probes credentials before reading the remote');
   });
 
   it('lets only the pinned pre-flights carry their own copy of the selection', () => {

@@ -808,7 +808,8 @@ describe('bundled lib docs', () => {
         'rebase-conflict-resolution.md']) {
         assert.ok(written.includes(name), `${name} must be bundled with /do:pr`);
       }
-      assert.ok(!written.includes('plan-issue-mode.md'), '/do:pr does not use issue mode');
+      assert.ok(!written.includes('plan-issue-setup.md'), '/do:pr does not use issue mode');
+      assert.ok(!written.includes('plan-issue-filing.md'), '/do:pr does not use issue mode');
     } finally { cleanup(tmpDir); }
   });
 
@@ -818,7 +819,7 @@ describe('bundled lib docs', () => {
       install({ env, packageDir: PACKAGE_DIR, dryRun: false });
       const bundled = (skill, name) =>
         fs.existsSync(path.join(env.commandsDir, skill, BUNDLED_LIB_DIR, name));
-      assert.ok(bundled('do-next', 'plan-issue-mode.md'), '/do:next has an issues mode');
+      assert.ok(bundled('do-next', 'plan-issue-setup.md'), '/do:next has an issues mode');
       assert.ok(bundled('do-review', 'review-security-audit.md'), '/do:review has lenses');
       assert.ok(!bundled('do-next', 'review-security-audit.md'), '/do:next has no lenses');
     } finally { cleanup(tmpDir); }

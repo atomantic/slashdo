@@ -77,7 +77,7 @@ describe('/do:next --collaborators claim gate', () => {
     assert.ok(glabProjected.length >= 2, `expected projected GitLab walks, got ${glabProjected.length}`);
     assert.match(next, /gh issue view <N> --json body -q \.body/);
     assert.match(next, /glab issue view <N> --output json --jq \.description/);
-    assert.match(next, /Skip that file's Setup step 3/);
+    assert.match(next, /reads only the setup partial, not \[lib\/plan-issue-filing\.md\]/);
   });
 
   it('refuses an explicit #num for a non-collaborator, not overridden', () => {

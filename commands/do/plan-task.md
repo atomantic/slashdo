@@ -43,12 +43,12 @@ accept either `--flag=value` or `--flag value`. Order is free.
 - **`--label <name>`** — add a label to the issue. Repeatable; a single value may be a
   comma-list (`--label bug,area:cli`). **Added to** any label Phase 4 infers, deduped.
   Labels are created if missing (idempotent) exactly as in
-  [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md).
+  [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) "Label creation".
 - **`--model <tier>`** / **`--effort <level>`** — set the issue's **dispatch hint**
   explicitly instead of letting Phase 4 infer it. `<tier>` ∈ `light` / `medium` /
   `heavy`; `<level>` ∈ `low` / `medium` / `high` / `xhigh` / `max`. Each applies the
   corresponding `model${LABEL_SEP}<tier>` / `effort${LABEL_SEP}<level>` label (see
-  [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "The dispatch hint"). A typed
+  [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) "The dispatch hint"). A typed
   value **wins over inference** for that axis and is not re-litigated at the gate; the
   other axis is still inferred. `--model none` / `--effort none` **suppress** that
   axis entirely — no label, no inference. Reject anything else with
@@ -112,13 +112,14 @@ accept either `--flag=value` or `--flag value`. Order is free.
      enforces that only one value per key applies to an issue at a time; GitHub has
      no equivalent, so it keeps `:`. Every prefixed label this command *builds*
      (`model`, `effort`, `severity`, …) is `<key>${LABEL_SEP}<value>`, per
-     [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "Setup". A label taxonomy
+     [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) "Setup". A label taxonomy
      the repo already **has** — `area`, most often — is the exception: match the
      separator its existing labels use, per Phase 5, or the issue lands on a second,
      unfilterable label.
 2. **Fetch existing open issues** for the dedup check (Phase 2), unless `--no-dedup`
-   is set, using the **same fetch [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md)
-   "Setup" step 3 defines** (so the two never drift) — it lists all open issues for
+   is set, using the **same fetch
+   [lib/plan-issue-filing.md](../../lib/plan-issue-filing.md) "Fetch existing open
+   issues" defines** (so the two never drift) — it lists all open issues for
    the resolved `CLI_TOOL` and records them as `EXISTING_ISSUES`.
 
 (Labels are created lazily in Phase 5, immediately before each is applied.)
@@ -158,7 +159,7 @@ Produce a **clean, human-readable title** and a **structured body**.
 
 **Title** — a self-contained, claimable task in plain language. **No `[category]` /
 `[SEVERITY]` brackets** — that metadata goes in labels (Phase 5), per
-[lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "Labels, not title brackets".
+[lib/plan-issue-filing.md](../../lib/plan-issue-filing.md) "Labels, not title brackets".
 Good: `Add a --dry-run flag to /do:pr that prints the PR body without pushing`. Bad:
 `[feature] dry-run` or `update pr.md`.
 
@@ -231,7 +232,7 @@ feature task — severity is for audit findings.
 ### The dispatch hint
 
 Then recommend **how to run the work** on the two independent axes defined in
-[lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) ("The dispatch hint"), using
+[lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) ("The dispatch hint"), using
 the code Phase 1 just read:
 
 - **`model${LABEL_SEP}<light|medium|heavy>`** — how much *capability* the task needs.
@@ -272,7 +273,7 @@ draft and re-show if the change is substantial. Only proceed on explicit approva
 
 **Create the issue** via the resolved `CLI_TOOL`, applying labels as **repeated
 `--label` flags**, creating each label lazily if missing (the `|| true` swallows
-"already exists"), per [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md):
+"already exists"), per [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) "Label creation":
 
 ```bash
 # Ensure each label exists first (gh — color optional; glab — color required):

@@ -238,7 +238,7 @@ SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_D
 
 Record the printed path as `SPOOL_DIR` in run state and pass **that literal path** to every agent — a shell variable does not survive between tool calls, so re-deriving it later would hand the filer agents an empty directory.
 
-Pass `SPOOL_DIR` to every audit agent along with the **"Bulk filing — spool the bodies, dedup on an index"** contract from [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) (the partial Phase 2 reads in). Each agent writes one ready-to-file issue body per finding to `$SPOOL_DIR/<category-slug>.md` — its own slug from Phase 2's summary table (`security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `platform-swiftui`, `tests`, `ux`), so no two agents write the same file — and **returns only the compact index**:
+Pass `SPOOL_DIR` to every audit agent along with the **"Bulk filing — spool the bodies, dedup on an index"** contract from [lib/plan-issue-filing.md](../../lib/plan-issue-filing.md) (the partial Phase 2 reads in). Each agent writes one ready-to-file issue body per finding to `$SPOOL_DIR/<category-slug>.md` — its own slug from Phase 2's summary table (`security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `platform-swiftui`, `tests`, `ux`), so no two agents write the same file — and **returns only the compact index**:
 
 ```
 <id> | <SEVERITY> | <category> | <file:line> | <one-line title>
@@ -618,7 +618,8 @@ For each file touched by multiple categories, document why it was assigned to on
 
 Only when `ISSUE_MODE=true`:
 
-!read lib/plan-issue-mode.md
+!read lib/plan-issue-setup.md
+!read lib/plan-issue-filing.md
 
 6. Print a summary table (short labels → full category → branch slug):
    - Security → Security & Secrets → `security`
