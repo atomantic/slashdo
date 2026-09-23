@@ -38,5 +38,5 @@ List all available `/do:*` commands with their descriptions.
 
 ## Notes
 
-- Commands are installed via `npx slash-do@latest`
+- Commands are installed via `npx slash-do@latest`, or `install.sh` when npm is unavailable
 - For more info, see https://github.com/atomantic/slashdo

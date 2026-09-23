@@ -8,19 +8,22 @@ Re-install slashdo commands from the latest published npm version.
 
 ## Steps
 
-1. **Run the installer**:
+1. **Record the installed version**: Read `~/.claude/.slashdo-version` before running the installer (it gets overwritten in the next step). Treat a missing file as "none installed".
+
+2. **Run the installer**: If `command -v npm` finds npm, run:
    ```bash
    npx slash-do@latest
    ```
+   Otherwise (the curl installer does not require npm), run:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/atomantic/slashdo/main/install.sh | bash
+   ```
+   The installer itself prints the new/updated/unchanged command counts — do not recompute or restate that summary.
 
-2. **Show what changed**:
-   - Compare the previous installed version (from `~/.claude/.slashdo-version`) to the new one
-   - Print a summary of new, updated, and unchanged commands
-
-3. **Report**: Print the version that was installed and the count of changes.
+3. **Report**: Print the version recorded in step 1, the new version (read `~/.claude/.slashdo-version` again), and pass through the installer's own output.
 
 ## Notes
 
-- This command is a convenience wrapper around `npx slash-do@latest`
-- It always pulls the latest published version from npm
+- This command wraps `npx slash-do@latest`, or `install.sh` when npm is unavailable
+- It always pulls the latest published version
 - Your existing commands that are not managed by slashdo are never touched

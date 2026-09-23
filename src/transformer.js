@@ -79,6 +79,14 @@ function rewriteConfigPath(body, env) {
   return body.replace(/~\/\.claude\/\.slashdo-config\.json/g, env.configPath);
 }
 
+// Rewrites the slashdo version-file token (`~/.claude/.slashdo-version`) to the
+// host CLI's own version file so help/update commands read the right file at
+// runtime. Mirrors rewriteConfigPath above.
+function rewriteVersionPath(body, env) {
+  if (!env.versionPath || env.versionPath === '~/.claude/.slashdo-version') return body;
+  return body.replace(/~\/\.claude\/\.slashdo-version/g, env.versionPath);
+}
+
 // Canonical includes plus the citation forms used by command and library docs.
 const LIB_CAT_RE = /!`cat ~\/\.claude\/lib\/(.+?)`/g;
 const LIB_PROSE_RE = /~\/\.claude\/lib\/([A-Za-z0-9._-]+\.md)/g;
@@ -471,15 +479,16 @@ function transformCommand(content, env, sourceLibDir, relPath, opts = {}) {
     transformedBody = bundle.body;
     if (opts.files) {
       for (const [filename, text] of Object.entries(bundle.files)) {
-        opts.files[filename] = rewriteConfigPath(text, env);
+        opts.files[filename] = rewriteVersionPath(rewriteConfigPath(text, env), env);
       }
     }
     for (const filename of Object.keys(bundle.files)) opts.bundled?.add(filename);
   }
 
-  // Run on the full body (after inlining) so config-path tokens that arrived via
-  // inlined lib content are rewritten too.
+  // Run on the full body (after inlining) so config-path/version-path tokens
+  // that arrived via inlined lib content are rewritten too.
   transformedBody = rewriteConfigPath(transformedBody, env);
+  transformedBody = rewriteVersionPath(transformedBody, env);
 
   // Run after inlining so conditionals inside inlined lib content are resolved too.
   transformedBody = applyConditionalBlocks(transformedBody, env);
@@ -522,6 +531,7 @@ function transformLib(content, env, sourceLibDir, opts = {}) {
     });
   }
   transformed = rewriteConfigPath(transformed, env);
+  transformed = rewriteVersionPath(transformed, env);
   return applyConditionalBlocks(transformed, env);
 }
 
@@ -532,6 +542,7 @@ module.exports = {
   parseFrontmatter,
   rewriteLibPaths,
   rewriteConfigPath,
+  rewriteVersionPath,
   inlineLibReferences,
   buildPromptBundle,
   applyConditionalBlocks,

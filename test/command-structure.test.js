@@ -45,3 +45,33 @@ describe('command file structure', () => {
     });
   }
 });
+
+// help.md hand-maintains a table of every /do:* command. Nothing enforces that
+// it stays in sync with commands/do/*.md, so a new/renamed/removed command file
+// silently drifts out of the table. This doesn't check description wording
+// (help.md's prose differs from each file's frontmatter description by design)
+// — only that the command *set* the table lists matches the command set on disk.
+describe('help.md command table', () => {
+  const files = fs.readdirSync(dir).filter((n) => n.endsWith('.md'));
+  const onDisk = new Set(files.map((n) => `/do:${n.replace(/\.md$/, '')}`));
+
+  const helpBody = fs.readFileSync(path.join(dir, 'help.md'), 'utf8');
+  const rowRe = /^\|\s*`(\/do:[a-z-]+)`\s*\|/gm;
+  const inTable = new Set();
+  let match;
+  while ((match = rowRe.exec(helpBody))) inTable.add(match[1]);
+
+  it('finds rows in the help table', () => {
+    assert.ok(inTable.size > 10, `expected the help.md command table, got ${inTable.size} rows`);
+  });
+
+  it('lists every command file in the help table', () => {
+    const missing = [...onDisk].filter((n) => !inTable.has(n)).sort();
+    assert.deepEqual(missing, [], `commands missing from help.md's table: ${missing.join(', ')}`);
+  });
+
+  it('has no help.md table row for a command file that does not exist', () => {
+    const stale = [...inTable].filter((n) => !onDisk.has(n)).sort();
+    assert.deepEqual(stale, [], `help.md lists commands with no matching file: ${stale.join(', ')}`);
+  });
+});
