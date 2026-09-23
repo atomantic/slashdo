@@ -10,40 +10,34 @@ When `SIMPLIFY_ONLY=true`, select only code-quality, dry, architecture, structur
 
 **Worker context:** give each worker its assigned paths, scope/lens below, relevant repository conventions, project/build/test facts, evidence format, and applicable mode/spool contract. Do not pass the complete command, other lenses, whole ADRs, future phases, or reviewer libraries. Resolve `AUDIT_MODEL_TIER` against the host per the model-tier guidance. Ask for confirmed findings and explicit coverage gaps, not a target finding count.
 
-Only the worker assigned a scope reads its corresponding lens below. These are conditional requirements, not instructions to read the whole list:
+A capable model already looks for the usual bug/style catalogs without being told; what it needs from you is scope and ownership, not a checklist. Give each worker only its row below — never another scope's row, and never the whole table:
 
-For `security`:
-!read lib/better-audit-security.md
+| Scope | Remit | Ownership boundary |
+|-------|-------|---------------------|
+| `security` | Auth, secrets, injection, unsafe input handling, supply-chain risk | Known CVEs in a dependency are reported here; whether to remove that dependency is `deps`' call |
+| `code-quality` | Brittleness, dead/unreachable code, unused imports, logging & observability | Language/framework-idiom violations belong to `stack-specific`, not here |
+| `dry` | Duplication, speculative abstraction, YAGNI | — |
+| `architecture` | Coupling, modularity, dependency inversion, API contract consistency (skip API contract findings when `SIMPLIFY_ONLY=true` — that's behavior, not structure) | Reader-cost of an individual function belongs to `cognitive-load` (simplify-only mode), not here |
+| `bugs-perf` | Runtime correctness, resource/perf, resilience, and observability of failure paths | — |
+| `stack-specific` | Detected-language/framework idioms and gotchas; general accessibility (alt text, ARIA, contrast) | Accessibility that is also a layout failure (touch target size, content clipped) belongs to `ux` instead |
+| `deps` | Third-party dependency necessity and removability | — |
+| `tests` | Coverage gaps and vacuous/weak test quality | Runs last among selected scopes and receives their compact finding index, not their full reports |
+| `ux` (UI projects only) | Layout, responsive behavior, visual consistency | Accessibility only when it is also a layout failure; otherwise `stack-specific` owns it |
+| `structural` (strict mode only) | Code-judo reframings, boundary leaks, canonical-helper duplication, growth past the size a single file should carry | Give this worker the structural lens below; no other scope needs it |
+| `cognitive-load` (simplify-only mode) | How much a reader must hold in their head to change one line safely | Size/shape thresholds (god files, over-long functions, nesting, parameter count) belong to `architecture`, not here |
 
-For `code-quality`:
-!read lib/better-audit-code-quality.md
+Repository conventions (already in each worker's context) supersede this table — do not pass one author's local style preferences as if they were universal.
 
-For `dry`:
-!read lib/better-audit-dry.md
+Only the `structural` worker reads the structural lens, and only when `STRICT_MODE=true`:
+!read lib/review-structural-ambition.md
 
-For `architecture`:
-!read lib/better-audit-architecture.md
-
-For `bugs-perf`:
-!read lib/better-audit-bugs-perf.md
-
-For `stack-specific`:
-!read lib/better-audit-stack-specific.md
-
-For `deps`:
-!read lib/better-audit-deps.md
-
-For `tests`:
-!read lib/better-audit-tests.md
-
-For `ux`:
-!read lib/better-audit-ux.md
-
-For `structural`:
-!read lib/better-audit-structural.md
-
-For `cognitive-load`:
-!read lib/better-audit-cognitive-load.md
+The preferences that change a worker's output, beyond the table above:
+- **`deps` severity:** unmaintained with CVEs → CRITICAL, unmaintained without CVEs → HIGH, replaceable single-function usage → MEDIUM, suspect but complex replacement → LOW. Report format: `**[SEVERITY]** {package} — {tier}. Uses: {functions}. Call sites: {N} in {M} files. Replacement: {complexity}. Reason: {why removable}`.
+- **`tests` tags:** prefix each finding's severity with a quality tag — `[VACUOUS]` (asserts nothing that could fail), `[WEAK]` (verifies implementation details or passes on a no-op result), or `[MISSING]` (no coverage) — e.g. `**[HIGH][VACUOUS]**`.
+- **`ux` above-the-fold bump:** bump severity one tier when a finding affects initial-viewport content at common viewports.
+- **`structural` blockers are `[CRITICAL]`:** file pushed past 1000 lines, spaghetti growth in existing code, thin wrappers, boundary leaks, and canonical-helper duplication are always `[CRITICAL]`, so Phase 2 picks them up for remediation. Drop findings that only say "could be cleaner" without a concrete reframing.
+- **`cognitive-load` defers size/shape:** never re-flag god files, over-long functions, nesting depth, or parameter counts — those are `architecture`'s findings.
+- **Every finding names a concrete transformation** (extract, invert, rename, table-ize, early-return, a specific replacement) — never a bare "could be cleaner."
 
 Each agent must report findings in this format:
 ```

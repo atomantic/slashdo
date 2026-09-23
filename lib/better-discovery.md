@@ -49,7 +49,7 @@ Additionally, detect whether the project ships a user-facing UI:
 - Desktop shells (Electron, Tauri) or mobile UI code (React Native, Flutter)
 - Server-rendered templates (ERB, Jinja, Blade, Razor, Go templates) that emit HTML
 
-Record `HAS_UI=true`/`false` — this gates the UX Consistency & Responsive Layout audit agent (Phase 1, agent 9) and its `ux` category downstream.
+Record `HAS_UI=true`/`false` — this gates the `ux` audit scope (Phase 1) and its category downstream.
 
 ### 0c: Build & Test Command Detection
 Derive build and test commands from the project type:

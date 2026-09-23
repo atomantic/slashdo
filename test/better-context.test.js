@@ -40,12 +40,16 @@ describe('better progressive context', () => {
     }
   });
 
-  it('routes every audit lens to an existing separate resource', () => {
+  it('lists every audit category slug in one ownership table instead of per-category lens files', () => {
     const dispatch = read('lib/better-audit.md');
-    const lenses = [...dispatch.matchAll(/^!read (lib\/better-audit-[\w-]+\.md)$/gm)].map((match) => match[1]);
-    assert.equal(lenses.length, 11);
-    assert.equal(new Set(lenses).size, lenses.length);
-    for (const lens of lenses) assert.ok(read(lens).length > 0);
+    const pipelineInputs = read('lib/better-pipeline-inputs.md');
+    const slugsLine = pipelineInputs.match(/^- `\{CATEGORY_SLUGS\}` = (.+)$/m)[1];
+    const slugs = [...slugsLine.matchAll(/`([\w-]+)`/g)].map((match) => match[1]);
+    assert.ok(slugs.length > 0, 'could not parse {CATEGORY_SLUGS} from lib/better-pipeline-inputs.md');
+    for (const slug of slugs) {
+      assert.match(dispatch, new RegExp(`\\| \`${slug}\``), `category table is missing the ${slug} row`);
+    }
+    assert.doesNotMatch(dispatch, /!read lib\/better-audit-/);
     assert.match(dispatch, /Do not pass the complete command/);
     assert.match(dispatch, /Cover every applicable requested scope/);
   });

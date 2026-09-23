@@ -94,12 +94,19 @@ COMMANDS=(
 
 OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
-# NOTE: keep in sync with install.sh LIBS — see comment there.
-LIBS=(
-  better-audit better-audit-architecture better-audit-bugs-perf
+# Libs a prior release installed that are no longer shipped, kept here only so
+# uninstall.sh can still clean them off disk (install.sh's LIBS never installs
+# them again). Mirrors the OLD_COMMANDS/OLD_HOOKS convention above.
+OLD_LIBS=(
+  better-audit-architecture better-audit-bugs-perf
   better-audit-code-quality better-audit-cognitive-load better-audit-deps
   better-audit-dry better-audit-security better-audit-stack-specific
   better-audit-structural better-audit-tests better-audit-ux
+)
+
+# NOTE: keep in sync with install.sh LIBS — see comment there.
+LIBS=(
+  better-audit
   better-discovery better-options better-pipeline-inputs
   better-plan better-remediation better-simplify
   better-state better-test-enhancement
@@ -189,7 +196,7 @@ uninstall_claude() {
     fi
   done
 
-  for lib in "${LIBS[@]}"; do
+  for lib in "${LIBS[@]}" "${OLD_LIBS[@]}"; do
     if [ -f "$target_lib/$lib.md" ]; then
       rm -f "$target_lib/$lib.md"
       printf "    removed: lib/%-18s${GREEN}ok${RESET}\n" "$lib.md"
@@ -261,7 +268,7 @@ uninstall_opencode() {
     fi
   done
 
-  for lib in "${LIBS[@]}"; do
+  for lib in "${LIBS[@]}" "${OLD_LIBS[@]}"; do
     if [ -f "$target_lib/$lib.md" ]; then
       rm -f "$target_lib/$lib.md"
       printf "    removed: lib/%-18s${GREEN}ok${RESET}\n" "$lib.md"
@@ -373,7 +380,7 @@ uninstall_gemini_legacy() {
     fi
   done
 
-  for lib in "${LIBS[@]}"; do
+  for lib in "${LIBS[@]}" "${OLD_LIBS[@]}"; do
     if [ -f "$target_lib/$lib.md" ]; then
       rm -f "$target_lib/$lib.md"
       printf "    removed: lib/%-18s${GREEN}ok${RESET}\n" "$lib.md"
