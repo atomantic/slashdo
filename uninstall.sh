@@ -102,6 +102,7 @@ OLD_LIBS=(
   better-audit-code-quality better-audit-cognitive-load better-audit-deps
   better-audit-dry better-audit-security better-audit-stack-specific
   better-audit-structural better-audit-tests better-audit-ux
+  code-review-checklist
 )
 
 # NOTE: keep in sync with install.sh LIBS — see comment there.
