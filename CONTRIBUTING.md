@@ -20,8 +20,8 @@ Thanks for considering a contribution. slashdo is a small, actively-maintained p
 
 ### Shared `better-*` pipeline placeholders
 
-`/do:better` and `/do:better-swift` share Phases 4/4b, 5/5d, 6, and 7 verbatim
-via `lib/better-*.md` (see `lib/better-pipeline-inputs.md` and
+`/do:better` and `/do:better-swift` share Phases 3–7 verbatim via
+`lib/better-*.md` (see `lib/better-pipeline-inputs.md` and
 `lib/swift-pipeline-inputs.md`); each calling command supplies the differences
 as `{PLACEHOLDER}` values in its own `## Shared Pipeline Inputs` section. Each
 shared partial's `### Inputs` block only lists which placeholders that phase

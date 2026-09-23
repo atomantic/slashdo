@@ -16,6 +16,7 @@ Parse arguments and saved defaults before choosing phases. Explicit flags overri
 Only with `--simplify-only` / `--refactor-only`, read the scope, finding gates, and hard behavior-preservation contract before discovery. It implies strict mode and skips test enhancement.
 
 !read lib/better-simplify.md
+!read lib/better-pipeline-inputs.md
 
 ## Workflow
 
@@ -43,7 +44,6 @@ Only when `ISSUE_MODE=true` (resolved by `--issues` in step 0's options), read t
 
 4. Resolve pipeline inputs, then run build/tests and internal review. Fix failures before publication. No feature or behavior changes are permitted in simplify-only mode.
 
-!read lib/better-pipeline-inputs.md
 !read lib/better-verification.md
 
 4c. Only outside simplify-only mode, enhance tests for demonstrated gaps and update file ownership. `pr-better` completes this before merging the worktree back.

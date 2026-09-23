@@ -355,14 +355,15 @@ describe('VCS host selection stays in one partial', () => {
       include < discovery.indexOf('Record `DEFAULT_BRANCH` via'),
       'lib/better-discovery.md must select the host before the default-branch lookup',
     );
-    for (const command of ['better-swift.md', 'depfree.md']) {
-      const body = read('commands', 'do', command);
-      const at = body.indexOf('!read lib/vcs-host.md');
-      assert.ok(at > -1, `commands/do/${command} must include lib/vcs-host.md`);
-      assert.ok(
-        at < body.indexOf('Record `DEFAULT_BRANCH` via'),
-        `commands/do/${command} must select the host before the default-branch lookup`,
-      );
-    }
+    const depfree = read('commands', 'do', 'depfree.md');
+    const depfreeAt = depfree.indexOf('!read lib/vcs-host.md');
+    assert.ok(depfreeAt > -1, 'commands/do/depfree.md must include lib/vcs-host.md');
+    assert.ok(
+      depfreeAt < depfree.indexOf('Record `DEFAULT_BRANCH` via'),
+      'commands/do/depfree.md must select the host before the default-branch lookup',
+    );
+
+    const swift = read('commands', 'do', 'better-swift.md');
+    assert.match(swift, /!read lib\/better-discovery\.md/);
   });
 });

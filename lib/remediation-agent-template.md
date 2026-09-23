@@ -17,7 +17,7 @@ Foundation utilities available (if created):
 </findings>
 
 <instructions>
-You are {AGENT_NAME}, a remediation worker for the better-{DATE} audit.
+You are {AGENT_NAME}, a remediation worker for the {BRANCH_PREFIX} audit.
 Fix all {CATEGORY} findings listed above.
 
 Confirm each finding against the code; skip false positives with evidence.

@@ -1,6 +1,6 @@
 ## Shared Pipeline Inputs
 
-Phases 4–7 are shared with `/do:better-swift`; resolve these inputs before Phase 4
+Phases 3–7 are shared with `/do:better-swift`; resolve these inputs before Phase 3
 (substitution rules are in `~/.claude/lib/better-verification.md`):
 
 - `{BRANCH_PREFIX}` = `better` (staging branch `better/{DATE}`, category branches `better/{CATEGORY_SLUG}`)
