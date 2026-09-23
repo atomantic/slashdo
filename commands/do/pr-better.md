@@ -24,7 +24,7 @@ Constraints applied automatically:
 
 ## Pre-flight
 
-1. Run `git branch --show-current` for `{CURRENT_BRANCH}`. Detect the default branch host-agnostically — this runs before `do:better`/`do:pr`'s own VCS-host detection, so it must work on GitHub and GitLab alike without invoking either CLI: `git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@'`; if empty, run `git remote set-head origin --auto` once and retry; fall back to `main` if still empty.
+1. Run `git branch --show-current` for `{CURRENT_BRANCH}`. Detect the default branch host-agnostically for this guard — this runs before `do:better`/`do:pr`'s own VCS-host detection, so it must work on GitHub and GitLab alike without invoking either CLI: `git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@'`; if empty, run `git remote set-head origin --auto` once and retry. **Never assume a name (e.g. `main`) if it's still empty** — a wrong guess here would misjudge step 2 and, if it happened to also survive into Phase B, rebase onto the wrong branch. If it cannot be resolved, skip step 2's check and proceed; `do:pr`'s own host-authoritative detection in Phase B (`gh repo view` / `glab repo view`) is the one that actually drives the rebase target and PR base, and it fails loudly if the repo is unreadable.
 2. If the current branch is the default branch, halt and tell the user: pr-better needs a feature branch — either create one first or run `/do:better` directly to produce per-category PRs from default
 3. Run `git status --porcelain` — if dirty, the do:better Phase 3a stash will handle it, but warn the user that uncommitted changes will be stashed and restored after the audit
 
