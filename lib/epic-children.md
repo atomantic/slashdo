@@ -106,8 +106,9 @@ the epic — it must be closed explicitly:
 - GitLab: `glab issue close` has no `--comment` flag, so post the note first, then close:
   `glab issue note "$N" -m "All children closed (#a, #b, …) and wrap-up complete — closing epic. (slashdo)" && glab issue close "$N"`
 
-Never close an `epic-open` epic even if its title reads as done. In
-`--interactive` flows, surface the candidate and ask before closing.
+Never close an `epic-open` epic even if its title reads as done. When the
+caller supports interactive mode (e.g., `/do:replan --interactive`), surface
+the candidate and ask before closing.
 
 ## Resolving a child's parent epic (for the post-ship hook)
 
