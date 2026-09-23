@@ -96,3 +96,13 @@ describe('#296 — next-swarm.md jq probe no longer contradicts "reuse Phase 1 v
     assert.match(swarm, /if \[ "\$CLI_TOOL" = glab \]; then\n\s*command -v jq >\/dev\/null 2>&1 \|\| \{/);
   });
 });
+
+describe('#381 — host verbs replace inline forge branches', () => {
+  it('keeps the shared teardown and merge handoffs on named operations', () => {
+    assert.match(next, /\*\*Host verbs\.\*\*/);
+    assert.match(next, /assign_me "\$ISSUE_NUM"/);
+    assert.match(next, /issue_close_note <num>/);
+    assert.match(next, /ci_wait_merge <PR> <method>/);
+    assert.match(next, /!read lib\/merge-gate\.md/);
+  });
+});

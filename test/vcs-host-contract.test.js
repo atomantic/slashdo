@@ -268,6 +268,16 @@ describe('VCS host selection, executed', () => {
 });
 
 describe('VCS host selection stays in one partial', () => {
+  it('keeps host verbs downstream of forge selection', () => {
+    const next = read('commands', 'do', 'next.md');
+    const gitlab = read('lib', 'next-gitlab.md');
+    const verbs = next.indexOf('**Host verbs.**');
+    const selection = next.indexOf('!read lib/vcs-host.md');
+    assert.ok(verbs > -1 && verbs < selection, 'host verbs must follow the shared forge selection');
+    assert.match(gitlab, /## Host verbs — GitLab forms/);
+    assert.match(gitlab, /glab issue update <N> --assignee "\+\$ME"/);
+  });
+
   it('derives from the remote before the first credential probe', () => {
     const [selection] = bashBlocks();
     const origin = selection.indexOf('ORIGIN_HOST="$(git remote get-url origin');

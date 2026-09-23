@@ -41,6 +41,7 @@ describe('/do:next --collaborators claim gate', () => {
   });
 
   it('fetches live collaborators and fails closed on empty or error', () => {
+    assert.match(next, /COLLAB_LOGINS="\$\(collaborators\)"/);
     assert.match(next, /gh api --hostname "\$GH_HOST" repos\/:owner\/:repo\/collaborators --paginate/);
     assert.match(next, /glab api --paginate "projects\/:id\/members\/all"/);
     assert.match(next, /select\(\.access_level >= 30\)/);
@@ -49,7 +50,6 @@ describe('/do:next --collaborators claim gate', () => {
       /Could not list collaborators for \$OWNER_REPO — \/do:next --collaborators cannot be enforced\. Aborting/,
     );
     assert.match(next, /never fall open to `--trusted-authors` alone/);
-    // Two-step GitLab capture — a piped jq would fail-open on empty input.
     assert.match(next, /MEMBERS_JSON="\$\(glab api --paginate "projects\/:id\/members\/all"\)"/);
     assert.doesNotMatch(next, /glab api --paginate "projects\/:id\/members\/all" \| jq/);
   });
@@ -73,8 +73,8 @@ describe('/do:next --collaborators claim gate', () => {
     // GitLab walks project away `description`.
     const glabProjected = next.match(/\| \.\[\] \| \{iid,title,labels,assignees,author,created_at\}"/g) || [];
     assert.ok(glabProjected.length >= 2, `expected projected GitLab walks, got ${glabProjected.length}`);
-    assert.match(next, /gh issue view <N> --json body -q \.body/);
-    assert.match(next, /glab issue view <N> --output json --jq \.description/);
+    assert.match(next, /fetch the body for this candidate only\*\* with `issue_body <N>`/);
+    assert.match(next, /check the freshest state with `issue_state <N>`/);
     assert.match(next, /reads only the setup partial, not \[lib\/plan-issue-filing\.md\]/);
   });
 
@@ -144,10 +144,27 @@ describe('/do:next --trusted-authors union', () => {
 describe('/do:next claim snippet', () => {
   it('keeps the sibling-race hard stop without repeated teardown rationale', () => {
     const claim = next.split('### Phase 2 — mark the issue in progress')[1].split('## Phase 3')[0];
+    assert.match(claim, /assign_me "\$ISSUE_NUM"/);
+    assert.match(claim, /ASSIGNEES="\$\(issue_assignees "\$ISSUE_NUM"\)"/);
+    assert.match(claim, /unassign_me "\$ISSUE_NUM"/);
+    assert.match(claim, /label_add "\$ISSUE_NUM" in-progress/);
+    assert.match(claim, /grep -qxF "\$ME"/);
     assert.match(claim, /if printf '%s' "\$ASSIGNEES"[\s\S]*?git push origin --delete "next\/\$\{SLUG\}"[\s\S]*?exit 1/);
     assert.doesNotMatch(claim, /Claim exclusivity is best-effort/);
     assert.doesNotMatch(claim, /race-detected branch is a hard stop/);
     assert.doesNotMatch(claim, /HARD STOP/);
+  });
+});
+
+describe('/do:next host verbs', () => {
+  it('defines the requested GitHub forms once and routes claim operations through them', () => {
+    for (const verb of ['issue_body', 'issue_state', 'issue_close_note', 'assign_me', 'unassign_me', 'label_add', 'label_rm', 'ci_wait_merge']) {
+      const marker = '- ' + String.fromCharCode(96) + verb;
+      const line = next.split('\n').find((candidate) => candidate.startsWith(marker));
+      assert.ok(line && line.includes('` — `') && line.includes('gh '), `${verb} must have one GitHub form`);
+    }
+    assert.match(next, /\*\*Host verbs\.\*\*/);
+    assert.match(next, /GitLab forms and the two-step `glab api` rule/);
   });
 });
 
