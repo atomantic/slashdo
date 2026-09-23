@@ -548,7 +548,7 @@ describe('review-loop parse contracts', () => {
     assert.match(pr, /Leaving the fixes uncommitted is invisible to that section's assertion/);
     // The gate's push must name its form, not leave it to the orchestrator — the two
     // forms it would otherwise reach for are the two this file forbids.
-    assert.match(pr, /using the upstream-derived push described under "Open the PR"/);
+    assert.match(pr, /using "Open the PR"'s upstream-derived push below/);
     // Without a stop-on-failure clause the orchestrator falls through to gh pr create
     // and opens exactly the stale pre-review PR this guard exists to prevent.
     assert.match(pr, /\*\*If the push still fails after that one retry, do NOT create the PR\*\*/);
@@ -886,10 +886,12 @@ describe('review-loop parse contracts', () => {
     assert.match(loop, /GIT_COMMON="\$\{GIT_COMMON:-\$\(git rev-parse --git-common-dir\)\}"/);
     assert.match(loop, /if \[ -z "\$GIT_COMMON" \] \|\| \[ -z "\$GIT_META_BAK" \]/);
 
-    // Parsing cmd is not the same as dispatching it — pr.md/release.md/review.md
-    // each name the local-agent loop's actual per-agent dispatch line inline
-    // (not via a shared partial), so `cmd` has to be added to each one by hand.
-    assert.match(readCommand('pr.md'), /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode` \| `cmd` → local-agent headless review loop/);
+    // Parsing cmd is not the same as dispatching it — review.md names the
+    // local-agent loop's actual per-agent dispatch line inline (not via a shared
+    // partial), so `cmd` has to be added there by hand. pr.md and release.md have
+    // no inline dispatch list — their exclusion-gated `!read`s (asserted above)
+    // are the dispatch.
+    assert.match(readCommand('pr.md'), /hands off to the \*\*multi-reviewer wrapper\*\*[^\n]*`LOCAL_AGENTS`[^\n]*`cmd` included/);
     // release.md has no inline dispatch list — its exclusion-gated `!read`s (asserted
     // above) are the dispatch — but it must forward the saved per-agent models.
     assert.match(readCommand('release.md'), /hand off to the \*\*multi-reviewer loop\*\*[^\n]*`\{REVIEW_MODELS\}`/);

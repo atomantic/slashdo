@@ -16,11 +16,10 @@ Parse `$ARGUMENTS` for:
 - **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation — no worktree, no code changes, no PRs. Every surviving finding is filed as a labelled tracker issue before the run exits, not just the deferred subset (see the Phase 2 gate)
 - **`--no-merge`**: run through PR creation, skip the review loop and merge
 - **`--heavy`**: aggressive mode — only keep foundational frameworks and language runtimes; replace everything else that is feasibly replaceable (see Heavy Mode)
-- **`--review-with <agent[,agent,...]>`**: which reviewer(s) run the Phase 5c review loop on the PR. Accepted slugs: `codex`, `agy` (aliases `gemini` / `antigravity` — the Antigravity CLI's `agy` binary), `claude`, `grok`, `pi`, `cursor` (alias `cursor-agent`), `opencode` (aliases `zen` / `opencode-zen`), `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins one, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`), `copilot` (**legacy** — GitHub's cloud Copilot review; supported when named, never selected implicitly), `cmd[<invocation>]` — an escape hatch for any harness not in this list (operator-authored shell command, read prompt on stdin, print the same verdict contract; always review-only; see `lib/local-agent-review-loop.md` "The `cmd` reviewer"), or an arbitrary GitHub login `@<login>` — any GitHub user or App/bot (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`); slashdo requests its review on the PR and waits for it (GitHub only, never posts an approval itself). `codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode` likewise accept a `<agent>[<model>]` bracket — e.g. `codex[o3]`, `claude[claude-opus-4-8]`, `grok[grok-code-fast-1]`, `opencode[provider/model]` — stripped into a per-entry `REVIEW_MODEL` (empty uses each other CLI's default; OpenCode receives no slashdo model override, so select an explicit or configured supported provider/model); `copilot` and `@<login>` take no model bracket. Comma-separated, ordered list: split on `,` **outside the outermost brackets** (a `,` inside a `cmd[<invocation>]` or a nested `[<model>]` is part of the value; "outermost" is the first `[` to the last `]` of the token), trim whitespace, normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, `zen`/`opencode-zen` → `opencode`, dedupe preserving first-occurrence order, with the `[<model>]` bracket (or, for `cmd`, the verbatim `[<invocation>]`) part of the dedup identity. Record as `REVIEW_AGENTS`. **There is no built-in default** — if omitted, leave `REVIEW_AGENTS` **unset for now**; the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (Phase 5c skipped, PR left open without merging). `copilot` is never added implicitly. Suffixes, strippable off the right of each token in any order before slug parsing: `~opt` (e.g. `ollama~opt`, `ollama[qwen2.5-coder:32b]~opt`) marks the reviewer **optional/non-blocking** — still requested and its findings still fixed, but an inconclusive result (timeout/skipped/incomplete/no-verdict) never blocks the merge (a hard-error still does); record as a per-entry `{OPTIONAL}` flag. `~max=<n>` (e.g. `claude~max=2`, `ollama~max=1`) caps how many review → fix → re-review cycles **that one reviewer** runs. `~effort=<level>` (e.g. `codex[gpt-5.6-luna]~effort=max~opt`, `claude~effort=high~max=2`) sets its reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`). Deduplication excludes `~` suffixes (`ollama~opt` == `ollama`; survivor takes `~opt` if any had it, and cap/effort from the first that carried them). Reject a malformed suffix with `Invalid --review-with suffix on {entry}: ~max must be a non-negative integer and ~effort must be one of low, medium, high, xhigh, max, each appearing at most once; the only suffixes are ~opt, ~max=<n>, and ~effort=<level>.` Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot, cmd[<invocation>], @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).` The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no reviewer (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default.
-- **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to the multi-reviewer loop; control when the reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
-- **`--review-mode <series|parallel>`**: forwarded to the multi-reviewer loop. `series` (default) runs the reviewers one-at-a-time so each sees the prior's committed fixes; `parallel` runs their reviews concurrently against one baseline and applies the deduped union once (`--reviewer-applies` and the stop-modes are ignored in parallel). Set `REVIEW_MODE`; if omitted, leave it **unset for now** (saved-defaults fills it from `review-mode`; built-in default `series`). Abort with `--review-mode must be one of series, parallel (got: {value}).` on any other value.
-- **`--reviewer-applies`**: forwarded to the review loop — the reviewing CLI applies fixes directly instead of the orchestrator — **only on the `codex` pass**, the one reviewer with a verified write-isolated profile; the loop forces every other local reviewer (`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`cmd`) back to review-only (and it has no effect on copilot or `@<login>` passes, which are read-only cloud-side reviews). Record `REVIEWER_APPLIES=true`/`false`.
-- **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** or **`@<login>`** pass runs (Phase 5c); no effect on `codex`/`agy`/`claude`/`grok`/`pi`/`cursor`/`opencode`/`cmd`/`ollama` passes (their own fixed iteration caps). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass, exiting early on 0 comments). `0` = loop until that reviewer returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).` To move the local-agent / `ollama` caps — or give each reviewer a different budget — use the per-entry `--review-with <agent>~max=<n>` suffix, which overrides this flag for the entry that carries it.
+
+The `--review-with`, `--review-stop-on-findings`/`--review-stop-on-clean`, `--review-mode`, `--reviewer-applies`, and `--review-iterations` grammar governing the Phase 5c review loop on the PR — entry syntax, per-reviewer `~opt`/`~max=`/`~effort=` suffixes, dedupe rules, and model-bracket forwarding — is owned by the shared partial below; do not restate it here:
+
+!`cat ~/.claude/lib/review-flags.md`
 
 After parsing the review flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the review flags **and** `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
 
@@ -176,6 +175,8 @@ Based on `PROJECT_TYPE`, extract the full dependency list:
 **Ruby:**
 - Read `Gemfile`
 
+Then run the whole-tree vulnerability audit **once** (`npm audit --json`, `cargo audit --json`, `pip-audit -f json`, etc., per `PROJECT_TYPE`) and index the results as `VULN_MAP`, keyed by **package name + installed version** (not name alone — a monorepo or lock file can carry multiple versions of the same package, and a finding against one version must not be attributed to another). Phase 1c's per-package usage analysis reads from `VULN_MAP` instead of re-running the audit for every Tier 2/3 dependency.
+
 ### 1b: Classify Dependencies
 
 For each dependency, first check `PRIOR_DECISIONS` (from Phase 0e). If a valid prior decision exists for the package + major version + mode, carry it forward:
@@ -208,7 +209,7 @@ Large, widely-audited, foundational libraries. Examples by ecosystem:
 - Download count is NOT a factor — popularity does not exempt a library from replacement
 - Libraries that are wrappers, utilities, CLIs, or single-purpose tools are Tier 2 or 3 regardless of popularity
 - Linting/formatting tools (eslint, prettier) in heavy mode: remain Tier 1 when required by CI or organization-wide standards (do not attempt replacement); otherwise treat as Tier 2 (audit usage, but do not rewrite their behavior)
-- Examples of libraries that DROP from Tier 1 in heavy mode: lodash, chalk, commander, yargs, dotenv, uuid, axios, node-fetch, glob, minimatch, semver, debug, winston, morgan, cors, helmet, body-parser, cookie-parser, compression, color, ora, inquirer, boxen, marked, highlight.js, moment, dayjs, date-fns, underscore, ramda, rxjs (if only basic operators used), jest (if vitest is also present — deduplicate), mocha, d3 (unless the visualization requires it), three (unless 3D rendering is core), rspec, sidekiq, devise, requests, httpx, pytest, clap, reqwest, tracing
+- Examples of libraries that DROP from Tier 1 in heavy mode: lodash, chalk, commander, dotenv, uuid, axios, moment, requests, clap, tracing — any single-purpose wrapper or utility collection, regardless of ecosystem or popularity, moves to Tier 2/3 for evaluation
 
 **Tier 2 — SUSPECT (audit usage):**
 Smaller libraries that may be doing something we can write ourselves.
@@ -276,7 +277,7 @@ Each agent should:
    - **Moderate** (20-100 lines): multi-function utility, needs tests, edge cases to handle
    - **Complex** (100-300 lines): significant logic, crypto, parsing, protocol implementation
    - **Infeasible** (300+ lines or requires deep domain expertise): keep the dependency
-5. Check if the package has known vulnerabilities: `npm audit`, `cargo audit`, `pip-audit`, etc.
+5. Look up known vulnerabilities for the package's installed version in the whole-tree `VULN_MAP` from Phase 1a (do not re-run the audit per package)
 6. Check last publish date and maintenance status
 7. Check for **consolidation opportunities**: does this package overlap in purpose with another dependency (two state managers, two HTTP clients, two date libraries, two test runners)? If so, flag which kept dependency could absorb this one's usage
 
@@ -331,7 +332,7 @@ Unless `TRACKER_AVAILABLE=false`, read the tracker setup and filing partials now
 
 1. Fetch `EXISTING_ISSUES` per those partials (skip when `TRACKER_AVAILABLE=false`).
 2. Filter to only REMOVE recommendations from Phase 1c/1d (exclude any downgraded to KEEP (transitive) in Phase 1d)
-3. For EVALUATE recommendations: **Default mode** — treat as KEEP (conservative). **Heavy mode** — treat as REMOVE (aggressive). **Interactive mode** — present to user via `AskUserQuestion` for each. If both `--interactive` and `--heavy` are set, still prompt for each EVALUATE item (interactive takes precedence), but present REMOVE as the default suggestion
+3. For EVALUATE recommendations: **Default mode** — treat as KEEP (conservative). **Heavy mode** — treat as REMOVE (see Heavy Mode). **Interactive mode** — present to user via `AskUserQuestion` for each. If both `--interactive` and `--heavy` are set, still prompt for each EVALUATE item (interactive takes precedence), but present REMOVE as the default suggestion
 4. Group removable dependencies by replacement strategy:
    - **Native replacement**: built-in API replaces the library (e.g., `crypto.randomUUID()`)
    - **Inline replacement**: write a small utility function (e.g., ANSI color wrapper)
@@ -418,7 +419,7 @@ Steps:
 - Do NOT use `git add -A` or `git add .` — stage specific files only
 - Do NOT edit the manifest or lock file — see step 6 above
 - Keep replacement code minimal
-- If replacement is more complex than estimated (>2x the estimated lines), report back and skip — do not force a bad replacement. In `HEAVY_MODE`, the ceiling is 300 lines per replacement — only skip if replacement requires deep domain expertise (crypto primitives, binary protocol parsers, codec implementations) or exceeds 300 lines
+- If replacement is more complex than estimated (>2x the estimated lines), report back and skip — do not force a bad replacement. In `HEAVY_MODE`, use the raised ceiling from Heavy Mode above (300 lines) instead of the 2x estimate — only skip if replacement requires deep domain expertise (crypto primitives, binary protocol parsers, codec implementations) or exceeds that ceiling
 - Place shared utility replacements in a sensible location (e.g., `src/utils/`, `lib/`, `internal/`) following existing project conventions
 - Commit each replacement independently: `refactor: replace {package} with owned {utility/code}`. If `git commit` fails on a transient `index.lock` (another agent committing at the same instant), wait briefly and retry once before reporting failure
 </guardrails>
@@ -488,12 +489,7 @@ After all replacement agents complete, run these steps once, in the orchestrator
    ```bash
    cd {WORKTREE_DIR} && git diff {DEFAULT_BRANCH}...HEAD
    ```
-2. Review all replacement code for:
-   - Functional equivalence (does the replacement handle the same inputs/outputs?)
-   - Missing edge cases that the original library handled
-   - Security regressions (e.g., replacing a sanitization library with a naive regex)
-   - Performance regressions (e.g., replacing an optimized parser with O(n^2) code)
-   - Correct error handling at system boundaries
+2. Review the diff for behavior parity with the removed library — same inputs/outputs, edge cases the original handled, no new security or performance regressions (e.g. a naive regex replacing a sanitization library, or O(n^2) code replacing an optimized parser), and correct error handling at system boundaries
 3. Fix any issues found, commit each fix separately
 
 ### 4c: Update DEPS.md
@@ -767,6 +763,6 @@ Transitive deps eliminated: ~{count} (estimated)
 - This command complements `/do:better` — `depfree` for dependency hygiene, `better` for code quality
 - All remediation happens in an isolated worktree. Phase 3a may stash a dirty tree directly in `{REPO_DIR}` before the worktree exists, but Phase 6 always restores that stash on `{CURRENT_BRANCH}` without ever checking out another branch there — so by the time the command finishes, the user's branch and working tree are exactly as they were when it started, on every exit path (`--no-merge`, GitLab, no reviewer, merged, or left open)
 - `docs/DEPS.md` is the persistent decision log (read in Phase 0e, rewritten in Phase 4c). Major version bumps and heavy-mode escalations bypass it; manually delete an entry to force re-audit
-- **Default mode**: when in doubt, keep the dependency. **Heavy mode**: when in doubt, replace it, unless the replacement needs crypto primitives, binary protocol parsing, or deep domain expertise
+- **Default vs. heavy mode aggressiveness**: see Heavy Mode above
 - Replacement code should be minimal — don't over-engineer utilities that replace single-purpose packages
 - For monorepos, audit the root manifest and each workspace package manifest
