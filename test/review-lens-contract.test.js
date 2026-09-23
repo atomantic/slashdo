@@ -91,10 +91,15 @@ describe('shared review preferences', () => {
       ...fs.readdirSync(path.join(root, 'lib')).map((name) => `lib/${name}`),
       ...fs.readdirSync(path.join(root, 'src')).map((name) => `src/${name}`),
       'install.sh',
-      'uninstall.sh',
       'README.md',
       '.claude/commands/improve/review.md',
     ];
     for (const file of files) assert.doesNotMatch(read(file), /code-review-checklist/, file);
+  });
+
+  it('is still cleaned off disk by uninstall.sh as a retired lib', () => {
+    const oldLibs = read('uninstall.sh').match(/^OLD_LIBS=\(([\s\S]*?)^\)/m);
+    assert.ok(oldLibs, 'uninstall.sh has no OLD_LIBS array');
+    assert.match(oldLibs[1], /\bcode-review-checklist\b/);
   });
 });
