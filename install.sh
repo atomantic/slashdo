@@ -186,7 +186,7 @@ LIBS=(
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
   gh-host github-reviewer-loop
-  local-agent-review-loop merge-gate model-tiers multi-reviewer-loop next-gitlab next-swarm ollama-review-loop
+  local-agent-review-loop merge-gate model-tiers multi-reviewer-loop multi-reviewer-parallel next-gitlab next-swarm ollama-review-loop
   plan-id-format plan-issue-setup plan-issue-filing pr-write-access
   rebase-conflict-resolution remediation-agent-template
   release-documented replan-issues review-agent-selection review-config-defaults review-convergence-gate review-flags

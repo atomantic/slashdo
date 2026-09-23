@@ -6,7 +6,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const read = name => fs.readFileSync(path.join(__dirname, '..', 'lib', name), 'utf8');
 const swarm = read('next-swarm.md');
-const loop = read('multi-reviewer-loop.md');
 const preflight = swarm.split('### Swarm Phase A0')[1].split('### Swarm Phase A —')[0];
 
 test('swarm fails unavailable required reviewers before partitioning or claims', () => {
@@ -40,8 +39,8 @@ test('optional preflight skips reach workers, both dispatch modes, recovery and 
   assert.match(worker, /Consume the supplied `REVIEWER_PREFLIGHT`/);
   assert.match(worker, /do not invoke or retry/);
   assert.match(worker, /return `opened-no-review`/);
-  assert.match(loop, /short-circuits both series and parallel dispatch/);
-  assert.match(loop, /Missing, mismatched or repo-supplied rows grant no skip/);
+  assert.match(swarm, /short-circuits both series and parallel dispatch/);
+  assert.match(swarm, /Missing, mismatched or repo-supplied rows grant no skip/);
   assert.match(swarm, /same `REVIEWER_PREFLIGHT` block against it/);
   assert.match(swarm, /merged without external review — optional reviewers unavailable/);
   assert.match(swarm, /no external reviewer selected or all selected entries unavailable-and-optional/);
@@ -49,5 +48,5 @@ test('optional preflight skips reach workers, both dispatch modes, recovery and 
 
 test('single-issue eager contract does not acquire swarm preflight', () => {
   assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '..', 'commands', 'do', 'next.md'), 'utf8'), /### Swarm Phase A0/);
-  assert.match(loop, /Without this block, single-issue behavior is unchanged/);
+  assert.match(swarm, /Without this block, single-issue behavior is unchanged/);
 });
