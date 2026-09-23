@@ -19,6 +19,15 @@ binary — every jq expression in `next.md` and this file is built from this map
 | `body` | `description` | |
 | `OPEN` / `CLOSED` | `opened` / `closed` | issue/MR state strings |
 
+## The `glab api` capture rule
+
+`glab api` has no built-in `--jq` flag (only `glab issue`/`glab mr` do), so every plain `glab api` call below pipes to the standalone jq binary in a **separately-checked, two-step capture** — never one `glab api ... | jq ...` pipeline. A pipeline reports only **jq's** exit status, and jq exits 0 on empty input, so a failed `glab api` call piped straight into jq looks like "succeeded, returned nothing." When the parsed value is an identity you're about to act on (a username), **guard it non-empty too**: `jq -e` fails only on `null`/`false`, and an empty string (`{"username":""}`) is truthy to jq, so `jq -er '.field'` alone still exits 0 with no value. The shape every call site below follows:
+```bash
+RESULT_JSON="$(glab api <endpoint>)" || { <fail-closed handler>; }
+VALUE="$(printf '%s' "$RESULT_JSON" | jq -er '.field')" || { <fail-closed handler>; }
+[ -n "$VALUE" ] || { <fail-closed handler>; }
+```
+
 ## Phase 1 — issues mode: jq probe
 
 `glab api` — unlike the `glab issue`/`glab mr` subcommands — has no built-in `--jq`
@@ -40,16 +49,16 @@ The `--collaborators` gate's live member fetch stays inline in `next.md`'s
 hosts need, so splitting the branch out would duplicate that wrapper). The GitLab
 branch (`MEMBERS_JSON="$(glab api --paginate "projects/:id/members/all")"`, then
 `COLLAB_LOGINS="$(printf '%s' "$MEMBERS_JSON" | jq -r '.[] | select(.access_level
->= 30) | .username')"`) is a **two-step capture** — never pipeline-fail-open. A
-failed `glab api` piped straight to jq would report jq's status, and jq exits 0 on
-empty input, which would look like "no collaborators" instead of "could not list
-them." GitLab collaborators are project members who can push (`access_level >= 30`
-Developer, including inherited members via `members/all`).
+>= 30) | .username')"`) follows the glab api capture rule above — a failed fetch
+must read as "could not list them," never as "no collaborators." GitLab
+collaborators are project members who can push
+(`access_level >= 30` Developer, including inherited members via `members/all`).
 
 ## Phase 1 — issues mode: candidate list
 
 `glab issue list` in place of `gh issue list` for the priority/oldest walk — same
-sort key, different field names/shapes (see the mapping table above):
+sort key (`PRIORITY_SORT`, Conventions, in its GitLab form), different field
+names/shapes (see the mapping table above):
 
 ```bash
 LIST_ARGS=(--output json)
@@ -57,15 +66,10 @@ LIST_ARGS=(--output json)
 # glab's --author takes a username. Unlike `gh`, it does not resolve the
 # GitHub-CLI token `@me` — pass the authenticated login so --self actually
 # filters (the explicit-#num path in next.md already compares against this same
-# `glab api user` value).
-# Resolve the login in TWO steps, never one `glab api user | jq -r .username`
-# pipeline: the pipeline's exit status is jq's, and `jq -r .username` exits 0 on
-# empty input, so a failed `glab api user` would leave ME empty. Then GUARD ON
-# NON-EMPTY separately: `jq -e` only fails on `null`/`false`, and an empty-string
-# username ({"username":""}) is truthy to jq, so it exits 0 with no login. Either
-# way an empty ME means `--author ""`, which glab reads as NO author filter — the
-# --self security gate would silently enumerate and claim other people's issues.
-# All three checks must pass before the filter is added.
+# `glab api user` value). Two-step capture per the glab api capture rule above:
+# an unguarded pipeline here would silently drop the --self filter (empty ME
+# means `--author ""`, which glab reads as no filter at all, and the security
+# gate would enumerate and claim other people's issues).
 if [ "$SELF_MODE" = "true" ]; then
   ME_JSON="$(glab api user)" || {
     echo "Could not read the authenticated GitLab user — --self cannot be enforced. Aborting."; exit 1; }
@@ -77,7 +81,7 @@ if [ "$SELF_MODE" = "true" ]; then
 fi
 # Project away `description` (GitLab's body) — next.md's steps 3–4 fetch it per candidate.
 glab issue list "${LIST_ARGS[@]}" --per-page 100 \
-  --jq "sort_by([ (([.labels[] | select(test(\"^priority${LABEL_SEP}[0-9]+\$\")) | ltrimstr(\"priority${LABEL_SEP}\") | tonumber] | min) // infinite), .created_at ]) | .[] | {iid,title,labels,assignees,author,created_at}"
+  --jq "PRIORITY_SORT | .[] | {iid,title,labels,assignees,author,created_at}"
 ```
 
 GitLab's `--per-page` maxes out at 100 with no "give me everything" pagination for a
@@ -93,8 +97,9 @@ glab issue list "${LIST_ARGS[@]}" --output json --per-page 100 \
   --jq "map(select(any(.labels[]; . == \"model${LABEL_SEP}light\")
                 or ([.labels[] | select(startswith(\"model${LABEL_SEP}\"))] | length == 0)))
       | map(select(any(.labels[]; . == \"effort${LABEL_SEP}max\")))
-      | sort_by([ (([.labels[] | select(test(\"^priority${LABEL_SEP}[0-9]+\$\")) | ltrimstr(\"priority${LABEL_SEP}\") | tonumber] | min) // infinite), .created_at ]) | .[] | {iid,title,labels,assignees,author,created_at}"
+      | PRIORITY_SORT | .[] | {iid,title,labels,assignees,author,created_at}"
 ```
+`PRIORITY_SORT` (Conventions, in next.md) with the two filter clauses above prepended.
 
 ## Phase 2 — claim
 
@@ -105,17 +110,11 @@ splitting the GitLab half out would either duplicate that wrapper or leave an
 `else` branch with no command to fail) — this section is the "why", not a second
 copy of the "what":
 
-- **The claim marker** (capture the authenticated user, resolve its username, guard
-  it non-empty, then `glab issue update "$ISSUE_NUM" --assignee "+$ME"`) resolves
-  the login in **two separately-checked steps**, never one `glab api user | jq -r
-  .username` pipeline: a pipeline's exit status is jq's, and a bare `jq -r` exits 0
-  on empty input, so a failed capture would leave `ME` empty and `--assignee "+"`
-  would claim nothing while still looking like a successful claim. The non-empty
-  guard is not redundant with `jq`'s own `-e` flag: `-e` only fails on
-  `null`/`false`, and an empty-string username is truthy to jq. The `+` prefix
+- **The claim marker** resolves the login per the glab api capture rule above,
+  then `glab issue update "$ISSUE_NUM" --assignee "+$ME"`. The `+` prefix
   **adds** one assignee without touching whatever's already there — a bare
-  `--assignee "$ME"` would **replace** the whole list and defeat the read-back that
-  follows.
+  `--assignee "$ME"` would **replace** the whole list and defeat the read-back
+  that follows.
 - **The yield/release path** uses the `-` prefix (`--assignee "-$ME"`) for the same
   reason in reverse: it removes exactly your one assignee without touching a
   sibling's.
