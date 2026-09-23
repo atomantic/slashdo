@@ -17,7 +17,7 @@ A capable model already looks for the usual bug/style catalogs without being tol
 | `security` | Auth, secrets, injection, unsafe input handling, supply-chain risk | Known CVEs in a dependency are reported here; whether to remove that dependency is `deps`' call |
 | `code-quality` | Brittleness, dead/unreachable code, unused imports, logging & observability | Language/framework-idiom violations belong to `stack-specific`, not here |
 | `dry` | Duplication, speculative abstraction, YAGNI | — |
-| `architecture` | Coupling, modularity, dependency inversion, API contract consistency | Reader-cost of an individual function belongs to `cognitive-load` (simplify-only mode), not here |
+| `architecture` | Coupling, modularity, dependency inversion, API contract consistency (skip API contract findings when `SIMPLIFY_ONLY=true` — that's behavior, not structure) | Reader-cost of an individual function belongs to `cognitive-load` (simplify-only mode), not here |
 | `bugs-perf` | Runtime correctness, resource/perf, resilience, and observability of failure paths | — |
 | `stack-specific` | Detected-language/framework idioms and gotchas; general accessibility (alt text, ARIA, contrast) | Accessibility that is also a layout failure (touch target size, content clipped) belongs to `ux` instead |
 | `deps` | Third-party dependency necessity and removability | — |
