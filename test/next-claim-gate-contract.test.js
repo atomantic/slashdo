@@ -4,17 +4,15 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+// A command's contract spans the file plus the lib docs it includes (`!cat` and
+// on-demand `!read` alike): those are one document to the agent, and splitting a
+// section into lib/ (e.g. issue #293's lib/next-gitlab.md) must not move it out of
+// a contract's reach.
+const { readCommandDocs } = require('./helpers/command-docs');
 
 const root = path.join(__dirname, '..');
-const resolveIncludes = (body) =>
-  body.replace(/!`cat ~\/\.claude\/lib\/(.+?)`/g, (match, name) => {
-    const libFile = path.join(root, 'lib', name);
-    return fs.existsSync(libFile) ? fs.readFileSync(libFile, 'utf8') : match;
-  });
 
-const next = resolveIncludes(
-  fs.readFileSync(path.join(root, 'commands', 'do', 'next.md'), 'utf8'),
-);
+const next = readCommandDocs('next.md', { eager: true });
 const config = fs.readFileSync(path.join(root, 'commands', 'do', 'config.md'), 'utf8');
 const defaults = fs.readFileSync(
   path.join(root, 'lib', 'review-config-defaults.md'),

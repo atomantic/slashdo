@@ -128,6 +128,8 @@ const ON_DEMAND_LIBS = new Map([
   // Explicitly flag-gated or situational paths.
   ['next-swarm.md',
     { what: 'parallel swarm flow (phases A-D)', when: '`--swarm` was passed' }],
+  ['next-gitlab.md',
+    { what: 'GitLab-specific /do:next steps', when: 'the origin remote is GitLab (`CLI_TOOL=glab`)' }],
   ['enhance-loop.md',
     { what: 'draft-enhancement loop', when: '`--enhance-with` was passed' }],
   ['ci-flake-handling.md',
