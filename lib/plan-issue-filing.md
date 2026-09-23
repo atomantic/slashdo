@@ -1,17 +1,16 @@
-# Issue-Mode Filing
+# Tracker Issue Filing
 
-Filing rules for a command that resolves **`ISSUE_MODE=true`** and records deferred
-or discovered work as tracker issues instead of `PLAN.md` lines: fetching existing
-issues to dedup against, the `--scan-only` recording rule, the create/dedup
-mechanics, labels, and the bulk spool path for audits that surface many findings at
-once. **Assumes [plan-issue-setup.md](./plan-issue-setup.md) already ran** — `CLI_TOOL`,
-`LABEL_SEP`, and the caller's own `ISSUE_MODE`/`PLAN_LABEL` resolution are in place;
-read that file first if it hasn't.
+Filing rules for a command that records deferred or discovered work as tracker
+issues: fetching existing issues to dedup against, the `--scan-only` recording rule,
+the create/dedup mechanics, labels, and the bulk spool path for audits that surface
+many findings at once. **Assumes [plan-issue-setup.md](./plan-issue-setup.md) already
+ran** — `CLI_TOOL`, `LABEL_SEP`, and the caller's `PLAN_LABEL` resolution are in
+place; read that file first if it hasn't. If setup found no tracker, file nothing and
+list the deferrals in the report as that file's "No tracker" rule says.
 
 ## Fetch existing open issues
 
-In issue mode the tracker — not `PLAN.md` — is the source of truth for already-known
-work, so pull the open issues up front and keep them in context for dedup:
+The tracker is the source of truth for already-known work, so pull the open issues up front and keep them in context for dedup:
 `gh issue list --state open --limit 500 --json number,title,labels,body --jq '.'`
 (glab: `glab issue list --state opened --per-page 100 -F json`). Record this as
 `EXISTING_ISSUES`. Listing **all** open issues (not just `--label <PLAN_LABEL>`)
@@ -26,32 +25,26 @@ for that tradeoff.*
 ## Recording every finding under `--scan-only`
 
 The rules below record an item when a command **defers** it — decides not to act on
-it this run. A `--scan-only` run acts on *nothing*, so under `--scan-only` +
-`ISSUE_MODE` **every surviving finding is deferred and must be filed**, not just the
+it this run. A `--scan-only` run acts on *nothing*, so under `--scan-only`
+**every surviving finding is deferred and must be filed**, not just the
 subset a full run would have skipped. The filed issues are the entire output of that
 run: no worktree, no code changes, no PRs. Apply the same dedup, labels, and
 title/body rules below to all of them, and report the created and reused `#<number>`s
 in the command's summary.
 
-`--issues` alone does not do it.
-
 ## Recording a plan item
 
-- **PLAN.md mode (default):** append
-  `- [ ] [<slug>] **Title** — rationale` per [plan-id-format.md](./plan-id-format.md).
-- **Issue mode (`--issues`):** **first dedup against `EXISTING_ISSUES`.** Before
-  filing, check whether the finding already has an open issue — match on the same
-  file path / symbol or a clearly equivalent title, not just an exact string match.
-  If it does, **skip creation** and reuse that issue's `#<number>` as the ID;
-  optionally add a comment if the new finding adds detail. Only when no existing
-  issue covers it, create one:
-  `gh issue create --title "<Title>" --body "<rationale + context: file paths, category, why it was deferred>" <label flags>`
-  (glab: `glab issue create --title "<Title>" --description "<body>" <label flags>`).
-  The **issue number is the ID** — assign **no** slug, and write **nothing** to
-  `PLAN.md`. Make the title a self-contained, claimable task and put enough context
-  in the body that someone can pick it up cold. Capture the issue numbers (created
-  **and** reused) for the command's final summary (report `#<number>` where it would
-  have reported a `[slug]`), and note which were skipped as duplicates.
+**First dedup against `EXISTING_ISSUES`.** Before filing, check whether the finding
+already has an open issue — match on the same file path / symbol or a clearly
+equivalent title, not just an exact string match. If it does, **skip creation** and
+reuse that issue's `#<number>` as the ID; optionally add a comment if the new finding
+adds detail. Only when no existing issue covers it, create one:
+`gh issue create --title "<Title>" --body "<rationale + context: file paths, category, why it was deferred>" <label flags>`
+(glab: `glab issue create --title "<Title>" --description "<body>" <label flags>`).
+The **issue number is the ID**. Make the title a self-contained, claimable task and
+put enough context in the body that someone can pick it up cold. Capture the issue
+numbers (created **and** reused) for the command's final summary, and note which were
+skipped as duplicates.
 
   **Capturing the created number — parse the printed URL, do NOT use `-q`/`--jq`.**
   `gh issue create` (and `glab issue create`) prints the new issue's **URL** on
@@ -153,8 +146,7 @@ suggested fix, and enough context for someone to pick it up cold>
 ```
 
 The id only has to be unique within the run — `<agent-slug>-<NN>` is enough. It is a
-handle for the orchestrator, not a plan slug (issue mode assigns no slugs, per
-[plan-id-format.md](./plan-id-format.md)) and not the final ID (the issue number is).
+handle for the orchestrator, not the final ID (the issue number is).
 
 ### 2. Agents return an index, not bodies
 
@@ -227,7 +219,7 @@ that came back `ERROR` was not filed** — list those explicitly with the spool 
 the user can file them by hand, and never report an errored finding as filed. Leave
 `SPOOL_DIR` on disk when any error occurred. Otherwise remove it **only once nothing
 downstream still needs the bodies** — filing is not always the end of the run. A command
-that goes on to remediate (`/do:better --issues` without `--scan-only`) reads these same
+that goes on to remediate (`/do:better` without `--scan-only`) reads these same
 bodies again in its remediation and test-enhancement phases, so it keeps the directory
 until those agents have returned; a `--scan-only` run may remove it as soon as the report
 is printed.

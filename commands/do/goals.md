@@ -21,19 +21,19 @@ Parse `$ARGUMENTS` for:
 
 `--prd --refresh` re-scans and updates an existing `PRD.md`.
 
-## Boundary Rule: GOALS.md vs PRD.md vs PLAN.md
+## Boundary Rule: GOALS.md vs PRD.md vs Issue Tracker
 
-**GOALS.md is strategic. PRD.md is the requirements spec. PLAN.md is tactical.**
+**GOALS.md is strategic. PRD.md is the requirements spec. The issue tracker (the project's tracker; GitHub/GitLab issues by default) is tactical.**
 
 - GOALS.md answers: *Why does this project exist? What does success look like? What will we never do?*
 - PRD.md answers: *What exactly must the product do, and not do? Who is it for? What counts as "it works"?*
-- PLAN.md answers: *What are we building next? What's the backlog?* (completed items don't stay here — git history/the changelog is the record of what's done)
+- The issue tracker answers: *What are we building next? What's the backlog? What's done?*
 
 **GOALS.md must NEVER contain:**
 - Checkbox task lists (`- [ ] Add feature X`)
 - Implementation details or subtasks
 - Specific file paths, function names, or technical steps
-- "Current State" progress tables (that's PLAN.md's job)
+- "Current State" progress tables (that's the issue tracker's job)
 - Prioritized next-action lists
 
 The [GOALS.md Structure](#goalsmd-structure-default) template below is the full spec for what it should contain.
@@ -43,7 +43,7 @@ Milestones describe what "done" looks like in outcome-oriented prose:
 - BAD: "- [ ] Add date range buttons above charts / - [ ] Filter chart data to selected range"
 
 **PRD.md must NEVER contain:**
-- Checkbox task lists or sprint/iteration planning — that's PLAN.md's job
+- Checkbox task lists or sprint/iteration planning — that's the issue tracker's job
 - Specific file paths, function names, or line-level implementation detail
 - Vague, untestable statements ("the system should be fast") without a concrete acceptance criterion
 - Fabricated numeric targets the codebase doesn't evidence — an unverifiable KPI belongs in Open Questions
@@ -57,7 +57,7 @@ Requirement statements use RFC-2119-style keywords — **MUST/SHALL** (mandatory
 Gather signals about the project's purpose and intent. Launch these as parallel Explore agents:
 
 ### Agent 1: Identity & Purpose
-Scan README, package manifest (`package.json`/`Cargo.toml`/`pyproject.toml`/`go.mod`), `CLAUDE.md`, `PLAN.md`, `LICENSE`, and community files (`CONTRIBUTING.md`, `.github/FUNDING.yml`, `CODE_OF_CONDUCT.md`) for stated purpose, audience, and licensing/community intent — a capable model already knows to check these; nothing here changes what to extract.
+Scan README, package manifest (`package.json`/`Cargo.toml`/`pyproject.toml`/`go.mod`), `CLAUDE.md`, `LICENSE`, and community files (`CONTRIBUTING.md`, `.github/FUNDING.yml`, `CODE_OF_CONDUCT.md`) for stated purpose, audience, and licensing/community intent — a capable model already knows to check these; nothing here changes what to extract.
 
 Extract: project name, stated purpose, target audience, licensing model, community intent.
 
@@ -67,7 +67,7 @@ Scan entry points, exported APIs/CLI commands, config schemas, data models, and 
 Extract: list of capabilities, deployment model, key domain concepts. **In `--prd` mode**, also enumerate each discrete feature/command/endpoint with its observed inputs, outputs, and error-handling behavior — this seeds functional requirements directly.
 
 ### Agent 3: Evolution & Direction
-Scan recent git log, merged PR/MR history, open issues and PRs/MRs, `PLAN.md` incomplete items, `CHANGELOG.md`, `TODO`/`FIXME` comments, and feature branch names for trajectory signals.
+Scan recent git log, merged PR/MR history, open issues and PRs/MRs, `CHANGELOG.md`, `TODO`/`FIXME` comments, and feature branch names for trajectory signals.
 
 Sample history broadly rather than just the last few commits: aim for 30-100 merged PR/MR titles and read 8-15 full bodies spread across the range (GitHub: `gh pr list --state merged --limit 100` and `gh pr view`; GitLab: `glab mr list --state merged` and `glab mr view`). Do not filter by the repository owner — organization accounts usually do not author their repositories' pull/merge requests. If that history is unavailable or empty, fall back to the default branch's commit history, filtering by the relevant maintainer when that identity is known.
 
@@ -199,10 +199,10 @@ Example: "Engine correctness — every fund type produces accurate calculations 
 
 ---
 
-For the tactical backlog and current work items, see [PLAN.md](./PLAN.md).
+For the tactical backlog and current work items, see the repository's open issues.
 ```
 
-The template intentionally omits "Current State" tables and "Direction" sections — those belong in PLAN.md. If the user asks for them, add a brief (1-2 sentence) summary that points to PLAN.md rather than duplicating the detail.
+The template intentionally omits "Current State" tables and "Direction" sections — those belong in the issue tracker. If the user asks for them, add a brief (1-2 sentence) summary that points to the tracker rather than duplicating the detail.
 
 ### PRD.md Structure (`--prd`)
 
@@ -298,7 +298,7 @@ The template intentionally omits "Current State" tables and "Direction" sections
 
 ---
 
-{Footer: link to [GOALS.md](./GOALS.md) if it exists, and [PLAN.md](./PLAN.md) for the tactical backlog.}
+{Footer: link to [GOALS.md](./GOALS.md) if it exists, and the repository's open issues for the tactical backlog.}
 ```
 
 Requirement IDs (`FR-`, `NFR-`, `NR-`) are assigned sequentially at generation time and are **stable across `--refresh` runs** — an existing ID must never be reassigned to a different requirement. New requirements append the next unused number per prefix; a requirement that no longer holds retires its number rather than having it reused.
@@ -311,14 +311,14 @@ If `--refresh` was passed and the target document already exists:
 3. Identify items whose status has changed (new progress, completed, abandoned — or, in `--prd` mode, requirements that no longer hold, or new behavior not yet captured)
 4. **Default mode**: update in-place, preserving user-written content and stable requirement IDs where possible; print a summary of what changed and which evidence caused each change.
    **Interactive mode (`--interactive`)**: present changes for confirmation before updating.
-5. **GOALS.md mode — one migration rule:** move any checkbox task lists found in the existing GOALS.md automatically in default mode, or offer to move them in interactive mode. **Check issue mode first:** if PLAN.md is absent, or its body is the `/do:replan --issues` stub (sentinel phrase "tracks its roadmap as issues" or "Managed by `/do:replan --issues`", zero `- [ ]` items), this repo tracks work as issues — file a tracker issue per item instead, and never write to or overwrite the stub. Otherwise insert each item into PLAN.md, **assigning it a unique `[<slug>]` ID** per [lib/plan-id-format.md](../../lib/plan-id-format.md): kebab-case slug derived from the item title, ≤50 chars, unique against every existing `[slug]` in PLAN.md.
+5. **GOALS.md mode**: remove any checkbox task lists found in the existing GOALS.md and file each item as a tracker issue automatically (default) or after confirmation (interactive): detect the host from the `origin` remote per [lib/vcs-host.md](../../lib/vcs-host.md), skip items that duplicate an open issue title, and label each with the saved `issues-label` default (or `plan`) — `gh issue create --title "<item>" --body "<context>" --label <label>` (glab: `glab issue create --title "<item>" --description "<context>" --label <label>`). If no authenticated `gh`/`glab` can reach the repo, list the items in the Phase 5 summary under "Tactical items (not filed — no issue tracker available)" instead. Never write them to PLAN.md.
 6. **PRD.md mode**: preserve existing `FR-`/`NFR-`/`NR-` IDs for requirements that still hold; assign the next unused ID (per prefix) to new ones. If a requirement no longer appears to hold, mark it `(status: removed — verify)` in place rather than deleting it, and call it out in the change summary.
 7. **PRD.md mode**: do not replace a user-authored requirement with a semantically different inference merely because current code is incomplete. Mark the conflict in the evidence notes and Risks & Open Questions, retaining the baseline wording until resolved.
 
 ## Phase 5: Finalize
 
 1. Write the target document (`GOALS.md`, or `PRD.md` in `--prd` mode) to the repo root
-2. If `PLAN.md` exists and is not the issue-mode stub (see Refresh Mode step 5), ensure it has a reference link to the generated document (only if not already present)
+2. **GOALS.md mode**: if checkbox task lists were moved out of GOALS.md during `--refresh`, list the issues filed for them (or the unfiled items) in the summary
 3. Print a summary — checkbox migration under `--refresh` already happened per Refresh Mode step 5, so this just reports the result:
 
    GOALS.md mode:
@@ -346,4 +346,5 @@ If `--refresh` was passed and the target document already exists:
 - Preserve the user's voice — if they provide rephrased goals or requirements, use their wording verbatim
 - If the project is brand new with minimal code, lean more heavily on user input and less on codebase inference
 - If `gh`/`glab` is not authenticated, skip issue/PR scanning gracefully — don't halt
+- **Never put checkbox task lists in GOALS.md or PRD.md** — tactical items belong in the issue tracker; never create or write PLAN.md
 - **In `--prd` mode, never present an unsupported inference as an observed requirement** — include the evidence note and confidence, or place it in Risks & Open Questions

@@ -36,7 +36,7 @@ Then shut down all agents via `SendMessage` with `type: "shutdown_request"` and 
 
 Before any PR exists, review the whole remediation diff (`git diff {DEFAULT_BRANCH}...HEAD` in `{WORKTREE_DIR}`) against the **{REVIEW_CHECKLIST}** section of this command.
 
-**When `SIMPLIFY_ONLY=true`**, carry one extra question through this same pass: *does any hunk change what this program does?* — different return value, different side effect, different error type or message, changed validation, changed output format, changed public API without a re-export. Every such hunk is reverted, not fixed. Then dispose of the finding behind it: if the improvement is still worth making in a run that's allowed to change behavior, **defer** it (an open PLAN.md item / tracker issue noting it needs behavior review); if the transformation cannot be done at all without changing behavior it must not change, record it as a rejection per gate 4 of the run's **Finding gates** section.<!-- Not a link: #finding-gates is an anchor in /do:better only, and this partial is shared. -->
+**When `SIMPLIFY_ONLY=true`**, carry one extra question through this same pass: *does any hunk change what this program does?* — different return value, different side effect, different error type or message, changed validation, changed output format, changed public API without a re-export. Every such hunk is reverted, not fixed. Then dispose of the finding behind it: if the improvement is still worth making in a run that's allowed to change behavior, **defer** it (a tracker issue noting it needs behavior review); if the transformation cannot be done at all without changing behavior it must not change, record it as a rejection per gate 4 of the run's **Finding gates** section.<!-- Not a link: #finding-gates is an anchor in /do:better only, and this partial is shared. -->
 
 Fix each review finding in its own `fix: {description of review finding}` commit, with `{BUILD_CMD}` and `{TEST_CMD}` passing again{VERIFY_SCOPE_SUFFIX} afterward.
 
@@ -58,4 +58,4 @@ AskUserQuestion([{
 **"Commit directly"** replaces Phases 5–7 entirely (no category branches or PRs exist). On exit:
 - Nothing is left uncommitted on `{BRANCH_PREFIX}/{DATE}` (remaining changes go in as `fix: {PIPELINE_LABEL} remediation — remaining changes`, specific files staged).
 - `{BRANCH_PREFIX}/{DATE}` is merged into `{CURRENT_BRANCH}` in `{REPO_DIR}`. Only after a clean merge are `{WORKTREE_DIR}` and the staging branch removed; on a merge conflict both are kept and the user gets the resolve-then-remove commands.
-- The stash is restored, PLAN.md is updated, and the final summary is printed. Stop there.
+- The stash is restored and the final summary (with filed or deferred issues) is printed. Stop there.
