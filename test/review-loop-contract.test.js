@@ -335,6 +335,63 @@ describe('review-loop parse contracts', () => {
     assert.match(block, /validate AGY_ENH_MODEL against this; fall back to the newest Flash \(High\)/);
   });
 
+  it('gives every enhance-loop agent a concrete invocation and no invented ~suffix grammar', () => {
+    // #351: grok and cursor used to read "Verified tool-free fallback" with no
+    // command at all, and the Pi runner claimed "the same model brackets and
+    // per-entry suffixes as local reviewers" / "model and thinking pins" even
+    // though plan-task's --enhance-with parser (unlike --review-with) strips only
+    // a [<model>] bracket -- no ~opt/~max/~effort grammar exists to carry a
+    // --thinking flag. Every row must now either give a runnable command or point
+    // at the one per-CLI recipe file that has it, and the Pi section must not
+    // claim inputs the parser never produces.
+    const enhance = readLib('enhance-loop.md');
+
+    assert.match(enhance, /`grok` \| `grok -p "\$ENHANCE_PROMPT" \$\{MODEL_FLAG\[@\]\+"\$\{MODEL_FLAG\[@\]\}"\}`/);
+    assert.match(enhance, /`cursor` \| Binary probe \+ invocation in `lib\/local-agent-cursor\.md`/);
+
+    const piSection = enhance.slice(enhance.indexOf('### Pi enhancement runner'));
+    assert.match(piSection, /no `~opt`\/`~max`\/`~effort` suffix grammar/);
+    assert.doesNotMatch(piSection, /per-entry suffixes/);
+    assert.doesNotMatch(piSection, /thinking pins/);
+    assert.match(
+      piSection,
+      /pi --print --no-approve --no-tools --no-builtin-tools --no-extensions --no-skills --no-prompt-templates --no-themes --no-context-files --no-session \$\{MODEL_FLAG\[@\]\+"\$\{MODEL_FLAG\[@\]\}"\} -- "\$ENHANCE_PROMPT"/,
+    );
+    assert.doesNotMatch(enhance, /model and thinking pins/);
+  });
+
+  it("guards enhance-loop's snapshot/restore against a planted git hook or .git/config edit", () => {
+    // #351: the loop already snapshotted HEAD/index/tracked/untracked state before
+    // running agy/grok/cursor/pi with real tools, but never captured .git/config or
+    // hooks -- so a reviewer that planted a hook or set core.hooksPath would survive
+    // the "restore" and get code execution on the orchestrator's next git
+    // commit/push. Mirror local-agent-review-loop.md's git-metadata guard: capture
+    // it as a fifth baseline artifact and restore it FIRST, before any other git
+    // command runs in the restore sequence.
+    const enhance = readLib('enhance-loop.md');
+    const step2 = enhance.slice(enhance.indexOf('Also snapshot the working-tree baseline'), enhance.indexOf('3. **Invoke** per the table above.'));
+    assert.match(step2, /GIT_COMMON="\$\(git rev-parse --git-common-dir\)"/);
+    assert.match(step2, /cp "\$GIT_COMMON\/config" "\$GIT_META_BAK\/config"/);
+    assert.match(step2, /tar -cf "\$GIT_META_BAK\/hooks\.tar" -C "\$GIT_COMMON" hooks/);
+    assert.match(step2, /git_meta_hash\(\) \{/);
+    // Content/path alone misses a hook flipped from non-executable to executable
+    // with no other change -- that flip is what makes it run, so the fingerprint
+    // must include mode bits too.
+    assert.match(step2, /stat -f '%Lp' "\$f" 2>\/dev\/null \|\| stat -c '%a' "\$f"/);
+    assert.match(step2, /GIT_META_BASELINE=\$\(git_meta_hash\)/);
+    assert.match(step2, /these five artifacts capture the caller's ENTIRE pre-pass state/);
+
+    const step4 = enhance.slice(enhance.indexOf('4. **Verify the read-only contract'));
+    assert.match(step4, /Compare the git-metadata hash first and, on a mismatch, restore it before\s+running any other git command/);
+    assert.match(step4, /rm -rf "\$GIT_COMMON\/hooks"/);
+    assert.match(step4, /tar -xf "\$GIT_META_BAK\/hooks\.tar" -C "\$GIT_COMMON"/);
+    // The restore-first ordering must precede the HEAD/index/tracked/untracked steps.
+    assert.ok(
+      step4.indexOf('Compare the git-metadata hash first') < step4.indexOf('**HEAD** — if it moved'),
+      'git metadata must be restored before HEAD/index/worktree/untracked',
+    );
+  });
+
   it('tells the in-process claude reviewer what to do with ~effort, and what not to reach for', () => {
     // The Agent tool takes a model but no reasoning effort, so a dispatching agent
     // handed `claude~effort=xhigh` has no parameter to put it in. Left unsaid, it
@@ -731,7 +788,8 @@ describe('review-loop parse contracts', () => {
     assert.match(wrapper, /Cursor binary probe/);
 
     const enhance = readLib('enhance-loop.md');
-    assert.match(enhance, /`cursor` \| Verified tool-free fallback/);
+    assert.match(enhance, /`cursor` \| Binary probe \+ invocation in `lib\/local-agent-cursor\.md`/);
+    assert.match(enhance, /Only when `\{AGENT\}` is `cursor`:\n!read lib\/local-agent-cursor\.md/);
 
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'rpr.md', 'config.md']) {
       const body = readCommandDocs(name, { eager: true });
