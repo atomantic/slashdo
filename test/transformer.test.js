@@ -10,6 +10,7 @@ const {
   parseFrontmatter,
   rewriteLibPaths,
   rewriteConfigPath,
+  rewriteVersionPath,
   inlineLibReferences,
   applyConditionalBlocks,
   getSkillName,
@@ -125,6 +126,36 @@ describe('rewriteConfigPath', () => {
   it('is a no-op when env has no configPath', () => {
     const body = 'read ~/.claude/.slashdo-config.json now';
     assert.equal(rewriteConfigPath(body, {}), body);
+  });
+});
+
+// ── rewriteVersionPath ──────────────────────────────────────────────
+
+describe('rewriteVersionPath', () => {
+  const codexEnv = { versionPath: '~/.codex/.slashdo-version' };
+  const claudeEnv = { versionPath: '~/.claude/.slashdo-version' };
+
+  it('rewrites the version-path token to the env version path', () => {
+    const body = 'read ~/.claude/.slashdo-version now';
+    assert.equal(rewriteVersionPath(body, codexEnv), 'read ~/.codex/.slashdo-version now');
+  });
+
+  it('replaces multiple occurrences', () => {
+    const body = '~/.claude/.slashdo-version then ~/.claude/.slashdo-version';
+    assert.equal(
+      rewriteVersionPath(body, codexEnv),
+      '~/.codex/.slashdo-version then ~/.codex/.slashdo-version'
+    );
+  });
+
+  it('is a no-op for claude (token already matches)', () => {
+    const body = 'read ~/.claude/.slashdo-version now';
+    assert.equal(rewriteVersionPath(body, claudeEnv), body);
+  });
+
+  it('is a no-op when env has no versionPath', () => {
+    const body = 'read ~/.claude/.slashdo-version now';
+    assert.equal(rewriteVersionPath(body, {}), body);
   });
 });
 
@@ -601,6 +632,19 @@ describe('transformCommand', () => {
     assert.ok(result.includes('global: ~/.codex/.slashdo-config.json'), 'direct token rewritten');
     assert.ok(result.includes('read ~/.codex/.slashdo-config.json'), 'inlined token rewritten');
     assert.ok(!result.includes('~/.claude/.slashdo-config.json'), 'no claude token remains');
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  it('rewrites the version-path token, including tokens from inlined lib content', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-test-'));
+    fs.writeFileSync(path.join(tmpDir, 'defaults.md'), 'read ~/.claude/.slashdo-version\n', 'utf8');
+    const env = { ...codexEnv, versionPath: '~/.codex/.slashdo-version' };
+
+    const content = '---\ndescription: Test\n---\ninstalled: ~/.claude/.slashdo-version\n!`cat ~/.claude/lib/defaults.md`';
+    const result = transformCommand(content, env, tmpDir);
+    assert.ok(result.includes('installed: ~/.codex/.slashdo-version'), 'direct token rewritten');
+    assert.ok(result.includes('read ~/.codex/.slashdo-version'), 'inlined token rewritten');
+    assert.ok(!result.includes('~/.claude/.slashdo-version'), 'no claude token remains');
     fs.rmSync(tmpDir, { recursive: true });
   });
 

@@ -17,6 +17,9 @@ const CLAUDE_ROOT_PATH_PREFIX = process.env.CLAUDE_CONFIG_DIR
 const CLAUDE_CONFIG_PATH = process.env.CLAUDE_CONFIG_DIR
   ? path.join(CLAUDE_DIR, '.slashdo-config.json')
   : '~/.claude/.slashdo-config.json';
+const CLAUDE_VERSION_PATH = process.env.CLAUDE_CONFIG_DIR
+  ? path.join(CLAUDE_DIR, '.slashdo-version')
+  : '~/.claude/.slashdo-version';
 const CLAUDE_LIB_PATH_PREFIX = process.env.CLAUDE_CONFIG_DIR
   ? `${path.join(CLAUDE_DIR, 'lib')}${path.sep}`
   : '~/.claude/lib/';
@@ -33,6 +36,9 @@ const ENVIRONMENTS = {
     // Runtime form of configFile, used by the transformer to rewrite the
     // config-path token in command/lib text for each host CLI.
     configPath: CLAUDE_CONFIG_PATH,
+    // Runtime form of versionFile, used by the transformer to rewrite the
+    // version-path token in command/lib text for each host CLI.
+    versionPath: CLAUDE_VERSION_PATH,
     claudeRootPath: CLAUDE_ROOT_PATH,
     claudeRootPathPrefix: CLAUDE_ROOT_PATH_PREFIX,
     // format: documentation only — transformCommand always emits YAML frontmatter
@@ -53,6 +59,7 @@ const ENVIRONMENTS = {
     versionFile: path.join(HOME, '.config', 'opencode', '.slashdo-version'),
     configFile: path.join(HOME, '.config', 'opencode', '.slashdo-config.json'),
     configPath: '~/.config/opencode/.slashdo-config.json',
+    versionPath: '~/.config/opencode/.slashdo-version',
     format: 'yaml-frontmatter',
     ext: '.md',
     namespacing: 'flat',
@@ -72,6 +79,7 @@ const ENVIRONMENTS = {
     versionFile: path.join(HOME, '.gemini', 'antigravity-cli', '.slashdo-version'),
     configFile: path.join(HOME, '.gemini', 'antigravity-cli', '.slashdo-config.json'),
     configPath: '~/.gemini/antigravity-cli/.slashdo-config.json',
+    versionPath: '~/.gemini/antigravity-cli/.slashdo-version',
     // Antigravity uses the Agent Skills standard: one SKILL.md per skill
     // directory, YAML frontmatter, lib content inlined (no runtime !cat
     // injection) — the same shape as Codex skills.
@@ -96,6 +104,7 @@ const ENVIRONMENTS = {
     versionFile: path.join(HOME, '.codex', '.slashdo-version'),
     configFile: path.join(HOME, '.codex', '.slashdo-config.json'),
     configPath: '~/.codex/.slashdo-config.json',
+    versionPath: '~/.codex/.slashdo-version',
     format: 'yaml-frontmatter',
     ext: null,
     namespacing: 'directory',
@@ -121,6 +130,7 @@ const ENVIRONMENTS = {
     versionFile: path.join(HOME, '.grok', '.slashdo-version'),
     configFile: path.join(HOME, '.grok', '.slashdo-config.json'),
     configPath: '~/.grok/.slashdo-config.json',
+    versionPath: '~/.grok/.slashdo-version',
     format: 'yaml-frontmatter',
     ext: null,
     namespacing: 'directory',

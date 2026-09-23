@@ -73,17 +73,11 @@ A complete end-to-end workflow from idea to reviewed, merged PR:
    ```
    *Investigates the codebase, drafts a comprehensive issue with acceptance criteria, and files it in your tracker.*
 
-2. **Claim & implement the task in isolation:**
+2. **Claim, implement, review, and ship — in one command:**
    ```
-   /do:next #123
+   /do:next #123 --review-with=ollama[qwen2.5-coder:32b]~opt,codex[gpt-5.6-luna]~effort=max~opt
    ```
-   *Claims issue `#123`, implements the solution in an isolated git worktree, verifies tests, and opens a PR.*
-
-3. **Ship with custom multi-agent code reviews:**
-   ```
-   /do:pr --review-with=ollama[qwen2.5-coder:32b]~opt,codex[gpt-5.6-luna]~effort=max~opt --merge
-   ```
-   *Runs a local fast Ollama pass (`~opt` non-blocking) followed by a maximum-effort Codex pass (`~effort=max~opt`), automatically applying fixes and merging once CI passes.*
+   *Claims issue `#123`, implements the solution in an isolated git worktree, verifies tests, opens a PR, runs a local fast Ollama pass (`~opt` non-blocking) followed by a maximum-effort Codex pass (`~effort=max~opt`) — forwarded to `/do:pr`, which owns the review/ship step — applying fixes automatically, then merges once CI passes and cleans up.*
 
 ### Ship the work in your working tree
 
