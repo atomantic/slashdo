@@ -61,7 +61,9 @@ a plain issue list; `--issues-label` keeps a busy GitLab tracker under it). Only
 
 **Migration candidates + open-question detection.** If a legacy `PLAN.md` exists,
 every open item in it (`- [ ]`, plus open prose/numbered roadmap entries) is a
-migration candidate for Phase 3; completed (`- [x]`) items are dropped. Across the
+migration candidate for Phase 3; completed (`- [x]`) items are dropped. Strip any
+legacy `[<slug>]` ID from a migrated item's text — the issue title is the plain task,
+and the new issue number replaces the slug as its ID. Across the
 migration candidates and Agent 3's suggestions, flag every item carrying an **open
 question or undecided choice**. Signals: an `## Open Questions` / `## Decisions`
 section; a line ending in `?`; markers like `TBD`, `TODO: decide`, `decision needed`,

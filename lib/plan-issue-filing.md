@@ -64,8 +64,10 @@ skipped as duplicates.
 
 The issue **title is a clean, human-readable task** — do **not** prefix it with
 `[category]` / `[SEVERITY]` brackets (e.g. ❌ `[dry][LOW] Consolidate the XML
-decoders`). That metadata belongs in GitHub/GitLab **labels**, which both hosts
-render as colored tags and let users filter on — the whole point of a tracker.
+decoders`), and never with an id or slug (❌ `[security-01] …`,
+❌ `[sql-injection-in-pr-route] …`). Issues need no invented slug: the tracker's
+**issue number is the ID**. That metadata belongs in GitHub/GitLab **labels**, which
+both hosts render as colored tags and let users filter on — the whole point of a tracker.
 Carry every label through the `<label flags>` placeholder in the create commands
 above as **repeated `--label <name>`** flags (one per label):
 
@@ -122,17 +124,20 @@ SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_D
 A shell variable does not survive from one tool call to the next, so re-deriving
 `SPOOL_DIR` later gives a different directory and the filer agents find nothing.
 
-Each agent writes its findings to `$SPOOL_DIR/<agent-slug>.md` — one file per agent,
-so no two agents write the same path. An agent that spools across more than one call
+Each finding goes to `$SPOOL_DIR/<category>.md`, named for **that finding's own
+category** — one file per category, owned by the one agent covering that category, so
+no two agents write the same path. An agent covering several categories writes each
+finding to its own category's file, so later phases find it by its index line's category. An agent that spools across more than one call
 **appends** after the first write (`cat >` once, `cat >>` thereafter); a second `cat >`
 silently truncates the findings already spooled. Each finding is a **ready-to-file issue body**
-under an id heading, not raw notes. **No line inside a body may begin with `## [` at
-column 0** — indent any such quoted line by one space, so it cannot be mistaken for the
-next block's heading: whoever files it must be able to lift the block
-out and hand it straight to `--body-file` without rewriting a word.
+under a finding marker and a `title:` line, not raw notes. **No line inside a body may
+begin with `<!-- finding ` at column 0** — indent any such quoted line by one space, so
+it cannot be mistaken for the next block's marker: whoever files it must be able to lift
+the block out and hand it straight to `--body-file` without rewriting a word.
 
 ```markdown
-## [<agent-slug>-01] <Title — a self-contained, claimable task>
+<!-- finding 1 -->
+title: <Title — a self-contained, claimable task in plain language>
 severity: high
 category: security
 labels: model${LABEL_SEP}light, effort${LABEL_SEP}medium
@@ -141,22 +146,28 @@ files: src/routes/pr.js:142
 <the issue body: what is wrong, the quoted evidence, why it matters, the
 suggested fix, and enough context for someone to pick it up cold>
 
-## [<agent-slug>-02] <Title>
+<!-- finding 2 -->
+title: <Title>
 ...
 ```
 
-The id only has to be unique within the run — `<agent-slug>-<NN>` is enough. It is a
-handle for the orchestrator, not the final ID (the issue number is).
+The marker's number is a plain counter, unique within that spool file; together with
+the category on the finding's index line it is the finding's **id** below. **Never
+invent a slug, a `[category-NN]` tag, or any other bracketed id.** The id is a
+throwaway handle for the orchestrator, not the final ID (the issue number is), and it
+**never reaches the tracker**: the issue title is exactly the `title:` value — a
+plain, human-readable task — and the body is everything below the `title:` line.
 
 ### 2. Agents return an index, not bodies
 
 Each agent's **return value** is one line per finding and nothing else:
 
 ```
-<id> | <SEVERITY-or-UNCERTAIN> | <category> | <file:line> | <one-line title>
+<N> | <SEVERITY-or-UNCERTAIN> | <category> | <file:line> | <one-line title>
 ```
 
-If an audit reports uncertainty, preserve `UNCERTAIN` in both index and body.
+`<N>` is the finding's marker number. If an audit reports uncertainty, preserve
+`UNCERTAIN` in both index and body.
 The consolidator may read those specific bodies and cited source to validate them.
 Unresolved findings remain explicitly unconfirmed investigation follow-ups: no
 confirmed severity label and no automatic remediation. Do not silently coerce
@@ -189,13 +200,14 @@ Dispatch one filer agent per category, in parallel, giving each:
 - `CLI_TOOL`, `PLAN_LABEL`, and the label rules from "Labels, not title brackets",
 - the `URL` / `${URL##*/}` number-capture form from "Recording a plan item".
 
-A **block** runs from a line matching `^## \[<id>\] ` to the next line matching `^## \[`
-(or EOF). That bracketed form is the delimiter, **not a bare `^## `**: a body's quoted
+A **block** runs from a line matching `^<!-- finding <N> -->$` to the next line matching
+`^<!-- finding ` (or EOF). That marker is the delimiter, **not a bare `^## `**: a body's quoted
 evidence may legitimately contain `## ` lines inside a fence, and a filer that split on
 those would truncate the body and file a partial issue — the very truncation this path
 exists to prevent.
 
-For each id the filer extracts that block from the spool file into its own
+For each id the filer takes the `--title` from the block's `title:` line, verbatim,
+extracts the rest of the block — everything below the `title:` line — into its own
 `--body-file` temp file, creates any missing labels, creates the issue, and captures
 the number. It returns only `<id> -> #<number>` lines. **A filer never rewrites a
 body** — it moves bytes from the spool to the tracker. If a block is malformed or its
