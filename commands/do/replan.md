@@ -45,7 +45,8 @@ Parse `$ARGUMENTS` for:
 
 !read lib/vcs-host.md
 
-   **Surface its abort message.** Never fall back to the other CLI.
+   **Surface its abort message.** Never fall back to the other CLI. Stop, naming the
+   tracker, if its tracker gate leaves `TRACKER_CLI` empty.
 2. **Ensure the scoping label exists.** `gh label create <PLAN_LABEL> --description "Tracked by /do:replan" 2>/dev/null || true` (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" 2>/dev/null || true` — glab requires a color).
 3. **Legacy PLAN.md.** If a `PLAN.md` exists, this run migrates it once (Phases 1, 3, 4): its open items become issues and the plan content is removed.
 

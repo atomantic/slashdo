@@ -94,7 +94,8 @@ accept either `--flag=value` or `--flag value`. Order is free.
 
    !read lib/vcs-host.md
 
-   Print: `Tracker: {VCS_HOST} (via {CLI_TOOL})`. Every prefixed label this command
+   Stop with the partial's tracker-gate message if `TRACKER_CLI` is empty. Print:
+   `Tracker: {TRACKER} (via {CLI_TOOL})`. Every prefixed label this command
    *builds* (`model`, `effort`, `severity`, …) is `<key>${LABEL_SEP}<value>`, per
    [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) "Setup". A label taxonomy
    the repo already **has** — `area`, most often — is the exception: match the
