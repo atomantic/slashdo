@@ -119,7 +119,7 @@ Turn a rough idea into a well-formed tracker issue, then hand it to an agent:
 ```
 
 `--enhance-with <list>` routes the drafted issue through a sequential pipeline of
-enhancement agents (`codex`, `claude`, `agy`, `grok`, `cursor` — same `agent[model]` grammar as
+enhancement agents (`codex`, `claude`, `agy`, `grok`, `pi`, `cursor` — same `agent[model]` grammar as
 `--review-with`, e.g. `--enhance-with codex[o3],cursor`), each refining the previous
 one's output, before the approval gate — a cheap second/third opinion folded into the
 draft. A missing or misbehaving agent degrades to the last good draft; the human still
