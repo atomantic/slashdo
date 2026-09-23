@@ -27,7 +27,7 @@ describe('bulk issue-filing spool contracts', () => {
   it('keeps SPOOL_DIR in both audit commands\' compaction-survival lists', () => {
     // Compaction mid-audit that drops SPOOL_DIR strands every spooled body.
     for (const name of ['better.md', 'better-swift.md']) {
-      assert.match(readCommand(name), /^- `SPOOL_DIR` \(issue mode only/m, name);
+      assert.match(readCommand(name), /^- `SPOOL_DIR` \(the literal spool path/m, name);
     }
   });
 
@@ -68,7 +68,7 @@ describe('bulk issue-filing spool contracts', () => {
     // Its {FINDINGS} block is built by the orchestrator, which now holds only index
     // lines — a worker handed those alone remediates from a bare one-line title.
     for (const body of [readCommand('better.md'), readCommand('better-swift.md')]) {
-      assert.match(body, /\*\*In issue mode the finding bodies are on disk, not in this context\.\*\*/);
+      assert.match(body, /\*\*The finding bodies are on disk, not in this context\.\*\*/);
       // <slug> not <category-slug>: Conflict avoidance merges two categories into one
       // worker, so it must open every spool file its ids name, not just its own.
       assert.match(body, /read the full body for each of its ids out of `\$SPOOL_DIR\/<slug>\.md`, where/);
@@ -92,7 +92,7 @@ describe('bulk issue-filing spool contracts', () => {
       // ...and something must actually remove it: the partial delegates removal to the
       // command, so with no removal step every --issues run leaks a directory holding
       // the full text of every finding.
-      assert.match(body, /\*\*Issue mode — remove the spool\.\*\*/);
+      assert.match(body, /\*\*Remove the spool\.\*\*/);
       assert.match(body, /rm -rf "\$SPOOL_DIR"/);
       assert.match(body, /\*\*Unless any filer returned `ERROR`\*\*/);
       // A scan-only run has no Phase 3c/4c, so filing is its last read.

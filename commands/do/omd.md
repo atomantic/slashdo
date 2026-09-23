@@ -29,7 +29,6 @@ Glob for markdown files in the repo root and common locations:
 - `CONTRIBUTING.md`
 - `CHANGELOG.md`
 - `GOALS.md`
-- `PLAN.md`
 - `CODE_OF_CONDUCT.md`
 - `SECURITY.md`
 - `LICENSE.md`
@@ -45,6 +44,8 @@ Found {N} markdown files to audit:
 
 Skip files that are clearly generated (e.g., `node_modules/`, `vendor/`, lock files).
 
+A legacy `PLAN.md` is not a governance doc to optimize (the backlog lives in the issue tracker) — skip it, and if one exists, suggest running `/do:replan` once to migrate its items to tracker issues.
+
 ## Phase 1: File-Type Preferences
 
 Identify the file type and apply its row below. A capable model already knows generic markdown hygiene (clear structure, no dead links, no stale content) — this table only records what's specific to this project's conventions, not restated elsewhere.
@@ -53,7 +54,7 @@ Identify the file type and apply its row below. A capable model already knows ge
 |---|---|
 | `CLAUDE.md` / `AGENTS.md` | Lean, imperative agent instructions, not prose. **`AGENTS.md` is the cross-tool equivalent of `CLAUDE.md`** — agent-facing project instructions (conventions, constraints, how to work in this repo) — never a list of sub-agent/sub-command definitions; don't rewrite it as one. Root `CLAUDE.md` loads at startup, so keep it lean; subfolder `CLAUDE.md` files load only when Claude reads that subtree — module-specific content belongs there, not at the root. |
 | `README.md` | Written for humans, not agents. Lead with what/why, then installation/quickstart. Long guides or tutorials belong in `docs/` with a link from README. |
-| `GOALS.md` / `PLAN.md` | Follow the `/do:goals` / `/do:replan` boundaries: GOALS.md is strategic outcome-prose with no checkboxes; PLAN.md is the tactical backlog, reflecting reality not aspiration. Don't restructure either against what those commands expect to read and write. |
+| `GOALS.md` | Follow the `/do:goals` boundaries: GOALS.md is strategic outcome-prose with no checkboxes — the tactical backlog lives in the issue tracker, not a markdown file. Don't restructure it against what `/do:goals` expects to read and write. |
 | `CONTRIBUTING.md` | Setup steps + PR process. Drop rules already enforced by linters/CI. |
 | `CHANGELOG.md` | Keep a Changelog format (Added/Changed/Deprecated/Removed/Fixed/Security), most recent first, no duplicate entries within a version. |
 | `SECURITY.md` | Reporting process (not public issues), supported versions, response-time expectations — concise. |

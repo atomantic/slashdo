@@ -773,7 +773,7 @@ describe('review-loop parse contracts', () => {
     // [effort=<level>], matching cursor[gpt-5]~effort=max and a saved
     // review-models cursor=gpt-5 plus cursor~effort=max. Never pass --effort.
     assert.match(loop, /CURSOR_MODEL="\$\{REVIEW_MODEL\}\[effort=\$\{REVIEW_EFFORT\}\]"/);
-    assert.match(loop, /"\$REVIEW_BIN" -p "\$LOCAL_PROMPT" \$\{MODEL_FLAG\[@\]\+"\$\{MODEL_FLAG\[@\]\}"\}/);
+    assert.match(loop, /"\$REVIEW_BIN" -p "\$LOCAL_PROMPT" --mode ask \$\{MODEL_FLAG\[@\]\+"\$\{MODEL_FLAG\[@\]\}"\}/);
 
     // Config and docs must advertise the same model + effort grammar as the
     // other reviewers — a saved review-models entry and a ~effort suffix.
@@ -808,6 +808,40 @@ describe('review-loop parse contracts', () => {
     assert.match(rpr, /forwarding `REVIEWER_APPLIES`.+\{REVIEW_EFFORT\}/s);
     assert.match(rpr, /Pass `\{REVIEW_AGENT\}`.+\{REVIEW_EFFORT\}/s);
     assert.match(rpr, /\{OLLAMA_EFFORT\}/);
+  });
+
+  it('cursor never auto-trusts or auto-approves, and a trust refusal is skipped, not cli-error (#399)', () => {
+    // An untrusted workspace makes cursor print "Workspace Trust Required" and
+    // exit 1 before any model call. As cli-error that is a hard error ~opt can't
+    // excuse, so the first run in any new clone aborted /do:pr.
+    const recipe = readLib(LOCAL_AGENT_RECIPES.cursor);
+    const loop = readLib('local-agent-review-loop.md');
+    const invocation = recipe.match(/^"\$REVIEW_BIN" -p [^\n]*$/m);
+    assert.ok(invocation, 'cursor recipe must carry its print-mode invocation');
+    // --trust persists (~/.cursor/projects/<ws>/.workspace-trusted): it would
+    // silently change the user's Cursor state and relax the gate that stands
+    // between an attacker-influenced checkout and the agent. --mode ask is the belt.
+    assert.doesNotMatch(invocation[0], /--trust\b/);
+    assert.match(recipe, /\*\*Do not pass `--trust`\.\*\*/);
+    assert.match(invocation[0], /--mode ask\b/);
+    // Never a flag that auto-approves commands, MCP servers, or tool calls.
+    // (The 'never grants blanket permissions' test already bans the long aliases
+    // anywhere in the local-agent text.)
+    assert.doesNotMatch(invocation[0], /(?:^|\s)(?:-f|--approve-mcps|--auto-review|--sandbox)\b/);
+    assert.match(recipe, /\*\*Never\*\* pass an auto-approve flag either — `-f`/);
+
+    // The classifier: non-zero exit + trust notice on stderr => skipped, deferred
+    // past Step 3's restoration check, matched on $ERR_FILE only.
+    assert.match(recipe, /grep -q 'Workspace Trust Required' "\$ERR_FILE" 2>/);
+    assert.match(recipe, /CURSOR_TRUST_REQUIRED=true\n/);
+    const step3 = recipe.slice(recipe.indexOf('CURSOR_TRUST_REQUIRED=true` after the restoration check'));
+    assert.match(step3, /STATUS=skipped/);
+    assert.doesNotMatch(step3, /STATUS=cli-error/);
+    assert.match(recipe, /same reasoning as `cmd`'s `126`\/`127`/);
+
+    // The generic loop must run the cursor classifier before its cli-error branch.
+    assert.match(loop, /recipe exit classifier \([^)]*cursor: workspace trust\) \*\*before\*\*/);
+    assert.match(loop, /cursor: a flagged workspace-trust refusal returns `skipped`/);
   });
 
   it('accepts opencode (and zen aliases) as a local-agent reviewer and probes the OpenCode CLI', () => {
@@ -1237,6 +1271,30 @@ describe('shared review-flag parse partial (#311)', () => {
 
   it('review.md forwards {REVIEW_MODELS} to the multi-reviewer wrapper (#332)', () => {
     assert.match(raw('review.md'), /`\{REVIEW_MODELS\}` — the saved per-agent default models/);
+  });
+});
+
+describe('PLAN.md mode is retired (review/rpr/config)', () => {
+  const raw = (name) => _read('commands', 'do', name);
+  it('review and rpr treat --issues as a no-op and abort on --no-issues', () => {
+    for (const name of ['review.md', 'rpr.md']) {
+      const body = raw(name);
+      assert.match(body, /--issues is now the default \(PLAN\.md mode was removed\); the flag can be dropped\./, name);
+      assert.match(body, /--no-issues is no longer supported: PLAN\.md mode was removed\. slashdo records work only in the project's issue tracker\./, name);
+      assert.doesNotMatch(body, /ISSUE_MODE|\[--issues\|--no-issues\]|defer to PLAN\.md/, name);
+    }
+  });
+  it('config rejects --issues/--no-issues and no longer shows an issues key', () => {
+    const body = raw('config.md');
+    assert.match(body, /\/do:config --issues\/--no-issues was removed: PLAN\.md mode no longer exists, issues are always used\. Run \/do:config --unset issues to clean up a saved value\./);
+    assert.doesNotMatch(body, /^\s+issues\s+=/m);
+    assert.doesNotMatch(body, /\[--issues\|--no-issues\]/);
+  });
+  it('the shared issue libs carry no PLAN.md branch', () => {
+    for (const name of ['plan-issue-setup.md', 'plan-issue-filing.md', 'finding-disposition.md']) {
+      assert.doesNotMatch(readLib(name), /PLAN\.md|ISSUE_MODE|plan-id-format/, name);
+    }
+    assert.ok(!fs.existsSync(path.join(__dirname, '..', 'lib', 'plan-id-format.md')));
   });
 });
 

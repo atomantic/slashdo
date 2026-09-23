@@ -1,6 +1,6 @@
 ---
 description: Audit and remediate repository code in isolated worktrees, with per-category PRs, CI checks, and optional reviewer loops
-argument-hint: "[--interactive] [--scan-only] [--simplify-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--strict|--nuclear] [--issues|--no-issues] [--issues-label <name>] [path filter or focus areas]"
+argument-hint: "[--interactive] [--scan-only] [--simplify-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--strict|--nuclear] [--issues-label <name>] [path filter or focus areas]"
 ---
 
 # Better — Audit and remediate
@@ -26,19 +26,19 @@ Execute applicable steps in order. Reading this list does not request loading ev
 
 !read lib/better-discovery.md
 
-Only when `ISSUE_MODE=true` (resolved by `--issues` in step 0's options), read the shared spool/filer contract once, before any phase below touches it:
+Read the shared spool/filer contract once, before any phase below touches it:
 
 !read lib/better-issue-mode.md
 
-1. Audit only applicable scopes. Workers read their own lens and receive only their task context; tests follow the other scopes. Carry the compact finding index and literal spool path in issue mode.
+1. Audit only applicable scopes. Workers read their own lens and receive only their task context; tests follow the other scopes. Carry the compact finding index and literal spool path.
 
 !read lib/better-audit.md
 
-2. Consolidate, deduplicate, assign one owner per file, and record disposition. `--issues` chooses the tracker instead of PLAN.md; it does not stop remediation. **`--scan-only --issues` files every surviving finding before stopping.** Scan-only never creates a worktree or edits code. If no actionable findings remain, report deferred work and stop.
+2. Consolidate, deduplicate, assign one owner per file, and record disposition. Deferred findings are filed as tracker issues, deduped against open ones (listed in the final report when no tracker is available). **`--scan-only` files every surviving finding before stopping.** Scan-only never creates a worktree or edits code. If no actionable findings remain, report deferred work and stop.
 
 !read lib/better-plan.md
 
-3. Remediate CRITICAL/HIGH/MEDIUM code findings in the isolated worktree; create shared foundations before dependent workers. LOW findings stay tracked. Keep overlapping files with one worker.
+3. Remediate CRITICAL/HIGH/MEDIUM code findings in the isolated worktree; create shared foundations before dependent workers. LOW findings are filed as issues, not auto-remediated. Keep overlapping files with one worker.
 
 !read lib/better-remediation.md
 

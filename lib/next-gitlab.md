@@ -1,9 +1,9 @@
 # GitLab specifics for `/do:next`
 
-GitLab-only behavior for `/do:next`, read once — near the top of Phase 1 issues mode
-setup, before the first plain `glab api` call — so every later phase can just point
-back here by heading instead of re-explaining `glab`/`jq` quirks inline. **A GitHub
-run never reads this file.** The Phase 6 merge (for GitHub and GitLab) is in
+GitLab-only behavior for `/do:next`, read once — in the Pre-flight, before the first
+plain `glab api` call — so every later phase can just point back here by heading
+instead of re-explaining `glab`/`jq` quirks inline. **A GitHub run never reads this
+file.** The Phase 6 merge (for GitHub and GitLab) is in
 [merge-gate.md](./merge-gate.md).
 
 Field names and shapes differ from GitHub's REST/GraphQL payloads, not just the
@@ -59,17 +59,15 @@ VALUE="$(printf '%s' "$RESULT_JSON" | jq -er '.field')" || { <fail-closed handle
 [ -n "$VALUE" ] || { <fail-closed handler>; }
 ```
 
-## Phase 1 — issues mode: jq probe
+## Pre-flight — jq probe
 
 `glab api` — unlike the `glab issue`/`glab mr` subcommands — has no built-in `--jq`
-flag, so this phase and Phase 2 pipe it to the **standalone** jq binary instead.
-Probe **here** (once you're in issues mode), not in the shared Pre-flight: PLAN.md
-mode never calls plain `glab api`, so probing in the shared Pre-flight would abort a
-GitLab + PLAN.md repo that has always worked without jq.
+flag, so Phase 1 and Phase 2 pipe it to the **standalone** jq binary instead. Probe
+once, in the Pre-flight, before any claim:
 
 ```bash
 command -v jq >/dev/null 2>&1 || {
-  echo "/do:next's GitLab issue mode pipes 'glab api' output through jq, which is not installed. Install it (e.g. 'brew install jq' or 'apt-get install jq') and re-run."; exit 1; }
+  echo "/do:next on GitLab pipes 'glab api' output through jq, which is not installed. Install it (e.g. 'brew install jq' or 'apt-get install jq') and re-run."; exit 1; }
 ```
 
 ## Phase 1 — native blocked-by lookup
@@ -82,7 +80,7 @@ LINKS_JSON="$(glab api "projects/:id/issues/<N>/links")" || {
 printf '%s' "$LINKS_JSON" | jq -r '.[] | select(.link_type == "is_blocked_by")'
 ```
 
-## Phase 1 — issues mode: candidate list
+## Phase 1 — candidate list
 
 `glab issue list` in place of `gh issue list` for the priority/oldest walk — same
 sort key (`PRIORITY_SORT`, Conventions, in its GitLab form), different field

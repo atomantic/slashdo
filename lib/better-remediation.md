@@ -1,6 +1,6 @@
 ## Phase 3: Worktree Remediation
 
-Only CRITICAL, HIGH, and MEDIUM findings are remediated. LOW findings stay tracked in PLAN.md (or the tracker) and are not auto-remediated. Test Quality & Coverage findings belong to Phase 4c.
+Only CRITICAL, HIGH, and MEDIUM findings are remediated. LOW findings are filed as issues and are not auto-remediated. Test Quality & Coverage findings belong to Phase 4c.
 
 ### Inputs
 
@@ -36,7 +36,7 @@ Use `TeamCreate` named `{BRANCH_PREFIX}-{DATE}` and one `TaskCreate` per actiona
 Spawn one general-purpose `Agent` sub-agent per category with actionable findings, in parallel (multiple tool calls in one response) batched to the host's available slots, and wait for all to return. **Resolve `REMEDIATION_MODEL_TIER` to this host's model per [lib/model-tiers.md](./model-tiers.md) and pass it as the `model` parameter on each `Agent` call** (`heavy` → this host's strongest alias, `model: "opus"` on Claude Code).
 <!-- /if:teams -->
 
-**In issue mode the finding bodies are on disk, not in this context.** Build `{FINDINGS}`
+**The finding bodies are on disk, not in this context.** Build `{FINDINGS}`
 from each worker's index lines **plus the literal `SPOOL_DIR` path**, and instruct the
 worker to read the full body for each of its ids out of `$SPOOL_DIR/<slug>.md`, where
 `<slug>` is the category on **that id's own index line** — the ownership rule above
