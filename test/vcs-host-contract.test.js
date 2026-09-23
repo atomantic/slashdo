@@ -96,6 +96,8 @@ function runSelection({
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(bin, 'gh'), STUB('gh', 'GH_AUTHED', 'GH_REPO'), { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'glab'), STUB('glab', 'GLAB_AUTHED', 'GLAB_REPO'), { mode: 0o755 });
+    // Logged like the others so a scenario can prove resolution never reaches Jira.
+    fs.writeFileSync(path.join(bin, 'jira'), STUB('jira', 'GH_AUTHED', 'GH_REPO'), { mode: 0o755 });
 
     const repo = path.join(dir, 'repo');
     fs.mkdirSync(repo);
@@ -358,14 +360,29 @@ describe('code host and tracker resolution, executed', () => {
       remote: 'git@github.com:team/app.git',
       ghAuthed: true, ghRepo: true,
       globalConfig: '{"defaults":{"tracker":"gitlab"}}',
-      projectConfig: '{"defaults":{"tracker":"jira"}}',
+      projectConfig: '{"defaults":{"tracker":"linear"}}',
     });
     // Resolution itself never aborts on the tracker: /do:pr has no use for it. The
     // tracker gate is TRACKER_CLI, which only tracker-using commands consult.
     assert.equal(run.status, 0, run.stdout);
     assert.equal(run.codeHost, 'github');
-    assert.equal(run.tracker, 'jira', 'project tracker wins over global');
+    assert.equal(run.tracker, 'linear', 'project tracker wins over global');
     assert.equal(run.trackerCli, '', 'a tracker with no backend must not borrow the code host CLI');
+  });
+
+  it('resolves a Jira tracker without reaching Jira or lending it the code host CLI', () => {
+    // TRACKER_CLI=jira is set only by lib/tracker-jira.md's pre-flight, so a command
+    // that never reads that file sees "no tracker" rather than gh/glab issue calls.
+    for (const [remote, cli, sep, authed] of [['git@github.com:team/app.git', 'gh', ':', { ghAuthed: true, ghRepo: true }],
+      ['git@gitlab.com:team/app.git', 'glab', '::', { glabAuthed: true, glabRepo: true }]]) {
+      const run = runSelection({ remote, ...authed, projectConfig: '{"defaults":{"tracker":"Jira","jira-project":"proj"}}' });
+      assert.equal(run.status, 0, run.stdout);
+      assert.equal(run.cliTool, cli, 'PRs/MRs stay on the code host CLI');
+      assert.equal(run.labelSep, sep);
+      assert.equal(run.tracker, 'jira');
+      assert.equal(run.trackerCli, '');
+      assert.ok(!run.calls.some((c) => c.startsWith('jira ')), 'resolution must not reach Jira');
+    }
   });
 
   it('serves the tracker through the code host CLI only when they match', () => {
@@ -390,11 +407,13 @@ describe('code host and tracker overrides are wired end to end', () => {
 
   it('lets /do:config set, show, and unset code-host and tracker', () => {
     assert.match(config, /`--code-host <github\|gitlab>` → key `code-host`/);
-    assert.match(config, /`--tracker <github\|gitlab>` → key `tracker`/);
-    assert.match(config, /Supported: [^`]*--code-host, --tracker, --unset <key>/);
-    assert.match(config, /Valid keys: [^`]*code-host, tracker\./);
+    assert.match(config, /`--tracker <github\|gitlab\|jira>` → key `tracker`/);
+    assert.match(config, /`--jira-project <KEY>` → key `jira-project`/);
+    assert.match(config, /Supported: [^`]*--code-host, --tracker, --jira-project, --unset <key>/);
+    assert.match(config, /Valid keys: [^`]*code-host, tracker, jira-project\./);
     assert.match(config, /^ {2}code-host {10}= /m);
     assert.match(config, /^ {2}tracker {12}= /m);
+    assert.match(config, /^ {2}jira-project {7}= /m);
   });
 
   it('keeps /do:config and the partial on one supported value set', () => {
@@ -402,7 +421,15 @@ describe('code host and tracker overrides are wired end to end', () => {
     const [select] = bashBlocks();
     assert.match(select, /\n {2}github\) CLI_TOOL=gh;[^\n]*\n {2}gitlab\) CLI_TOOL=glab;[^\n]*\n {2}\*\) echo[^\n]*supported: github, gitlab/);
     assert.match(config, /--code-host must be one of github, gitlab/);
-    assert.match(config, /--tracker must be one of github, gitlab/);
+    // The tracker set is every code host plus the tracker-only backends — the two
+    // lists must name exactly the same values.
+    // A tracker-only backend is a lib/tracker-<name>.md file the partial's gate names.
+    const trackerOnly = fs.readdirSync(path.join(root, 'lib'))
+      .map((entry) => entry.match(/^tracker-([a-z]+)\.md$/)?.[1]).filter(Boolean);
+    assert.deepEqual(trackerOnly, ['jira']);
+    for (const name of trackerOnly) assert.match(partial, new RegExp(`\\(\`${name}\`: set only by\\s+\`lib/tracker-${name}\\.md\``));
+    const [, saved] = config.match(/--tracker must be one of ([a-z, ]+) \(got/);
+    assert.deepEqual(saved.split(', '), ['github', 'gitlab', ...trackerOnly]);
   });
 
   it('runs the tracker gate in every command that reads or files tracker issues', () => {

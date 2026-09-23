@@ -130,6 +130,7 @@ LIBS=(
   review-surface-scan review-surface-quality review-security-audit
   review-cross-file-tracing review-cross-file-contract
   review-structural-ambition
+  tracker-jira
   upstream-push
   vcs-host
 )
