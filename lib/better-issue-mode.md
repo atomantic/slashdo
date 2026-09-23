@@ -21,7 +21,8 @@ SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_D
 
 Record the printed path as `SPOOL_DIR` in run state and pass **that literal path**
 to every agent; a shell variable does not survive between tool calls. Each agent
-writes one ready-to-file issue body per finding (the Phase 1 finding format) to
+writes one ready-to-file issue body per finding (the Phase 1 finding format, under the
+`<!-- finding <N> -->` marker and plain `title:` line from the bulk-filing spool format) to
 `$SPOOL_DIR/<category-slug>.md`, using its own category slug, and **returns only the
 compact index**:
 

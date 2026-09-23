@@ -66,8 +66,8 @@ The issue **title is a clean, human-readable task** — do **not** prefix it wit
 `[category]` / `[SEVERITY]` brackets (e.g. ❌ `[dry][LOW] Consolidate the XML
 decoders`), and never with an id or slug (❌ `[security-01] …`,
 ❌ `[sql-injection-in-pr-route] …`). Issues need no invented slug: the tracker's
-**issue number is the ID**. That metadata belongs in GitHub/GitLab **labels**, which both hosts
-render as colored tags and let users filter on — the whole point of a tracker.
+**issue number is the ID**. That metadata belongs in GitHub/GitLab **labels**, which
+both hosts render as colored tags and let users filter on — the whole point of a tracker.
 Carry every label through the `<label flags>` placeholder in the create commands
 above as **repeated `--label <name>`** flags (one per label):
 
@@ -164,7 +164,8 @@ Each agent's **return value** is one line per finding and nothing else:
 <N> | <SEVERITY-or-UNCERTAIN> | <category> | <file:line> | <one-line title>
 ```
 
-`<N>` is the finding's marker number. If an audit reports uncertainty, preserve `UNCERTAIN` in both index and body.
+`<N>` is the finding's marker number. If an audit reports uncertainty, preserve
+`UNCERTAIN` in both index and body.
 The consolidator may read those specific bodies and cited source to validate them.
 Unresolved findings remain explicitly unconfirmed investigation follow-ups: no
 confirmed severity label and no automatic remediation. Do not silently coerce
@@ -204,7 +205,8 @@ those would truncate the body and file a partial issue — the very truncation t
 exists to prevent.
 
 For each id the filer takes the `--title` from the block's `title:` line, verbatim,
-extracts the rest of the block — everything below the `title:` line — into its own `--body-file` temp file, creates any missing labels, creates the issue, and captures
+extracts the rest of the block — everything below the `title:` line — into its own
+`--body-file` temp file, creates any missing labels, creates the issue, and captures
 the number. It returns only `<id> -> #<number>` lines. **A filer never rewrites a
 body** — it moves bytes from the spool to the tracker. If a block is malformed or its
 id is missing from the spool, the filer reports `<id> -> ERROR: <reason>` and moves
