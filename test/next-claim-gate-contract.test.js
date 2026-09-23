@@ -15,7 +15,7 @@ const root = path.join(__dirname, '..');
 const next = readCommandDocs('next.md', { eager: true });
 const config = fs.readFileSync(path.join(root, 'commands', 'do', 'config.md'), 'utf8');
 const defaults = fs.readFileSync(
-  path.join(root, 'lib', 'review-config-defaults.md'),
+  path.join(root, 'lib', 'config-defaults-issues-merge.md'),
   'utf8',
 );
 const swarm = fs.readFileSync(path.join(root, 'lib', 'next-swarm.md'), 'utf8');

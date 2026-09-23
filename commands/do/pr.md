@@ -18,6 +18,8 @@ Then apply any **saved defaults** (set via `/do:config`) to the flags the user d
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
+!`cat ~/.claude/lib/config-defaults-issues-merge.md`
+
 ## Detect VCS Host
 
 Determine whether this repo lives on GitHub or GitLab so the right CLI is used for every host-specific step below. The **`origin` remote URL is the authoritative signal** — `auth status` only says which CLI is usable, not where the repo lives. Detect from the remote first, then confirm the matching CLI is authenticated:

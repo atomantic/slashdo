@@ -42,4 +42,6 @@ Leave omitted configurable values unset until saved defaults have been applied, 
 
 !read lib/review-config-defaults.md
 
+!read lib/config-defaults-issues-merge.md
+
 After defaults, unresolved reviewers become `[]`; unresolved simplify/strict/issues flags become false. No built-in reviewer is selected, including Copilot. Empty reviewers leave PRs open. GitLab skips review/auto-merge. The shared review wrapper owns the final aggregate gate; do not reimplement its optional, cap, or stop-mode semantics.
