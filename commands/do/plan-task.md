@@ -56,22 +56,23 @@ accept either `--flag=value` or `--flag value`. Order is free.
   `--effort must be one of low, medium, high, xhigh, max, none (got: {value}).`
 - **`--enhance-with <list>`** — after the draft is written, route it through an
   **ordered pipeline of enhancement agents** (Phase 3.5), each refining the previous
-  agent's output, before the approval gate. Same `agent[model]` list grammar as
-  `--review-with` (see `/do:pr`). **Accepted slugs: `codex`, `claude`, `agy` (aliases
-  `gemini`/`antigravity`), `grok`, `pi`, and `cursor` (alias `cursor-agent`)** — the
-  agentic CLIs that take a free-form prompt; `ollama` and `copilot` are findings
-  emitters, not draft rewriters, and are rejected here. Examples: `--enhance-with=grok`;
+  agent's output, before the approval gate. Parsed with the same `agent[model]` list
+  grammar as `--review-with` — comma-split outside brackets, `[<model>]` stripped
+  into a per-entry `{ENH_MODEL}`, `gemini`/`antigravity` → `agy`, `cursor-agent` →
+  `cursor`, dedupe preserving first-occurrence order (the bracket is part of the
+  identity) — see [lib/review-flags.md](../../lib/review-flags.md). **One boundary is
+  specific to this flag**: the rest of `$ARGUMENTS` after it is free-form task text,
+  so the value ends at the first whitespace *outside* any `[...]` bracket (an opened
+  bracket runs to its matching `]`) rather than at the first whitespace outright —
+  `--enhance-with 'agy[Gemini 3.8 Flash (High)]' fix the login bug` must not leak
+  `3.8 Flash (High)]` into the description.
+  **What differs from `--review-with`: only `codex`, `claude`, `agy` (aliases
+  `gemini`/`antigravity`), `grok`, `pi`, and `cursor` (alias `cursor-agent`) are
+  accepted** — the agentic CLIs that take a free-form prompt and return a rewritten
+  draft; `ollama` and `copilot` are findings emitters, not draft rewriters, and are
+  rejected here (see [lib/enhance-loop.md](../../lib/enhance-loop.md) "Inputs" for the
+  full per-entry contract). Examples: `--enhance-with=grok`;
   `--enhance-with=codex[o3],grok` (Codex on `o3` first, then Grok on Codex's result).
-  **Tokenize bracket-aware, never by naive whitespace split**: model selectors may
-  contain spaces and parens (e.g. `--enhance-with 'agy[Gemini 3.8 Flash (High)]' fix
-  the login bug`) and the rest of `$ARGUMENTS` is free-form task text, so a
-  whitespace-first split would leak `3.8 Flash (High)]` into the description. The
-  value ends at the first whitespace *outside* any `[...]` bracket (an opened bracket
-  runs to its matching `]`, whatever it contains). Then parse it exactly as
-  `--review-with`: split on `,` (only commas outside brackets), trim, strip each
-  `[<model>]` bracket into a per-entry `{ENH_MODEL}`, normalize `gemini`/`antigravity`
-  → `agy`, `cursor-agent` → `cursor`, dedupe preserving first-occurrence order (the
-  bracket is part of the identity, so `codex[o3]` and `codex[o4]` are distinct).
   Reject an unknown slug with
   `Unknown --enhance-with value: {value}. Use one of: codex, claude, agy, grok, pi, cursor.`
   **`--enhance-with=none`** (case-insensitive) explicitly skips the pipeline (mirrors
@@ -84,74 +85,60 @@ accept either `--flag=value` or `--flag value`. Order is free.
 
 ## Phase 0 — Detect the tracker
 
-1. **VCS host / `CLI_TOOL` — detect from the `origin` remote first, then confirm the
-   matching CLI is authenticated** (the same order as `/do:pr`'s "Detect VCS Host").
-   `auth status` only says which CLI is *usable*, so with **both** `gh` and `glab`
-   authenticated the host must never be decided by whichever probe passes first.
-   - Read the remote host: `git remote get-url origin`. If the host is a GitLab
-     instance (`gitlab.com` or self-hosted), set `VCS_HOST=gitlab` and
-     `CLI_TOOL=glab`; otherwise (GitHub, GitHub Enterprise, or ambiguous) set
-     `VCS_HOST=github` and `CLI_TOOL=gh`. Both CLIs resolve the concrete host from
-     the remote, so Enterprise / self-managed hosts need no extra flags (no
-     `GH_HOST` derivation — see [lib/gh-host.md](../../lib/gh-host.md)).
-   - Confirm the matching CLI is authenticated: `gh auth status --active` for GitHub
-     (`--active` scopes the check to the active account so a stale token elsewhere
-     doesn't falsely fail it), `glab auth status` for GitLab. If it is **not**,
-     abort — never fall back to the other CLI (wrong host):
+1. **VCS host / `CLI_TOOL` / `LABEL_SEP`** — same order every slashdo command uses:
+   derive the host from the `origin` remote first, then confirm that host's
+   credentials (`auth status` only says which CLI is *usable*, so with **both** `gh`
+   and `glab` authenticated the host must never be decided by whichever probe passes
+   first). This command makes no raw `gh api` calls, so it needs no `GH_HOST`
+   derivation on top of this.
 
-     > `/do:plan-task detected a {VCS_HOST} repo but `{CLI_TOOL}` is not authenticated.
-     > Run `{CLI_TOOL} auth login` for this repo's host first.`
+   !read lib/vcs-host.md
 
-   - If there is **no `origin` remote at all**, fall back to whichever CLI is
-     authenticated (`gh` first, then `glab`); if neither is, abort with:
-     `/do:plan-task needs an authenticated `gh` (GitHub) or `glab` (GitLab). Run `gh auth login` or `glab auth login`.`
-
-   Print: `Tracker: {VCS_HOST} (via {CLI_TOOL})`.
-   - **Derive `LABEL_SEP`:** `[ "$CLI_TOOL" = glab ] && LABEL_SEP="::" || LABEL_SEP=":"`.
-     GitLab renders any `key::value` label as a two-tone **scoped label** and
-     enforces that only one value per key applies to an issue at a time; GitHub has
-     no equivalent, so it keeps `:`. Every prefixed label this command *builds*
-     (`model`, `effort`, `severity`, …) is `<key>${LABEL_SEP}<value>`, per
-     [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) "Setup". A label taxonomy
-     the repo already **has** — `area`, most often — is the exception: match the
-     separator its existing labels use, per Phase 5, or the issue lands on a second,
-     unfilterable label.
-2. **Fetch existing open issues** for the dedup check (Phase 2), unless `--no-dedup`
-   is set, using the **same fetch
+   Print: `Tracker: {VCS_HOST} (via {CLI_TOOL})`. Every prefixed label this command
+   *builds* (`model`, `effort`, `severity`, …) is `<key>${LABEL_SEP}<value>`, per
+   [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) "Setup". A label taxonomy
+   the repo already **has** — `area`, most often — is the exception: match the
+   separator its existing labels use, per Phase 4, or the issue lands on a second,
+   unfilterable label.
+2. **Fetch the repo's label taxonomy** — `gh label list --limit 200 --json name --jq
+   '.[].name'` (glab: `glab label list --output json --per-page 100 --jq
+   '.[].name'`) — and record it as `EXISTING_LABELS` for Phase 4's label inference
+   and dispatch hint.
+   This command files at most one issue per run, so per
    [lib/plan-issue-filing.md](../../lib/plan-issue-filing.md) "Fetch existing open
-   issues" defines** (so the two never drift) — it lists all open issues for
-   the resolved `CLI_TOOL` and records them as `EXISTING_ISSUES`.
+   issues" it skips that fetch's full open-issue `--json …,body` dump; Phase 2 dedups
+   with a targeted search instead.
 
 (Labels are created lazily in Phase 5, immediately before each is applied.)
 
 ## Phase 1 — Understand the task
 
-Investigate the codebase so the issue is **grounded in the actual code**, not a
-paraphrase of the request. Proportional to the task's size:
-
-- **Read the request literally**, then find the code it touches: grep/glob for the
-  relevant modules, entry points, config, tests, and docs. Read the specific files so
-  you can name real paths, functions, and current behavior.
-- **Establish the current state** — what exists today, how it behaves, what's missing
-  or wrong. "current: `commands/do/pr.md` has no `--dry-run` handling in Parse
-  Arguments" is worth ten "we should add a dry-run flag."
-- **Identify constraints and prior art** — patterns already in the repo the task
-  should follow (e.g. "mirror the `--yes` flag grammar used in every other command"),
-  CI/build implications, and anything that scopes the work.
-- **Surface open questions** — genuine decisions the task can't proceed without.
-  Resolved in the approval gate (Phase 5) or, under `--yes`, asked before filing.
-- **For a large or cross-cutting task**, spawn a read-only investigation subagent
-  (`Explore` or `general-purpose`) to sweep the affected area and report the map
-  back. Keep it proportional — a one-file tweak doesn't need a subagent.
+Ground the body in real paths and current behavior, proportional to the task's size:
+find the code the request touches, and name the real files, functions, and current
+behavior — "current: `commands/do/pr.md` has no `--dry-run` handling in Parse
+Arguments" is worth ten "we should add a dry-run flag." Note prior art the task
+should follow and any genuine open question the draft can't proceed without (folded
+into the draft per the invariant above). For a large or cross-cutting task, spawn a
+read-only investigation subagent (`Explore` or `general-purpose`) to sweep the
+affected area and report the map back — a one-file tweak doesn't need one.
 
 ## Phase 2 — Dedup against existing issues
 
-Unless `--no-dedup` is set, compare the planned task against `EXISTING_ISSUES`
-(Phase 0). Match on the **same file path / symbol / feature or a clearly equivalent
-intent**, not just an exact title string. If an open issue already covers this work,
-**do not create a duplicate**: report the existing `#<number>` and its title, note
-what (if anything) your planning adds, and stop — offer to add a clarifying comment
-to that issue instead.
+Unless `--no-dedup` is set, search for issues that might already cover this work —
+once Phase 1 has grounded the task, so the search terms are real file/symbol names,
+not the raw request: `gh issue list --state open --search "<key terms>" --json
+number,title,labels,body --jq '.'` (glab: `glab issue list --state opened --search
+"<key terms>" --output json`), per
+[lib/plan-issue-filing.md](../../lib/plan-issue-filing.md) "Fetch existing open
+issues" (a command filing at most one item may dedup with a targeted search instead
+of the full open-issue dump). **Run it once per distinct anchor** Phase 1 surfaced
+(the affected file/symbol, the feature name, and any alternate wording an existing
+issue might use) and union the results — a single narrow query can miss an issue
+that only mentions one of them. Match on the **same file path / symbol / feature or
+a clearly equivalent intent**, not just an exact title string. If an open issue
+already covers this work, **do not create a duplicate**: report the existing
+`#<number>` and its title, note what (if anything) your planning adds, and stop —
+offer to add a clarifying comment to that issue instead.
 
 ## Phase 3 — Draft the issue
 
@@ -222,7 +209,7 @@ surfaced still stops to ask rather than filing a vague issue**.
 Suggest labels so the issue is filterable (labels, not title brackets). Keep it light —
 a **type/category label** the repo already uses when one obviously fits (`bug`,
 `enhancement`/`feature`, `docs`, `chore`, `area${LABEL_SEP}<x>`), plus any from
-`--label`. Prefer labels that **already exist** in `EXISTING_ISSUES`' label set over
+`--label`. Prefer labels that **already exist** in `EXISTING_LABELS` (Phase 0) over
 inventing new taxonomy — including matching its separator: if the repo's own `area`
 labels already use `:` (or `::`), follow that convention rather than `$LABEL_SEP`
 for this one, since a mismatched separator makes it a different, unfilterable label.
@@ -231,32 +218,19 @@ feature task — severity is for audit findings.
 
 ### The dispatch hint
 
-Then recommend **how to run the work** on the two independent axes defined in
-[lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) ("The dispatch hint"), using
-the code Phase 1 just read:
-
-- **`model${LABEL_SEP}<light|medium|heavy>`** — how much *capability* the task needs.
-  Judge it from what Phase 1 found, not the request's wording: an approach you could
-  write out line-by-line is `light` however long it is; genuine uncertainty between
-  two designs is `heavy`.
-- **`effort${LABEL_SEP}<low|medium|high|xhigh|max>`** — how much *reasoning budget*
-  per step, driven by **surface area and blast radius**: call-site count, how easy a
-  silent miss is, whether a wrong move corrupts data or breaks a public contract.
-
-**Set the axes independently.** The off-diagonal combinations carry the most
-information (`model:light` + `effort:max` for a wide mechanical sweep; `model:heavy` +
-`effort:low` for a small change hinging on one idea); both landing on the middle
-value every time means you're estimating size, not recommending a dispatch.
-
-**Precedence and omission:**
-- A typed `--model` / `--effort` **wins outright** for that axis — don't re-raise it
-  at the gate.
-- `--model none` / `--effort none` suppress that axis: no label, no inference.
-- **Leave an axis off when you can't justify a value** — a reflexive guess is worse
-  than silence, because `/do:next --model light` will act on it.
-- If the repo already uses its **own** sizing/dispatch taxonomy (`size/M`, story
-  points, `complexity:*` — visible in `EXISTING_ISSUES`' label set), prefer it and
-  skip these. Say which you used.
+Recommend **how to run the work** on the two axes defined in
+[lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) ("The dispatch hint"),
+judged from what Phase 1 actually found, not the request's wording — an approach
+you could write out line-by-line is `model:light` however long it is; genuine
+uncertainty between two designs is `model:heavy`; `effort` tracks surface area and
+blast radius (call-site count, how easy a silent miss is, whether a wrong move
+corrupts data or breaks a public contract), independent of `model`. Set the axes
+independently — landing both on the middle value every time is a size estimate, not
+a dispatch recommendation. A typed `--model`/`--effort` wins outright for that axis
+(don't re-raise it at the gate); `--model none`/`--effort none` suppress it; leave an
+axis off rather than guess when you can't justify a value. If the repo already uses
+its **own** sizing/dispatch taxonomy (`size/M`, story points, `complexity:*` —
+visible in `EXISTING_LABELS`), prefer it and skip these — say which you used.
 
 State the hint with a one-line justification in the Phase 5 gate (e.g. `model:light +
 effort:max — mechanical, but it touches 40 call sites and a miss is silent`).
@@ -268,7 +242,7 @@ effort:max — mechanical, but it touches 40 call sites and a miss is silent`).
 its own line with its one-line justification) — and ask the user to **approve, edit,
 or cancel**. Fold requested edits (including answers to open questions) back into the
 draft and re-show if the change is substantial. Only proceed on explicit approval.
-`--yes` skips straight to creation (but still stops on a *blocking* open question).
+`--yes` skips straight to creation, subject to the invariant above.
 `--dry-run` prints the draft and stops here.
 
 **Create the issue** via the resolved `CLI_TOOL`, applying labels as **repeated
@@ -305,5 +279,10 @@ in the backlog is always a valid stopping point.
 
 - **Custom / Enterprise hosts** need no configuration: `gh issue` / `glab issue`
   infer the host from the `origin` remote, and this command never calls raw `gh api`.
+- **Outside `/do:replan`'s scope by default.** `/do:replan` only triages issues
+  carrying `PLAN_LABEL`, and this command doesn't apply that label on its own. Pass
+  `--label <name>` with the saved `issues-label` default (or `plan`) if a filed issue
+  should show up in that triage; otherwise it stays a normal tracker issue, claimable
+  directly via `/do:next #<number>`.
 - **No AI-attribution noise** in the issue body — write it as a human engineer would
   (the same rule slashdo applies to commits and PRs).

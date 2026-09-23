@@ -1,16 +1,10 @@
 ## Better pipeline — Cleanup & Final Summary (Phase 7)
 
-The shared teardown every `better-*` audit pipeline runs after its PRs are
-merged or left open. `/do:better` and `/do:better-swift` include this file
-verbatim.
-
 ### Inputs
 
 In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines:
 `{SUMMARY_TABLE_ROWS}`, `{SUMMARY_TABLE_ROW_RULES}`, and
-`{SUMMARY_TABLE_FOOTER}`. What each one means and where its value comes from
-is documented once, in CONTRIBUTING.md's "Shared `better-*` pipeline
-placeholders".
+`{SUMMARY_TABLE_FOOTER}`.
 
 ## Phase 7: Cleanup
 

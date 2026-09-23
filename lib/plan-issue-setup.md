@@ -1,7 +1,7 @@
 # Tracker Issue Setup
 
 Shared setup for any command that reads or files GitHub/GitLab tracker issues:
-reusing/deriving the VCS host and `LABEL_SEP`, creating labels lazily, and the
+consuming the VCS host and `LABEL_SEP`, creating labels lazily, and the
 `model:`/`effort:` dispatch-hint vocabulary. **This file assumes the caller's own
 argument parsing already resolved `PLAN_LABEL`** (`--issues-label`, saved
 `issues-label`, default `plan`), so this file does not redefine it.
@@ -12,49 +12,17 @@ that actually files a finding as an issue should also read.
 
 ## Setup
 
-1. **VCS host.** Reuse `CLI_TOOL` (`gh`/`glab`) if the command already detected it
-   in its own discovery phase. Otherwise **derive it from the `origin` remote first,
-   then confirm that host's credentials** — never pick a CLI by probing its
-   credentials before looking at the remote, which is how a GitLab repo on a
-   machine also authenticated to GitHub ends up misrouted against a repository it
-   cannot see (see `~/.claude/lib/vcs-host.md`, which this mirrors):
-   ```bash
-   ORIGIN_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"
-   if printf '%s' "$ORIGIN_HOST" | grep -qi gitlab; then
-     CLI_TOOL=glab
-   elif [ -n "$ORIGIN_HOST" ]; then
-     CLI_TOOL=gh
-   elif gh auth status --active >/dev/null 2>&1; then
-     CLI_TOOL=gh
-   elif glab auth status >/dev/null 2>&1; then
-     CLI_TOOL=glab
-   else
-     echo "No issue tracker: needs an authenticated gh or glab. Run 'gh auth login' or 'glab auth login'."; TRACKER=none
-   fi
-   ```
-   (`gh auth status --active` scopes to the active account so a stale token on
-   another account doesn't falsely fail it — only the no-origin fallback above;
-   remote-derived branches confirm credentials next.) Then confirm the selected
-   `CLI_TOOL` is authenticated to `$ORIGIN_HOST` (`gh auth status --active` /
-   `glab auth status`); if not, there is no tracker. Never fall back to a local backlog file.
+1. **Host state.** This partial requires `CLI_TOOL` and `LABEL_SEP` from the caller.
+   If either is unset, read and run [vcs-host.md](./vcs-host.md) before continuing;
+   do not infer either value from ambient credentials or re-derive them here. If the
+   confirmed `CLI_TOOL` cannot reach this repo's issues (not authenticated, or the
+   issues feature is disabled), there is no tracker. Never fall back to a local
+   backlog file.
 
    **No tracker:** a backlog command (`/do:replan`, `/do:next`, `/do:plan-task`)
-   aborts in pre-flight with the message above. A command that only defers
-   findings continues, files nothing, and lists each deferral (title, one-line
-   rationale, file:line) in its final report under "Deferred (not filed — no issue
-   tracker available)".
-
-   **Derive `LABEL_SEP` from `CLI_TOOL` right after it's set:**
-   `[ "$CLI_TOOL" = glab ] && LABEL_SEP="::" || LABEL_SEP=":"`. GitLab natively
-   treats any `key::value` label as a **scoped label** — the UI renders the two
-   halves in two tones and, more importantly, **only one value per key can be
-   applied to an issue at a time** (applying a second one silently replaces the
-   first). That is exactly the semantics `severity`/`model`/`effort`/`priority`/
-   `area` want on a GitLab tracker, and GitHub has no equivalent (no special
-   rendering, no exclusivity), so it keeps the plain single colon. Every
-   prefixed label name is built as `<key>${LABEL_SEP}<value>` — the examples
-   below show `:` for readability; substitute the resolved `LABEL_SEP` when
-   actually creating or matching a label.
+   aborts in pre-flight. A command that only defers findings continues, files
+   nothing, and lists each deferral (title, one-line rationale, file:line) in its
+   final report under "Deferred (not filed — no issue tracker available)".
 2. **Label creation — lazy, not upfront.** Do **not** create `PLAN_LABEL` (or any
    other label) here as a preamble step — a pure consume run (e.g. `/do:next`
    picking work to claim) that files nothing this run never needs to write to the

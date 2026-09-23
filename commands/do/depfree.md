@@ -30,7 +30,7 @@ After parsing the review flags above, apply any **saved defaults** (set via `/do
 
 - **`--issues-label <name>`**: the label on the GitHub/GitLab issues deferred removals are filed as (see Phase 2). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`. A saved `issues` key is ignored.
 - **`--issues`**: deprecated no-op; print once: `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.`
-- **`--no-issues`**: abort with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only as GitHub/GitLab issues.`
+- **`--no-issues`**: abort with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only in the project's issue tracker.`
 - **Specific packages**: limit audit scope to named packages (e.g., "chalk dotenv")
 
 Set `HEAVY_MODE` to `true` if `--heavy` was passed, `false` otherwise.
@@ -405,10 +405,10 @@ Replacement strategy: {STRATEGY from Phase 2}
 Steps:
 1. Write the replacement code (utility function, inline replacement, or native API call)
 2. Update ALL import/require statements across the codebase to use the new code
-3. Remove the package from the manifest ({package.json, Cargo.toml, etc.})
-4. Run `{BUILD_CMD}` to verify compilation
-5. Run `{TEST_CMD}` to verify tests pass
-6. If tests reference the removed package directly (mocking it, importing test helpers from it), update those tests too
+3. Run `{BUILD_CMD}` to verify compilation — the manifest still lists `{PACKAGE_NAME}` at this point, so the module resolves normally; that's expected
+4. Run `{TEST_CMD}` to verify tests pass
+5. If tests reference the removed package directly (mocking it, importing test helpers from it), update those tests too
+6. Commit your code changes. **Do NOT touch the manifest** ({package.json, Cargo.toml, pyproject.toml, go.mod, Gemfile, etc.) or any lock file — every agent in this batch runs in the same `{WORKTREE_DIR}` in parallel, so a shared manifest edited by more than one agent races (partial writes, lost edits, index.lock contention). The orchestrator removes all replaced packages from the manifest in one pass, in Phase 3c, after every agent here has finished
 </task>
 
 <guardrails>
@@ -416,32 +416,45 @@ Steps:
 - You may omit handling for input shapes or edge cases that are provably unreachable based on {USAGE_DETAILS}, but do not narrow behavior for any actual call site
 - Do NOT introduce new dependencies to replace old ones
 - Do NOT use `git add -A` or `git add .` — stage specific files only
+- Do NOT edit the manifest or lock file — see step 6 above
 - Keep replacement code minimal
 - If replacement is more complex than estimated (>2x the estimated lines), report back and skip — do not force a bad replacement. In `HEAVY_MODE`, the ceiling is 300 lines per replacement — only skip if replacement requires deep domain expertise (crypto primitives, binary protocol parsers, codec implementations) or exceeds 300 lines
 - Place shared utility replacements in a sensible location (e.g., `src/utils/`, `lib/`, `internal/`) following existing project conventions
-- Commit each replacement independently: `refactor: replace {package} with owned {utility/code}`
+- Commit each replacement independently: `refactor: replace {package} with owned {utility/code}`. If `git commit` fails on a transient `index.lock` (another agent committing at the same instant), wait briefly and retry once before reporting failure
 </guardrails>
 ```
 
-**Parallelization**: Launch up to 5 agents in parallel; batch if >5 dependencies. Assign each agent a non-overlapping set of dependencies (if two would modify the same files, group them into one agent).
+**Parallelization**: Launch up to 5 agents in parallel; batch if >5 dependencies. Assign each agent a non-overlapping set of dependencies (if two would modify the same files, group them into one agent). Agents never edit the manifest or lock file (step 6 above), so manifest contention cannot occur regardless of grouping; grouping still avoids two agents editing the same source files.
 
 ### 3c: Lock File Update
 
-After all replacement agents complete:
-1. Remove all replaced packages from the lock file:
+After all replacement agents complete, run these steps once, in the orchestrator — never inside a parallel agent:
+
+1. Remove all replaced packages from the manifest, in one pass:
    ```bash
    cd {WORKTREE_DIR}
-   # Node.js: refresh lockfile only, without running lifecycle scripts
+   # Edit package.json / Cargo.toml / pyproject.toml / go.mod / Gemfile / etc.
+   # to drop every dependency in {REMOVED_PACKAGES}
+   ```
+   Commit the manifest change on its own: `git -C {WORKTREE_DIR} commit -m "chore: remove replaced dependencies from manifest"`.
+2. Refresh the lock file to match the new manifest:
+   ```bash
+   cd {WORKTREE_DIR}
+   # Node.js (npm): refresh lockfile only, without running lifecycle scripts
    npm install --package-lock-only --ignore-scripts
-   # Or: yarn install --mode=update-lockfile --ignore-scripts
-   # Or: pnpm install --lockfile-only --ignore-scripts
-   # Rust: let a check refresh Cargo.lock to reflect manifest changes only
-   cargo check
-   # Python: use the project's lock tool to refresh
-   # poetry lock --no-update
+   # Node.js (yarn Berry, 2.x+): refresh lockfile only
+   # yarn install --mode=update-lockfile
+   # Node.js (pnpm):
+   # pnpm install --lockfile-only --ignore-scripts
+   # Rust: refresh Cargo.lock for the removed entries only, without upgrading anything else
+   # cargo update --workspace
+   # Python (Poetry 2.x — `poetry lock --no-update` was removed; plain `poetry lock` only
+   # touches entries affected by the pyproject.toml change):
+   # poetry lock
+   # Python (pip-tools):
    # pip-compile requirements.in
    ```
-2. Commit the lock file update:
+3. Commit the lock file update:
    ```bash
    git -C {WORKTREE_DIR} add {lock file}
    git -C {WORKTREE_DIR} commit -m "chore: update lock file after dependency removal"
@@ -553,23 +566,29 @@ fi
 
 ### 4d: Verify No Phantom Dependencies
 
-Confirm no source file still references a removed package:
+Confirm no source file still imports/requires/uses a removed package. A bare word match (`grep -r "$pkg"`) is too noisy for a package name that also reads as an English word or a common identifier (`uuid`, `debug`, `color`) — it flags legitimate hits inside the very replacement files this run just wrote (a comment, a variable named after the concept, a string literal) as well as unrelated code. Anchor the match to actual import syntax instead, per ecosystem, and exclude the removed package's own manifest/lock entries (already handled in 3c) and generated/vendor directories:
 ```bash
 cd {WORKTREE_DIR}
 for pkg in {REMOVED_PACKAGES}; do
-  grep -r "$pkg" \
-    --include='*.ts' \
-    --include='*.js' \
-    --include='*.tsx' \
-    --include='*.jsx' \
-    --include='*.py' \
-    --include='*.rs' \
-    --include='*.go' \
-    --include='*.rb' \
-    . && echo "WARN: $pkg still referenced"
+  grep -rnE "(^|[^.$_[:alnum:]])(import .*['\"]${pkg}(/|['\"])|require\(['\"]${pkg}(/|['\"])|from ['\"]${pkg}(/|['\"]))" \
+    --include='*.ts' --include='*.js' --include='*.tsx' --include='*.jsx' \
+    --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build . \
+    && echo "WARN: $pkg still imported (JS/TS)"
+  grep -rnE "^[[:space:]]*(from|import) ${pkg}([. ]|$)" \
+    --include='*.py' --exclude-dir=.venv --exclude-dir=venv . \
+    && echo "WARN: $pkg still imported (Python)"
+  grep -rnE "^[[:space:]]*use ${pkg//-/_}(::| |;)" \
+    --include='*.rs' --exclude-dir=target . \
+    && echo "WARN: $pkg still used (Rust)"
+  grep -rnE "\"[^\"]*/${pkg}\"" \
+    --include='*.go' --exclude-dir=vendor . \
+    && echo "WARN: $pkg still imported (Go)"
+  grep -rnE "require ['\"]${pkg}['\"]" \
+    --include='*.rb' --exclude-dir=vendor . \
+    && echo "WARN: $pkg still required (Ruby)"
 done
 ```
-Fix any remaining references.
+Run only the ecosystem block(s) matching `{PROJECT_TYPE}`. Fix any remaining references; a hit inside a comment or a string literal that isn't an actual import is not a phantom dependency — confirm by reading the flagged line before treating it as one.
 
 
 ## Phase 5: PR Creation
@@ -631,9 +650,11 @@ glab mr create --source-branch depfree/{DATE} --target-branch {DEFAULT_BRANCH} \
 
 Record `PR_NUMBER` and `PR_URL`.
 
-**GATE: If `--no-merge` was passed, STOP HERE.** Print the PR URL and summary.
+**GATE: If `--no-merge` was passed, skip straight to Phase 6 cleanup** (skip 5b, 5c, 5d). Print the PR/MR URL and summary first. Phase 6 still runs — in particular its stash restore — so a `--no-merge` run never strands the pre-audit stash; only the merge and its cleanup-owned remote-branch deletion are skipped (the PR/MR itself, and its branch, are left exactly as opened).
 
-### 5b: CI Verification
+**GATE: If `VCS_HOST=gitlab`, skip 5b, 5c, and 5d entirely** — `gh pr checks`, the review loop wrappers, and the merge step below are all GitHub-specific. Print the MR URL and summary, then proceed to Phase 6 cleanup with the MR left open for manual review and merge.
+
+### 5b: CI Verification (GitHub only)
 
 1. Wait 30 seconds for CI to start
 2. Poll CI status:
@@ -649,7 +670,14 @@ Record `PR_NUMBER` and `PR_URL`.
 
 **GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this phase AND the Phase 5d merge.** There is no default reviewer. Leave the PR open for manual review, print its URL and summary, then proceed to Phase 6 cleanup.
 
-Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (series default — reviewers run one-at-a-time so each sees the prior's fixes; `parallel` collects reviews concurrently then applies the union once), `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot and `@<login>` passes only; local-agent and ollama passes use their own fixed iteration caps). Read the wrapper, then only the inner loop bodies it dispatches to for the reviewer kinds in `REVIEW_AGENTS`:
+Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (series default — reviewers run one-at-a-time so each sees the prior's fixes; `parallel` collects reviews concurrently then applies the union once), `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot and `@<login>` passes only; local-agent and ollama passes use their own fixed iteration caps). Read the wrapper, then only the inner loop bodies it dispatches to for the reviewer kinds in `REVIEW_AGENTS`.
+
+For each GitHub-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
+
+- `copilot` — use the previous Copilot review duration on this PR (default 60 seconds if none); max wait 3x that duration, minimum 90 seconds, maximum 5 minutes; poll every 5s, 5s, 10s, 10s, then 15s.
+- `@<login>` — expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s.
+
+Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass both schedules.
 
 !read lib/multi-reviewer-loop.md
 
@@ -657,13 +685,13 @@ Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with 
 
 Read only the bodies for reviewer kinds present in the agent list.
 
-Only for `copilot` entries:
-
-!read lib/copilot-review-loop.md
-
-Only for `@<login>` entries:
+For every `copilot` or `@<login>` entry, read the shared GitHub-reviewer template:
 
 !read lib/github-reviewer-loop.md
+
+Only for `copilot` entries, also read the Copilot delta:
+
+!read lib/copilot-review-loop.md
 
 Only for an entry that is none of `copilot`, `ollama`, or `@<login>` (every other slug — the fixed CLIs and `cmd[<invocation>]` alike — dispatches through this one loop; a future addition needs no new gate here):
 
@@ -673,42 +701,41 @@ Only for `ollama` entries:
 
 !read lib/ollama-review-loop.md
 
-Pass: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the GitHub-side loops' `gh api` calls hit the right host on GitHub Enterprise), `depfree/{DATE}` (the branch the local-agent loop checks out), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (default 1 — one pass, returning `capped`, which counts as clean for the merge gate below; 0 = run until 0 comments, bounded by the 10-iteration guardrail).
+Pass: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_MODELS}` (the saved per-agent default models resolved in Parse Arguments — every local reviewer but `cmd` reads it; without it a saved `review-models` default is silently ignored), `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the GitHub-side loops' `gh api` calls hit the right host on GitHub Enterprise), the per-entry `{WAIT_SCHEDULE}` selected above, `depfree/{DATE}` (the branch the local-agent loop checks out), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (default 1 — one pass, returning `capped`, which counts as clean for the merge gate below; 0 = run until 0 comments, bounded by the 10-iteration guardrail).
 
-### 5d: Merge
+### 5d: Merge (GitHub only)
 
-Reached only when a review loop ran (`REVIEW_AGENTS` non-empty). Consume the multi-reviewer wrapper's `{OVERALL_STATUS}`:
+Reached only when a review loop ran (`REVIEW_AGENTS` non-empty) and `VCS_HOST=github` — GitLab stops at the gate above 5b, before this step. Consume the multi-reviewer wrapper's `{OVERALL_STATUS}`:
 
-**Default mode**: Auto-merge when `{OVERALL_STATUS}` is `clean` (or `partial` under an explicit stop-mode). On `inconclusive` (a requested reviewer timed out, errored, hit its guardrail, or was skipped — including a missing CLI binary) or `dirty` (broken build / failed tests / reject), leave the PR open and report the status.
-**Interactive mode**: Ask the user for merge approval, showing `{OVERALL_STATUS}`.
+**Default mode**: proceed to the merge gate below when `{OVERALL_STATUS}` is `clean` (or `partial` under an explicit stop-mode). On `inconclusive` (a requested reviewer timed out, errored, hit its guardrail, or was skipped — including a missing CLI binary) or `dirty` (broken build / failed tests / reject), leave the PR open, set `MERGE_OUTCOME=left open`, report the status, and skip the merge gate.
+**Interactive mode**: Ask the user for merge approval, showing `{OVERALL_STATUS}`, before running the gate.
 
-```bash
-gh pr merge {PR_NUMBER} --merge
-```
+Merge through the **shared merge gate** — it resolves the repo's actual allowed merge method (never hardcodes `--merge`, which a squash-only or rebase-only repo rejects), waits on required CI, merges, and reads the result back instead of trusting the merge command's exit status. Run it from inside `{WORKTREE_DIR}` with `{PR}` = `{PR_NUMBER}`, `{GIT}` = `git` (already running in the worktree), `{MODE}` = `wait` (Phase 6 needs the confirmed read-back to decide whether deleting the branch is safe), `{LINKED_WORKTREE}` = `1`, and `{MERGE_METHOD}` unset (depfree has no `--merge-method` flag, so the gate falls back to the repo's allowed method):
+
+!read lib/merge-gate.md
+
+Record the gate's outcome as `MERGE_OUTCOME` (`merged`, `queued`, or `left open`). The gate itself deletes the remote head once — and only once — it reads back `MERGED` (its step 5); Phase 6 never deletes it again.
 
 
 ## Phase 6: Cleanup
 
-1. Remove the worktree:
+Reached from every path through Phase 5: after 5d's merge gate (any `MERGE_OUTCOME`), from the `--no-merge` gate, from the `VCS_HOST=gitlab` gate, or from 5c's "no reviewer requested" gate. `MERGE_OUTCOME` is `merged` only when 5d's gate confirmed it there; every other path leaves it unset, which this phase treats as **the PR/MR is still open** — closing an open PR by deleting its head branch is the exact bug this phase exists to avoid.
+
+1. **If `MERGE_OUTCOME=merged`:** the merge gate already deleted the remote head (its step 5). Remove the worktree and delete the local branch:
    ```bash
    git worktree remove {WORKTREE_DIR}
+   git branch -d depfree/{DATE}
    ```
-2. Delete the local branch:
+   Use `-d`, not `-D` — a refusal here means the local branch carries commits the gate's merge doesn't account for (e.g. a squash merge rewrote the SHA); investigate before forcing.
+
+   **Otherwise** (`MERGE_OUTCOME` unset, `queued`, or `left open` — covers `--no-merge`, GitLab, no reviewer requested, and `inconclusive`/`dirty` review results): the PR/MR is still open. **Do not** remove the worktree, and do not delete the local or remote branch — deleting the head branch of an open PR closes it on GitHub. Report `{WORKTREE_DIR}` and the branch name as retained for later review/merge.
+2. **Restore stashed changes, on the branch that made them, in `{REPO_DIR}` — never in `{WORKTREE_DIR}`, and never after checking out a different branch there.** All remediation happened in the worktree; this phase never runs `git checkout` in `{REPO_DIR}`, because doing so would move the user off whatever branch (`{CURRENT_BRANCH}`) they were on when the run started, and popping the stash after such a checkout would apply it to the wrong branch. If Phase 3a stashed (`IS_DIRTY` was true):
    ```bash
-   git checkout {DEFAULT_BRANCH}
-   git branch -D depfree/{DATE}
-   if git ls-remote --exit-code --heads origin "depfree/{DATE}" >/dev/null 2>&1; then
-       git push origin --delete "depfree/{DATE}"
-   else
-       echo "warning: remote branch depfree/{DATE} not found or already deleted"
-   fi
+   git -C {REPO_DIR} stash pop
    ```
-3. Restore stashed changes if applicable:
-   ```bash
-   git stash pop
-   ```
-4. File each removal that was reverted or skipped after Phase 2 as a deferred issue (deduped against `EXISTING_ISSUES`, per the Phase 2 partials); when `TRACKER_AVAILABLE=false`, add it to the "Deferred (not filed — no issue tracker available)" list instead.
-5. Print the final summary, with the PR link, the created and reused issue numbers for deferred removals, and (when `TRACKER_AVAILABLE=false`) the "Deferred (not filed — no issue tracker available)" list:
+   Run this on **every** path through this phase — including `--no-merge`, GitLab, and every "PR left open" branch above — not only after a successful merge, so a run never strands the pre-audit stash. `{REPO_DIR}` remains on `{CURRENT_BRANCH}` throughout the entire command; nothing in this command checks it out elsewhere.
+3. File each removal that was reverted or skipped after Phase 2 as a deferred issue (deduped against `EXISTING_ISSUES`, per the Phase 2 partials); when `TRACKER_AVAILABLE=false`, add it to the "Deferred (not filed — no issue tracker available)" list instead.
+4. Print the final summary, with the PR link (noting when `MERGE_OUTCOME` is unset that the PR/MR is still open rather than merged), the created and reused issue numbers for deferred removals, and (when `TRACKER_AVAILABLE=false`) the "Deferred (not filed — no issue tracker available)" list:
 
 ```
 | Package          | Status   | Replacement              | Lines |
@@ -735,12 +762,10 @@ Transitive deps eliminated: ~{count} (estimated)
 - **Test failure from replacement**: if tests fail and the fix isn't obvious, revert the replacement — a working dependency is better than broken owned code
 - **Existing worktree found at startup**: ask user — resume or clean up
 
-!`cat ~/.claude/lib/graphql-escaping.md`
-
 ## Notes
 
 - This command complements `/do:better` — `depfree` for dependency hygiene, `better` for code quality
-- All remediation happens in an isolated worktree — the user's working directory is never modified
+- All remediation happens in an isolated worktree. Phase 3a may stash a dirty tree directly in `{REPO_DIR}` before the worktree exists, but Phase 6 always restores that stash on `{CURRENT_BRANCH}` without ever checking out another branch there — so by the time the command finishes, the user's branch and working tree are exactly as they were when it started, on every exit path (`--no-merge`, GitLab, no reviewer, merged, or left open)
 - `docs/DEPS.md` is the persistent decision log (read in Phase 0e, rewritten in Phase 4c). Major version bumps and heavy-mode escalations bypass it; manually delete an entry to force re-audit
 - **Default mode**: when in doubt, keep the dependency. **Heavy mode**: when in doubt, replace it, unless the replacement needs crypto primitives, binary protocol parsing, or deep domain expertise
 - Replacement code should be minimal — don't over-engineer utilities that replace single-purpose packages

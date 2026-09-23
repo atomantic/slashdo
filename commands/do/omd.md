@@ -1,7 +1,7 @@
 ---
 description: Audit and optimize markdown files against best practices, extracting inappropriate content to external docs
 argument-hint: "[file.md | --all] (defaults to CLAUDE.md)"
-allowed-tools: Read, Write, Edit, MultiEdit, LS, Glob, Grep, WebFetch
+allowed-tools: Read, Write, Edit, MultiEdit, LS, Glob, Grep
 ---
 
 You are a markdown optimization specialist. Your goal is to make markdown files focused, high-signal documents that serve their intended purpose without becoming bloated or disorganized.
@@ -46,156 +46,46 @@ Skip files that are clearly generated (e.g., `node_modules/`, `vendor/`, lock fi
 
 A legacy `PLAN.md` is not a governance doc to optimize (the backlog lives in the issue tracker) — skip it, and if one exists, suggest running `/do:replan` once to migrate its items to tracker issues.
 
-## Phase 1: File-Type Detection & Best Practices
+## Phase 1: File-Type Preferences
 
-Identify the file type and load appropriate guidelines. Each type has different optimization goals:
+Identify the file type and apply its row below. A capable model already knows generic markdown hygiene (clear structure, no dead links, no stale content) — this table only records what's specific to this project's conventions, not restated elsewhere.
 
-### CLAUDE.md
-**Purpose**: AI assistant instructions — focused, concise, actionable directives.
-**Best practices source**: WebFetch https://www.anthropic.com/engineering/claude-code-best-practices and https://docs.anthropic.com/en/docs/claude-code/memory
+| File type | Preference |
+|---|---|
+| `CLAUDE.md` / `AGENTS.md` | Lean, imperative agent instructions, not prose. **`AGENTS.md` is the cross-tool equivalent of `CLAUDE.md`** — agent-facing project instructions (conventions, constraints, how to work in this repo) — never a list of sub-agent/sub-command definitions; don't rewrite it as one. Root `CLAUDE.md` loads at startup, so keep it lean; subfolder `CLAUDE.md` files load only when Claude reads that subtree — module-specific content belongs there, not at the root. |
+| `README.md` | Written for humans, not agents. Lead with what/why, then installation/quickstart. Long guides or tutorials belong in `docs/` with a link from README. |
+| `GOALS.md` | Follow the `/do:goals` boundaries: GOALS.md is strategic outcome-prose with no checkboxes — the tactical backlog lives in the issue tracker, not a markdown file. Don't restructure it against what `/do:goals` expects to read and write. |
+| `CONTRIBUTING.md` | Setup steps + PR process. Drop rules already enforced by linters/CI. |
+| `CHANGELOG.md` | Keep a Changelog format (Added/Changed/Deprecated/Removed/Fixed/Security), most recent first, no duplicate entries within a version. |
+| `SECURITY.md` | Reporting process (not public issues), supported versions, response-time expectations — concise. |
+| Other | Clear purpose stated at the top, logical section order, no orphaned or stale content. |
 
-Key principles:
-- Root CLAUDE.md is loaded at startup — keep it lean
-- Subfolder CLAUDE.md files load only when Claude reads files in that subtree
-- Content should be imperative instructions, not prose explanations
-- Module-specific content belongs in subfolder CLAUDE.md files
-- Verbose details belong in external docs referenced from CLAUDE.md
+## Phase 2: Audit & Optimize
 
-### README.md
-**Purpose**: Project introduction for humans — first thing visitors see.
-**Best practices source**: WebFetch https://www.makeareadme.com/
+For each file in the queue: read it, check it against its Phase 1 row, then apply fixes directly in this order of impact — don't produce a separate issues list first and a fixes list second, they're the same pass.
 
-Key principles:
-- Lead with a clear, concise project description (what it does, why it exists)
-- Follow with installation/quickstart — get users running fast
-- Standard sections in order: Description, Installation, Usage, API/Configuration, Contributing, License
-- Badges should be current and meaningful (not decorative)
-- Examples should be copy-pasteable and tested
-- Remove stale feature lists, outdated screenshots, or dead links
-- Keep it scannable — use headers, bullet points, code blocks
-- Long guides or tutorials belong in `docs/` with a link from README
-
-### AGENTS.md
-**Purpose**: Agent definitions and configuration for AI coding tools.
-
-Key principles:
-- Each agent should have a clear role, tools, and constraints
-- Remove agents that duplicate built-in behavior
-- Keep agent instructions concise — verbose prompts waste context
-- Ensure agent names and descriptions are distinct
-
-### CONTRIBUTING.md
-**Purpose**: Guide for new contributors — reduce friction to first PR.
-
-Key principles:
-- Start with setup instructions (clone, install, run)
-- Document the PR process (branch naming, commit style, review expectations)
-- List code style rules only if not enforced by tooling
-- Remove rules that are already handled by linters/formatters/CI
-- Keep it short — long contributing guides discourage contributors
-
-### CHANGELOG.md
-**Purpose**: Human-readable release history.
-
-Key principles:
-- Follow Keep a Changelog format (Added, Changed, Deprecated, Removed, Fixed, Security)
-- Most recent version first
-- Remove duplicate entries within the same version
-- Ensure version numbers match actual releases
-- Link version headers to git diffs/tags when possible
-
-### GOALS.md
-**Purpose**: Strategic direction. The tactical backlog lives in the issue tracker, not a markdown file.
-
-Key principles:
-- High-level vision and non-goals — should rarely change
-- Remove stale/abandoned goals
-- Ensure goals are measurable and specific, not vague
-
-### SECURITY.md
-**Purpose**: Security policy and vulnerability reporting instructions.
-
-Key principles:
-- Clear reporting process (email, not public issues)
-- Supported versions table
-- Response time expectations
-- Keep concise — link to detailed policies if needed
-
-### Other Markdown Files
-**Purpose**: Varies — apply general markdown best practices.
-
-Key principles:
-- Clear purpose stated at the top
-- Logical section ordering
-- No orphaned content (sections that don't relate to the file's purpose)
-- Remove stale TODOs, dead links, outdated references
-- Consistent formatting throughout
-
-## Phase 2: Audit
-
-For each file in the queue, perform a type-aware audit:
-
-1. **Read the file** — parse structure, content, line count
-2. **Check against type-specific standards** from Phase 1
-3. **Identify issues** in these categories:
-
-**Content issues:**
-- Outdated or obsolete information
-- Stale TODOs, completed migration notes, old changelog entries
-- Dead links or references to removed files/features
-- Information that duplicates what's in other files
-- Content that belongs in a different file (e.g., contributing guidelines in README)
-
-**Structure issues:**
-- Missing standard sections for the file type
-- Sections in non-standard order
-- Inconsistent heading levels
-- Missing or excessive table of contents
-- Wall-of-text sections that need breaking up
-
-**Scope issues (especially for CLAUDE.md):**
-- Module-specific content in root CLAUDE.md → move to subfolder CLAUDE.md
-- Verbose implementation details → move to external docs
-- Human-oriented content in CLAUDE.md → move to README or CONTRIBUTING
-- AI-oriented instructions in README → move to CLAUDE.md
-
-**Quality issues:**
-- Vague or non-actionable instructions
-- Redundant or repetitive content
-- Inconsistent formatting or style
-- Overly verbose where concise would suffice
-
-## Phase 3: Optimization
-
-For each file, apply fixes in order of impact:
-
-### 3a: Remove
-- Delete outdated, obsolete, or redundant content
-- Remove stale TODOs, completed items, dead links
-- Drop sections that no longer reflect reality
+### 2a: Remove
+- Outdated or obsolete information; stale TODOs, completed migration notes, old changelog entries; dead links or references to removed files/features
+- Information that duplicates what's in another file (keep it in one place, reference from the other)
 - Don't create external docs for removed content — it's gone for a reason
 
-### 3b: Relocate
-- Move content to the correct file based on scope and purpose
-- For CLAUDE.md: move module-specific content to subfolder CLAUDE.md files
-- For README: move detailed guides to `docs/`, move AI instructions to CLAUDE.md
+### 2b: Relocate
+- Content that belongs in a different file for its scope/purpose — e.g. module-specific content in root `CLAUDE.md` moves to a subfolder `CLAUDE.md`, human-oriented content in `CLAUDE.md` moves to README/CONTRIBUTING, AI-oriented instructions in README move to `CLAUDE.md`, verbose implementation detail moves to external docs
 - When moving content, add a brief reference in the source file if the content is important
 - Only create new files when there's substantial content to move
 
-### 3c: Restructure
-- Reorder sections to match type-specific conventions
-- Fix heading hierarchy
-- Add missing standard sections (with minimal placeholder content)
-- Break up wall-of-text sections with sub-headers or bullet points
-- Add table of contents if the file exceeds ~100 lines and has 4+ sections
+### 2c: Restructure
+- Reorder sections to match the file type's convention; fix inconsistent heading levels; break up wall-of-text sections with sub-headers or bullet points
+- Add a table of contents if the file exceeds ~100 lines and has 4+ sections
+- Don't add a standard section that has no real content to put in it — a placeholder header is bloat, not structure
 
-### 3d: Refine
+### 2d: Refine
 - Tighten language — remove filler words, passive voice, unnecessary qualifiers
-- Convert prose to bullet points where appropriate (especially in CLAUDE.md)
+- Convert prose to bullet points where appropriate (especially in `CLAUDE.md`)
 - Ensure examples are current and functional
 - Standardize formatting (consistent list styles, code block languages, etc.)
 
-## Phase 4: Cross-File Consistency (Full Scan Mode Only)
+## Phase 3: Cross-File Consistency (Full Scan Mode Only)
 
 When optimizing multiple files, check for cross-file issues:
 
@@ -203,9 +93,8 @@ When optimizing multiple files, check for cross-file issues:
 - **Contradictions**: README says "use npm" but CLAUDE.md says "use yarn" → resolve the conflict
 - **Missing cross-references**: CLAUDE.md references a doc that doesn't exist, README doesn't mention CONTRIBUTING.md
 - **Orphaned docs**: Files in `docs/` that nothing links to — either add references or consider removal
-- **CLAUDE.md index**: Ensure CLAUDE.md has a documentation index section pointing to other relevant files
 
-## Phase 5: Validate & Report
+## Phase 4: Validate & Report
 
 ### Per-File Validation
 - Verify no critical information was lost (only outdated content removed)
@@ -243,6 +132,5 @@ When optimizing multiple files, check for cross-file issues:
 
 ## Error Handling
 - File not found → Offer to create it with a type-appropriate template
-- WebFetch fails → Use embedded knowledge with a warning that best practices may not reflect latest guidelines
 - No changes needed → Report "File is already well-optimized" with brief confirmation of what was checked
 - Conflicting content across files → Flag for user decision rather than auto-resolving

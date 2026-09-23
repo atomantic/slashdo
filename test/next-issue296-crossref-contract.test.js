@@ -79,10 +79,7 @@ describe('#296 — next-swarm.md A1 delegates to Phase 1 by name, not "below"', 
       swarm,
       /A1 — Build the eligible queue by running `next\.md`'s `### Phase 1 — issue queue`/,
     );
-    assert.match(
-      swarm,
-      /its shared issue setup read, the collaborator fetch when `COLLAB_MODE` is on, then steps 1–4/,
-    );
+    assert.match(swarm, /it applies every skip and filter\. Do not invent a second picker/);
     assert.match(next, /^### Phase 1 — issue queue$/m);
   });
 });
@@ -94,5 +91,15 @@ describe('#296 — next-swarm.md jq probe no longer contradicts "reuse Phase 1 v
       swarm,
       /Swarm replaces Phases 1–7 but not that Pre-flight: the \*\*A1e\*\* \(explicit-list\) path never runs Phase 1/,
     );
+  });
+});
+
+describe('#381 — host verbs replace inline forge branches', () => {
+  it('keeps the shared teardown and merge handoffs on named operations', () => {
+    assert.match(next, /\*\*Host verbs\.\*\*/);
+    assert.match(next, /assign_me "\$ISSUE_NUM"/);
+    assert.match(next, /issue_close_note <num>/);
+    assert.match(next, /ci_wait_merge <PR> <method>/);
+    assert.match(next, /!read lib\/merge-gate\.md/);
   });
 });

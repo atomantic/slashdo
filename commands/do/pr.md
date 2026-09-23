@@ -22,14 +22,9 @@ Then apply any **saved defaults** (set via `/do:config`) to the flags the user d
 
 ## Detect VCS Host
 
-Determine whether this repo lives on GitHub or GitLab so the right CLI is used for every host-specific step below. The **`origin` remote URL is the authoritative signal** — `auth status` only says which CLI is usable, not where the repo lives. Detect from the remote first, then confirm the matching CLI is authenticated:
+Determine whether this repo lives on GitHub or GitLab so the right CLI is used for every host-specific step below. Use the shared preflight: the **`origin` remote is authoritative**, ambient credentials never select the forge, unsupported remotes stop, and the selected CLI must be able to read this checkout.
 
-1. Read the remote host: `git remote get-url origin`. If the host is a GitLab instance (e.g. `gitlab.com`, or a self-hosted GitLab), set `VCS_HOST=gitlab` and `CLI_TOOL=glab`; otherwise (GitHub or ambiguous) set `VCS_HOST=github` and `CLI_TOOL=gh`.
-2. Confirm the matching CLI is authenticated: `gh auth status --active` for GitHub, `glab auth status` for GitLab. (`--active` scopes the check to the active account — a bare `gh auth status` exits non-zero if any *other* configured account has a stale token.) If it is not, abort with: "`/do:pr` detected a {VCS_HOST} repo but `{CLI_TOOL}` is not authenticated. Run `{CLI_TOOL} auth login`."
-3. If there is no `origin` remote at all, fall back to whichever CLI is authenticated (`gh` first, then `glab`); if neither is authenticated, abort with: "`/do:pr` needs an authenticated `gh` (GitHub) or `glab` (GitLab). Run `gh auth login` or `glab auth login`."
-4. **When `VCS_HOST=github`, derive the API host `{GH_HOST}` from the remote and confirm auth to it.** `gh api` (used by the PR-side reviewer loops) defaults to `github.com` rather than reading the remote, so on a GitHub Enterprise repo the loops would silently poll the wrong host and time out. Derive `{GH_HOST}` once via the snippet below and pass it to the reviewer loops and every `gh api` call; if the snippet's auth precheck fails, abort with its message. (GitLab: skip — `glab` resolves the host from the remote.)
-
-!`cat ~/.claude/lib/gh-host.md`
+!read lib/vcs-host.md
 
 Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`.
 
@@ -155,16 +150,28 @@ Execution order is always local phase, then PR-side phase, however the user inte
   - `REVIEW_STOP_MODE=on-findings`: skip `PR_SIDE_AGENTS` the same way if `LOCAL_OVERALL_STATUS` is `partial`, OR at least one commit was added between `LOCAL_PHASE_START_SHA` and HEAD.
 - `REVIEW_STOP_MODE=all` (default): no cross-phase skip — always run `PR_SIDE_AGENTS` when non-empty.
 
+**On GitHub, when `PR_SIDE_AGENTS` is non-empty**, read the shared host helper before dispatching any PR-side reviewer. The VCS preflight has already seeded `{GH_HOST}` from the checkout; the helper preserves that value, applies its fallbacks when needed, and confirms authentication.
+
+!read lib/gh-host.md
+
 When no cross-phase skip applies, hand off to the **multi-reviewer wrapper** (under "Reviewer loop bodies" below) over `PR_SIDE_AGENTS` with:
 
 - `{PR_SIDE_AGENTS}` — `copilot` and/or `@<login>` entries, in order
 - `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (the copilot / `@<login>` cycle cap)
 - `{GH_HOST}` — from "Detect VCS Host", so the loops target the right GitHub host
+- `{WAIT_SCHEDULE}` — the single schedule selected below for the current GitHub-side entry
 
-The stop-mode flags still apply *within* this wrapper invocation (e.g. stopping after the first of several `@<login>` entries that comes back clean); the cross-phase check only handles the boundary. Reviewer types:
+For each GitHub-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
 
-- `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`)
-- `@<login>` → GitHub-reviewer loop (`lib/github-reviewer-loop.md`), forwarding `{REVIEWER_LOGIN}`
+- `copilot` — use the previous Copilot review duration on this PR (default 60 seconds if none); max wait 3x that duration, minimum 90 seconds, maximum 5 minutes; poll every 5s, 5s, 10s, 10s, then 15s.
+- `@<login>` — expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s.
+
+Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass both schedules.
+
+The stop-mode flags still apply **within** this wrapper invocation (e.g. stopping after the first of several `@<login>` entries that comes back clean); the cross-phase check only handles the boundary. Reviewer types:
+
+- `copilot` → shared GitHub-reviewer template plus the Copilot delta (`lib/github-reviewer-loop.md`, `lib/copilot-review-loop.md`)
+- `@<login>` → shared GitHub-reviewer template (`lib/github-reviewer-loop.md`), forwarding `{REVIEWER_LOGIN}`
 
 **GitHub only** — both drive `gh`/GraphQL against a GitHub PR. When `VCS_HOST=gitlab` and `PR_SIDE_AGENTS` is non-empty, print a warning (`copilot and @<login> reviewers are GitHub-only and were skipped on this GitLab MR; use a local-agent reviewer (codex/agy/claude/grok/pi/cursor/opencode, or cmd[<invocation>] for anything else) instead`) and set `PR_SIDE_OVERALL_STATUS=inconclusive`.
 
@@ -204,62 +211,11 @@ When `MERGE_ENABLED=true`, gate the merge on **all three** of the review result,
    ```
 
    The snippet fails closed on purpose. If it exits non-zero, **do not merge**: report the unpushed SHAs, leave the PR open, and say the branch has local work to push. Skip the gate when the branch has no upstream. It is independent of `{OVERALL_STATUS}`.
-3. **Resolve the merge method** into `{MERGE_METHOD}`: the explicit flag or saved `merge-method` default if set; otherwise query `gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed` and pick from the repo's allowed methods — if exactly one is allowed use it; if several are, prefer `squash`, then `merge`, then `rebase`. State the chosen method. (GitLab: omit the method flag and let `glab` use the project default.)
-4. **Merge once CI is green** — GitHub (`gh`):
-   - **Resolve `{LINKED_WORKTREE}` first** — `/do:pr` is routinely invoked from inside a `git worktree` (by `/do:next`, `/do:pr-better`, and the claim flows), which changes which merge flags are safe:
+3. **Merge through the shared merge gate.** Inputs: `{PR}` is the PR/MR number, `{GIT}` is `git`, `{MODE}` is `queue` (the merge lands once required checks pass, even after this session ends, and falls back to watching in this session when the host has auto-merge off), `{MERGE_METHOD}` comes from Parse Arguments (it may be unset), and `{LINKED_WORKTREE}` is unset, so the gate resolves it. When `LINKED_WORKTREE=1`, the gate's step 5 deletes the remote head after a confirmed merge. The gate reports whether the PR **merged**, is **queued**, or was **left open**:
 
-     ```bash
-     GIT_DIR_ABS="$(cd "$(git rev-parse --git-dir)" && pwd -P)"
-     GIT_COMMON_ABS="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
-     if [ "$GIT_DIR_ABS" = "$GIT_COMMON_ABS" ]; then
-       LINKED_WORKTREE=0
-     else
-       LINKED_WORKTREE=1
-     fi
-     echo "LINKED_WORKTREE=$LINKED_WORKTREE"
-     ```
+!read lib/merge-gate.md
 
-     **Read the printed value and carry it yourself** — shell variables do not survive between Bash calls, so steps 4–6 must branch on what this `echo` printed; re-expanding `$LINKED_WORKTREE` later yields the empty string, which silently takes the not-a-worktree path. Normalizing both paths with `cd … && pwd -P` is required: raw, `--git-common-dir` is *relative* from a subdirectory of a plain clone (misreporting it as a linked worktree), and `--path-format=absolute` is rejected by git < 2.31, where both empty outputs compare equal and the probe fails *open* into `LINKED_WORKTREE=0`.
-
-     `--delete-branch` deletes the **local** branch too, which makes `gh` check out the default branch first — in a linked worktree that fails (`fatal: '{default_branch}' is already used by worktree at …`) and `gh` **exits non-zero even though the merge itself succeeded**, so any `||` fallback chain fires against an already-merged PR. **When `LINKED_WORKTREE=1`, omit `--delete-branch` from every merge command below**; then delete the remote branch explicitly once — and only once — the PR really reads `MERGED`, leaving the local worktree + branch to the caller's cleanup phase:
-
-     ```bash
-     # One self-contained block: it re-derives the upstream because the push step's
-     # block is a DIFFERENT Bash call (and is skipped entirely when there was
-     # nothing to push), so its $PUSH_REMOTE/$PUSH_BRANCH are long gone by now.
-     if [ "$(gh pr view {number} --json state -q .state)" = "MERGED" ]; then
-       BR="$(git branch --show-current)"
-       DEL_REMOTE="$(git config --get "branch.$BR.remote")"
-       DEL_REF="$(git config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
-       # $DEL_REF must be non-empty too: `git push --delete ""` fails, and
-       # `ls-remote --heads <remote> ""` returns 2, so an empty ref would report
-       # the benign "already gone" for a delete that never ran.
-       if [ -n "$DEL_REMOTE" ] && [ "$DEL_REMOTE" != "." ] && [ -n "$DEL_REF" ]; then
-         if ! git push "$DEL_REMOTE" --delete "$DEL_REF"; then
-           # rc 2 means "no such ref" — already gone (the repo auto-deletes merged
-           # heads), which is success. Any other rc is a transport/auth failure that
-           # proves nothing, so do NOT report the branch as deleted.
-           git ls-remote --exit-code --heads "$DEL_REMOTE" "$DEL_REF" >/dev/null 2>&1; RC=$?
-           if [ "$RC" -eq 2 ]; then
-             echo "note: remote branch $DEL_REF was already gone"
-           else
-             echo "ERROR: could not confirm $DEL_REF is gone (ls-remote rc=$RC) — delete it manually"
-           fi
-         fi
-       else
-         echo "note: no upstream resolved for $BR — not deleting any remote branch"
-       fi
-     else
-       echo "PR {number} is not MERGED — keeping its head branch"
-     fi
-     ```
-
-     Delete through the **config-derived** remote and ref — never a hardcoded `origin` plus the local branch name, which would delete an unrelated remote branch on an `upstream/feature-x` or `origin/pr-123-head` upstream. The `MERGED` read-back matters too: `gh pr merge` exits zero on a repo with a **merge queue** while the PR is only queued, and GitHub auto-closes a PR whose head branch disappears. Whenever the merge is queued rather than done — a merge queue, or native `--auto` — **delete nothing**; the repo's "automatically delete head branches" setting or the caller's cleanup owns those branches.
-   - First try GitHub-native auto-merge, so the merge lands when required checks pass even if this session ends: `gh pr merge {number} --auto --{MERGE_METHOD} --delete-branch` (drop `--delete-branch` when `LINKED_WORKTREE=1`).
-   - If that errors because auto-merge is not enabled on the repo, **fall back to watching checks in-session, then merging directly**: `gh pr checks {number} --required --watch --fail-fast` (**required** checks only, so an optional job can't block a merge branch protection would allow); on success run `gh pr merge {number} --{MERGE_METHOD} --delete-branch` (again, drop `--delete-branch` when `LINKED_WORKTREE=1`, then run the `MERGED`-gated remote delete above once the merge is confirmed). If a required check **fails**, apply the **CI flake handling** routine (one conservative re-run on the same commit — see `~/.claude/lib/ci-flake-handling.md`): if the same SHA passes on the re-run, treat it as a flake and merge (logging which check flaked); if it fails again, leave the PR open and report which check failed. (No required checks on the branch ⇒ the gate is vacuously satisfied — merge directly.)
-   - GitLab (`glab`): `glab mr merge {number} --auto-merge --yes --remove-source-branch` (merges when the pipeline succeeds). If the installed `glab` doesn't support `--auto-merge`, fall back to polling `glab ci status` until the pipeline passes, then `glab mr merge {number} --yes`.
-5. **Verify** the result: `gh pr view {number} --json state,mergedAt` (GitLab: `glab mr view {number}`). Distinguish *merged now* from *queued to auto-merge on green CI*.
-6. After a **completed** merge, sync the default branch locally: `git checkout {default_branch} && git pull --rebase --autostash` — **only when `LINKED_WORKTREE=0`.** In a linked worktree that checkout fails for the same reason `--delete-branch` does (the parent repo holds `{default_branch}`): skip it, say so, and let the caller's cleanup phase sync the parent repo. When the merge is merely **queued**, skip the local sync too and say so.
+4. After a **completed** merge, sync the default branch locally with `git checkout {default_branch} && git pull --rebase --autostash`, **only when `LINKED_WORKTREE=0`.** In a linked worktree, that checkout fails for the same reason `--delete-branch` does: the parent repo already has `{default_branch}` checked out. Skip the sync, say so, and let the caller's cleanup phase sync the parent repo. When the merge is only **queued**, also skip the local sync and say so.
 
 Never merge on `dirty`/`inconclusive`, never merge while the branch has unpushed commits, never merge before required checks pass, and never override branch protection — `--auto` respects it, and the in-session fallback waits on `gh pr checks`.
 
@@ -279,13 +235,13 @@ Read when either agent list is non-empty:
 
 Read only the bodies for reviewer kinds present in the agent list.
 
-Only for `copilot` entries:
-
-!read lib/copilot-review-loop.md
-
-Only for `@<login>` entries:
+For every `copilot` or `@<login>` entry, read the shared GitHub-reviewer template:
 
 !read lib/github-reviewer-loop.md
+
+Only for `copilot` entries, also read the Copilot delta:
+
+!read lib/copilot-review-loop.md
 
 Only for an entry that is none of `copilot`, `ollama`, or `@<login>` (every other slug — the fixed CLIs and `cmd[<invocation>]` alike — dispatches through this one loop; a future addition needs no new gate here):
 
@@ -294,9 +250,3 @@ Only for an entry that is none of `copilot`, `ollama`, or `@<login>` (every othe
 Only for `ollama` entries:
 
 !read lib/ollama-review-loop.md
-
-### CI flake handling (referenced by the merge gate)
-
-Only when the in-session merge gate sees a required check fail:
-
-!read lib/ci-flake-handling.md

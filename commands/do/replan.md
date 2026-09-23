@@ -19,7 +19,7 @@ Parse `$ARGUMENTS` for:
 - **`--interactive`**: pause after evidence gathering for approval. Record `INTERACTIVE=true` (default `false`).
 - **`--issues-label <name>`**: the label that scopes which issues are plan items. Record `PLAN_LABEL` (default `plan`); when the flag is absent, take it from the saved `issues-label` default — per-project `.slashdo.json` overrides the global `~/.claude/.slashdo-config.json`, key by key. A saved `issues` key is ignored.
 - **`--issues`**: deprecated no-op. Print once: `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.` and continue.
-- **`--no-issues`**: abort with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only as GitHub/GitLab issues.`
+- **`--no-issues`**: abort with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only in the project's issue tracker.`
 
 **Actionable-issues invariant.** Every issue replan files must be **well-formed and decision-complete**. Before filing an item, replan surfaces any open question or pending decision on it (Phase 3) and asks the human to resolve it, folding the resolution into the issue body. If the human explicitly **defers**, the item is not filed (reported in the summary).
 

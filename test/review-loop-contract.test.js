@@ -25,6 +25,63 @@ const LOOPS_WITH_OPTIONAL_ARRAYS = [
 ];
 
 describe('review-loop parse contracts', () => {
+  it('keeps current-head protection in the shared GitHub and Copilot path', () => {
+    const core = readLib('github-reviewer-loop.md');
+    const copilot = readLib('copilot-review-loop.md');
+    const currentHeadQueries = core.match(/pullRequest\(number: \{PR_NUMBER\}\) \{ headRefOid reviews\(last: 20\) \{[^\n]+commit \{ oid \}/g) || [];
+
+    assert.ok(currentHeadQueries.length >= 2);
+    assert.match(core, /reuse a review from \{REVIEWER_LOGIN\} only when its\s+`commit\.oid` equals the current `headRefOid`/);
+    assert.match(core, /submittedAt[\s\S]{0,240}AND\*\* its `commit\.oid` equals this poll's\s+`headRefOid`/);
+    assert.match(copilot, /github-reviewer-loop\.md/);
+    assert.match(copilot, /current-`headRefOid` review gate/);
+    assert.match(copilot, /do not reuse that error\s+review[\s\S]+wait only\s+for a later current-head review/);
+    assert.doesNotMatch(copilot, /### Sub-agent prompt template|Run the following loop|FIX all unresolved|When done, report back/);
+    assert.ok(Buffer.byteLength(copilot, 'utf8') <= 2048, 'the Copilot file must remain a small delta');
+  });
+
+  it('loads the Copilot delta with the core and keeps wait schedules with callers', () => {
+    const callers = ['pr.md', 'review.md', 'release.md', 'depfree.md'].map(readCommand);
+    callers.push(readLib('better-review-loop.md'));
+
+    for (const caller of callers) {
+      const coreAt = caller.indexOf('!read lib/github-reviewer-loop.md');
+      const deltaAt = caller.indexOf('!read lib/copilot-review-loop.md');
+      assert.ok(coreAt >= 0, 'each GitHub-side caller must load the shared core');
+      assert.ok(deltaAt > coreAt, 'the Copilot delta must load after the shared core');
+      assert.match(caller, /caller-owned `\{WAIT_SCHEDULE\}`/);
+      assert.match(caller, /`copilot` —/);
+      assert.match(caller, /`@<login>` —/);
+      assert.match(caller, /never give one pass both schedules/);
+    }
+
+    const core = readLib('github-reviewer-loop.md');
+    const wrapper = readLib('multi-reviewer-loop.md');
+    const { ON_DEMAND_LIBS } = require('../src/transformer');
+    assert.match(ON_DEMAND_LIBS.get('copilot-review-loop.md').what, /delta/);
+    assert.match(ON_DEMAND_LIBS.get('github-reviewer-loop.md').when, /`copilot` or an `@<login>`/);
+    assert.match(core, /WAIT SCHEDULE:\n\{WAIT_SCHEDULE\}/);
+    assert.doesNotMatch(core, /TIMEOUT SCHEDULE|WAIT BUDGET|Iteration 1: max wait/);
+    assert.match(wrapper, /caller-selected `\{WAIT_SCHEDULE\}`/);
+    assert.match(wrapper, /shared GitHub-reviewer template's steps 1–3 plus the Copilot delta[\s\S]+accept only a current-head review/);
+  });
+
+  it('removes the redundant GraphQL escaping partial and include', () => {
+    const core = readLib('github-reviewer-loop.md');
+    assert.match(core, /inline literal values in JSON on stdin[\s\S]+never\s+put shell-expandable `\$variables` in a query string/);
+    assert.equal(fs.existsSync(path.join(__dirname, '..', 'lib', 'graphql-escaping.md')), false);
+
+    for (const source of [
+      readLib('better-review-loop.md'),
+      readCommand('depfree.md'),
+      readCommand('rpr.md'),
+      _read('install.sh'),
+    ]) {
+      assert.doesNotMatch(source, /graphql-escaping/);
+    }
+    assert.match(_read('uninstall.sh'), /OLD_LIBS=\([\s\S]*graphql-escaping[\s\S]*\)/);
+  });
+
   it('never grants blanket permissions to feedback or applying reviewers', () => {
     for (const name of ['local-agent-review-loop.md', 'enhance-loop.md']) {
       const body = readLib(name);
@@ -281,6 +338,38 @@ describe('review-loop parse contracts', () => {
     assert.match(inProcess, /\/code-review/);
   });
 
+  it('keeps Claude Code on the in-process reviewer path with snapshot enforcement', () => {
+    const localAgent = readLib('local-agent-review-loop.md');
+    const enhance = readLib('enhance-loop.md');
+    const dispatch = localAgent.slice(localAgent.indexOf('When `REVIEW_AGENT=claude`: dispatch an in-process sub-agent'));
+
+    assert.match(dispatch, /Step 1 snapshot and Step 3 restore/);
+    assert.match(dispatch, /REVIEWER_APPLIES=false/);
+    assert.doesNotMatch(dispatch, /verified `REVIEWER_APPLIES=true`/);
+    assert.doesNotMatch(localAgent, /This rule overrides every in-process dispatch example below/);
+    assert.doesNotMatch(localAgent, /flags below disable each CLI's approval gates/);
+    assert.match(enhance, /Under Claude Code, keep the in-process sub-agent as the\s+plan-billing path/);
+    assert.doesNotMatch(enhance, /The Agent API must enforce a read-only tool set; otherwise/);
+  });
+
+  it('commits leftover edits before clean and normalizes reviewer-applies commits', () => {
+    const loop = readLib('local-agent-review-loop.md');
+    const reviewOnly = loop.slice(
+      loop.indexOf('**When `REVIEWER_APPLIES=false` (default — orchestrator applies)**'),
+      loop.indexOf('**When `REVIEWER_APPLIES=true` (reviewer applies)**'),
+    );
+    const reviewerApplies = loop.slice(loop.indexOf('**When `REVIEWER_APPLIES=true` (reviewer applies)**'));
+
+    assert.ok(
+      reviewOnly.indexOf('If recomputed `UNCOMMITTED > 0`') < reviewOnly.indexOf('If recomputed `NEW_COMMITS == 0`'),
+    );
+    assert.match(reviewOnly, /address review \(\$REVIEW_AGENT\): orchestrator-applied/);
+    assert.match(reviewerApplies, /leave its changes uncommitted/);
+    assert.match(reviewerApplies, /git reset --soft "\$LOOP_START_SHA"/);
+    assert.match(reviewerApplies, /address review \(\$REVIEW_AGENT\): <summary>/);
+    assert.doesNotMatch(reviewerApplies, /chore: local review changes/);
+  });
+
   it('lets ~opt excuse no-verdict and lets capped satisfy partial', () => {
     // Two ways a new status gets stranded: added to a loop's status set but not to
     // the aggregate rules that consume it. A ~opt no-verdict must reach the
@@ -412,6 +501,16 @@ describe('review-loop parse contracts', () => {
       /git push [^\n`]*HEAD:refs\/heads\//,
       'no prescribed push may re-prefix refs/heads/ (naming it in a warning is fine)',
     );
+    for (const name of ['local-agent-review-loop.md', 'ollama-review-loop.md']) {
+      const loop = readLib(name);
+      assert.match(loop, /PUSH_REMOTE="\$\(git config --get "branch\.\$BR\.remote"\)"/, `${name} must derive its push remote from branch config`);
+      assert.match(loop, /PUSH_BRANCH="\$\(git config --get "branch\.\$BR\.merge"\)"/, `${name} must derive its push ref from branch config`);
+      assert.match(loop, /\[ "\$PUSH_REMOTE" = "\." \]/, `${name} must reject a local upstream`);
+      const prescribed = [...loop.matchAll(/git push [^\n`]*?HEAD:[^\s"`]*/g)].map((m) => m[0]);
+      assert.ok(prescribed.length >= 2, `${name} must prescribe the upstream-derived push and retry`);
+      assert.ok(prescribed.every((c) => c === 'git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH'), `${name} has a non-derived push: ${prescribed.join(' | ')}`);
+      assert.doesNotMatch(loop, /git push origin \{BRANCH_NAME\}/, `${name} must not assume origin or the local branch name`);
+    }
     // The variables must be consumed in the shell that set them — spec snippets run
     // as separate Bash calls, where an empty PUSH_REMOTE means `git push "" "HEAD:"`.
     // The point is that the push lives inside the guard, in the same shell — not
@@ -1037,6 +1136,29 @@ describe('shared review-flag parse partial (#311)', () => {
     assert.match(raw('pr.md'), /and `\{REVIEW_MODELS\}` \(the saved per-agent default models/);
     assert.doesNotMatch(raw('release.md'), /copilot iteration cap/);
   });
+
+  it('review.md and rpr.md also include lib/review-flags.md instead of restating the grammar (#332)', () => {
+    for (const name of ['review.md', 'rpr.md']) {
+      const body = raw(name);
+      assert.match(body, /!`cat ~\/\.claude\/lib\/review-flags\.md`/, `${name} must include the shared partial`);
+      assert.doesNotMatch(body, /Accepted values per slot/, `${name} must not carry its own copy of the --review-with grammar`);
+      assert.doesNotMatch(body, /Accepted slugs: `codex`, `agy`/, `${name} must not carry a hand-copied slug list`);
+    }
+    // review.md's other own flags (parsed outside the shared partial) must survive the swap.
+    const reviewBody = raw('review.md');
+    assert.match(reviewBody, /--strict`\*\* \(alias: \*\*`--nuclear/);
+    assert.match(reviewBody, /--draft`\*\* \(PR mode only\)/);
+    assert.match(reviewBody, /--apply` \/ `--no-apply`\*\*/);
+    // rpr's own consequences of the grammar (never in the shared partial) must survive the swap.
+    const rprBody = raw('rpr.md');
+    assert.match(rprBody, /@<login>` entries are accepted by the parser but never requested/);
+    assert.match(rprBody, /forwarded as `\{MAX_ITERATIONS\}`/);
+    assert.match(rprBody, /rpr does not support `--review-iterations`/);
+  });
+
+  it('review.md forwards {REVIEW_MODELS} to the multi-reviewer wrapper (#332)', () => {
+    assert.match(raw('review.md'), /`\{REVIEW_MODELS\}` — the saved per-agent default models/);
+  });
 });
 
 describe('PLAN.md mode is retired (review/rpr/config)', () => {
@@ -1045,7 +1167,7 @@ describe('PLAN.md mode is retired (review/rpr/config)', () => {
     for (const name of ['review.md', 'rpr.md']) {
       const body = raw(name);
       assert.match(body, /--issues is now the default \(PLAN\.md mode was removed\); the flag can be dropped\./, name);
-      assert.match(body, /--no-issues is no longer supported: PLAN\.md mode was removed\. slashdo records work only as GitHub\/GitLab issues\./, name);
+      assert.match(body, /--no-issues is no longer supported: PLAN\.md mode was removed\. slashdo records work only in the project's issue tracker\./, name);
       assert.doesNotMatch(body, /ISSUE_MODE|\[--issues\|--no-issues\]|defer to PLAN\.md/, name);
     }
   });

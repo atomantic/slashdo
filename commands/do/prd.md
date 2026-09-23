@@ -14,7 +14,3 @@ Run the workflow defined in `~/.claude/commands/do/goals.md` **verbatim**, with 
 Argument handling:
 - Pass `$ARGUMENTS` through to `do:goals` verbatim, with `--prd` added if not already present. It parses every flag itself, including `--interactive`, `--refresh`, and focus hints — there is nothing to extract or re-validate here.
 - `--prd` in `$ARGUMENTS` is redundant but harmless — do not error on it.
-
-## Notes
-
-- See `/do:goals` for the full specification, including the GOALS.md vs PRD.md vs issue-tracker boundary rules.

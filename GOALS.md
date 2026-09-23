@@ -25,7 +25,7 @@ Enforce consistent commit practices, SemVer versioning, and changelog management
 Integrate multi-reviewer review loops — GitHub Copilot, CLI reviewers (Codex, Claude, Antigravity, Grok, Ollama), or any GitHub login — with automated thread resolution into the PR workflow. `/do:pr` and `/do:rpr` handle the full cycle from PR creation through review iteration.
 
 ### 5. Maintain Project Governance Documentation
-Keep planning and standards documents current and well-structured. `/do:replan` manages the tactical backlog (as GitHub/GitLab issues), `/do:goals` generates strategic goal documents (or, with `--prd`, a detailed PRD.md of product requirements), and `/do:omd` audits and optimizes markdown files (CLAUDE.md, README.md, AGENTS.md, etc.).
+Keep planning and standards documents current and well-structured. `/do:replan` manages the tactical backlog (in the issue tracker), `/do:goals` generates strategic goal documents (or, with `--prd`, a detailed PRD.md of product requirements), and `/do:omd` audits and optimizes markdown files (CLAUDE.md, README.md, AGENTS.md, etc.).
 
 ### 6. Be Project-Agnostic
 Auto-detect tech stacks and adapt build commands, test runners, version bumping, and audit strategies accordingly. Commands should work on any codebase without manual configuration.

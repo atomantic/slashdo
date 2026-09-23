@@ -10,6 +10,4 @@ Every finding gets exactly one of three dispositions:
 
 ## Don't use the backlog as a dumping ground
 
-The failure mode this guards against: judging a finding "bigger than a one-liner" and filing it instead of fixing it. **If you *could* fix it now within the current change, you must** — the tracker is for work that genuinely cannot land in this PR.
-
-Before deferring, ask: **"Is this actually large or risky — or just more than a trivial edit?"** Only the former defers. A medium-effort but self-contained fix is still a fix-now. When in doubt, fix it now; deferral is the exception you justify, not the default you reach for.
+The failure mode this guards against: seeing a finding, judging it "bigger than a one-liner," and filing it as an issue instead of fixing it — a medium-effort but self-contained fix is still a fix-now. Before deferring, ask: **"Is this actually large or risky — or just more than a trivial edit?"** Only the former qualifies; deferral is the exception you justify, not the default you reach for.

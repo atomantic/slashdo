@@ -38,6 +38,6 @@ List all available `/do:*` commands with their descriptions.
 
 ## Notes
 
-- Work is tracked as GitHub/GitLab issues (Jira isn't automated yet — see https://github.com/atomantic/slashdo/issues/372); `--issues-label`, `--self`, `--collaborators`, and `--trusted-authors` still apply. Have a legacy PLAN.md? Run `/do:replan` once to migrate it.
+- Work is tracked in the project's issue tracker. The default when nothing else is configured is the repo's GitHub/GitLab issues, which is the only tracker automated today; support for other trackers is tracked in https://github.com/atomantic/slashdo/issues/372. `--issues-label`, `--self`, `--collaborators`, and `--trusted-authors` still apply. Have a legacy PLAN.md? Run `/do:replan` once to migrate it.
 - Commands are installed via `npx slash-do@latest`
 - For more info, see https://github.com/atomantic/slashdo

@@ -35,6 +35,10 @@ describe('/do:next --merge / --no-merge (#288)', () => {
       next,
       /--merge=<method> and --merge-method specify conflicting methods \(\{first\} vs \{second\}\)/,
     );
+    assert.match(next, /- \*\*Enable:\*\*/);
+    assert.match(next, /- \*\*Disable:\*\*/);
+    assert.match(next, /- \*\*Method:\*\*/);
+    assert.match(next, /- \*\*Swarm:\*\*/);
   });
 
   it("keeps /do:next's own --no-merge default distinct from /do:pr's", () => {
@@ -101,7 +105,7 @@ describe('/do:next --merge is ignored under --swarm except for the method (#288)
     );
     assert.match(
       next,
-      /`--merge=<method>`\/`--merge-method` still resolve `MERGE_METHOD` for that Phase C merge/,
+      /`--merge=<method>` \/ `--merge-method` still resolve `MERGE_METHOD` for that Phase C merge/,
     );
   });
 });

@@ -119,7 +119,7 @@ Turn a rough idea into a well-formed tracker issue, then hand it to an agent:
 ```
 
 `--enhance-with <list>` routes the drafted issue through a sequential pipeline of
-enhancement agents (`codex`, `claude`, `agy`, `grok`, `cursor` — same `agent[model]` grammar as
+enhancement agents (`codex`, `claude`, `agy`, `grok`, `pi`, `cursor` — same `agent[model]` grammar as
 `--review-with`, e.g. `--enhance-with codex[o3],cursor`), each refining the previous
 one's output, before the approval gate — a cheap second/third opinion folded into the
 draft. A missing or misbehaving agent degrades to the last good draft; the human still
@@ -327,7 +327,7 @@ Save the behavior once with `/do:config --merge` (see [Configuration](#configura
 
 ## Work tracking
 
-slashdo tracks todo items as issues in your repo's tracker — we recommend GitHub or GitLab issues (automated via an authenticated `gh` / `glab`, including Enterprise/self-managed hosts), or Jira (not automated yet — see [#372](https://github.com/atomantic/slashdo/issues/372)). `/do:replan` triages issues; `/do:next` claims them; `/do:plan-task` files one; `/do:better`, `/do:better-swift`, `/do:simplify`, `/do:depfree`, `/do:review`, and `/do:rpr` file deferred findings as labeled issues (with no tracker available they list them in their final report instead). The stable item ID is the **issue number** (e.g. `#42`); concurrent agents claim work via branch names carrying it.
+slashdo tracks todo items in your project's issue tracker. It doesn't prefer any particular tracker: commands follow whatever tracker the codebase is set up to use, and when nothing is specified they use the repo's own GitHub or GitLab issues. GitHub/GitLab issues are the only tracker automated today (through an authenticated `gh` / `glab`, including Enterprise/self-managed hosts). Support for other trackers, such as Jira, is tracked in [#372](https://github.com/atomantic/slashdo/issues/372). `/do:replan` triages issues; `/do:next` claims them; `/do:plan-task` files one; `/do:better`, `/do:better-swift`, `/do:simplify`, `/do:depfree`, `/do:review`, and `/do:rpr` file deferred findings as labeled issues (with no tracker available they list them in their final report instead). The stable item ID is the **issue number** (e.g. `#42`); concurrent agents claim work via branch names carrying it.
 
 **Legacy `PLAN.md`?** slashdo no longer reads or writes `PLAN.md`. Run `/do:replan` once: it files each open item as a labeled issue (deduped against open issues, asking you to resolve any open question first), then deletes `PLAN.md` — or, if it holds other notes, removes only the plan sections. `--issues` is now a no-op and `--no-issues` is rejected.
 

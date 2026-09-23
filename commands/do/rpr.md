@@ -13,18 +13,17 @@ Address the latest review feedback on the current branch's PR using parallel sub
 
 ## Parse Arguments
 
-Parse `$ARGUMENTS` for `--review-with <agent[,agent,...]>`:
-- Accepted slugs: `codex`, `agy` (aliases `gemini` / `antigravity` — the Antigravity CLI's `agy` binary), `claude`, `grok`, `pi`, `cursor` (alias `cursor-agent` — the Cursor Agent CLI), `opencode` (aliases `zen` / `opencode-zen` — the OpenCode CLI), `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins one, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`), `copilot` (**legacy** — GitHub's cloud Copilot review; supported when asked for, never selected implicitly), `cmd[<invocation>]` — an escape hatch for any harness not in this list (operator-authored shell command, read prompt on stdin, print the same verdict contract; always review-only; see `lib/local-agent-review-loop.md` "The `cmd` reviewer"), or an arbitrary GitHub login `@<login>`. `codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode` also accept `<agent>[<model>]` (e.g. `codex[o3]`, `opencode[provider/model]`), stripped into a per-entry `REVIEW_MODEL` (empty uses each other CLI's default; OpenCode receives no slashdo model override, so select an explicit or configured supported provider/model); `copilot` and `@<login>` take no model bracket. Split on `,` **outside the outermost brackets** — a `,` inside a `cmd[<invocation>]` or a nested `[<model>]` (e.g. `cursor[claude-opus-4-7[thinking=true,effort=high]]`) is part of the value, not a new entry; "outermost" is the first `[` to the last `]` of the token — trim whitespace, normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, `zen`/`opencode-zen` → `opencode`, dedupe preserving first-occurrence order (for a model-taking agent — `codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`ollama` — the `[<model>]` bracket is part of the dedup identity; for `cmd`, the verbatim `[<invocation>]` is). Suffixes — stripped off the right of each token in any order before slug parsing, and excluded from the dedup identity: `~opt` (e.g. `ollama~opt`) marks that reviewer **optional/non-blocking** — still requested and its findings still fixed, but an inconclusive result from it never contributes a merge-blocking `inconclusive` aggregate (a hard-error still does); record as a per-entry `{OPTIONAL}` flag (`ollama~opt` == `ollama`, optional-wins on collapse). `~max=<n>` (e.g. `claude~max=2`) caps how many review → fix → re-review cycles **that one reviewer** runs. `~effort=<level>` (e.g. `codex[gpt-5.6-luna]~effort=max~opt`) sets its reasoning effort level (`low`, `medium`, `high`, `xhigh`, `max`). On a dedup collapse the survivor takes `~opt` if any had it, and cap/effort from the first that carried them. Reject a malformed suffix with `Invalid --review-with suffix on {entry}: ~max must be a non-negative integer and ~effort must be one of low, medium, high, xhigh, max, each appearing at most once; the only suffixes are ~opt, ~max=<n>, and ~effort=<level>.` rpr forwards `{ENTRY_MAX}` as `{MAX_ITERATIONS}` and `{ENTRY_EFFORT}` as `{REVIEW_EFFORT}` / `{OLLAMA_EFFORT}` to the **local-agent** and **Ollama** loops it dispatches (the same loops `/do:pr` uses); neither reaches rpr's `copilot` entry, which runs rpr's own bespoke request/monitor flow, not the shared Copilot loop. See `lib/multi-reviewer-loop.md`. Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot, cmd[<invocation>], @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).` The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no reviewer (`REVIEW_AGENTS=[]`) and overrides any saved `review-with` default.
-- **`@<login>` entries are accepted by the parser but never requested** — rpr's only GitHub-side request path is its bespoke Copilot flow (arbitrary-reviewer dispatch is a tracked follow-up). Drop any `@<login>` entry from `REVIEW_AGENTS` after parsing/dedup, whether typed or inherited from a saved `review-with` default, and print `Note: @<login> is not yet supported by /do:rpr — dropped from --review-with.` If that leaves an explicitly typed `--review-with` empty, set `REVIEW_AGENTS=[]` and run the no-reviewer path — do **not** fall through to the saved default.
-- Record as `REVIEW_AGENTS`. **There is no built-in default reviewer** — `copilot` is never added implicitly. If `--review-with` is omitted, leave `REVIEW_AGENTS` **unset for now**; the saved-defaults step below fills it from `/do:config`, and only if still unset after that is `REVIEW_AGENTS=[]` (rpr requests no new review and just resolves the PR's existing unresolved threads).
+!`cat ~/.claude/lib/review-flags.md`
 
-Parse `$ARGUMENTS` for `--reviewer-applies` (boolean): record `REVIEWER_APPLIES=true`/`false` (default `false`). Forwarded to the local-agent review loop, where it reaches only the `codex` pass — the one reviewer with a verified write-isolated profile; every other local reviewer (`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`cmd`) is forced back to review-only. No effect on the Copilot path (warn if combined with a copilot-only list) or the ollama path (Ollama is non-agentic — always review-only).
+rpr-only consequences of the grammar above:
+- `{ENTRY_MAX}` is forwarded as `{MAX_ITERATIONS}` and `{ENTRY_EFFORT}` as `{REVIEW_EFFORT}` / `{OLLAMA_EFFORT}` to the **local-agent** and **Ollama** loops it dispatches (the same loops `/do:pr` uses); neither reaches rpr's `copilot` entry, which runs rpr's own bespoke request/monitor flow, not the shared multi-reviewer loop. rpr does not support `--review-iterations`; use the per-entry `~max=<n>` suffix instead. `--review-mode` and the `--review-stop-on-*` flags likewise have no effect — rpr dispatches each listed reviewer directly rather than through the shared wrapper.
+- **`@<login>` entries are accepted by the parser but never requested** — rpr's only GitHub-side request path is its bespoke Copilot flow (arbitrary-reviewer dispatch is a tracked follow-up). Drop any `@<login>` entry from `REVIEW_AGENTS` after parsing/dedup, whether typed or inherited from a saved `review-with` default, and print `Note: @<login> is not yet supported by /do:rpr — dropped from --review-with.` If that leaves an explicitly typed `--review-with` empty, set `REVIEW_AGENTS=[]` and run the no-reviewer path — do **not** fall through to the saved default. If `--review-with` is omitted and `REVIEW_AGENTS` is still unset after the saved-defaults step, rpr requests no new review and just resolves the PR's existing unresolved threads.
 
 After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to `review-with` / `reviewer-applies` / `issues-label` the user did not pass. Precedence: explicit flag (or `--review-with none`) > saved `review-with` default > `REVIEW_AGENTS=[]` (see step 2 and step 8). rpr ignores saved `review-iterations` / `review-stop-mode` (it does not support those flags):
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
-Parse `$ARGUMENTS` for `--issues-label <name>`: a **deferred** finding (see Finding Disposition) is filed as a GitHub/GitLab issue. Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan` (a saved `issues` key is ignored). `--issues` is a deprecated no-op: print once `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.` `--no-issues` aborts with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only as GitHub/GitLab issues.`
+Parse `$ARGUMENTS` for `--issues-label <name>`: a **deferred** finding (see Finding Disposition) is filed as a GitHub/GitLab issue. Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan` (a saved `issues` key is ignored). `--issues` is a deprecated no-op: print once `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.` `--no-issues` aborts with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only in the project's issue tracker.`
 
 !`cat ~/.claude/lib/gh-host.md`
 
@@ -51,7 +50,7 @@ Parse `$ARGUMENTS` for `--issues-label <name>`: a **deferred** finding (see Find
 
    **While waiting for review**: the persistent monitor ("Poll for review completion") emits CI bucket transitions as events; fix any CI failures before the review completes ("CI failure handling").
 
-3. **Fetch review comments**: Use `gh api graphql` with stdin JSON to get all unresolved review threads, per `lib/graphql-escaping.md` below. Inline values and pipe JSON via stdin:
+3. **Fetch review comments**: Use `gh api graphql` with literal values in stdin JSON to get all unresolved review threads; never put shell-expandable `$variables` in the query string:
    ```bash
    echo '{"query":"{ repository(owner: \"OWNER\", name: \"REPO\") { pullRequest(number: PR_NUM) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }"}' | gh api --hostname GH_HOST graphql --input -
    ```
@@ -68,11 +67,11 @@ Parse `$ARGUMENTS` for `--issues-label <name>`: a **deferred** finding (see Find
    - Each thread-fixing agent should:
      - Read the file and understand the context of the feedback
      - Make the requested code changes if they are accurate and warranted
-     - **Identify the root cause** of why the issue landed (missing lint rule, missing comment at the canonical site, misleading name, API that invites the mistake, etc.) per `~/.claude/lib/per-finding-root-cause.md` and apply the smallest matching action **in the same change**; defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
+     - **Identify the root cause** of why the issue landed and apply the smallest matching action **in the same change**, per `~/.claude/lib/review-fix-conventions.md`; defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
      - Return what was changed, the thread ID that was addressed, and the root-cause action taken (or "none — one-off")
    - The code quality reviewer is **one additional agent that reviews all changed files for logic defects the threads missed (no style nits)** — a real bug, a missing error-handling path, a broken contract, a security issue — under the same `~/.claude/lib/finding-disposition.md` rules the thread agents use. It should:
      - Read all changed files in the PR
-     - For each issue found, also apply the smallest root-cause action per `~/.claude/lib/per-finding-root-cause.md`
+     - For each issue found, also apply the smallest root-cause action per `~/.claude/lib/review-fix-conventions.md`
      - Apply fixes directly and return what was changed plus the root-cause actions taken
    - After all agents return, review their changes for conflicts or overlapping edits
 
@@ -91,7 +90,7 @@ Parse `$ARGUMENTS` for `--issues-label <name>`: a **deferred** finding (see Find
 
    **Re-request gate (which reviewer, if any):**
    - **If `REVIEW_AGENTS` is empty, there is no reviewer to re-request.** Skip the worthiness evaluation and proceed to step 9.
-   - **Only re-request a Copilot review if Copilot is the reviewer actually in play** — `REVIEW_AGENTS` contains `copilot` **and** the threads you just resolved came from a Copilot review (`HAS_COPILOT_REVIEW`). If the round resolved only non-Copilot threads (e.g. a human review), do NOT request a Copilot review — proceed to step 9. A `copilot~max=<n>` cap bounds this re-request loop under the accounting below; rpr's Copilot loop is bespoke (not a dispatch into `lib/copilot-review-loop.md`), so nothing else enforces the budget — count each requested Copilot round and stop once `n` is spent.
+    - **Only re-request a Copilot review if Copilot is the reviewer actually in play** — `REVIEW_AGENTS` contains `copilot` **and** the threads you just resolved came from a Copilot review (`HAS_COPILOT_REVIEW`). If the round resolved only non-Copilot threads (e.g. a human review), do NOT request a Copilot review — proceed to step 9. A `copilot~max=<n>` cap bounds this re-request loop under the accounting below; rpr's Copilot loop is bespoke and does not dispatch through the shared reviewer loop, so nothing else enforces the budget — count each requested Copilot round and stop once `n` is spent.
    - For a **local CLI** (none of `ollama`, `copilot`, or `@<login>` — the fixed CLIs and `cmd[<invocation>]` alike) or `ollama` entry, "another round" means re-running that entry's loop (local-agent, or Ollama with `{OLLAMA_MODEL}` against the locally checked-out PR branch) — not a Copilot request. Each loop manages its cap (`{MAX_ITERATIONS}`, built-in `3` unless `~max=<n>` moved it) *within* one dispatch, so typically one pass suffices; loop again only if the last round made substantive fixes **and** the entry has budget left.
    - **A per-entry `~max=<n>` is a total budget, not a per-dispatch one — for every reviewer type, including `copilot` and `@<login>`.** An inner loop enforces the cap only within its own dispatch, so handing the same entry a fresh `n` every outer round would let `--review-with ollama~max=1` run unbounded. Track each entry's **rounds spent so far** across this outer loop (sum the iterations its inner loop reported on every dispatch); for an entry whose cap was explicitly configured (`{MAX_EXPLICIT}=true`, `n ≥ 1`), stop re-dispatching once the total reaches `n`, and forward the *remaining* budget (`n - spent`), not `n`, on any subsequent dispatch. An entry on its built-in default cap or on `~max=0` (unlimited) is stopped only by the worthiness evaluation below; so is an uncapped `copilot` entry, which has **no** built-in per-entry cap in rpr.
 
@@ -103,20 +102,17 @@ Parse `$ARGUMENTS` for `--issues-label <name>`: a **deferred** finding (see Find
 
 9. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input). List deferred findings with their issue numbers, or as unfiled per `plan-issue-setup.md`'s no-tracker rule.
 
-10. **Convention encoding**: after the summary, for each recurring pattern among the issues addressed this session, apply the **smallest** code-level action that makes the convention self-evident (in-tree comment at the canonical site, a clarifying rename, or a surgical refactor that removes the footgun). CLAUDE.md / AGENTS.md additions are a **fallback** for conventions that can't be expressed locally. Encoded actions land in the same branch as the rpr fixes.
+10. **Convention encoding**: after the summary, run the end-of-cycle phase from `~/.claude/lib/review-fix-conventions.md` against the issues addressed this session. Encoded actions land in the same branch as the rpr fixes.
 
 !`cat ~/.claude/lib/finding-disposition.md`
 
 Only when a finding is being deferred:
 
+!read lib/vcs-host.md
 !read lib/plan-issue-setup.md
 !read lib/plan-issue-filing.md
 
-!`cat ~/.claude/lib/per-finding-root-cause.md`
-
-!`cat ~/.claude/lib/post-review-doc-recommendations.md`
-
-!`cat ~/.claude/lib/graphql-escaping.md`
+!`cat ~/.claude/lib/review-fix-conventions.md`
 
 ## Local-Agent Review Loop (for `--review-with codex|agy|claude|grok|pi|cursor|opencode|cmd[<invocation>]`)
 

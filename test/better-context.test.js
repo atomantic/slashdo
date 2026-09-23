@@ -23,6 +23,26 @@ describe('better progressive context', () => {
     }
   });
 
+  it('keeps better-swift a thin caller over the shared pipeline', () => {
+    const entry = read('commands/do/better-swift.md');
+    assert.ok(Buffer.byteLength(entry) <= 10000);
+    assert.doesNotMatch(entry, /!`cat /);
+    assert.doesNotMatch(entry, /^## Phase (?:0|1|2|3|4c)\b/m);
+    for (const phase of ['options', 'discovery', 'audit', 'plan', 'remediation', 'verification', 'test-enhancement', 'pr-and-ci', 'review-loop', 'cleanup']) {
+      assert.match(entry, new RegExp(`!read lib/better-${phase}\\.md`), `missing ${phase} phase route`);
+    }
+    assert.match(entry, /!read lib\/swift-pipeline-inputs\.md/);
+    assert.match(entry, /unsupported by this Swift caller/);
+    const inputs = read('lib/swift-pipeline-inputs.md');
+    assert.match(inputs, /PLATFORMS/);
+    assert.match(inputs, /DEPLOYMENT_TARGETS/);
+    assert.match(inputs, /SWIFT-SPECIFIC GUARDRAILS/);
+    assert.match(inputs, /platform-swiftui/);
+    assert.match(inputs, /!read lib\/swift-gotchas\.md/);
+    const remediation = read('lib/better-remediation.md');
+    assert.match(remediation, /WORKTREE_DIR=\.\.\/\{BRANCH_PREFIX\}-\{DATE\}/);
+    assert.match(read('lib/remediation-agent-template.md'), /\{BRANCH_PREFIX\} audit/);
+  });
   it('ships a compact skill with phase resources and native command read paths', () => {
     const source = read('commands/do/better.md');
     for (const key of ['claude', 'opencode', 'codex', 'antigravity']) {
@@ -93,9 +113,28 @@ describe('better progressive context', () => {
     const issueMode = read('lib/better-issue-mode.md');
     assert.match(issueMode, /targeted validation of `UNCERTAIN` findings/);
     assert.match(issueMode, /never auto-remediate them/);
-    assert.match(read('lib/remediation-agent-template.md'), /Useful structural\n  refactors are intentionally behavior-preserving/);
+    const template = read('lib/remediation-agent-template.md');
+    assert.match(template, /Confirm each finding against the code; skip false positives with evidence\./);
+    assert.match(template, /Structural refactors are intentionally behavior-preserving; honor the caller's\nsimplify contract/);
     assert.match(read('lib/better-simplify.md'), /bug encountered incidentally is recorded as deferred/);
     assert.match(read('lib/better-pr-and-ci.md'), /`--no-merge`[\s\S]{0,160}Phase 7 safe finalization/);
+  });
+
+  it('states the Phase 4c–6 gates once, as contracts rather than transcripts', () => {
+    // #323: the gates got lost among git/gh command transcripts and were repeated
+    // across better.md and the partials. Each now appears once, in one sentence.
+    const entry = read('commands/do/better.md');
+    const prAndCi = read('lib/better-pr-and-ci.md');
+    const tests = read('lib/better-test-enhancement.md');
+    assert.match(prAndCi, /\*\*At most 3 CI fix attempts per PR\.\*\*/);
+    assert.match(prAndCi, /every expected check \*\*for its current pushed HEAD\*\* has passed/);
+    assert.doesNotMatch(entry, /three attempts|3 (?:CI )?(?:fix )?attempts/);
+    assert.match(tests, /Every new test must fail against a temporarily broken implementation/);
+    assert.match(tests, /the break is never committed/);
+    assert.doesNotMatch(tests, /Rules for writing good tests|git restore/);
+    assert.doesNotMatch(prAndCi, /Poll every 30 seconds|git checkout -b/);
+    // One run-state list, not a summary in better.md plus a justified checklist.
+    assert.doesNotMatch(entry, /^Preserve phase, complete file ownership/m);
   });
 
   it('keeps open PR branches and current-head gates in the shared workflow', () => {
@@ -126,10 +165,10 @@ describe('better progressive context', () => {
       const hint = body.match(/^argument-hint: .*$/m);
       if (hint) assert.doesNotMatch(hint[0], /--issues\b(?!-label)|--no-issues/, file);
     }
-    for (const file of ['lib/better-options.md', 'commands/do/better-swift.md', 'commands/do/depfree.md']) {
+    for (const file of ['lib/better-options.md', 'commands/do/depfree.md']) {
       const body = read(file);
       assert.ok(body.includes('`--issues is now the default (PLAN.md mode was removed); the flag can be dropped.`'), file);
-      assert.ok(body.includes('`--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only as GitHub/GitLab issues.`'), file);
+      assert.ok(body.includes("`--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only in the project's issue tracker.`"), file);
     }
   });
 });

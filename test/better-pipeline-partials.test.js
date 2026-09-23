@@ -30,7 +30,7 @@ const RUNTIME_TOKENS = new Set([
   'DEFAULT_BRANCH', 'DATE', 'CATEGORY_SLUG', 'FIRST_CATEGORY', 'NEW_VERSION',
   'LEVEL', 'PR_NUMBER', 'OWNER', 'REPO', 'GH_HOST', 'REVIEW_AGENTS',
   'REVIEW_STOP_MODE', 'REVIEW_MODE', 'REVIEWER_APPLIES', 'REVIEW_ITERATIONS',
-  'OVERALL_STATUS', 'OPTIONAL', 'RUN_ID', 'JOB_ID', 'PLATFORMS',
+  'REVIEW_MODELS', 'WAIT_SCHEDULE', 'MERGE_METHOD', 'OVERALL_STATUS', 'OPTIONAL', 'RUN_ID', 'JOB_ID', 'PLATFORMS',
   'DEPLOYMENT_TARGETS', 'VACUOUS_TESTS_FIXED', 'WEAK_TESTS_STRENGTHENED',
   'NEW_TEST_CASES', 'NEW_TEST_FILES', 'SIMPLIFY_CATEGORIES', 'N',
 ]);
@@ -41,8 +41,8 @@ const RUNTIME_TOKENS = new Set([
 // command's own top level.
 const REVIEWER_LOOP_LIBS = [
   'multi-reviewer-loop',
-  'copilot-review-loop',
   'github-reviewer-loop',
+  'copilot-review-loop',
   'local-agent-review-loop',
   'ollama-review-loop',
 ];
@@ -128,6 +128,16 @@ describe('shared better-* pipeline partials', () => {
         );
       }
     }
+  });
+
+  it('keeps the Copilot gate on the shared GitHub-reviewer core', () => {
+    const source = fs.readFileSync(path.join(root, 'lib', 'better-review-loop.md'), 'utf8');
+    const coreAt = source.indexOf('!read lib/github-reviewer-loop.md');
+    const deltaAt = source.indexOf('!read lib/copilot-review-loop.md');
+
+    assert.ok(coreAt >= 0);
+    assert.ok(deltaAt > coreAt);
+    assert.match(source.slice(source.lastIndexOf('For every', coreAt), deltaAt), /For every `copilot` or `@<login>` entry/);
   });
 
   it('is driven by the same input token set from both commands', () => {

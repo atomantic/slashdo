@@ -22,7 +22,7 @@ describe('/do:replan is tracker-only', () => {
   it('keeps --issues as a deprecated no-op and rejects --no-issues', () => {
     assert.doesNotMatch(replan.split('---')[1], /--issues\|/);
     assert.match(replan, /--issues is now the default \(PLAN\.md mode was removed\); the flag can be dropped\./);
-    assert.match(replan, /--no-issues is no longer supported: PLAN\.md mode was removed\. slashdo records work only as GitHub\/GitLab issues\./);
+    assert.match(replan, /--no-issues is no longer supported: PLAN\.md mode was removed\. slashdo records work only in the project's issue tracker\./);
   });
 
   it('loads the epic/GH_HOST partials with a deferred read at the triage step', () => {

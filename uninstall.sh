@@ -102,7 +102,9 @@ OLD_LIBS=(
   better-audit-code-quality better-audit-cognitive-load better-audit-deps
   better-audit-dry better-audit-security better-audit-stack-specific
   better-audit-structural better-audit-tests better-audit-ux
-  code-review-checklist plan-id-format replan-issues
+  code-review-checklist graphql-escaping
+  per-finding-root-cause post-review-doc-recommendations
+  plan-id-format replan-issues
 )
 
 # NOTE: keep in sync with install.sh LIBS — see comment there.
@@ -115,14 +117,15 @@ LIBS=(
   ci-flake-handling commit-conventions config-defaults-issues-merge copilot-review-loop
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
-  gh-host github-reviewer-loop graphql-escaping
-  local-agent-review-loop model-tiers multi-reviewer-loop next-gitlab next-swarm ollama-review-loop
-  per-finding-root-cause plan-issue-setup plan-issue-filing pr-write-access
-  post-review-doc-recommendations rebase-conflict-resolution remediation-agent-template
+  gh-host github-reviewer-loop
+  local-agent-review-loop merge-gate model-tiers multi-reviewer-loop next-gitlab next-swarm ollama-review-loop
+  plan-issue-setup plan-issue-filing pr-write-access
+  rebase-conflict-resolution remediation-agent-template
   release-documented review-agent-selection review-config-defaults review-convergence-gate review-flags
+  review-fix-conventions
   review-pr-mode
   review-preferences
-  swift-review-checklist swift-gotchas
+  swift-review-checklist swift-gotchas swift-pipeline-inputs
   review-surface-scan review-surface-quality review-security-audit
   review-cross-file-tracing review-cross-file-contract
   review-structural-ambition

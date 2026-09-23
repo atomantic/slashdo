@@ -10,11 +10,8 @@ Parse `$ARGUMENTS` for:
 - **`--draft`** (PR mode only): write the review payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the `gh api` command to publish it manually, instead of posting the review. Ignored when `PR_MODE=false`. Implies `--no-apply` — a draft publishes nothing, so it must not push commits either.
 - **`--apply` / `--no-apply`** (mutually exclusive, PR mode only): how verified findings are delivered. Default `PR_APPLY=auto` — **commit the fixes onto the PR's head branch when we can push to it, post inline review comments when we can't** (see "Determine write access"). `--no-apply` forces review-only; `--apply` forces fix-and-push and aborts with `--apply was requested but the PR head branch is not writable ({reason}) — rerun without --apply to post an inline review instead.` when `CAN_PUSH_HEAD=false`. Abort with `--apply and --no-apply cannot be combined` if both appear.
 - **`--merge` / `--merge=<method>`** (optional, PR mode only): after the review finishes **clean**, merge the PR. Off by default — without this flag `/do:review` never merges anything. `<method>` ∈ {`squash`, `rebase`, `merge`}; abort on anything else with `--merge=<method> must be one of squash, rebase, merge (got: {value}).` Record `MERGE_ENABLED=true` and, when given, `MERGE_METHOD`. Every gate in "Merge the PR" must pass — the flag requests a merge, it does not authorize one.
-- **`--review-with <agent[,agent,...]>`** (optional): after the host CLI's self-review, run **additional** review passes through the named external CLIs in order. Slugs: `codex`, `agy` (aliases `gemini` / `antigravity` — the Antigravity CLI's `agy` binary), `claude`, `grok`, `pi`, `cursor` (alias `cursor-agent` — the Cursor Agent CLI), `opencode` (aliases `zen` / `opencode-zen` — the OpenCode CLI), `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins one, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`), `copilot` (**legacy** — GitHub's cloud Copilot review; supported when named, never selected implicitly), `cmd[<invocation>]` — an escape hatch for any harness not in this list (operator-authored shell command, read prompt on stdin, print the same verdict contract; always review-only; see `lib/local-agent-review-loop.md` "The `cmd` reviewer"), or a GitHub login `@<login>` — any user or App/bot (e.g. `@octocat`, `@some-app[bot]`); slashdo requests its review on the PR and waits for it (GitHub only, never posts an approval itself). `codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode` also accept `<agent>[<model>]` (e.g. `codex[o3]`, `opencode[provider/model]`), stripped into a per-entry `REVIEW_MODEL` (empty uses each other CLI's default; OpenCode receives no slashdo model override, so select an explicit or configured supported provider/model); `copilot` and `@<login>` take no model bracket. Split on `,` **outside the outermost brackets** — a `,` inside a `cmd[<invocation>]` or a nested `[<model>]` (e.g. `cursor[claude-opus-4-7[thinking=true,effort=high]]`) is part of the value, not a new entry; "outermost" is the first `[` to the last `]` of the token — trim whitespace, normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, `zen`/`opencode-zen` → `opencode`, dedupe preserving first-occurrence order (for a model-taking agent — `codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`ollama` — the `[<model>]` bracket is part of the dedup identity; for `cmd`, the verbatim `[<invocation>]` is). Suffixes — stripped off the right of each token in any order before slug parsing, and excluded from the dedup identity: `~opt` (e.g. `ollama~opt`) marks that reviewer **optional/non-blocking** — still requested and its findings still fixed, but an inconclusive result from it never contributes a merge-blocking `inconclusive` aggregate (a hard-error still does); record as a per-entry `{OPTIONAL}` flag (`ollama~opt` == `ollama`, optional-wins on collapse). `~max=<n>` (e.g. `claude~max=2`) caps how many review → fix → re-review cycles **that one reviewer** runs. `~effort=<level>` (e.g. `codex[gpt-5.6-luna]~effort=max~opt`) sets its reasoning effort level (`low`, `medium`, `high`, `xhigh`, `max`). On a dedup collapse the survivor takes `~opt` if any had it, and cap/effort from the first that carried them. Reject a malformed suffix with `Invalid --review-with suffix on {entry}: ~max must be a non-negative integer and ~effort must be one of low, medium, high, xhigh, max, each appearing at most once; the only suffixes are ~opt, ~max=<n>, and ~effort=<level>.` Abort with `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot, cmd[<invocation>], @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).` on any unknown slug. The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no delegated reviewers (`REVIEW_AGENTS=[]`) and overrides any saved `review-with` default. If omitted, leave `REVIEW_AGENTS` **unset for now** — the saved-defaults step below fills it from `/do:config`; only if still unset after that is `REVIEW_AGENTS=[]` (self-review only). The host CLI is not implied in this list — it runs the self-review first regardless; an explicit `claude` entry under claude starts a fresh headless claude session for a second-pass perspective.
-- **`--review-stop-on-findings` / `--review-stop-on-clean`** (mutually exclusive, optional): stop-mode for the delegated passes. Default `REVIEW_STOP_MODE=all` (run every listed agent). `on-findings` stops after the first delegated reviewer that surfaces a non-empty change set; `on-clean` after the first that reports zero findings. Abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined` if both appear.
-- **`--review-mode <series|parallel>`** (optional): `series` (default) runs the listed reviewers one-at-a-time so each sees the prior's committed fixes; `parallel` runs them concurrently against one frozen baseline and applies the deduped union of findings once (`--reviewer-applies` and the stop-modes are ignored). Record as `REVIEW_MODE`; if omitted, leave it **unset for now** (the saved-defaults step fills it from the `review-mode` default; built-in default `series`). Abort with `--review-mode must be one of series, parallel (got: {value}).` on any other value.
-- **`--reviewer-applies`** (optional, boolean): forwarded to the delegated review passes to route fixes through the reviewing CLI instead of the orchestrator — in practice only the `codex` pass, the one reviewer with a verified write-isolated profile; the loop forces every other local reviewer (`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`cmd`) back to review-only (see `lib/local-agent-review-loop.md` "Editing mode"). No effect on the copilot path, the `@<login>` path, the ollama path (Ollama is non-agentic — always review-only), or the host's self-review.
-- **`--review-iterations <n>`** (optional): caps how many review-and-fix cycles a delegated **copilot** or **`@<login>`** pass runs. Record as `REVIEW_ITERATIONS`; default `1` (one pass, exiting early on 0 comments). Must be a non-negative integer — abort with `--review-iterations must be a non-negative integer (got: {value}).` otherwise. `0` means "loop until that reviewer returns 0 comments" (bounded by each loop's own 10-iteration safety guardrail). No effect on local-agent/ollama passes or the host's self-review; a per-entry `--review-with <agent>~max=<n>` suffix overrides this flag for the entry that carries it.
+
+!`cat ~/.claude/lib/review-flags.md`
 
 After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the delegated-review flags **and** `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
 
@@ -22,7 +19,7 @@ After parsing the flags above, apply any **saved defaults** (set via `/do:config
 
 !`cat ~/.claude/lib/config-defaults-issues-merge.md`
 
-- **`--issues-label <name>`** (optional): a **deferred** finding (local-branch mode only — see Finding Disposition) is filed as a GitHub/GitLab issue with this label. Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan` (a saved `issues` key is ignored). No effect in PR mode. `--issues` is a deprecated no-op: print once `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.` `--no-issues` aborts with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only as GitHub/GitLab issues.`
+- **`--issues-label <name>`** (optional): a **deferred** finding (local-branch mode only — see Finding Disposition) is filed as a GitHub/GitLab issue with this label. Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan` (a saved `issues` key is ignored). No effect in PR mode. `--issues` is a deprecated no-op: print once `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.` `--no-issues` aborts with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only in the project's issue tracker.`
 - **PR reference** — any non-flag token that looks like a pull-request reference. **Match on URL *shape*, never on the hostname** — a self-managed GitHub Enterprise host often carries no `github` substring; the host-independent `/pull/{number}` path segment is what identifies a GitHub-flavored PR. A token matches if **any** of the following holds:
   - Full URL of the shape `{scheme}://{host}/{owner}/{repo}/pull/{number}` — **any** `{host}`, including `github.com`, `github.example.com`, and a GHES host with no `github` substring. Trailing subpaths (`/files`, `/commits`, `/checks`) and a `#discussion_r…` fragment are allowed and ignored.
   - SSH-style URL (`git@{host}:{owner}/{repo}`) carrying the same `/pull/{number}` segment — again on any host.
@@ -213,9 +210,7 @@ For each finding, ground it in evidence before classifying:
 3. If the fix involves async/state changes, **trace the execution path** to confirm the issue is real
 4. If you cannot quote specific code for a finding, downgrade it to **[UNCERTAIN]**
 
-After verifying all findings, run the project's build and test commands to confirm no false positives.
-
-In `PR_MODE` with `PR_DISPOSITION=inline`, skip the local build/test step (nothing is checked out; the PR's CI is the source of truth) and verify by reading code only. With `PR_DISPOSITION=apply` the build/test step is mandatory: it runs after the fixes in "Fix Issues", and a failure blocks the push.
+Verification here is reading code, not running it — a build/test pass over unfixed code cannot show a finding is a false positive. The project's build and test commands run once, after fixes, in "Fix Issues" (local branch mode and `PR_DISPOSITION=apply`); a failure there blocks the commit/push. `PR_DISPOSITION=inline` skips the local build/test step entirely (nothing is checked out; the PR's CI is the source of truth) and verifies by reading code only.
 
 ## Fix Issues (local branch mode, and PR mode when `PR_DISPOSITION=apply`)
 
@@ -227,6 +222,7 @@ When `PR_MODE=true` and `PR_DISPOSITION=apply`, first follow "Fix Issues — PR-
 
 Only when a finding is being deferred:
 
+!read lib/vcs-host.md
 !read lib/plan-issue-setup.md
 !read lib/plan-issue-filing.md
 
@@ -236,7 +232,7 @@ For each verified finding (local branch mode):
 3. Fix IMPROVEMENT issues too. Per Finding Disposition, defer to a tracker issue only when the fix is genuinely large/architectural or too risky to land in this branch
 4. **Identify the root cause** of why the issue existed (missing lint rule, missing comment at the canonical site, misleading name, API that invites the mistake, etc.) and apply the smallest matching action **in the same change**. Defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
 
-!read lib/per-finding-root-cause.md
+!read lib/review-fix-conventions.md
 
 5. After fixes, run the project's test suite and build command
 6. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
@@ -279,7 +275,7 @@ In `PR_MODE`, follow "Report additions" in `lib/review-pr-mode.md` (already load
 
 After the report is printed and fixes are committed (local branch mode), for each finding pattern likely to recur (fixed or accepted-as-is), apply the **smallest** code-level action that makes the convention self-evident (in-tree comment at the canonical site, a clarifying rename, or a surgical refactor that removes the footgun). CLAUDE.md / AGENTS.md additions are a **fallback** for conventions that can't be expressed locally. Encoded actions land in the same branch as the review fixes. (Root-cause identification already happened per finding, at Fix Issues step 4 above.)
 
-!read lib/post-review-doc-recommendations.md
+!read lib/review-fix-conventions.md
 
 ## PR Comment Policy
 
@@ -305,11 +301,20 @@ Inputs to the wrapper:
 - `{REVIEW_MODE}` — `series` (default) | `parallel`
 - `{REVIEWER_APPLIES}` — boolean, forwarded to each local-agent pass
 - `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot/`@<login>` iteration cap (`0` = loop until clean)
+- `{REVIEW_MODELS}` — the saved per-agent default models (`EFFECTIVE_REVIEW_MODELS` from the saved-defaults step); every local reviewer but `cmd` reads it when an entry's own `[<model>]` bracket is absent
 - `{GH_HOST}` — the GitHub API host established in "Determine Scope" (the PR URL's host in PR mode, the `origin` remote's host in local mode); forwarded to the GitHub-side loops so their `gh api` calls target the right host on GitHub Enterprise
+- `{WAIT_SCHEDULE}` — the single schedule selected below for the current GitHub-side entry
+
+For each GitHub-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
+
+- `copilot` — use the previous Copilot review duration on this PR (default 60 seconds if none); max wait 3x that duration, minimum 90 seconds, maximum 5 minutes; poll every 5s, 5s, 10s, 10s, then 15s.
+- `@<login>` — expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s.
+
+Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass both schedules.
 
 Per-agent dispatch inside the wrapper:
 
-- `copilot` and `@<login>` — GitHub-side and PR-bound: only meaningful when a PR exists for the current branch (local mode) or when `PR_MODE=true`. `copilot` requests a Copilot review via the Copilot review loop; `@<login>` requests a review from the arbitrary login `{REVIEWER_LOGIN}` via the GitHub-reviewer loop (`lib/github-reviewer-loop.md`). If no PR is associated with the current branch in local mode, print `Skipping copilot pass: no open PR on {branch}.` / `Skipping @{REVIEWER_LOGIN} pass: no open PR on {branch}.` and continue to the next agent.
+- `copilot` and `@<login>` — GitHub-side and PR-bound: only meaningful when a PR exists for the current branch (local mode) or when `PR_MODE=true`. `copilot` requests a review through the shared GitHub-reviewer template plus the Copilot delta; `@<login>` requests a review from the arbitrary login `{REVIEWER_LOGIN}` through the shared template. If no PR is associated with the current branch in local mode, print `Skipping copilot pass: no open PR on {branch}.` / `Skipping @{REVIEWER_LOGIN} pass: no open PR on {branch}.` and continue to the next agent.
 - `codex` | `agy` | `claude` | `grok` | `pi` | `cursor` | `opencode` | `cmd` | `ollama` — invoke the local-agent review loop (ollama: the Ollama review loop). The CLI runs a self-contained single-agent review prompt headless (codex: `codex review --base "$BASE_BRANCH"`; the others: `git diff $BASE_BRANCH...HEAD` inside the prompt) — never the `/do:review` multi-sub-agent skill, which hangs headless. The loop publishes nothing to the PR; in review-only mode it emits findings to stdout and the orchestrator owns any PR comment.
   - In **local branch mode**, set the wrapper's `BASE_BRANCH=$BASE_BRANCH` so the inner loop reviews against the same base this self-review used (with the host's just-committed fixes in HEAD).
   - In **PR mode**, a local `git diff` needs a checked-out branch and a resolvable base ref — a PR URL won't resolve — so **these passes are skipped** unless the PR branch is checked out locally with a resolvable base (`copilot` is the PR-by-URL reviewer), printing `Skipping {agent} pass in PR mode: the local-agent loop reviews a local git diff and cannot resolve a PR URL. Use --review-with {agent} against a local branch instead.` Each skip is recorded in the per-pass table as status `skipped`, treated like a non-fix inconclusive for `{OVERALL_STATUS}` purposes.
@@ -324,13 +329,13 @@ Read when `REVIEW_AGENTS` is non-empty:
 
 Read only the bodies for reviewer kinds present in the agent list.
 
-Only for `copilot` entries:
-
-!read lib/copilot-review-loop.md
-
-Only for `@<login>` entries:
+For every `copilot` or `@<login>` entry, read the shared GitHub-reviewer template:
 
 !read lib/github-reviewer-loop.md
+
+Only for `copilot` entries, also read the Copilot delta:
+
+!read lib/copilot-review-loop.md
 
 Only for an entry that is none of `copilot`, `ollama`, or `@<login>` (every other slug — the fixed CLIs and `cmd[<invocation>]` alike — dispatches through this one loop; a future addition needs no new gate here):
 

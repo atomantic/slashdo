@@ -20,8 +20,8 @@ Thanks for considering a contribution. slashdo is a small, actively-maintained p
 
 ### Shared `better-*` pipeline placeholders
 
-`/do:better` and `/do:better-swift` share Phases 4/4b, 5/5d, 6, and 7 verbatim
-via `lib/better-*.md` (see `lib/better-pipeline-inputs.md` and
+`/do:better` and `/do:better-swift` share Phases 3–7 verbatim via
+`lib/better-*.md` (see `lib/better-pipeline-inputs.md` and
 `lib/swift-pipeline-inputs.md`); each calling command supplies the differences
 as `{PLACEHOLDER}` values in its own `## Shared Pipeline Inputs` section. Each
 shared partial's `### Inputs` block only lists which placeholders that phase
@@ -66,7 +66,7 @@ doesn't re-teach them on every run:
   "Platform Impact" section).
 - `{CI_FAILURE_CAUSES_EXTRA}` — extra bullet(s) for the CI failure-cause list,
   or empty (e.g. a JS-only "missing exports" cause, code-signing noise).
-  Indented six spaces to match the lettered sub-list it lands in.
+  Lands at column 0, in the bullet list under Phase 5d's CI-fix rule.
 - `{REVIEW_LOOP_EXTRA_INSTRUCTION}` — extra paragraph handed to every Phase 6
   review sub-agent, or empty (a multi-platform pipeline requires each fix still
   compiles everywhere).

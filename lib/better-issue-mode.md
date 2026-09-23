@@ -95,7 +95,7 @@ titles.
 
 ### Phase 4c (Test Enhancement) — triage from the spool
 
-**Agent 8's findings are on disk, not in this context.** The index
+**The test-audit findings are on disk, not in this context.** The index
 (`<id> | <SEVERITY> | <category> | <file:line> | <title>`) carries no `[VACUOUS]`/`[WEAK]`/`[MISSING]` tag at all — triaging off it is not merely
 lossy, it is impossible. Read `$SPOOL_DIR/tests.md` (the literal path from run state) and
 triage off each finding's full body, populating `{VACUOUS_AND_WEAK_FINDINGS}` /
