@@ -94,7 +94,7 @@ Run the following loop for at most {REVIEW_ITERATIONS} review-and-fix cycles
    - Evaluate if the finding is a real issue — if it is, fix it regardless of whether the current PR modified that code. Never dismiss findings as "out of scope" or "pre-existing."
    - A real issue is a logic/behavior bug, security hole, broken contract, or missing-coverage gap — something the project's linter/type-checker/formatter/build does NOT already catch. If a comment is a pure style/formatting/lint nit (already covered by tooling) or a bare rename/extract-a-helper preference with no behavior consequence, resolve the thread without a code change rather than churning the diff.
    - Make the code fix
-   - IDENTIFY THE ROOT CAUSE of why the issue landed (missing lint rule, missing comment at the canonical site, misleading name, API that invites the mistake, etc.) per `~/.claude/lib/per-finding-root-cause.md` and apply the smallest matching action in the same change. Defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
+   - IDENTIFY THE ROOT CAUSE of why the issue landed and apply the smallest matching action in the same change, per `~/.claude/lib/review-fix-conventions.md`. Defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
    - Run the build command
    - If build passes, commit: address review (copilot): <summary>
      (the parenthesized agent name records which reviewer surfaced the finding)
@@ -130,7 +130,7 @@ When done, report back:
 - Total iterations completed
 - List of commits made (if any)
 - Any unresolved threads remaining
-- **Convention encoding**: if the loop addressed any non-nitpick findings, run the Convention Encoding phase from `~/.claude/lib/post-review-doc-recommendations.md` against the issues fixed across all iterations. For each recurring pattern, apply the smallest code-level action that makes the convention self-evident (in-tree comment, clarifying rename, or surgical refactor); CLAUDE.md / AGENTS.md additions are a fallback only. Include the encoded actions (and any fallback suggestions) in the final report under a "Conventions Encoded" heading. If all findings were nitpicks (or no findings landed), omit the section.
+- **Convention encoding**: run the end-of-cycle phase from `~/.claude/lib/review-fix-conventions.md` against the issues fixed across all iterations, even when every finding was a nitpick (or none landed) — always print the "Conventions Encoded" section, using its explicit no-conventions message when nothing qualifies.
 ```
 
 Launch the sub-agent and wait for its result.

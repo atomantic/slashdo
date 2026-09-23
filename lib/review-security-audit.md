@@ -12,10 +12,10 @@ Review the change adversarially for trust-boundary violations, injection, data e
 
 For each finding:
 ```
-file:line — [CRITICAL|IMPROVEMENT|NEEDS-TRACE] description
+file:line — [CRITICAL|IMPROVEMENT|UNCERTAIN] description
 Evidence: `quoted code line(s)`
 Attack scenario: brief exploitation description
 ```
 
 Security findings default to CRITICAL unless exploitation requires unlikely preconditions.
-Use [NEEDS-TRACE] for cross-file security flows requiring the cross-file agent to verify.
+Lenses run in parallel: trace a cross-file flow yourself, or mark [UNCERTAIN] if unconfirmed.

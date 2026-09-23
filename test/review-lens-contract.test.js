@@ -57,7 +57,7 @@ describe('review lens files', () => {
 
   it('does not point lens selection at a checklist /do:review never loads', () => {
     assert.doesNotMatch(read('lib/review-agent-selection.md'), /review checklist/);
-    assert.doesNotMatch(read('lib/post-review-doc-recommendations.md'), /review checklists?/);
+    assert.doesNotMatch(read('lib/review-fix-conventions.md'), /review checklists?/);
   });
 });
 
