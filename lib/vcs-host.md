@@ -1,53 +1,51 @@
-### Selecting the VCS host (`VCS_HOST` / `CLI_TOOL`)
+### Code host and tracker selection
 
-The `origin` remote selects the forge; credentials never select or switch the forge,
-they only gate access. Run both blocks, substituting `{COMMAND}` with the invoking
-command's name. Any `gitlab` substring in the host means GitLab, so self-managed and
-Enterprise instances need no configuration. Every abort is non-mutating and happens
-before any branch, worktree, issue, or PR/MR exists.
+`origin` picks the forge (`gitlab` substring = GitLab) unless saved `/do:config`
+`code-host` overrides; `tracker` defaults to it.
+Credentials never select or switch the forge, only gate access. Run both blocks
+(`{COMMAND}` = invoking command); every abort is non-mutating.
 
 ```bash
 ORIGIN_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"
-if printf '%s' "$ORIGIN_HOST" | grep -qi gitlab; then
-  VCS_HOST=gitlab; CLI_TOOL=glab
-elif [ -n "$ORIGIN_HOST" ]; then
-  VCS_HOST=github; CLI_TOOL=gh
-else
-  # No origin remote: the ONLY case in which the authenticated CLI picks the host.
-  if gh auth status --active >/dev/null 2>&1; then VCS_HOST=github; CLI_TOOL=gh
-  elif glab auth status >/dev/null 2>&1; then VCS_HOST=gitlab; CLI_TOOL=glab
-  else
-    echo "{COMMAND} needs an authenticated gh (GitHub) or glab (GitLab). Run 'gh auth login' or 'glab auth login'."; exit 1
-  fi
-fi
-[ "$CLI_TOOL" = glab ] && LABEL_SEP="::" || LABEL_SEP=":"
+saved() { for _f in ~/.claude/.slashdo-config.json "$(git rev-parse --show-toplevel 2>/dev/null)/.slashdo.json"; do [ -f "$_f" ] && { tr -d '\n' < "$_f"; echo; } | sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'; done | tail -1 | tr A-Z a-z; }
+CODE_HOST="$(saved code-host)"
+[ -n "$CODE_HOST" ] || case "$(printf '%s' "$ORIGIN_HOST" | tr A-Z a-z)" in
+  *gitlab*) CODE_HOST=gitlab ;;
+  *bitbucket*|*codeberg*|*gitea*|*forgejo*|*gogs*|*sr.ht|*dev.azure.com|*visualstudio.com) CODE_HOST="$ORIGIN_HOST" ;;
+  '') # no origin: only here may auth pick the host
+    if gh auth status --active >/dev/null 2>&1; then CODE_HOST=github
+    elif glab auth status >/dev/null 2>&1; then CODE_HOST=gitlab
+    else echo "{COMMAND} needs an authenticated gh (GitHub) or glab (GitLab)."; exit 1; fi ;;
+  *) CODE_HOST=github ;;
+esac
+case "$CODE_HOST" in
+  github) CLI_TOOL=gh; CR_NOUN=PR; LABEL_SEP=":" ;;
+  gitlab) CLI_TOOL=glab; CR_NOUN=MR; LABEL_SEP="::" ;;
+  *) echo "{COMMAND}: unsupported code host '$CODE_HOST' (supported: github, gitlab; see /do:config --code-host)"; exit 1 ;;
+esac
+VCS_HOST="$CODE_HOST"
+TRACKER="$(saved tracker)"; TRACKER="${TRACKER:-$CODE_HOST}"
+[ "$TRACKER" = "$CODE_HOST" ] && TRACKER_CLI="$CLI_TOOL" || TRACKER_CLI=""
 ```
 
-Then confirm the selected CLI can actually read this repo — on Enterprise or
-self-managed hosts an ambient login passes `auth status` while the checkout's host
-stays unreadable:
+Then confirm the CLI can read this repo (ambient logins pass `auth status`):
 
 ```bash
 if [ "$CLI_TOOL" = gh ]; then
   if ! gh auth status --active >/dev/null 2>&1 \
      || { [ -n "$ORIGIN_HOST" ] && ! gh repo view >/dev/null 2>&1; }; then
-    echo "{COMMAND} selected GitHub for origin (${ORIGIN_HOST:-none}) but gh cannot read this repo."
-    echo "If it is a GitHub/GHES repo, run: gh auth login${ORIGIN_HOST:+ --hostname $ORIGIN_HOST}"
-    echo "If it is neither GitHub nor GitLab, {COMMAND} does not support this forge."
+    echo "{COMMAND}: gh cannot read this repo (origin ${ORIGIN_HOST:-none}). GHES: gh auth login${ORIGIN_HOST:+ --hostname $ORIGIN_HOST}; self-managed GitLab: /do:config --code-host gitlab; else unsupported code host."
     exit 1
   fi
-  GH_HOST="$ORIGIN_HOST"  # seed only; gh-host.md adds the fallbacks for `gh api`
-else
-  if ! glab auth status >/dev/null 2>&1 \
+  GH_HOST="$ORIGIN_HOST"  # seed; gh-host.md adds `gh api` fallbacks
+elif ! glab auth status >/dev/null 2>&1 \
      || { [ -n "$ORIGIN_HOST" ] && ! glab repo view >/dev/null 2>&1; }; then
-    echo "{COMMAND} selected GitLab for origin (${ORIGIN_HOST:-none}) but glab cannot read this repo."
-    echo "Run: glab auth login${ORIGIN_HOST:+ --hostname $ORIGIN_HOST}"
-    exit 1
-  fi
+  echo "{COMMAND}: glab cannot read this repo. Run: glab auth login${ORIGIN_HOST:+ --hostname $ORIGIN_HOST}"
+  exit 1
 fi
 ```
 
-Print `VCS host: {VCS_HOST} (via {CLI_TOOL})` and carry `VCS_HOST` / `CLI_TOOL` /
-`LABEL_SEP` (plus `GH_HOST` on GitHub) through every later phase rather than
-re-detecting. Build and match every prefixed label as `<key>${LABEL_SEP}<value>`; a
-hardcoded `:` silently misses GitLab's `::` scoped labels.
+Print `Code host: {CODE_HOST} (via {CLI_TOOL}), tracker: {TRACKER}`; carry these and
+`GH_HOST` through later phases. Say `{CR_NOUN}` in messages; build prefixed labels as
+`<key>${LABEL_SEP}<value>`. **Tracker gate:** issue calls use `TRACKER_CLI`; empty =
+no backend for `{TRACKER}` here = no tracker.

@@ -99,7 +99,9 @@ When `SWARM` is true the swarm flow **replaces Phases 1–7**: it claims and shi
 
 !read lib/vcs-host.md
 
-Carry `CLI_TOOL`/`VCS_HOST` (and `GH_HOST` on GitHub) and `LABEL_SEP` through every later phase — [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md)'s own setup step reuses `CLI_TOOL` rather than re-detecting it, and every prefixed-label match below (the priority sort key, the dispatch-hint filter) is built from `LABEL_SEP`, not a hardcoded `:` — a hardcoded colon would silently stop matching `priority::5` / `model::light` on a GitLab tracker.
+If the partial's tracker gate leaves `TRACKER_CLI` empty, abort naming the tracker — before claiming anything.
+
+Carry `CLI_TOOL`/`VCS_HOST`/`TRACKER` (and `GH_HOST` on GitHub) and `LABEL_SEP` through every later phase — [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md)'s own setup step reuses `CLI_TOOL` rather than re-detecting it, and every prefixed-label match below (the priority sort key, the dispatch-hint filter) is built from `LABEL_SEP`, not a hardcoded `:` — a hardcoded colon would silently stop matching `priority::5` / `model::light` on a GitLab tracker.
 
 **GitLab only — read `lib/next-gitlab.md` now, before the first plain `glab api` call.**
 It carries every GitLab-specific step the rest of `/do:next` needs — the host-verb
