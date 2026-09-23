@@ -175,13 +175,15 @@ release with no prepared release commit.
 
 1. **Determine version bump** from commits since the last git tag:
    - Scan commit messages (subject and body/footer) for conventional commit prefixes:
-     - `breaking:`, any prefix with a `!` (e.g. `feat!:`, `fix!:`, `refactor!:`), or a `BREAKING CHANGE:` footer → **major** bump
-     - `feat:` → **minor** bump
-     - `fix:`, `build:`, `chore:`, `docs:`, `refactor:`, `perf:`, `style:`, `test:`, `ci:` → **patch** bump
+     - `breaking:`, any prefix with a `!` (e.g. `feat!:`, `fix!:`, `refactor!:`, `feat!(scope):`), or a `BREAKING CHANGE:` footer → **major** bump
+     - `feat:` or `feat(scope):` → **minor** bump
+     - `fix:`, `build:`, `chore:`, `docs:`, `refactor:`, `perf:`, `style:`, `test:`, `ci:` (with or without scope) → **patch** bump
+     - `revert:` → **patch** bump
+     - Commits with no recognized prefix or `address review …` commits: classify by the PR title using `gh pr list --state merged --search <sha>`, or default to **patch** bump. (These commits are part of the PR whose merge-commit title classifies the change.)
    - Use the **highest applicable level** across all commits
    - **Default mode**: Use the determined version automatically. **Interactive mode (`--interactive`)**: Present the proposed version to the user for confirmation
 
-2. **Bump version** with the project's native command. Node: `npm version <major|minor|patch> --no-git-tag-version` (updates `package.json` and `package-lock.json`). **Rust** has no stock command — probe in order: `cargo release version <level> --execute` if `cargo-release` is installed (`command -v cargo-release`; the bare form is a dry run), else `cargo set-version --bump <level>` if `cargo-edit` is installed (`command -v cargo-set-version`; its positional argument takes a concrete version, not a level keyword), else edit the `version = "x.y.z"` line in `Cargo.toml` directly and run `cargo update -p <package>` to refresh `Cargo.lock`. **Python**: `poetry version <level>` (Poetry projects), else edit `pyproject.toml` `[project] version = "..."`. **Elixir**: edit `mix.exs`. **Go**: edit a `VERSION` file. Other ecosystems: the equivalent, detected from the project files.
+2. **Bump version** with the project's native command. Node: `npm version <major|minor|patch> --no-git-tag-version` (updates `package.json` and `package-lock.json`). **Rust**: `cargo set-version --bump <level>` or edit `Cargo.toml` + `cargo update -p <package>`. **Python**: `poetry version <level>` (Poetry projects), else edit `pyproject.toml` `[project] version = "..."`. **Elixir**: edit `mix.exs`. **Go**: edit a `VERSION` file. Other ecosystems: the equivalent, detected from the project files.
 
 3. **Finalize changelog / build the release notes**:
 
@@ -203,7 +205,7 @@ release with no prepared release commit.
      - **Group by feature/theme, never a raw `git log` dump**, in the same `## Highlights` + detailed-sections shape: read each commit's subject *and body* for the user-visible effect, drop pure-noise commits (formatting, "fix typo", CI churn) or fold them into an `Internal` group, and write each bullet for someone deciding whether to upgrade — no file paths, no `(#1234)` spam.
      - Destination per the resolved convention: the project's per-release file (`{changelog_dir}/v{new_version}.md`), the top of a rolling `CHANGELOG.md` — **or nowhere on disk** if the project keeps no changelog file, in which case the notes become the release body (and the PR description) and no changelog file is created or staged.
 
-   - **Mind the release-note size limit.** GitHub rejects a release body over **125,000 characters** (HTTP 422), and a multi-hundred-KB body passed to release automation as a command/env input can overflow `ARG_MAX` ("Argument list too long"). Publish the Highlights as the release body and link to the full changelog file at the tag; a pipeline that injects the whole changelog into the release body should feed it from a file (not argv/env) and truncate on a line boundary below the host's limit, appending that link.
+   - **Mind the release-note size limit.** If the body would exceed **125,000 characters**, publish the Highlights as the release body and link to the full changelog file at the tag.
 
 4. **Commit the release**: Stage exactly the files step 2's bump command modified (Node: `package.json` and possibly `package-lock.json`; Rust: `Cargo.toml` and `Cargo.lock`; Python: `pyproject.toml`; etc.) plus the changelog file **if step 3 wrote one** — list files explicitly, never `git add -A`. Commit with message `chore: release v{new_version}`.
 
@@ -212,14 +214,14 @@ release with no prepared release commit.
 <review_gate>
 
 1. Read all commit messages since last release to understand the scope
-2. Run `git diff {target}...{source}` to get the list of changed files
+2. Run `git diff --name-only {target}...{source}` to get the list of changed files
 3. For every changed file:
    a. Read the entire file using the Read tool (not just diff hunks)
    b. Check it against the tiered checklist below (always check Tiers 1+4; check Tiers 2-3 when relevance filters match). Load the checklist now, the first time this step runs:
       !read lib/code-review-checklist.md
    c. For each finding, quote the specific code line and explain why it's a problem
 4. After reviewing all files, verify: does the aggregate change set deliver what the release claims?
-5. Print a review summary table (see do:review for format)
+5. Print a review summary table (`| File | Tier | Finding | Severity | Status |`)
 6. Fix any issues, run tests, verify tests cover the changed code paths, commit and push
 7. Only after printing the review summary may you proceed to "Open the Release PR"
 
