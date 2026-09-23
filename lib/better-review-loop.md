@@ -1,4 +1,4 @@
-## Phase 6: Review Loop (GitHub only)
+## Phase 6: Review Loop
 
 **GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this entire phase AND the Phase 6.3 merge.** There is no default reviewer. Leave every PR open, print the PR URLs and summary (Review column `none — left open`), and proceed to Phase 7.
 
@@ -61,9 +61,14 @@ The selection alone decides which PRs are approved for 6.3; every PR it does not
 
 ### 6.3: Merge
 
-Merge each approved PR, in dependency order, only when its current local HEAD is pushed, the Phase 5d CI gate holds on that HEAD, and 6.2 approved it (the review aggregate, or the interactive selection); then confirm it reports merged. **Never hardcode `--merge`** — a repo that allows only squash or rebase rejects `gh pr merge --merge` every time. Resolve the method once per run, preferring `squash`, then `merge`, then `rebase` from the repo's allowed methods:
-```bash
-MERGE_METHOD="$(gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed \
-  -q '[(select(.squashMergeAllowed) | "squash"), (select(.mergeCommitAllowed) | "merge"), (select(.rebaseMergeAllowed) | "rebase")] | first // empty')"
-```
-If no method resolves, leave that PR open and report why instead of merging. Otherwise `gh pr merge {PR_NUMBER} --{MERGE_METHOD}`. A merge conflict means rebasing the branch onto `{DEFAULT_BRANCH}` and force-pushing with lease; the new HEAD then needs build/tests, the configured review loop, and CI again before merging. Prior approval of a different HEAD is insufficient. A branch-protection refusal is reported for manual merge.
+Merge each approved PR, in dependency order, only when its current local HEAD is pushed, the Phase 5d CI gate holds on that HEAD, and 6.2 approved it (the review aggregate, or the interactive selection); then confirm it reports merged.
+
+- **GitHub:** **Never hardcode `--merge`** — a repo that allows only squash or rebase rejects `gh pr merge --merge` every time. Resolve the method once per run, preferring `squash`, then `merge`, then `rebase` from the repo's allowed methods:
+  ```bash
+  MERGE_METHOD="$(gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed \
+    -q '[(select(.squashMergeAllowed) | "squash"), (select(.mergeCommitAllowed) | "merge"), (select(.rebaseMergeAllowed) | "rebase")] | first // empty')"
+  ```
+  If no method resolves, leave that PR open and report why instead of merging. Otherwise `gh pr merge {PR_NUMBER} --{MERGE_METHOD}`.
+- **GitLab:** `glab mr merge {PR_NUMBER} --yes`. GitLab has no separate merge-method flag; it uses the project's default merge method. Omit `--remove-source-branch` here — Phase 7 cleanup already owns deleting each category's branch once it confirms the merge, and deleting it twice is redundant, not wrong, but the confirmation in Phase 7 is what the branch-owner bookkeeping (`CREATED_CATEGORY_SLUGS`) relies on.
+
+A merge conflict means rebasing the branch onto `{DEFAULT_BRANCH}` and force-pushing with lease; the new HEAD then needs build/tests, the configured review loop, and CI again before merging. Prior approval of a different HEAD is insufficient. A branch-protection refusal is reported for manual merge.
