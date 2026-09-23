@@ -106,7 +106,7 @@ describe('bulk issue-filing spool contracts', () => {
     // the exact truncation the spool path exists to prevent.
     assert.match(partial, /A \*\*block\*\* runs from a line matching/);
     assert.match(partial, /\*\*not a bare `\^## `\*\*/);
-    assert.match(partial, /No line inside a body may begin with `## \[` at\ncolumn 0/);
+    assert.match(partial, /No line inside a body may\nbegin with `<!-- finding ` at column 0/);
   });
 
   it('reads the DRY bodies for the Foundation grouping', () => {
@@ -117,6 +117,18 @@ describe('bulk issue-filing spool contracts', () => {
       assert.match(body, /\*\*Step 3 is the exception\*\*/);
       assert.match(body, /read `\$SPOOL_DIR\/dry\.md`/);
     }
+  });
+
+  it('keeps the spool id and any slug out of the filed issue', () => {
+    // The issue number is the tracker ID. A filer that passed the heading line through
+    // verbatim filed titles like "[security-01] …" — the slug prefix PLAN.md once needed.
+    assert.match(partial, /\*\*Never\ninvent a slug, a `\[category-NN\]` tag, or any other bracketed id\.\*\*/);
+    assert.match(partial, /never reaches the tracker/);
+    assert.match(partial, /takes the `--title` from the block's `title:` line, verbatim/);
+    assert.match(partial, /never with an id or slug/);
+    assert.doesNotMatch(partial, /agent-slug|## \[</);
+    const conventions = fs.readFileSync(path.join(root, 'lib', 'commit-conventions.md'), 'utf8');
+    assert.doesNotMatch(conventions, /\[<slug>\]/);
   });
 
   it('bounds the fan-out at one filer per category and retries rate limits', () => {
