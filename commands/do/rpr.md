@@ -51,7 +51,7 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 
    **While waiting for review**: the persistent monitor ("Poll for review completion") emits CI bucket transitions as events; fix any CI failures before the review completes ("CI failure handling").
 
-3. **Fetch review comments**: Use `gh api graphql` with stdin JSON to get all unresolved review threads. **Do NOT use `$variables` in GraphQL queries — shell expansion consumes `$` signs.** Inline values and pipe JSON via stdin:
+3. **Fetch review comments**: Use `gh api graphql` with stdin JSON to get all unresolved review threads, per `lib/graphql-escaping.md` below. Inline values and pipe JSON via stdin:
    ```bash
    echo '{"query":"{ repository(owner: \"OWNER\", name: \"REPO\") { pullRequest(number: PR_NUM) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }"}' | gh api --hostname GH_HOST graphql --input -
    ```
@@ -60,7 +60,7 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
    **Thread-count tracking**: report the total unresolved threads upfront (e.g., "Found 7 unresolved review threads") and, after resolution, addressed vs. remaining (e.g., "Resolved 5/7 threads, 2 left unaddressed"), so partial sessions don't go unnoticed across context resets.
 
 4. **Spawn parallel sub-agents to address feedback**:
-   - For small PRs (1-3 unresolved threads), handle fixes inline instead of spawning agents
+   - For small PRs (1-3 unresolved threads), handle fixes inline instead of spawning agents — the independent code quality review below still runs, as its own inline pass rather than a spawned agent.
    - For larger PRs, spawn one `Agent` call (general-purpose type) per review thread (or group closely related threads on the same file into one agent)
    - Spawn one additional `Agent` call for an **independent code quality review** of all files changed in the PR (`gh pr diff --name-only`)
    - Launch all Agent calls **in parallel** (multiple tool calls in a single response) and wait for all to return
@@ -69,11 +69,9 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
      - Read the file and understand the context of the feedback
      - Make the requested code changes if they are accurate and warranted
      - **Identify the root cause** of why the issue landed (missing lint rule, missing comment at the canonical site, misleading name, API that invites the mistake, etc.) per `~/.claude/lib/per-finding-root-cause.md` and apply the smallest matching action **in the same change**; defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
-     - Look for further opportunities to DRY up affected code
      - Return what was changed, the thread ID that was addressed, and the root-cause action taken (or "none — one-off")
-   - The code quality reviewer should:
+   - The code quality reviewer is **one additional agent that reviews all changed files for logic defects the threads missed (no style nits)** — a real bug, a missing error-handling path, a broken contract, a security issue — under the same `~/.claude/lib/finding-disposition.md` rules the thread agents use. It should:
      - Read all changed files in the PR
-     - Check for: style violations, missing error handling, dead code, DRY violations, security issues
      - For each issue found, also apply the smallest root-cause action per `~/.claude/lib/per-finding-root-cause.md`
      - Apply fixes directly and return what was changed plus the root-cause actions taken
    - After all agents return, review their changes for conflicts or overlapping edits
@@ -81,10 +79,10 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 5. **Run tests**: Run the project's test suite. Do not proceed if tests fail — fix issues first.
 
 6. **Commit and push**:
-   - Stage all changed files and commit with a descriptive message summarizing what was addressed. Do not include co-author info.
+   - Stage all changed files and commit as `address review (<reviewer>): <summary>`, where `<reviewer>` is the thread author's login (e.g. `copilot`, a human's login), or `self` when the fix came from the inline/quality pass with no single thread author. Do not include co-author info.
    - Push to the branch.
 
-7. **Resolve conversations**: For each addressed thread, resolve it via GraphQL mutation using stdin JSON. Track resolution count against the total from step 3. **Never use `$variables` in the query — inline the thread ID directly**:
+7. **Resolve conversations**: For each addressed thread, resolve it via GraphQL mutation using stdin JSON (same escaping rule as step 3 — inline the thread ID directly). Track resolution count against the total from step 3:
    ```bash
    echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"THREAD_ID_HERE\"}) { thread { id isResolved } } }"}' | gh api --hostname GH_HOST graphql --input -
    ```
@@ -97,14 +95,9 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
    - For a **local CLI** (none of `ollama`, `copilot`, or `@<login>` — the fixed CLIs and `cmd[<invocation>]` alike) or `ollama` entry, "another round" means re-running that entry's loop (local-agent, or Ollama with `{OLLAMA_MODEL}` against the locally checked-out PR branch) — not a Copilot request. Each loop manages its cap (`{MAX_ITERATIONS}`, built-in `3` unless `~max=<n>` moved it) *within* one dispatch, so typically one pass suffices; loop again only if the last round made substantive fixes **and** the entry has budget left.
    - **A per-entry `~max=<n>` is a total budget, not a per-dispatch one — for every reviewer type, including `copilot` and `@<login>`.** An inner loop enforces the cap only within its own dispatch, so handing the same entry a fresh `n` every outer round would let `--review-with ollama~max=1` run unbounded. Track each entry's **rounds spent so far** across this outer loop (sum the iterations its inner loop reported on every dispatch); for an entry whose cap was explicitly configured (`{MAX_EXPLICIT}=true`, `n ≥ 1`), stop re-dispatching once the total reaches `n`, and forward the *remaining* budget (`n - spent`), not `n`, on any subsequent dispatch. An entry on its built-in default cap or on `~max=0` (unlimited) is stopped only by the worthiness evaluation below; so is an uncapped `copilot` entry, which has **no** built-in per-entry cap in rpr.
 
-   **Worthiness evaluation** (applies to whichever reviewer is in play): Classify all threads/findings addressed in the last round and decide:
-   - **Stop and merge** if ALL of the following are true:
-     - Every finding was a trivial nitpick — style preferences, naming suggestions, "consider..." language, minor formatting, or repeats of already-dismissed feedback
-     - No finding touched correctness, security, logic, data integrity, or API contracts
-     - You made fewer than 3 actual code changes in the last round
-   - **Request another review** if any finding was substantive — logic bugs, security issues, missing guards, contract violations, or meaningful refactors
+   **Worthiness evaluation** (applies to whichever reviewer is in play): apply `~/.claude/lib/review-convergence-gate.md` to the last round's landed findings.
 
-   If stopping: print "All remaining findings are nitpicks — skipping further review loop" and proceed to step 9. If looping with Copilot: request a fresh Copilot review per "Requesting GitHub Copilot Code Review", wait on the *existing* persistent monitor (never a second one) for the `copilot review:` event, then repeat from step 3 (the monitor's CI events surface failures meanwhile — see "CI failure handling"). If looping with a local CLI or `ollama`: re-run its loop, then repeat from step 3.
+   If it converges: print "Review loop converged — skipping further rounds" and proceed to step 9. If looping with Copilot: request a fresh Copilot review per "Requesting GitHub Copilot Code Review", wait on the *existing* persistent monitor (never a second one) for the `copilot review:` event, then repeat from step 3 (the monitor's CI events surface failures meanwhile — see "CI failure handling"). If looping with a local CLI or `ollama`: re-run its loop, then repeat from step 3.
 
    **Repeated-comment dedup**: after a new Copilot round, compare each new unresolved thread's body and file/line against the previous round's intentionally-unresolved threads (replied to as non-issues or disagreements). If every new unresolved thread is a repeat of dismissed feedback, treat the review as clean and exit the loop.
 
@@ -157,26 +150,17 @@ The reviewer name MUST include the `[bot]` suffix; without it the API returns a 
 **Use ONE persistent `Monitor` for the entire rpr session, not a fresh background poll per loop iteration.** Start it *once* (right after the first review request, or at session entry if a review is already pending). It tracks the most-recent Copilot review timestamp it has observed and emits exactly one event per *new* review, and transition-detects CI checks in the same loop — one event per CI bucket flip, no separate CI poll.
 
 ```bash
-# Replace OWNER/REPO/PR_NUM/GH_HOST with literals — no shell variables inside the GraphQL query
-# string. GH_HOST is the API host from step 1 (needed because `gh api` ignores the repo remote and
-# defaults to github.com); it goes in `--hostname GH_HOST`, outside the query string.
-# The monitor uses `gh pr checks` with `--json name,bucket` throughout. The `bucket` field
-# groups checks into a small fixed vocabulary: `pass`, `fail`, `cancel`, `skipping`, `pending`
-# — see `gh pr checks --help`. The emitted `ci: <name>: <bucket>` events embed that vocabulary
-# verbatim, so the rpr loop body should switch on those exact values.
+# Replace OWNER/REPO/PR_NUM/GH_HOST with literals (no shell $variables in the GraphQL query
+# string); GH_HOST goes in `--hostname GH_HOST`, outside the query. `gh pr checks --json
+# name,bucket` buckets are: pass, fail, cancel, skipping, pending — emitted verbatim in
+# `ci: <name>: <bucket>` events.
 Monitor:
   description: "PR PR_NUM — Copilot reviews + CI"
   timeout_ms: 1800000   # 30 min; raise if your reviews are routinely slower
   persistent: true
   command: |
-    # Seed the review baseline from the current max submittedAt so the first tick does NOT
-    # replay every historical Copilot review on the PR as if it just landed. (If we left
-    # this at the epoch sentinel, the very first tick would emit `copilot review:` for every
-    # past review, which contradicts the "exactly one event per *new* review" invariant.)
-    # Retry until the GraphQL call AND jq both succeed — a one-shot seed that falls back to
-    # the epoch sentinel on transient failure would silently replay history on tick 1.
-    # `latest` ends up as either the real max timestamp or — only if no Copilot reviews
-    # exist yet on this PR — the documented far-past sentinel.
+    # Seed the review baseline from the current max submittedAt so tick 1 doesn't replay
+    # every historical Copilot review as if it just landed. Retry until GraphQL + jq succeed.
     latest=""
     latest_seeded=""
     while [ -z "$latest_seeded" ]; do
@@ -192,12 +176,8 @@ Monitor:
         sleep 5
       fi
     done
-    # Seed CI baseline once so the first tick doesn't fire a spurious burst of "ci:" events
-    # for every check that was already in a terminal bucket when the monitor started. If the
-    # first `gh pr checks` call fails (network blip) OR jq itself fails (malformed JSON,
-    # missing jq) we'd be left with an empty ci_prev and the next tick would emit a burst
-    # for every existing check. Check the two exit statuses separately so we retry on a
-    # genuine failure but accept a legitimately-empty "no checks yet" snapshot.
+    # Seed the CI baseline once too, so tick 1 doesn't fire a spurious burst for every check
+    # already in a terminal bucket when the monitor started.
     ci_prev=""
     ci_prev_seeded=""
     while [ -z "$ci_prev_seeded" ]; do
@@ -206,10 +186,6 @@ Monitor:
         sleep 5
         continue
       fi
-      # Capture jq's exit status BEFORE piping to sort. `if cur=$(jq ... | sort)` would
-      # only capture sort's exit (last command in the pipeline) without `set -o pipefail`,
-      # masking jq failures and letting an empty cur overwrite the baseline. Two-step
-      # capture is explicit and portable.
       if ci_raw=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s0"); then
         ci_prev=$(printf '%s\n' "$ci_raw" | sort)
         ci_prev_seeded=1
@@ -218,21 +194,6 @@ Monitor:
       fi
     done
     while true; do
-      # New Copilot reviews since `latest`? Iterate in ascending order so that
-      # if multiple reviews land between ticks each one emits its own event,
-      # and `latest` advances to the most recent (max) — not the earliest.
-      # NOTE: the GraphQL `author.login` field returns `copilot-pull-request-reviewer`
-      # *without* a `[bot]` suffix — even though `__typename: Bot`. The `[bot]` form
-      # is only required when *requesting* a review via the REST API (see step 1 above).
-      # `last: 50` leaves comfortable headroom for fast multi-round sessions where
-      # Copilot reviews interleave with reviews from other reviewers. The GraphQL
-      # `reviews` connection has no native author filter, so the select() runs *after*
-      # the last-N window — meaning the practical Copilot-event headroom is "however
-      # many of the last 50 reviews happen to be from Copilot". At 25 s per tick and 50
-      # nodes of trailing history, dropping a Copilot review off the back would require
-      # >50 reviews in 25 s, which is far outside normal multi-round behaviour. If a
-      # workflow ever pushes against that limit, raise the cap further; the response is
-      # tiny so 100 or 200 is also viable.
       new_list=$(echo "{\"query\":\"{ repository(owner: \\\"OWNER\\\", name: \\\"REPO\\\") { pullRequest(number: PR_NUM) { reviews(last: 50) { nodes { author { login } submittedAt } } } } }\"}" \
         | gh api --hostname GH_HOST graphql --input - 2>/dev/null \
         | jq -r --arg t "$latest" '[.data.repository.pullRequest.reviews.nodes[]? | select(.author.login=="copilot-pull-request-reviewer") | select(.submittedAt > $t) | .submittedAt] | sort | .[]')
@@ -242,42 +203,15 @@ Monitor:
           latest="$ts"
         done <<<"$new_list"
       fi
-      # CI bucket transitions on the same tick.
-      # Event semantics: an event fires when the bucket *string* for a check changes
-      # after filtering out `pending`. So `fail → cancel` (or any terminal → different
-      # terminal) DOES fire. But `fail → pending → fail` (same terminal bucket either
-      # side of a re-run) does NOT — the comm diff sees no change because the pending
-      # tick was filtered out. If the rpr loop needs to learn that a re-run finished
-      # but landed on the same bucket, watch `gh run list` for new attempts on the
-      # failed check rather than relying on a `ci:` event.
-      # `gh pr checks` exits non-zero (code 8) when any check is failing — which is exactly
-      # the case we want to detect. We must NOT use `|| echo '[]'` here: when gh exits 8,
-      # command substitution would concatenate gh's real JSON output with the literal `[]`,
-      # producing malformed input that breaks jq. Capture the output unconditionally; only
-      # substitute `[]` when the captured output is empty (transport failure, not check
-      # failure). Then check jq's exit status separately before updating `ci_prev` — if jq
-      # fails we keep the previous baseline so the next tick doesn't emit a spurious burst
-      # for every check still in a terminal bucket.
-      # Treat an empty `s` as a transient transport failure (gh exit / network blip) and
-      # SKIP the ci_prev update entirely — coercing empty to '[]' would parse cleanly,
-      # produce an empty cur, and overwrite the baseline. The next successful tick would
-      # then surface every existing check as "new" and emit a spurious burst, defeating
-      # the whole seed-loop purpose.
+      # `gh pr checks` exits non-zero when any check is failing, so capture output
+      # unconditionally rather than `|| echo '[]'` (which would concatenate onto it).
       s=$(gh pr checks PR_NUM --json name,bucket 2>/dev/null)
       if [ -z "$s" ]; then
         sleep 25
         continue
       fi
-      # Pipefail-avoidance pattern: capture jq's output and exit status BEFORE piping to
-      # sort, so a jq failure preserves the baseline rather than overwriting it with the
-      # empty string that sort would happily exit 0 on.
       if cur_raw=$(jq -r '.[] | select(.bucket!="pending") | "\(.name): \(.bucket)"' <<<"$s"); then
         cur=$(printf '%s\n' "$cur_raw" | sort)
-        # Use `printf '%s'` (no trailing newline) so an empty ci_prev / cur feeds zero
-        # lines to comm rather than one blank line. Without this, `echo "$x"` always
-        # emits at least a newline, so comm -13 would surface that blank line as "new"
-        # on tick 2, producing a spurious `ci: ` event (just the prefix) whenever a
-        # baseline transitions empty → empty or empty → populated.
         comm -13 <(printf '%s' "$ci_prev" | grep -v '^$' || true) <(printf '%s' "$cur" | grep -v '^$' || true) | sed 's/^/ci: /'
         ci_prev=$cur
       fi
@@ -287,7 +221,7 @@ Monitor:
 
 When you push a fix and want another review, just *request* it (the API call above) and keep working — the existing monitor emits `copilot review: <timestamp>` when it lands. **Do not start a second monitor.** Stop it only when the rpr loop is done (`TaskStop` with the monitor's id), or let it time out.
 
-**Poll cadence + "stuck" threshold**: the monitor's tick is a fixed 25 s (covers the typical 30–90 s review latency). The **stuck threshold** is dynamic: if a review hasn't landed after **3× the historical average latency for this PR** (minimum 90 s, maximum 5 min), surface it via a one-shot status check and treat it as stuck — that decision lives in the rpr loop body, not in the monitor's sleep.
+**Poll cadence + "stuck" threshold**: the monitor's tick is a fixed 25 s (covers the typical 30–90 s review latency). The **stuck threshold** is a fixed 10 minutes: if a review hasn't landed by then, surface it via a one-shot status check and treat it as stuck — that decision lives in the rpr loop body, not in the monitor's sleep.
 
 The review is "complete" when a new `copilot review:` event fires. If no event arrives by the deadline you set: **Default mode**: auto-skip and continue. **Interactive mode (`--interactive`)**: ask the user whether to continue waiting, re-request, or skip.
 
@@ -308,8 +242,6 @@ The persistent monitor emits one event per CI check bucket transition — `ci: l
 
 ## Notes
 
-- Only resolve threads where you've actually addressed the feedback
 - If feedback is unclear or incorrect, leave a reply comment instead of resolving
-- Always run tests before committing — never push code with known failures
 - **Never dismiss findings as "out of scope" or "not modified in this PR."** If a review identifies a real issue, fix it — regardless of whether the current PR touched that code.
 - **Default to fixing findings in this PR; defer to PLAN.md only when a fix is genuinely large/architectural or too risky to land here.** See the "Finding Disposition" guidance loaded above for the fix-now / reply / defer decision.
