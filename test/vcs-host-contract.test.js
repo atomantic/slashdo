@@ -25,15 +25,14 @@ const read = (...segments) => fs.readFileSync(path.join(root, ...segments), 'utf
 const partial = read('lib', 'vcs-host.md');
 
 // Commands that legitimately carry their own copy of the selection. /do:pr runs it
-// as a pre-flight the user sees before any claim, and /do:plan-task needs no
-// GH_HOST at all; both predate the partial. /do:next used to as well, but issue
-// #293 moved its pre-flight onto `!read lib/vcs-host.md` (see "GitLab-only blocks
-// and a drifted copy of host detection load on every GitHub run"), so it now reads
-// the partial like everything else. Pinned so a NEW command cannot join this set by
-// re-typing the logic instead of reading the file.
+// as a pre-flight the user sees before any claim, and predates the partial. /do:next
+// and /do:plan-task used to as well: /do:next moved onto `!read lib/vcs-host.md` in
+// issue #293 (see "GitLab-only blocks and a drifted copy of host detection load on
+// every GitHub run"), and /do:plan-task's hand-copy (with no `repo view` reachability
+// probe) was retired the same way in issue #356. Pinned so a NEW command cannot join
+// this set by re-typing the logic instead of reading the file.
 const INLINE_IMPLEMENTERS = new Set([
   'commands/do/pr.md',
-  'commands/do/plan-task.md',
 ]);
 
 const REFERENCES_PARTIAL =
