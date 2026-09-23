@@ -51,6 +51,10 @@ describe('review lens files', () => {
     assert.match(body, /\[BLOCKER\|IMPROVEMENT\|UNCERTAIN\]/);
   });
 
+  it('assigns accessibility to the runtime lens', () => {
+    assert.match(read('lib/review-surface-scan.md').match(/^## Mandate\n(.*)$/m)[1], /inaccessible by keyboard or assistive technology/);
+  });
+
   it('does not point lens selection at a checklist /do:review never loads', () => {
     assert.doesNotMatch(read('lib/review-agent-selection.md'), /review checklist/);
     assert.doesNotMatch(read('lib/post-review-doc-recommendations.md'), /review checklists?/);
