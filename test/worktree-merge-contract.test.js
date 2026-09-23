@@ -246,4 +246,11 @@ describe('single-issue /do:next Phase 7 cleanup', () => {
     // Phase 2 already published.
     assert.match(body, /has no PR to read back: skip this gate entirely/);
   });
+
+  it('keeps cleanup ordering concise while preserving the executable gate', () => {
+    const body = readCommand('next.md');
+    assert.match(body, /Each step is `&&`-gated and the remote delete runs last\./);
+    assert.doesNotMatch(body, /Order matters: remove the worktree/);
+    assert.doesNotMatch(body, /If the gate returns \*\*merged\*\*, continue to Phase 7/);
+  });
 });

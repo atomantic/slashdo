@@ -47,7 +47,11 @@ Collect targets into an ordered list `TARGETS`, **in this order**: **(1) expand*
 - **`--plan`** — before writing code, enter an **interactive plan-mode session** (Phase 3.5): present a written plan, surface open questions, get explicit approval. Runs *after* the worktree is claimed. Rejection routes to Phase 7 cleanup like a Phase 3 skip. **Ignored in `--swarm` mode when more than one issue actually runs** (state the skip); honored when swarm degenerates to the single-issue flow.
 - **`--review-with` / `--review-iterations` / `--review-mode` / `--review-stop-on-findings` / `--review-stop-on-clean` / `--reviewer-applies`** — **passed through to `/do:pr`** in Phase 6, which owns the review/ship machinery. (`--review-mode series|parallel` selects how `/do:pr`'s multi-reviewer loop dispatches reviewers; series is the default.) Same grammar as every other slashdo command (see `/do:pr`). With neither `--review-with` nor `--no-review`, Phase 6 still decides whether the diff warrants a quality pass (`/simplify` or equivalent) — it never decides the external reviewer: `/do:pr` applies its own saved `--review-with` default, if any, and no reviewer is invented here.
 - **`--no-review`** opts out of both the quality pass and the external pass. `/do:pr` has no `--no-review` flag of its own, so Phase 6 **translates it** rather than forwarding it verbatim: `--no-review` becomes `/do:pr --no-merge --review-with none`, which forces `REVIEW_AGENTS=[]` and skips any saved `review-with` default.
-- **`--merge`** / **`--no-merge`** / **`--merge=<method>`** / **`--merge-method <method>`** — control **`/do:next`'s own merge**, not `/do:pr`'s: Phase 6 always ships through `/do:pr --no-merge` (review/ship pipeline only — see below), then `/do:next` itself merges the resulting PR once its own gate passes (single-issue Phase 6 / swarm Phase C). `--merge` (the **default**, accepted explicitly too) keeps that existing behavior — resolves `MERGE_ENABLED=true`. `--no-merge` resolves `MERGE_ENABLED=false`: **stop right after Phase 6 opens the PR** — report its URL, leave the worktree and (in issues mode) the assignee + `in-progress` claim in place, and **skip Phase 7 cleanup** — reusing the same stop path Phase 6 already uses for a `dirty`/`inconclusive` review result. If both `--merge` and `--no-merge` appear (directly, or via `--merge=<method>` standing in for `--merge`), abort with `--merge and --no-merge cannot be combined` (same wording as `/do:pr`). `--merge=<method>` sets `MERGE_ENABLED=true` **and** `MERGE_METHOD=<method>`; `--merge-method <method>` sets `MERGE_METHOD` alone, without implying `--merge`. `<method>` ∈ `squash`/`rebase`/`merge` (GitHub only — `glab mr merge` takes no method flag); reject an unrecognized value with `--merge=<method> must be one of squash, rebase, merge (got: {value}).` / `--merge-method must be one of squash, rebase, merge (got: {value}).`, and a conflicting pair (`--merge=squash --merge-method rebase`) with `--merge=<method> and --merge-method specify conflicting methods ({first} vs {second})` (identical methods are fine). With neither `--merge` nor `--no-merge` typed, resolve `MERGE_ENABLED` from the saved `merge` default, else the **built-in `true`** — `/do:next`'s built-in default is the opposite of `/do:pr`'s `false`, because `/do:next` has always merged once its own gate passed; `--no-merge` is a new opt-out, not a change to that default. `MERGE_METHOD` resolves the same way regardless of where it came from — see step 1 of the merge gate ([lib/merge-gate.md](../../lib/merge-gate.md)). **Under `--swarm`, only the enable/disable half is ignored** (state the skip): the orchestrator always attempts its own serialized merge in Phase C for every eligible result, so `--merge`/`--no-merge`/`MERGE_ENABLED` don't apply there, and every worker still ships via `/do:pr --no-merge` regardless of these flags. `--merge=<method>`/`--merge-method` still resolve `MERGE_METHOD` for that Phase C merge, through the same merge gate.
+The **`--merge`** / **`--no-merge`** / **`--merge=<method>`** / **`--merge-method <method>`** flags control **`/do:next`'s own merge**, not `/do:pr`'s. Phase 6 always ships through `/do:pr --no-merge`, then `/do:next` applies its own merge gate.
+- **Enable:** `--merge` (the default) resolves `MERGE_ENABLED=true`. If both `--merge` and `--no-merge` appear, directly or through `--merge=<method>`, abort with `--merge and --no-merge cannot be combined`.
+- **Disable:** `--no-merge` resolves `MERGE_ENABLED=false`: stop right after Phase 6 opens the PR, leave the worktree and issues-mode assignee + `in-progress` claim in place, skip Phase 7, and reuse the `dirty`/`inconclusive` stop path. With neither flag typed, resolve `MERGE_ENABLED` from the saved `merge` default, else the **built-in `true`**.
+- **Method:** `--merge=<method>` also enables merging and sets `MERGE_METHOD=<method>`; `--merge-method <method>` sets only `MERGE_METHOD`. `<method>` ∈ `squash`/`rebase`/`merge` (GitHub only); reject other values with `--merge=<method> must be one of squash, rebase, merge (got: {value}).` / `--merge-method must be one of squash, rebase, merge (got: {value}).`, and conflicting pairs with `--merge=<method> and --merge-method specify conflicting methods ({first} vs {second})` (identical methods are fine). `MERGE_METHOD` resolves the same way regardless of origin through [lib/merge-gate.md](../../lib/merge-gate.md) step 1.
+- **Swarm:** ignore enable/disable; the orchestrator always attempts its own serialized merge in Phase C for every eligible result. `--merge=<method>` / `--merge-method` still resolve `MERGE_METHOD` for that Phase C merge.
 - **Any other `--flag`** not defined above aborts immediately, before any claim is made: `Unknown /do:next option: {flag}. Supported: --issues, --no-issues, --issues-label, --model, --effort, --self, --no-self, --collaborators, --no-collaborators, --trusted-authors, --swarm, --plan, --review-with, --review-iterations, --review-mode, --review-stop-on-findings, --review-stop-on-clean, --reviewer-applies, --no-review, --merge, --no-merge, --merge-method.`
 
 ## Conventions
@@ -256,9 +260,7 @@ The worktree is a **sibling directory** (`../next-<slug>`) on branch `next/<slug
 
 ```bash
 SLUG="<picked-slug>" && \
-# Fail-closed pre-check: if origin ALREADY has this claim branch, a sibling machine
-# claimed it between Phase 1's scan and now — abort and re-pick (don't build a worktree
-# you'll just discard). This catches the common cross-machine collision cheaply.
+# Abort if origin already has the claim branch.
 if git ls-remote --exit-code --heads origin "next/${SLUG}" >/dev/null 2>&1; then
   echo "next/${SLUG} already on origin — another machine claimed it; re-run /do:next to pick the next item."; exit 1
 fi && \
@@ -270,80 +272,48 @@ git fetch origin "${DEFAULT_BRANCH}" && \
 git worktree add -b "next/${SLUG}" "${WORKTREE}" "origin/${DEFAULT_BRANCH}" && \
 cd "${WORKTREE}" && \
 pwd && \
-# Publish the (empty) claim branch IMMEDIATELY so the claim is remote-visible to
-# other clones/machines right now — not only after /do:pr pushes in Phase 6. This
-# is the PLAN.md-mode analog of the issue-mode assignee marker: Phase 1's in-flight
-# scan on another machine fetches remote branches, so an early push is what stops two
-# machines from claiming the same PLAN line. Non-fatal: if the push fails (no write
-# access yet), warn and continue — the claim degrades to LOCAL-only (still protects
-# parallel claims on THIS machine, just not across machines).
+# Publish the empty claim branch now; a push failure leaves a local-only claim.
 git push -u origin "next/${SLUG}" || echo "WARN: could not publish next/${SLUG} — claim is local-only (no cross-machine protection until /do:pr pushes)."
 ```
 
 **Verify `pwd` is the worktree path**, not the main repo. If it printed the main repo path, the worktree creation or `cd` failed — STOP, report the error, do not proceed. **Re-anchor every later Bash call** with `cd "${WORKTREE}"` or absolute paths. **Re-export `WORKTREE` and `DEFAULT_BRANCH` at the top of each subsequent Bash snippet**, per the default-branch one-liner's rule (Conventions) — otherwise they'd expand empty in Phases 5/6/7.
-
-> **Claim exclusivity is best-effort by design — not a distributed lock.** The `ls-remote` pre-check + immediate push narrow the cross-machine race to the sub-second window in which two machines both pass the pre-check before either's push lands (a plain `git push` of an identical-commit branch succeeds for both). The load-bearing protection is the in-flight branch/PR scan; the markers just shrink the window. True ref-CAS locking is deliberately out of scope; a sub-second race surfaces at PR time (two PRs for one slug) and you close one.
 
 ### Phase 2 — mark the issue in progress (issues mode only)
 
 Immediately after the worktree is verified, claim the issue **on the host** so a `/do:next --issues` on any other machine sees it as taken (Phase 1's assignee check is the reader). Do this before writing code:
 
 ```bash
-ISSUE_NUM="<picked-issue-number>"; SLUG="issue-${ISSUE_NUM}"; WORKTREE="../next-${SLUG}"   # re-declare — shell vars don't cross snippets
+ISSUE_NUM="<picked-issue-number>"; SLUG="issue-${ISSUE_NUM}"; WORKTREE="../next-${SLUG}"
 
-# Load-bearing marker — if the assign itself FAILS (no triage/write access, API
-# error), you have NOT claimed the issue. Abort immediately; do NOT fall through to
-# the read-back, which would see zero assignees, take the `else` path, and proceed
-# without a marker (letting a second machine work the same issue).
+# Assignment is the claim marker; fail before the read-back if it fails.
 if [ "$CLI_TOOL" = gh ]; then
   ME="$(gh api --hostname "$GH_HOST" user -q .login)"
   gh issue edit "$ISSUE_NUM" --add-assignee @me
 else
-  # GitLab — two-step capture per the glab api capture rule (lib/next-gitlab.md):
-  # resolve the login, guard it non-empty, then use `+` to ADD one assignee
-  # without touching whatever's already on the issue (a bare `--assignee "$ME"`
-  # would REPLACE the list and defeat the read-back below).
+  # GitLab: add without replacing existing assignees.
   ME_JSON="$(glab api user)" && ME="$(printf '%s' "$ME_JSON" | jq -er .username)" && [ -n "$ME" ] && glab issue update "$ISSUE_NUM" --assignee "+$ME"
 fi || {
   echo "Could not claim issue #$ISSUE_NUM (missing write access?) — aborting."
-  # Phase 2 already created and (best-effort) pushed next/issue-<num>. Retract the
-  # REMOTE claim here (works from the worktree); then STOP and run Phase 7 cleanup from
-  # the MAIN repo to drop the local worktree + branch. (Do NOT try to remove the worktree
-  # from inside it — `cd ..` here lands in the worktree's parent, not the main repo.)
   git push origin --delete "next/${SLUG}" 2>/dev/null || true
-  exit 1   # then: cd <main repo>, git worktree remove --force "$WORKTREE", git branch -D "next/${SLUG}"
+  exit 1
 }
 
-# Confirm exclusivity: adding an assignee is NOT a compare-and-swap — both GitHub
-# issues and GitLab issues allow MULTIPLE assignees, so a sibling machine that
-# picked the same issue in the race window can also add itself and keep going.
-# Re-read the assignees; if anyone OTHER than you is now assigned, a sibling won
-# the race — yield: release your marker and stop (re-run Phase 1 to pick the next issue).
+# If another assignee won, release our marker and stop.
 if [ "$CLI_TOOL" = gh ]; then
   ASSIGNEES="$(gh issue view "$ISSUE_NUM" --json assignees -q '[.assignees[].login] | join(",")')"
 else
   ASSIGNEES="$(glab issue view "$ISSUE_NUM" --output json --jq '[.assignees[].username] | join(",")')"
 fi
 if printf '%s' "$ASSIGNEES" | tr ',' '\n' | grep -qvxF "$ME" ; then
-  # A sibling won the race. Release the marker and STOP — do NOT add the label,
-  # do NOT continue to Phase 3+. Run Phase 7 cleanup (remove the worktree + branch)
-  # and re-run Phase 1 to pick the NEXT issue. This is a hard exit from the claim.
   echo "Issue #$ISSUE_NUM already claimed by: $ASSIGNEES — yielding."
   if [ "$CLI_TOOL" = gh ]; then
     gh issue edit "$ISSUE_NUM" --remove-assignee @me 2>/dev/null || true
   else
     glab issue update "$ISSUE_NUM" --assignee "-$ME" 2>/dev/null || true
   fi
-  # Retract the REMOTE claim branch here (works from the worktree) so the yielded issue
-  # doesn't read as in-flight to the next picker; the local worktree + branch are dropped
-  # by Phase 7 cleanup run from the MAIN repo (not from inside the worktree).
   git push origin --delete "next/${SLUG}" 2>/dev/null || true
-  exit 1   # HARD STOP — do not fall through to the label step or Phase 3. Then run Phase 7
-           # cleanup from the main repo (cd out, git worktree remove --force, git branch -D)
-           # and re-run /do:next to pick the next issue.
+  exit 1
 else
-  # Claim is exclusive (only you assigned) — mark in-progress for human visibility
-  # and proceed to Phase 3.
   if [ "$CLI_TOOL" = gh ]; then
     gh label create in-progress --color FFA500 --description "Claimed and being worked" 2>/dev/null || true
     gh issue edit "$ISSUE_NUM" --add-label in-progress 2>/dev/null || true
@@ -353,10 +323,6 @@ else
   fi
 fi
 ```
-
-**The race-detected branch is a hard stop, not a warning.** When the read-back shows another assignee, you have NOT claimed the issue — release your assignee, run Phase 7 cleanup to remove the worktree + branch, and re-enter Phase 1 for the next eligible issue. Only the `else` branch (you are the sole assignee) proceeds to Phase 3.
-
-The re-read narrows the race to the window between the assignee add and the read-back — not a true distributed lock (two reads can interleave so both yield, or in a tie both proceed), but close to compare-and-swap. The assignee is the marker; the label is convenience. **If you must stop after this, run `release_marker`** (Conventions) — so a half-claimed issue isn't stranded as "taken."
 
 ## Phase 3: Verify still valid
 
@@ -490,8 +456,6 @@ cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit 
 
 !read lib/merge-gate.md
 
-If the gate returns **merged**, continue to Phase 7. If it returns **queued** or **left open** (no method resolved, a required check really failed, or the read-back is not `MERGED`/`merged`), leave the PR open, report why, and skip Phase 7, as for `dirty`.
-
 ## Phase 7: Clean up
 
 **If this run opened and merged a PR, confirm it actually merged before touching
@@ -504,13 +468,7 @@ From the **main repo** (not the worktree), as a single Bash invocation, re-subst
 ```bash
 SLUG="<picked-slug>" && \
 WORKTREE="../next-${SLUG}" && \
-# Recompute the default branch (Conventions) and sync THAT branch's local ref
-# explicitly — not "whatever HEAD happens to be" — WITHOUT switching the main
-# repo's checkout. /do:next may have been launched from a feature branch in the
-# main repo, and this phase never touches that checkout (see the Phase 2 box): if
-# the default branch is already checked out, fast-forward it in place; otherwise
-# update its ref via a plain fetch refspec, leaving whatever branch the user had
-# open untouched.
+# Sync the default branch ref without switching the main repo's checkout.
 DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)" && \
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(git remote show origin | sed -n 's/.*HEAD branch: //p')}" && \
 git worktree remove "${WORKTREE}" && \
@@ -524,9 +482,7 @@ else
 fi && \
 git branch -d "next/${SLUG}" && \
 if ! git push origin --delete "next/${SLUG}"; then
-  # A branch that is already gone is success; anything else is not — a surviving
-  # claim branch keeps reading as in-flight to every other machine. rc 2 is
-  # "no such ref"; every other rc is a transport/auth failure that proves nothing.
+  # An already-gone branch is success; every other failure blocks cleanup.
   git ls-remote --exit-code --heads origin "next/${SLUG}" >/dev/null 2>&1; RC=$?
   if [ "$RC" -eq 2 ]; then
     echo "note: remote branch next/${SLUG} was already gone"
@@ -536,7 +492,7 @@ if ! git push origin --delete "next/${SLUG}"; then
 fi
 ```
 
-(Order matters: remove the worktree, **sync the default branch's ref without switching the checkout, delete the local claim branch, and only THEN touch the remote** — every step is `&&`-gated, so a failure never removes the claim branch while the default branch ref is stale, and **the remote-delete is the LAST link**, so a failed/partial cleanup that may still hold unmerged work never retracts the remote claim. This phase never runs `git checkout` in the main repo: the sync step above either fast-forwards `${DEFAULT_BRANCH}` in place when it's already the checked-out branch, or updates its ref via a plain `git fetch` refspec when it isn't — leaving whatever branch the user had open untouched, and leaving a non-fast-forwardable ref alone (noted, not forced) rather than failing the whole cleanup. `git branch -d` needs none of this to be correct: it checks the claim branch against its own tracked upstream, not against `${DEFAULT_BRANCH}`, so a stale or skipped sync never blocks the delete. Since the merge did **not** pass `--delete-branch`, this trailing delete is the real remote deletion, and a failure must be **distinguished, not swallowed**: a blanket `|| true` would report a clean sweep while the claim branch survives on the remote, where Phase 1's in-flight scan reads the item as claimed on every machine, forever. The `git ls-remote` fallback treats an already-gone branch (GitLab's `--remove-source-branch`, or auto-deleted merged heads) as success and anything else as a failure of the chain.)
+Each step is `&&`-gated and the remote delete runs last.
 
 **Abandoned a claim (Phase 2 abort/yield, Phase 3 skip, or Phase 3.5 reject — no PR, work discarded)?** The branch is unmerged, so `git branch -d` won't remove it. Retract the claim explicitly (force-delete local, delete remote) and **verify the remote retract landed** — Phase 2 published this branch, and a silently failed delete leaves a phantom claim that Phase 1's in-flight scan honours forever, with no local artifact to hint at it. From the main repo:
 
