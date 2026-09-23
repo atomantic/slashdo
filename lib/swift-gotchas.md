@@ -31,7 +31,6 @@
 | 8 | TestFlight upload validation gotchas | CI workflow uploads to TestFlight via `apple-actions/upload-testflight-build` or `xcrun altool` |
 | 9 | xcodebuild App Group provisioning auth failure | App Groups, Push, or extension targets in `.entitlements` |
 | 10 | iOS first-IAP submission rejection | `import StoreKit` AND `Product.products(for:)` calls |
-| 11 | `.foregroundStyle(.accentColor)` compile failure | Any SwiftUI code using `.foregroundStyle(.accentColor)` |
 | 12 | Keychain test failures in simulator | `SecItemAdd` / `SecItemCopyMatching` used for symmetric keys |
 
 ---
@@ -596,25 +595,6 @@ if let price {
 
 ---
 
-## 11. `.foregroundStyle(.accentColor)` compile failure
-
-### Trigger
-SwiftUI compile error on `.foregroundStyle(.accentColor)`.
-
-### Cause
-`ShapeStyle` has no `.accentColor` member.
-
-### Fix
-```swift
-// WRONG
-.foregroundStyle(.accentColor)
-
-// CORRECT
-.foregroundStyle(Color.accentColor)
-```
-
----
-
 ## 12. Keychain test failures in simulator (CryptoKit)
 
 ### Trigger
@@ -622,37 +602,48 @@ SwiftUI compile error on `.foregroundStyle(.accentColor)`.
 - `SecItemAdd` and `SecItemCopyMatching` silently return non-success in test environment
 - Encrypt-then-decrypt roundtrip test fails because a new key is generated on each `getOrCreateKey()` call
 
-### Fix
-Add an in-memory key cache as fallback so tests don't depend on Keychain persistence:
-```swift
-private static var cachedKey: SymmetricKey?
+### Root cause
+This is a test-environment problem, not a production one: the test target is missing the Keychain-access entitlement, or the test runs with no host app under `CODE_SIGNING_ALLOWED=NO` (Keychain APIs require a signed, entitled process). Do NOT "fix" this by adding a silent in-memory fallback that production code can also take — anything encrypted under that in-memory key becomes unreadable the moment the app relaunches and hits the real Keychain (permanent data loss).
 
-private static func getOrCreateKey() -> SymmetricKey? {
-    if let existingKey = loadKeyFromKeychain() {
-        cachedKey = existingKey
-        return existingKey
+### Fix
+Put Keychain access behind a protocol and inject a fake store in tests, so the roundtrip test never touches the real Keychain:
+```swift
+protocol KeyStore {
+    func loadKey() -> SymmetricKey?
+    func saveKey(_ key: SymmetricKey)
+}
+
+struct KeychainKeyStore: KeyStore { /* real SecItemAdd/SecItemCopyMatching */ }
+
+final class InMemoryKeyStore: KeyStore {
+    private var key: SymmetricKey?
+    func loadKey() -> SymmetricKey? { key }
+    func saveKey(_ key: SymmetricKey) { self.key = key }
+}
+
+struct Encryptor {
+    let store: KeyStore
+    func getOrCreateKey() -> SymmetricKey {
+        if let existing = store.loadKey() { return existing }
+        let newKey = SymmetricKey(size: .bits256)
+        store.saveKey(newKey)
+        return newKey
     }
-    if let cached = cachedKey {
-        return cached
-    }
-    let newKey = SymmetricKey(size: .bits256)
-    cachedKey = newKey
-    saveKeyToKeychain(newKey)
-    return newKey
 }
 ```
+Production always uses `KeychainKeyStore`; tests inject `InMemoryKeyStore()`. If the real Keychain must be exercised in tests, fix the test target's entitlements (add the Keychain Sharing capability, or run against a host app) instead of working around the failure.
 
 ---
 
 ## How audit agents should use this catalogue
 
-1. In Phase 0, the orchestrator detects project characteristics (CloudKit, SwiftData, iCloud, xcstrings, StoreKit, XcodeGen, CI release path) and lists the relevant entries from this catalogue's quick index for each downstream audit agent.
-2. Audit agents grep / read for the **TRIGGER** signals in each relevant entry. When a trigger matches, the agent files a finding referencing the entry number and severity.
-3. Remediation agents receive this catalogue as part of their context. When fixing an issue that matches an entry, they apply the FIX **as written** rather than improvising. The fixes here have all shipped in real projects.
-4. Test enhancement (Phase 4c) uses the test patterns embedded in entries 1, 2, 6, and 10 (CloudKit smoke test, `testModelContainerSchemaIsValid`, localization round-trip, IAP product-loading test) when the relevant project characteristics are present.
+1. In Phase 0e, the orchestrator reads this catalogue once — only when the project shows at least one candidate signal (CloudKit, SwiftData, iCloud, xcstrings, StoreKit, XcodeGen, a TestFlight-uploading CI workflow) — and matches it against the Quick index above to record `GOTCHA_ENTRIES_IN_SCOPE`, routed to the audit agent(s) that own each category.
+2. Audit agents receive only the excerpted entries for their category (never the whole file) and check the **TRIGGER** signals against the codebase. When a trigger matches, the agent files a finding citing the entry number and severity.
+3. Remediation agents, when fixing a finding that cites an entry number, read that entry and apply the FIX **as written** rather than improvising. The fixes here have all shipped in real projects.
+4. Phase 4c (test enhancement) does not consume this catalogue directly — it triages Agent 7's `[VACUOUS]`/`[WEAK]`/`[MISSING]` findings independently. Fix sections that include their own test/verification code (entries 1, 2, 6, 10) are applied by the Phase 3 remediation agent as part of that entry's fix, not by Phase 4c.
 
 Severity guidance:
 - **CRITICAL**: app-launch crashes (#1, #2), App Store rejection (#10 missing Restore), data loss (#5)
-- **HIGH**: silent data corruption (#4, #6.6), build/release pipeline failures (#7.1, #7.3, #8.1), compile failures (#11)
+- **HIGH**: silent data corruption (#4, #6.6), build/release pipeline failures (#7.1, #7.3, #8.1)
 - **MEDIUM**: UX bugs that ship to users (#6.1–6.5, #6.7), warnings that may become fatal (#8.2)
 - **LOW**: code clarity / convention drift
