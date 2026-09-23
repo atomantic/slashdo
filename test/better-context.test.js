@@ -30,10 +30,10 @@ describe('better progressive context', () => {
     // every `!read` it reaches, recursively, except those whose gate prose
     // directly above opens with "Only when/with/for/on …".
     //
-    // #325's target is 60 KB. Since tracker filing became unconditional (#375),
-    // the shared tracker partials (plan-issue-filing/-setup) sit on this path, so
-    // the budget holds today's size until those shrink — lower it, never raise it.
-    const BUDGET = 84000;
+    // #325's 60 KB target. The shared partials on this path (tracker setup/filing,
+    // model tiers, saved defaults, host selection) are written as contracts, not
+    // how-to, and gh-host.md loads only in Phase 6. Lower it, never raise it.
+    const BUDGET = 60000;
     const GATE = /^(?:\d+[a-z]?\.\s+)?Only (?:when|with|for|on)\b/;
     const reached = new Map();
     const gated = new Set();
