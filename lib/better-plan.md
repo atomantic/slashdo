@@ -1,6 +1,6 @@
 ## Phase 2: Plan Generation
 
-Steps 2–4 are an in-run plan kept in context, never written to a file; the only persistent records are tracker issues, filed per [lib/better-issue-mode.md](./better-issue-mode.md).
+Steps 2–4 are an in-run plan kept in context, never written to a file; only tracker issues persist.
 
 1. Fetch `EXISTING_ISSUES` per the setup and filing partials (skip when `TRACKER_AVAILABLE=false`).
 2. Validate `UNCERTAIN` findings, then deduplicate across agents and against `EXISTING_ISSUES`, per the spool contract.
@@ -25,4 +25,4 @@ Steps 2–4 are an in-run plan kept in context, never written to a file; the onl
 
 Omit a conditional category when its condition is false. When `SIMPLIFY_ONLY=true`, keep only the [`SIMPLIFY_CATEGORIES`](./better-simplify.md) and apply the simplify contract's Phase 2 rules. A caller-specific Phase 2 category map, when supplied, is authoritative for category names and slugs.
 
-**GATE: If `--scan-only` was passed, STOP HERE** — but **file every surviving finding as an issue first** (not just the deferred ones: the issues are the run's output), then print the summary and exit. Open no worktree and write no code. **Then remove `SPOOL_DIR`** (`rm -rf "$SPOOL_DIR"`, same errored-filer exception) — a scan-only run has no Phase 3c or 4c to read the bodies, so filing is the last read.
+**GATE: If `--scan-only` was passed, STOP HERE** — but **file every surviving finding as an issue first** (not just the deferred ones: the issues are the run's output; with no tracker, list them per [lib/better-issue-mode.md](./better-issue-mode.md)), then print the summary and exit. Open no worktree and write no code. **Then remove `SPOOL_DIR`** (`rm -rf "$SPOOL_DIR"`, same errored-filer exception) — a scan-only run has no Phase 3c or 4c to read the bodies, so filing is the last read.

@@ -6,9 +6,9 @@
 !read lib/plan-issue-filing.md
 
 **When `TRACKER_AVAILABLE=false`** (Phase 0a), skip setup, the `EXISTING_ISSUES`
-fetch, and all filing: carry each deferred finding's title, rationale, and `file:line`
-from its index line into the Phase 7 report under "Deferred (not filed — no issue
-tracker available)". Spooling and remediation are unchanged.
+fetch, and all filing: list each deferred finding's title, rationale, and `file:line`
+under "Deferred (not filed — no issue tracker available)" in the run's final report —
+Phase 7, or the `--scan-only` gate's summary. Spooling and remediation are unchanged.
 
 ### Phase 1 (Audit)
 
