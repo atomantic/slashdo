@@ -13,6 +13,8 @@ Resolve `VCS_HOST` and `CLI_TOOL` here, before any phase reaches for a forge CLI
 
 - **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state, following the shared derivation (and its per-host auth precheck) included below. The Phase 6 GitHub-side reviewer loops use `gh api`, which ignores the repo remote and defaults to github.com — so on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out.
 
+- **Record `TRACKER_AVAILABLE` once.** `true` when the confirmed `CLI_TOOL` reaches this repo and its issues feature is enabled; otherwise `false`. Deferred findings are filed as issues only when it is `true`; when `false` the run continues, files nothing, and lists every deferred finding (title, one-line rationale, `file:line`) in the Phase 7 report under "Deferred (not filed — no issue tracker available)". Never write PLAN.md as a fallback.
+
 **GitHub only — skip the snippet below entirely on GitLab**, whose `glab` calls resolve the host from the remote themselves and where its `gh auth` precheck would abort the run.
 
 !read lib/gh-host.md
@@ -64,7 +66,7 @@ Three cheap reads: two gate inputs plus the project's vocabulary. Skip this step
      | sort | uniq -c | sort -rn | head -40
    ```
    The `ls-files` filter drops paths that no longer exist, so deleted files can't crowd out live ones. Record the paths with their commit counts. If the repo is younger than the window or the list comes back near-empty, re-run **the same pipeline** with `--since` dropped rather than treating every file as cold — a young repo has no dormant code to deprioritize. Never run a bare `git log --name-only` without the `sort | uniq -c | head` aggregation: on a mid-size repo that is tens of thousands of lines straight into context.
-2. **`PRIOR_REJECTIONS`** (gate 4) — reframings earlier runs tried and rejected, as a do-not-re-propose list for the audit agents. Default: the `### Rejected reframings` subsections of PLAN.md. Under `--issues`: issues carrying **both** `{PLAN_LABEL}` and `rejected-reframing`, which is what makes this a bounded read rather than a scan of every closed plan issue —
+2. **`PRIOR_REJECTIONS`** (gate 4) — reframings earlier runs tried and rejected, as a do-not-re-propose list for the audit agents. Read the closed issues carrying **both** `{PLAN_LABEL}` and `rejected-reframing`, which is what makes this a bounded read rather than a scan of every closed plan issue (empty when `TRACKER_AVAILABLE=false`) —
    ```bash
    {CLI_TOOL} issue list --state closed --label "{PLAN_LABEL}" --label rejected-reframing \
      --limit 200 --json number,title,body

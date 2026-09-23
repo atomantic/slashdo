@@ -44,10 +44,9 @@ Each agent must report findings in this format:
 - **[CRITICAL/HIGH/MEDIUM/LOW]** `file:line` - Description. Suggested fix: ... Complexity: Simple/Medium/Complex
 ```
 
-**Issue mode (`--issues`) changes where this format goes, not what it contains.**
-Only when `ISSUE_MODE=true` (the shared contract was already loaded once at
-pipeline start, see [lib/better-issue-mode.md](./better-issue-mode.md)), create the
-spool directory before dispatching any agent:
+**Findings are spooled to disk, not returned in full.** Using the shared contract
+loaded once at pipeline start ([lib/better-issue-mode.md](./better-issue-mode.md)),
+create the spool directory before dispatching any agent:
 
 ```bash
 SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_DIR"
