@@ -21,16 +21,19 @@ Resolve `VCS_HOST` and `CLI_TOOL` here, before any phase reaches for a forge CLI
 Detect the project's primary manifest and record its ecosystem as
 `PROJECT_TYPE`.
 
-From that same manifest, resolve **version ownership** for Phase 5b's version
-bump (`lib/better-pr-and-ci.md`): if the manifest declares a version field,
-record `HAS_VERSION_BUMP=true` and `VERSION_BUMP_CMD` as the ecosystem
-(`npm`/`cargo`/`python`/`java`/`ruby`/`dotnet`). Record `HAS_VERSION_BUMP=false`
-for Go (which versions by VCS tag, not an in-repo file), for any manifest with
-no discoverable version field, or when no manifest exists — a project with no
-version convention of its own must not be handed an invented one. Phase 5b
-skips its version-bump step entirely when `HAS_VERSION_BUMP=false`, and
-otherwise dispatches on `VERSION_BUMP_CMD` through the calling command's
-`Version Bump Procedure` section.
+Also resolve **version ownership** for Phase 5b's version bump
+(`lib/better-pr-and-ci.md`): if the ecosystem's own version source declares a
+version — the manifest itself for `npm`/`cargo`/`python`/`java`/`dotnet`, or
+for `ruby` a `VERSION` constant in `lib/**/version.rb` (the common gemspec
+convention) falling back to the gemspec's own `version =` assignment — record
+`HAS_VERSION_BUMP=true` and `VERSION_BUMP_CMD` as that ecosystem. Record
+`HAS_VERSION_BUMP=false` for Go (which versions by VCS tag, not an in-repo
+file), for any ecosystem with no discoverable version anywhere in its source,
+or when no manifest exists — a project with no version convention of its own
+must not be handed an invented one. Phase 5b skips its version-bump step
+entirely when `HAS_VERSION_BUMP=false`, and otherwise dispatches on
+`VERSION_BUMP_CMD` through the calling command's `Version Bump Procedure`
+section.
 
 Also record `HAS_UI=true`/`false` — whether the project ships a user-facing UI
 (web, desktop, or mobile frontend code, or server-rendered HTML templates).
