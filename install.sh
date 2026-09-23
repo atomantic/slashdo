@@ -182,7 +182,7 @@ LIBS=(
   better-plan better-remediation better-simplify
   better-state better-test-enhancement
   better-cleanup better-pr-and-ci better-review-loop better-verification
-  ci-flake-handling code-review-checklist config-defaults-issues-merge copilot-review-loop
+  ci-flake-handling config-defaults-issues-merge copilot-review-loop
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
   gh-host github-reviewer-loop graphql-escaping
@@ -190,6 +190,7 @@ LIBS=(
   per-finding-root-cause plan-id-format plan-issue-setup plan-issue-filing pr-write-access
   post-review-doc-recommendations rebase-conflict-resolution remediation-agent-template
   release-documented review-agent-selection review-config-defaults review-convergence-gate review-flags
+  review-preferences
   swift-review-checklist swift-gotchas
   review-surface-scan review-surface-quality review-security-audit
   review-cross-file-tracing review-cross-file-contract

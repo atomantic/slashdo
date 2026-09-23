@@ -72,7 +72,7 @@ Print: `PR flow: {current_branch} → {default_branch}`
 2. Run `git diff {REVIEW_BASE}...{current_branch}` to get the list of changed files — the base resolved in "Commit and Push" (`origin/{default_branch}` on the linked-worktree fallback; the un-advanced local ref would enumerate every file that landed on the default branch outside this branch)
 3. For every changed file:
    a. Read the entire file using the Read tool (not just diff hunks)
-   b. Check it against the tiered checklist below (always check Tiers 1+4; check Tiers 2-3 when relevance filters match)
+   b. Review it under the review preferences below
    c. For each finding, quote the specific code line and explain why it's a problem
 4. After reviewing all files, verify: does the code actually deliver what the commits claim?
 5. Print a review summary table (see do:review for format)
@@ -83,13 +83,13 @@ If the diff touches more than 15 files, delegate later batches to a subagent to 
 
 </review_gate>
 
-Checklist to apply to each file:
+Review preferences to apply to each file:
 
-!`cat ~/.claude/lib/code-review-checklist.md`
+!`cat ~/.claude/lib/review-preferences.md`
 
 Verification — confirm before proceeding:
 - [ ] Read every changed file in full (not just diffs)
-- [ ] Checked each file against the relevant checklist tiers
+- [ ] Every finding names a concrete wrong outcome, not a style preference
 - [ ] Quoted specific code for each finding
 - [ ] Printed a review summary table with findings
 
