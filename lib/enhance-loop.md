@@ -139,7 +139,7 @@ MODEL_FLAG=()
 # for 20-30 min), so it is handled separately and never left unpinned. agy rejects any
 # name not in its live roster, and that roster churns between releases, so resolve the
 # pinned name against `agy models` rather than trusting the literal below — same rule,
-# same reason, as the agy block in `lib/local-agent-review-loop.md`. Names must be a
+# same reason, as the agy recipe in `lib/local-agent-agy.md`. Names must be a
 # LEVELED entry (`Gemini 3.8 Flash (High)` / `gemini-3.8-flash-high`), never a bare base.
 AGY_ENH_MODEL="${ENH_MODEL:-${AGY_REVIEW_MODEL:-Gemini 3.8 Flash (High)}}"
 # Print the roster ONLY for an agy entry: this block runs once per agent, and an
@@ -166,7 +166,7 @@ as a positional argument (never via stdin) and prints the improved draft to stdo
 | `claude` | `claude -p "$ENHANCE_PROMPT" ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} --permission-mode plan --tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --settings '{"disableAllHooks":true}' --no-chrome --no-session-persistence` |
 <!-- /if:teams -->
 | `codex` | `codex ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} --sandbox read-only -a never exec "$ENHANCE_PROMPT"` |
-| `agy` | Verified invocation-local read-only profile or tool-free fallback as defined in `lib/local-agent-review-loop.md`; unavailable if neither is enforceable |
+| `agy` | Tool-free fallback as defined in `lib/local-agent-agy.md` (with `--disable-slash-commands`); unavailable if it is not enforceable |
 | `grok` | Verified tool-free fallback; unavailable if tools/MCP/hooks cannot be isolated |
 | `pi` | Pi enhancement runner below; enforced tool-free with model and thinking pins |
 | `cursor` | Verified tool-free fallback; unavailable if tools/MCP/hooks cannot be isolated |
@@ -190,7 +190,7 @@ one's output):
 1. **Normalize and pre-flight the binary.** Normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`.
    Resolve the binary (`claude`/`codex`/`agy`/`grok`/`pi`/`cursor` — the `[<model>]` bracket never
    changes which binary is required; for `cursor` use the Cursor binary probe in
-   `lib/local-agent-review-loop.md`, not `command -v cursor`). `command -v {binary}`
+   `lib/local-agent-cursor.md`, not `command -v cursor`). `command -v {binary}`
    for the other agents. **If it is missing:**
    print `{agent} CLI not installed — skipping this enhancement pass`, record the
    agent as `skipped`, leave `{DRAFT_TITLE}`/`{DRAFT_BODY}` **unchanged**, and
