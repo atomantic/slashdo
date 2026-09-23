@@ -10,6 +10,4 @@ Every finding gets exactly one of three dispositions:
 
 ## Don't use PLAN.md as a dumping ground
 
-The failure mode this guards against: seeing a finding, judging it "bigger than a one-liner," and parking it in PLAN.md instead of fixing it. **If you *could* fix it now within the current change, you must** — PLAN.md is for work that genuinely cannot land in this PR, not for everything you'd rather not do this session.
-
-Before deferring, ask: **"Is this actually large or risky — or just more than a trivial edit?"** Only the former defers. A medium-effort but self-contained fix is still a fix-now. When in doubt, fix it now; deferral is the exception you justify, not the default you reach for.
+The failure mode this guards against: seeing a finding, judging it "bigger than a one-liner," and parking it in PLAN.md instead of fixing it — a medium-effort but self-contained fix is still a fix-now. Before deferring, ask: **"Is this actually large or risky — or just more than a trivial edit?"** Only the former qualifies; deferral is the exception you justify, not the default you reach for.
