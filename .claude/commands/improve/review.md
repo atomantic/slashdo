@@ -9,10 +9,23 @@ Analyze code review feedback on a PR, identify patterns our review system missed
 
 ## Architecture Overview
 
-The `/do:review` system has one host orchestrator and six optional focused review
-lenses. The orchestrator inspects each PR and selects zero or more lenses based on
-the changed behavior; selected lenses run in parallel, and a simple change may use
-no sub-agents at all:
+The `/do:review` system has one host orchestrator and a set of optional focused
+review lenses. The orchestrator inspects each PR and selects zero or more lenses
+based on the changed behavior; selected lenses run in parallel, and a simple change
+may use no sub-agents at all.
+
+The lens set below can drift as lenses are added, renamed, or removed. Before
+relying on it — and before Phases 2c, 3a, 4c, and 5 below, which each enumerate
+the lens set again — re-derive it from the orchestrator itself rather than trusting
+memory:
+
+```bash
+sed -n '/### Select the review lenses/,/^## /p' commands/do/review.md | grep -o '!read lib/review-[a-z-]*\.md' | sed 's/!read //' | sort -u
+```
+
+If that list differs from the table below, update the table first (it is the
+lens-focus reference every later phase points back to), then carry the same set
+into every phase that names lenses individually.
 
 | Agent | File | Focus |
 |---|---|---|
@@ -85,7 +98,7 @@ For each theme, record:
 
 ### 2b: Generalize themes
 
-For each theme, write a **generic, technology-agnostic checklist item** that would catch this class of bug in any codebase. Rules for generalization:
+For each theme, draft a **generic, technology-agnostic checklist item** that would catch this class of bug in any codebase. This is a candidate only — Phase 4 decides whether it becomes an actual checklist item or is better fixed as a preferences/orchestration change or a mandate/boundary fix. Rules for generalization:
 
 1. **Database-agnostic**: Replace "PostgreSQL", "SQLite", "MongoDB" references with "database" or "data store".
 2. **Framework-agnostic**: Replace "React", "Express", "Next.js" with the general concept ("UI component", "route handler", "server framework"). Keep framework-specific terms only when genuinely framework-specific.
@@ -96,13 +109,14 @@ For each theme, write a **generic, technology-agnostic checklist item** that wou
 
 ### 2c: Assign each theme to an agent
 
-For each generalized theme, determine which agent **should have caught it** based on the reading strategy required:
+For each generalized theme, determine which agent **should have caught it** based on the reading strategy required. This list mirrors the current lens set from the Architecture Overview check above — add, rename, or drop an option here if that check found the lens set changed:
 
 - **Surface Scan** — catchable by reading a single file in isolation; per-file RUNTIME bugs (crashes, type/coercion, async/state, error handling, streaming, domain-specific runtime patterns)
 - **Surface Quality** — catchable by reading a single file; intent-vs-implementation drift, AI-generated code patterns, dead config, missing tests, supply chain hygiene, style
 - **Security Audit** — requires adversarial thinking about trust boundaries, injection, data exposure, access control
 - **Cross-File Tracing** — requires tracing STATE / LIFECYCLE / CONCURRENCY across files (stale state propagation, resource leaks, lock/flag exit paths, races)
 - **Cross-File Contract** — requires tracing CONTRACTS across files (schema/shape agreements, validation parity, error classification, field-set enumerations, architectural-pattern adherence)
+- **Structural Ambition** — requires STRICT-MODE structural judgment: code-judo simplifications, file-size growth, abstraction sprawl, boundary leaks, bespoke duplicates
 - **None (new agent needed)** — requires a fundamentally different reading strategy not covered by any existing agent
 - **Orchestrator** — requires changes to how agents are dispatched, how findings are collected, or how the review is scoped
 
@@ -117,13 +131,17 @@ Record this assignment for each theme — it determines which files to update in
 Read all source-of-truth files:
 ```
 lib/review-preferences.md             # shared review preferences
+lib/review-agent-selection.md         # orchestrator's lens-selection policy
 lib/review-surface-scan.md            # surface scan agent (runtime)
 lib/review-surface-quality.md         # surface quality agent
 lib/review-security-audit.md          # security agent
 lib/review-cross-file-tracing.md      # cross-file tracing (state/lifecycle)
 lib/review-cross-file-contract.md     # cross-file contract (schema/shape)
+lib/review-structural-ambition.md     # structural ambition agent (strict-mode)
 commands/do/review.md                 # orchestrator
 ```
+This is the current lens set plus its two orchestration files; if the Architecture
+Overview check above found a different lens set, read those files instead.
 
 ### 3b: Classify each theme
 
@@ -140,8 +158,7 @@ Beyond individual items, evaluate the agent architecture:
 
 1. **Agent scope drift** — Has any agent accumulated items that belong to a different agent's reading strategy? (e.g., the surface scan agent has items requiring cross-file tracing, or the security agent has generic quality checks)
 2. **Coverage gaps between agents** — Are there categories of bugs that fall between agents? (e.g., items requiring both adversarial thinking AND cross-file tracing that neither agent prioritizes)
-3. **Agent overload** — Has any agent grown so large that attention dilution is likely? Count items per agent and flag if any exceeds ~80 items.
-4. **Missing agent** — Would a new specialized agent (with a distinct reading strategy) catch a recurring class of issues better than broadening existing agents?
+3. **Missing agent** — Would a new specialized agent (with a distinct reading strategy) catch a recurring class of issues better than broadening existing agents?
 
 ### 3d: Check for consolidation opportunities
 
@@ -152,30 +169,50 @@ Scan each agent file for:
 
 ## Phase 4: Update Files
 
-### 4a: Review preferences (rarely)
+For each theme, prefer the highest change in this list that actually fixes the miss;
+only fall through to the next when it doesn't apply. A checklist bullet (4c) is the
+**last** resort, not the default — the goal is a system that reasons its way to the
+finding, not a longer list of things to check for.
 
-Change `lib/review-preferences.md` only when a theme changes how every review reasons (evidence, severity, what counts as a finding). Never add a what-to-look-for item to it.
+### 4a: Review preferences or orchestration (preferred)
 
-### 4b: Update agent files
+Change `lib/review-preferences.md` when a theme changes how every review reasons
+(evidence, severity, what counts as a finding), or `lib/review-agent-selection.md` /
+`commands/do/review.md` when the miss is really a dispatch problem — the right lens
+existed but wasn't selected, or the orchestrator's evidence-based selection policy
+needs adjusting. These changes generalize instead of adding to a list.
 
-For each theme, update the **assigned agent's instruction file** (`lib/review-surface-scan.md`, `lib/review-surface-quality.md`, `lib/review-security-audit.md`, `lib/review-cross-file-tracing.md`, or `lib/review-cross-file-contract.md`):
+### 4b: Lens mandate or boundary
 
+If a theme reveals that an agent's mandate is drawn wrong — a reading strategy that
+should own the finding isn't stated, or two agents' boundaries leave a gap or overlap
+(see 3c) — fix the mandate/boundary language in the relevant `lib/review-*.md` agent
+file(s) rather than adding a new bullet under it.
+
+### 4c: New checklist item (last resort)
+
+Add a new what-to-look-for item to the **assigned agent's instruction file**
+(`lib/review-surface-scan.md`, `lib/review-surface-quality.md`,
+`lib/review-security-audit.md`, `lib/review-cross-file-tracing.md`,
+`lib/review-cross-file-contract.md`, or `lib/review-structural-ambition.md`) only
+when both hold:
+- the miss **recurs** — this is not the first PR where this exact class of finding
+  was missed (note the prior instance(s) you're aware of, or say why you believe it
+  will recur)
+- a capable model **demonstrably** doesn't catch it unprompted — 4a/4b (reasoning
+  from preferences, evidence, or a corrected mandate) would not have caught it either
+
+If a theme doesn't meet both bars, classify it under 4a or 4b instead, or leave it
+unaddressed and say why in the report.
+
+When a new or broadened item does apply:
 - **New item**: Add under the most appropriate section in the agent file
 - **Broadened item**: Edit the existing item in the agent file
 - **Misplaced item**: Move from the current agent file to the correct one
 - **Wrong agent**: If a theme was found in one agent but belongs in another, move the item
 
-When adding items to agent files:
-- Match the agent file's existing style
-- Place adjacent to related items
-- Include the key pattern + consequence, not every sub-clause
-
-### 4c: Update orchestrator (if needed)
-
-Edit `commands/do/review.md` if:
-- A new agent is being added (add its dispatch section)
-- Agent dispatch instructions need updating (e.g., new context to pass)
-- The deduplication or reporting logic needs changes
+Match the agent file's existing style, place adjacent to related items, and include
+the key pattern + consequence, not every sub-clause.
 
 ### 4d: Consolidation pass
 
@@ -184,18 +221,17 @@ After all updates, re-read each modified file and check:
 - No duplicate items within any file
 - No project-specific language
 - Items flow logically within their sections
-- Agent files haven't grown past ~80 items
 
 ### 4e: Sync to installed locations
 
+**Never `cp` source files into `~/.claude`** — the installer transforms `!read
+lib/…` lines, lib paths, and `CLAUDE_CONFIG_DIR` on the way in (`src/transformer.js`);
+a raw copy leaves the installed `/do:review` with literal, unexecuted `!read` text.
+Reinstall through the CLI instead (see CONTRIBUTING.md), scoped to just this command
+so other installed commands are untouched:
+
 ```bash
-cp lib/review-preferences.md ~/.claude/lib/review-preferences.md
-cp lib/review-surface-scan.md ~/.claude/lib/review-surface-scan.md
-cp lib/review-surface-quality.md ~/.claude/lib/review-surface-quality.md
-cp lib/review-security-audit.md ~/.claude/lib/review-security-audit.md
-cp lib/review-cross-file-tracing.md ~/.claude/lib/review-cross-file-tracing.md
-cp lib/review-cross-file-contract.md ~/.claude/lib/review-cross-file-contract.md
-cp commands/do/review.md ~/.claude/commands/do/review.md
+node bin/cli.js --env claude review
 ```
 
 ## Phase 5: Report
@@ -206,42 +242,34 @@ cp commands/do/review.md ~/.claude/commands/do/review.md
 **Actionable comments**: {N} comments across {M} themes
 
 ### Themes Identified
-| Theme | Comments | Agent | Status |
-|---|---|---|---|
-| {theme name} | {count} | Surface/Security/Cross-File | Added / Broadened / Moved / Already covered |
+| Theme | Comments | Agent | Resolution | Status |
+|---|---|---|---|---|
+| {theme name} | {count} | Surface Scan/Surface Quality/Security/Cross-File Tracing/Cross-File Contract/Structural Ambition/Orchestrator | Preferences (4a) / Orchestration (4a) / Mandate-boundary (4b) / Checklist item (4c) | Added / Broadened / Moved / Already covered |
 
-### Checklist Changes
-- **Added**: {N} new items
-- **Broadened**: {N} existing items updated
+### Changes Made
+- **Preferences or orchestration changes**: {N} (4a)
+- **Mandate/boundary fixes**: {N} (4b)
+- **New checklist items**: {N} (4c — each with its recurrence + demonstrated-miss justification)
+- **Broadened checklist items**: {N}
 - **Moved between agents**: {N} items reassigned
 - **Consolidated**: {N} items merged
 - **Unchanged**: {N} themes already covered
 
 ### Files Modified
-| File | Items Added | Items Broadened | Items Moved In | Items Moved Out |
-|---|---|---|---|---|
-| review-preferences.md | N | N | — | — |
-| review-surface-scan.md | N | N | N | N |
-| review-surface-quality.md | N | N | N | N |
-| review-security-audit.md | N | N | N | N |
-| review-cross-file-tracing.md | N | N | N | N |
-| review-cross-file-contract.md | N | N | N | N |
-| commands/do/review.md (orchestrator) | — | — | — | — |
+{list each modified file with a one-line description of what changed and why}
 
 ### New/Modified Items
-{list each item with brief explanation of the pattern it catches and which agent owns it}
+{list each item with brief explanation of the pattern it catches, which agent owns it, and (for new checklist items) the recurrence + demonstrated-miss justification from 4c}
 
 ### Architecture Assessment
-- **Agent balance**: Surface-Scan({N}) / Surface-Quality({N}) / Security({N}) / Cross-File-Tracing({N}) / Cross-File-Contract({N})
 - **Scope drift detected**: {yes/no — list any misplaced items that were moved}
 - **Coverage gaps**: {description or "none found"}
-- **Agent overload risk**: {which agent, if any, is approaching the ~80 item threshold}
 
 ### Structural Recommendations (for user consideration)
 {Only if the analysis reveals structural issues. Examples:}
-- "Consider splitting Cross-File agent into State/Lifecycle and Data/Schema agents — it has {N} items and the two domains have distinct reading patterns"
-- "Consider a dedicated Migration agent — {N} of the last {M} PR feedback themes were migration-related and they require a distinct strategy (trace old→new format preservation)"
-- "The security agent at {N} items is lean; consider merging its input-handling checks into surface scan to reduce dispatch overhead"
+- "Consider splitting Cross-File Tracing and Cross-File Contract further — {theme} keeps landing in the overlap between the two and neither mandate clearly owns it"
+- "Consider a dedicated Migration agent — {N} of the last {M} PR feedback themes were migration-related and they require a distinct strategy (trace old→new format preservation) that no existing lens's mandate covers"
+- "Security Audit and Surface Scan mandates overlap on input handling; consider narrowing one to reduce dispatch overhead"
 
 (If no structural changes are warranted, print "Architecture is balanced — no restructuring needed.")
 ```
