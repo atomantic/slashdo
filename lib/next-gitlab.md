@@ -48,6 +48,8 @@ The host verbs defined in [next.md](../commands/do/next.md)'s Conventions resolv
 - `pr_title <PR> <title>` — `glab mr update <PR> --title <title>`
 - `ci_wait_merge <PR> <method>` — `git push "$UP_REMOTE" "HEAD:$UP_REF" && glab ci status --wait --branch "${UP_REF#refs/heads/}" && glab mr merge <PR> --yes --remove-source-branch`
 
+`ci_wait_merge` intentionally keeps `--remove-source-branch` on GitLab: the shared gate owns server-side head cleanup there, and Phase 7's remote delete is an already-gone-safe check.
+
 ## The `glab api` capture rule
 
 `glab api` has no built-in `--jq` flag (only `glab issue`/`glab mr` do), so every plain `glab api` call below pipes to the standalone jq binary in a **separately-checked, two-step capture** — never one `glab api ... | jq ...` pipeline. A pipeline reports only **jq's** exit status, and jq exits 0 on empty input, so a failed `glab api` call piped straight into jq looks like "succeeded, returned nothing." When the parsed value is an identity you're about to act on (a username), **guard it non-empty too**: `jq -e` fails only on `null`/`false`, and an empty string (`{"username":""}`) is truthy to jq, so `jq -er '.field'` alone still exits 0 with no value. The shape every call site below follows:

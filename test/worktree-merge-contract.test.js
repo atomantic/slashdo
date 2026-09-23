@@ -45,6 +45,8 @@ describe('/do:next host verb merge contract (#381)', () => {
     assert.match(gate, /executable `ci_wait_merge` host verb/);
     assert.match(gitlab, /`ci_wait_merge <PR> <method>`/);
     assert.match(gitlab, /glab ci status --wait --branch "\$\{UP_REF#refs\/heads\/\}"/);
+    assert.match(gitlab, /intentionally keeps `--remove-source-branch`/);
+    assert.match(next, /GitLab form intentionally keeps `--remove-source-branch`/);
     assert.match(next, /!read lib\/merge-gate\.md/);
     assert.doesNotMatch(next.split('## Phase 1: Pick')[1], /gh pr checks|glab ci status/);
   });
