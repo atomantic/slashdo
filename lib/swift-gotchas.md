@@ -610,28 +610,30 @@ Put Keychain access behind a protocol and inject a fake store in tests, so the r
 ```swift
 protocol KeyStore {
     func loadKey() -> SymmetricKey?
-    func saveKey(_ key: SymmetricKey)
+    /// Throws if the key could not be durably persisted — callers must not
+    /// treat the key as usable when this throws (e.g. Keychain write failure).
+    func saveKey(_ key: SymmetricKey) throws
 }
 
-struct KeychainKeyStore: KeyStore { /* real SecItemAdd/SecItemCopyMatching */ }
+struct KeychainKeyStore: KeyStore { /* real SecItemAdd/SecItemCopyMatching; throws on non-zero OSStatus */ }
 
 final class InMemoryKeyStore: KeyStore {
     private var key: SymmetricKey?
     func loadKey() -> SymmetricKey? { key }
-    func saveKey(_ key: SymmetricKey) { self.key = key }
+    func saveKey(_ key: SymmetricKey) throws { self.key = key }
 }
 
 struct Encryptor {
     let store: KeyStore
-    func getOrCreateKey() -> SymmetricKey {
+    func getOrCreateKey() throws -> SymmetricKey {
         if let existing = store.loadKey() { return existing }
         let newKey = SymmetricKey(size: .bits256)
-        store.saveKey(newKey)
+        try store.saveKey(newKey)  // propagate failure — never encrypt under a key that didn't persist
         return newKey
     }
 }
 ```
-Production always uses `KeychainKeyStore`; tests inject `InMemoryKeyStore()`. If the real Keychain must be exercised in tests, fix the test target's entitlements (add the Keychain Sharing capability, or run against a host app) instead of working around the failure.
+Production always uses `KeychainKeyStore`; tests inject `InMemoryKeyStore()`. A failed `saveKey` must abort the encrypt operation with an error, never fall through and encrypt anyway — a key that isn't durably stored is unrecoverable after relaunch. If the real Keychain must be exercised in tests, fix the test target's entitlements (add the Keychain Sharing capability, or run against a host app) instead of working around the failure.
 
 ---
 

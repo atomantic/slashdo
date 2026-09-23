@@ -137,7 +137,7 @@ const ON_DEMAND_LIBS = new Map([
   ['rebase-conflict-resolution.md',
     { what: 'autonomous rebase-conflict resolution playbook', when: 'a rebase stops on conflicts' }],
   ['swift-gotchas.md',
-    { what: 'Swift/iOS/macOS gotcha catalogue', when: 'the project shows CloudKit, SwiftData, iCloud, xcstrings, XcodeGen, TestFlight CI, or StoreKit (Phase 0e of /do:better-swift)' }],
+    { what: 'Swift/iOS/macOS gotcha catalogue', when: 'the project shows CloudKit, SwiftData, iCloud, xcstrings, XcodeGen, TestFlight CI, StoreKit, or Keychain use (Phase 0e of /do:better-swift)' }],
 
   // Review lenses: review-agent-selection.md dispatches only the lenses a diff
   // actually signals — often one or two, sometimes none.

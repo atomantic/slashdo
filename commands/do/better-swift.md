@@ -194,7 +194,7 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 
 ### 0e: Known Gotchas Catalogue
 
-`~/.claude/lib/swift-gotchas.md` catalogues real-world Swift / iOS / macOS failure modes — trigger conditions, root cause, verified fix, and verification steps for bugs that have shipped to production. Skip this section entirely (and leave `GOTCHA_ENTRIES_IN_SCOPE` empty) unless the project shows at least one of: CloudKit, SwiftData, iCloud entitlements, `Localizable.xcstrings`/`String(localized:)`, XcodeGen (`project.yml`), a TestFlight-uploading CI workflow, or StoreKit. Otherwise, read the catalogue once:
+`~/.claude/lib/swift-gotchas.md` catalogues real-world Swift / iOS / macOS failure modes — trigger conditions, root cause, verified fix, and verification steps for bugs that have shipped to production. Skip this section entirely (and leave `GOTCHA_ENTRIES_IN_SCOPE` empty) unless the project shows at least one of: CloudKit, SwiftData, iCloud entitlements, `Localizable.xcstrings`/`String(localized:)`, XcodeGen (`project.yml`), a TestFlight-uploading CI workflow, StoreKit, or Keychain use (`SecItemAdd`/`SecItemCopyMatching`). Otherwise, read the catalogue once:
 
 !read lib/swift-gotchas.md
 
