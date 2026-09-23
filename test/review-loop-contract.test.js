@@ -445,7 +445,7 @@ describe('review-loop parse contracts', () => {
     // Two ways a new status gets stranded: added to a loop's status set but not to
     // the aggregate rules that consume it. A ~opt no-verdict must reach the
     // optional-inconclusive exclusion, and a stop-mode run whose only pass returned
-    // capped must match `partial` — otherwise it matches NO rule at all (`clean`
+    // capped must match `partial` — otherwise it matches NO row at all (`clean`
     // excludes stop-short-circuited runs) and the merge is blocked.
     const wrapper = readLib('multi-reviewer-loop.md');
     assert.match(
@@ -455,7 +455,7 @@ describe('review-loop parse contracts', () => {
     assert.match(wrapper, /`no-verdict` — a local agent that ran but did not answer in the verdict format/);
     assert.match(
       wrapper,
-      /- `partial` — .*every executed pass returned a clean-equivalent status — `clean`, copilot `too-large`, or `capped`/,
+      /\| `partial` \|.*every executed pass returned a clean-equivalent status — `clean`, copilot `too-large`, or `capped`/,
     );
   });
 
@@ -506,11 +506,14 @@ describe('review-loop parse contracts', () => {
     // follow it. No length>0 canary: a correctly-qualified rewording that happens to
     // avoid every stem must not fail for being differently worded — the verbatim
     // "but never for `push-failed`" assertion further down is what pins that the
-    // qualification exists at all.
+    // qualification exists at all. Now that the aggregate rules are consolidated into
+    // one ordered table (#350), each exemption's qualifying clause sits inside a longer
+    // table cell than the old bullet-list prose, so the window is wider than the single
+    // repeated bullet this test originally guarded against.
     const exemptions = [...wrapper.matchAll(/(?:ignor|exclud|excus|count|waiv|appl)\w*\s+here/gi)];
     for (const m of exemptions) {
       assert.match(
-        wrapper.slice(Math.max(0, m.index - 200), m.index + 200),
+        wrapper.slice(Math.max(0, m.index - 300), m.index + 300),
         /push-failed/,
         `an ~opt exemption at index ${m.index} does not name the statuses it covers — unqualified, it reads as license to merge a pass whose fixes never reached the remote`,
       );
