@@ -124,17 +124,9 @@ Run the shared issue-mode setup — it reuses the `CLI_TOOL` the Pre-flight dete
 
 > **`/do:next` reads only the setup partial, not [lib/plan-issue-filing.md](../../lib/plan-issue-filing.md).** That file's dedup fetch, `--scan-only` recording, and bulk-spool path exist for commands that file and dedup *findings* in bulk; `/do:next` files at most one discovered-work issue (Phase 4), so dumping every open issue's body into context buys nothing. The step-1 walk below is the only open-issue listing this phase needs. If Phase 4 does file a discovered-work issue, check for a duplicate with a targeted search (`gh issue list --search "<keywords>"` / `glab issue list --search "<keywords>"`) instead.
 
-> **Issue mode works on GitHub or GitLab.** The claim (Phase 2) uses the tracker's **assignee** field as the cross-machine marker on either host — GitHub via `gh issue edit --add-assignee`/`--remove-assignee`, GitLab via `glab issue update --assignee "+<user>"`/`--assignee "-<user>"` (the `+`/`-` prefix adds/removes one assignee without clobbering others, which the race read-back depends on). Every `gh` call in this phase has a `glab` equivalent selected by `$CLI_TOOL`. One structural gap: GitHub has a native project-scoped **sub-issues** API for epic/child resolution (step 3); GitLab's analog (group-level Epics) is a different, tier-gated feature, so on GitLab the **convention fallback** (body task-lists + `Part of #N` back-references, per [lib/epic-children.md](../../lib/epic-children.md)) is the primary path.
+> **Issue mode works on GitHub or GitLab.** The claim (Phase 2) uses the tracker's **assignee** field as the cross-machine marker on either host — GitHub via `gh issue edit --add-assignee`/`--remove-assignee`, GitLab via `glab issue update --assignee "+<user>"`/`--assignee "-<user>"` (the `+`/`-` prefix adds/removes one assignee without clobbering others, which the race read-back depends on). Every `gh` call in this phase has a `glab` equivalent selected by `$CLI_TOOL`. Epic/child resolution (step 3) also differs by host — see [lib/epic-children.md](../../lib/epic-children.md) for GitHub's native sub-issues API vs. GitLab's convention fallback.
 
-**GitLab only — read `lib/next-gitlab.md` now, before the first plain `glab api` call.**
-It carries every GitLab-specific step this phase and the rest of `/do:next` need from
-here on — the `jq` probe (`glab api` has no built-in `--jq` flag, only `glab issue`/
-`glab mr` do, so this phase and Phase 2 pipe it to the standalone binary), the
-collaborator fetch, the candidate-list walk, the Phase 2 claim, and the Phase 6 merge
-— keyed by heading, plus the GitHub↔GitLab field-mapping table the jq expressions
-below build on. Probe for `jq` now, not in the shared Pre-flight: PLAN.md mode never
-calls plain `glab api`, so a pre-flight probe would abort a GitLab + PLAN.md repo that
-never needed jq. A GitHub run never reads this file.
+**GitLab only — read [lib/next-gitlab.md](../../lib/next-gitlab.md) now, before the first plain `glab api` call.** It carries every GitLab-specific step this phase and the rest of `/do:next` need from here on, keyed by heading. A GitHub run never reads this file.
 
 !read lib/next-gitlab.md
 
@@ -156,8 +148,8 @@ if [ "$COLLAB_MODE" = "true" ] && [ "$SELF_MODE" != "true" ]; then
     COLLAB_LOGINS="$(gh api --hostname "$GH_HOST" repos/:owner/:repo/collaborators --paginate -q '.[].login')" || {
       echo "Could not list collaborators for $OWNER_REPO — /do:next --collaborators cannot be enforced. Aborting."; exit 1; }
   else
-    # GitLab — the glab api capture rule (lib/next-gitlab.md) sets these same two
-    # variables the same fail-closed way; see its § Phase 1 — collaborator fetch.
+    # GitLab — two-step capture per the glab api capture rule (lib/next-gitlab.md):
+    # a failed fetch must read as "could not list them," never as "no collaborators."
     MEMBERS_JSON="$(glab api --paginate "projects/:id/members/all")" || {
       echo "Could not list collaborators for $OWNER_REPO — /do:next --collaborators cannot be enforced. Aborting."; exit 1; }
     COLLAB_LOGINS="$(printf '%s' "$MEMBERS_JSON" | jq -r '.[] | select(.access_level >= 30) | .username')" || {
@@ -239,7 +231,7 @@ Then:
 
    Act on the resulting state:
    - `epic-open` (≥1 child still OPEN) → **skip** as not-yet-workable; note `epic #N: X/Y children open`.
-   - `epic-done` (all children CLOSED, no wrap-up tasks) → nothing to implement; **close it inline** using [lib/epic-children.md](../../lib/epic-children.md)'s "Closing an epic" step (GitHub: `gh issue close "$N" --comment "..."`; GitLab: `glab issue note "$N" -m "..." && glab issue close "$N"`), note it, and keep scanning.
+   - `epic-done` (all children CLOSED, no wrap-up tasks) → nothing to implement; **close it inline** using [lib/epic-children.md](../../lib/epic-children.md)'s "Closing an epic" step, note it, and keep scanning.
    - `epic-wrapup` (all children CLOSED, wrap-up tasks remain) → **this IS claimable work**: "complete epic #N's remaining wrap-up tasks." Claim it like any issue — Phase 4 does the wrap-up (and ticks the wrap-up checkboxes in the epic body), and the Phase 6 PR carries `Closes #<N>`.
    - `epic-empty` (no children resolvable either way) → treat as an ordinary issue.
 4. **Resolve declared dependencies before picking (blocked-by).** A candidate may declare a hard dependency in its **body**: a line matching `Depends on #<N>` or `Blocked by #<N>` (case-insensitive; one line may list several, e.g. `Depends on #12, #15`). Collect every `#<N>` on those lines. The step-1 walk omits bodies, so **fetch the body for this candidate only**, when you evaluate it (GitHub: `gh issue view <N> --json body -q .body`; GitLab: `glab issue view <N> --output json --jq .description`) — the same fetch serves step 3's task-list check. A candidate is **blocked** when ANY referenced issue is still open — check the freshest state (GitHub: `gh issue view <N> --json state -q .state`; GitLab: `glab issue view <N> --output json --jq .state`) and test for "closed" rather than an exact "open" match (`OPEN`/`CLOSED` vs `opened`/`closed`); a referenced number that is closed, or doesn't exist, does not block. Resolve **lazily** as you walk (only for the candidate you're about to pick).
@@ -307,10 +299,10 @@ if [ "$CLI_TOOL" = gh ]; then
   ME="$(gh api --hostname "$GH_HOST" user -q .login)"
   gh issue edit "$ISSUE_NUM" --add-assignee @me
 else
-  # GitLab — lib/next-gitlab.md § Phase 2 — claim explains why this resolves the
-  # login in two steps (not one `| jq` pipeline) and guards it non-empty before
-  # using `+` to ADD one assignee without touching whatever's already on the issue
-  # (a bare `--assignee "$ME"` would REPLACE the list and defeat the read-back below).
+  # GitLab — two-step capture per the glab api capture rule (lib/next-gitlab.md):
+  # resolve the login, guard it non-empty, then use `+` to ADD one assignee
+  # without touching whatever's already on the issue (a bare `--assignee "$ME"`
+  # would REPLACE the list and defeat the read-back below).
   ME_JSON="$(glab api user)" && ME="$(printf '%s' "$ME_JSON" | jq -er .username)" && [ -n "$ME" ] && glab issue update "$ISSUE_NUM" --assignee "+$ME"
 fi || {
   echo "Could not claim issue #$ISSUE_NUM (missing write access?) — aborting."
@@ -562,8 +554,8 @@ fi
 **Issues mode — confirm closed, then clear the marker — but only for a PR that actually merged.** Anything other than `MERGED`/`merged` on the read-back means nothing shipped — leave the issue open with its `in-progress` label and assignee, and report the PR as queued/left-open. For a merged PR, `Closes #<num>` auto-closes the issue on merge to the **default branch**. Verify (GitHub: `gh issue view <num> --json state -q .state`, expect `CLOSED`; GitLab: `glab issue view <num> --output json --jq .state`, expect `closed`); if still open, close explicitly (GitHub: `gh issue close <num> --comment "Shipped in PR #<PR_NUM>."`; GitLab: `glab issue note <num> -m "Shipped in PR #<PR_NUM>." && glab issue close <num>`). Then drop the stale label (GitHub: `gh issue edit "$ISSUE_NUM" --remove-label in-progress 2>/dev/null || true`; GitLab: `glab issue update "$ISSUE_NUM" --unlabel in-progress 2>/dev/null || true`). Leave the assignee — it records who shipped it.
 
 **Issues mode — re-evaluate the parent epic (the shipped issue may have been an epic's last child).** Once the issue is confirmed closed, resolve its parent epic with the shared epic logic ("Resolving a child's parent epic" in [lib/epic-children.md](../../lib/epic-children.md)) — read that file now if this run never loaded it (Phase 1 step 3 only reads it on-demand, when a candidate is itself an epic, which a non-epic claim never triggers). If a parent epic `#P` exists, re-classify it:
-- `epic-done` (this was the last open child and `#P` has no remaining wrap-up tasks) → **close the epic** with an evidence comment (GitHub: `gh issue close "$P" --comment "All children closed (incl. #<num>) — closing epic. (slashdo)"`; GitLab: `glab issue note "$P" -m "All children closed (incl. #<num>) — closing epic. (slashdo)" && glab issue close "$P"`).
-- `epic-wrapup` (children all closed but wrap-up tasks remain) → **don't close**; comment so a later `/do:next` surfaces it (GitHub: `gh issue comment "$P" --body "All child issues are now closed — only the epic's own wrap-up tasks remain."`; GitLab: `glab issue note "$P" -m "All child issues are now closed — only the epic's own wrap-up tasks remain."`).
+- `epic-done` (this was the last open child and `#P` has no remaining wrap-up tasks) → **close it** using [lib/epic-children.md](../../lib/epic-children.md)'s "Closing an epic" step, noting the just-closed child (`incl. #<num>`) in the evidence comment.
+- `epic-wrapup` (children all closed but wrap-up tasks remain) → **don't close**; comment that the children are complete and the wrap-up tasks remain, so a later `/do:next` surfaces it (GitHub: `gh issue comment "$P" --body "…"`; GitLab: `glab issue note "$P" -m "…"`).
 - `epic-open` (other children still open) → leave it untouched.
 
 Skip this step when the shipped issue was *itself* an epic (its `Closes #<N>` already closed it).
