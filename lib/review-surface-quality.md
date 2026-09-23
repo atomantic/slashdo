@@ -6,7 +6,7 @@ Review each changed file, read in full, for quality within that file: claims tha
 ## Principles
 - A claim is a contract. When a comment, docstring, test name, prompt, sample config, or doc entry says something the code does not do, flag it — the claim misleads, and the missing code path may itself be the defect.
 - A test pins only what its assertions would catch regressing. A test that asserts a symptom (a status code, a value being present) instead of the contract it names pins nothing.
-- Code with no second use — a one-call wrapper, a one-value flag, a guard for a case that cannot occur — is a finding; recommend removing it.
+- Code with no second use — a one-call wrapper, a one-value flag, a guard for a case that cannot occur — is a finding only when it misleads: name the false belief it gives a reader (a case that can occur, a caller that exists) and what removing it deletes.
 
 ## Output format
 
