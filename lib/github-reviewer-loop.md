@@ -175,7 +175,7 @@ the moment a review returns zero unresolved comments:
      churning the diff.
    - Make the code fix.
    - IDENTIFY THE ROOT CAUSE of why the issue landed and apply the smallest
-     matching action in the same change, per `~/.claude/lib/per-finding-root-cause.md`.
+     matching action in the same change, per `~/.claude/lib/review-fix-conventions.md`.
      Defer big refactors to the end-of-loop Convention Encoding phase.
    - Run the build command.
    - If build passes, commit: address review (@{REVIEWER_LOGIN}): <summary>
@@ -220,10 +220,11 @@ When done, report back:
 - Total iterations completed
 - List of commits made (if any)
 - Any unresolved threads remaining
-- **Convention encoding**: if the loop addressed any non-nitpick findings, run the
-  Convention Encoding phase from `~/.claude/lib/post-review-doc-recommendations.md`
-  against the issues fixed across all iterations. Include the encoded actions under
-  a "Conventions Encoded" heading; omit the section if all findings were nitpicks.
+- **Convention encoding**: run the end-of-cycle phase from
+  `~/.claude/lib/review-fix-conventions.md` against the issues fixed across all
+  iterations, even when every finding was a nitpick (or none landed) — always
+  print the "Conventions Encoded" section, using its explicit no-conventions
+  message when nothing qualifies.
 ```
 
 Launch the sub-agent and wait for its result.
