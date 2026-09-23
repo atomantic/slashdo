@@ -716,7 +716,7 @@ describe('review-loop parse contracts', () => {
     // [effort=<level>], matching cursor[gpt-5]~effort=max and a saved
     // review-models cursor=gpt-5 plus cursor~effort=max. Never pass --effort.
     assert.match(loop, /CURSOR_MODEL="\$\{REVIEW_MODEL\}\[effort=\$\{REVIEW_EFFORT\}\]"/);
-    assert.match(loop, /"\$REVIEW_BIN" -p "\$LOCAL_PROMPT" --trust --mode ask \$\{MODEL_FLAG\[@\]\+"\$\{MODEL_FLAG\[@\]\}"\}/);
+    assert.match(loop, /"\$REVIEW_BIN" -p "\$LOCAL_PROMPT" --mode ask \$\{MODEL_FLAG\[@\]\+"\$\{MODEL_FLAG\[@\]\}"\}/);
 
     // Config and docs must advertise the same model + effort grammar as the
     // other reviewers — a saved review-models entry and a ~effort suffix.
@@ -752,7 +752,7 @@ describe('review-loop parse contracts', () => {
     assert.match(rpr, /\{OLLAMA_EFFORT\}/);
   });
 
-  it('cursor trusts the workspace without auto-approving, and a trust refusal is skipped, not cli-error (#399)', () => {
+  it('cursor never auto-trusts or auto-approves, and a trust refusal is skipped, not cli-error (#399)', () => {
     // An untrusted workspace makes cursor print "Workspace Trust Required" and
     // exit 1 before any model call. As cli-error that is a hard error ~opt can't
     // excuse, so the first run in any new clone aborted /do:pr.
@@ -760,8 +760,11 @@ describe('review-loop parse contracts', () => {
     const loop = readLib('local-agent-review-loop.md');
     const invocation = recipe.match(/^"\$REVIEW_BIN" -p [^\n]*$/m);
     assert.ok(invocation, 'cursor recipe must carry its print-mode invocation');
-    // --trust answers only the workspace prompt; --mode ask is the read-only belt.
-    assert.match(invocation[0], /--trust\b/);
+    // --trust persists (~/.cursor/projects/<ws>/.workspace-trusted): it would
+    // silently change the user's Cursor state and relax the gate that stands
+    // between an attacker-influenced checkout and the agent. --mode ask is the belt.
+    assert.doesNotMatch(invocation[0], /--trust\b/);
+    assert.match(recipe, /\*\*Do not pass `--trust`\.\*\*/);
     assert.match(invocation[0], /--mode ask\b/);
     // Never a flag that auto-approves commands, MCP servers, or tool calls.
     // (The 'never grants blanket permissions' test already bans the long aliases
