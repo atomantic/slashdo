@@ -243,7 +243,10 @@ one's output):
    git_meta_hash() {
      { cat "$GIT_COMMON/config"
        # Symlinked hooks execute too: hash the link target path, not its content.
-       find "$GIT_COMMON/hooks" \( -type f -o -type l \) 2>/dev/null | sort | while IFS= read -r f; do printf '%s\n' "$f"; readlink "$f" 2>/dev/null || cat "$f"; done
+       # Also fingerprint the mode bits — flipping a non-executable hook file to
+       # executable (no content or path change) is what makes it run, so a
+       # content-only hash would miss exactly the edit that matters.
+       find "$GIT_COMMON/hooks" \( -type f -o -type l \) 2>/dev/null | sort | while IFS= read -r f; do printf '%s\n' "$f"; readlink "$f" 2>/dev/null || cat "$f"; stat -f '%Lp' "$f" 2>/dev/null || stat -c '%a' "$f" 2>/dev/null; done
      } | git hash-object --stdin
    }
    GIT_META_BASELINE=$(git_meta_hash)

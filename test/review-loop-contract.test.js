@@ -374,6 +374,10 @@ describe('review-loop parse contracts', () => {
     assert.match(step2, /cp "\$GIT_COMMON\/config" "\$GIT_META_BAK\/config"/);
     assert.match(step2, /tar -cf "\$GIT_META_BAK\/hooks\.tar" -C "\$GIT_COMMON" hooks/);
     assert.match(step2, /git_meta_hash\(\) \{/);
+    // Content/path alone misses a hook flipped from non-executable to executable
+    // with no other change -- that flip is what makes it run, so the fingerprint
+    // must include mode bits too.
+    assert.match(step2, /stat -f '%Lp' "\$f" 2>\/dev\/null \|\| stat -c '%a' "\$f"/);
     assert.match(step2, /GIT_META_BASELINE=\$\(git_meta_hash\)/);
     assert.match(step2, /these five artifacts capture the caller's ENTIRE pre-pass state/);
 
