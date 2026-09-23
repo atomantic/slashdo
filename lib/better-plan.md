@@ -1,39 +1,9 @@
 ## Phase 2: Plan Generation
 
-> **Issue mode (`--issues`):** Keep the consolidated findings (steps 2–4 below) as
-> your **in-run working plan in context** — do **not** create or write the
-> `## Better Audit` section to `PLAN.md`, and skip step 1's "read/create PLAN.md".
-> The tracker, not `PLAN.md`, is the source of truth for already-known work, so the
-> disposition partial below has you fetch the open issues into `EXISTING_ISSUES`
-> during setup. When consolidating findings (step 2), **dedup against
-> `EXISTING_ISSUES`** as well as across agents: a finding that already has an open
-> issue is not new — reuse that issue's `#<number>` instead of filing a duplicate.
-> Remediation (Phase 3+) proceeds from that in-context plan exactly as normal. The
-> only persistent records are issues: for any finding you **defer** (don't
-> remediate this run, per the finding-disposition rules), file a labeled tracker
-> issue instead of a PLAN.md line — see the disposition partial below. Report the
-> created **and** reused issue numbers (`#<n>`) in the Phase 2 summary where you'd
-> report slugs. Setup (VCS host + label + `EXISTING_ISSUES` fetch) is covered by the
-> partial: reuse `CLI_TOOL` from Phase 0a.
-> Phase 1 spooled the finding **bodies** to `SPOOL_DIR` and returned only the
-> **index**, so consolidate and dedup against those index lines — steps 2–4 need
-> nothing else, so do not open a spool file **for them**. **Step 3 is the exception**:
-> grouping the Foundation extractions needs the duplication counts and call-site lists that
-> live only in the bodies, so read `$SPOOL_DIR/dry.md` for the ids step 2 kept in the `dry`
-> category before writing the Foundation list Phase 3b builds from. Beyond that, the only
-> reasons to open a spool file are targeted validation of `UNCERTAIN` findings
-> against their cited source, and lifting a block verbatim into a `--body-file` on
-> the inline path below. A validated finding receives its assessed severity;
-> a disproven one is dropped. Keep unresolved findings explicitly unconfirmed,
-> track them as investigation follow-ups without a confirmed severity label, and
-> never auto-remediate them. When validation changes a status, have the owning
-> audit worker update that finding's block and index before filing; the
-> orchestrator still does not retype spooled evidence. When the surviving set is
-> larger than ~20 findings, hand the ids off to per-category **filer agents** per
-> the partial's "Bulk filing — spool the bodies, dedup on an index" section rather
-> than running `gh issue create` yourself; at or below that, file them inline —
-> still lifting each id's block verbatim out of its spool file into a `--body-file`,
-> never retyping it from the index line.
+> **Issue mode (`--issues`):** see [lib/better-issue-mode.md](./better-issue-mode.md)
+> (read once at pipeline start) — keep steps 2–4 below as the in-run working plan in
+> context, skip step 1 and writing `## Better Audit` to `PLAN.md`, and dedup against
+> `EXISTING_ISSUES` as well as across agents.
 
 1. Read the existing `PLAN.md` (create if it doesn't exist)
 2. Validate `UNCERTAIN` evidence against the cited source before assigning severity; drop disproven findings and retain unresolved ones only as unconfirmed investigation follow-ups. Consolidate all findings from Phase 1, deduplicating across agents (same file:line flagged by multiple agents → keep the most specific description)
@@ -81,9 +51,6 @@ When `SIMPLIFY_ONLY=true`, emit only the [`SIMPLIFY_CATEGORIES`](./better-simpli
 
 **Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct findings via worktree branch names. Slug rules per [lib/plan-id-format.md](./plan-id-format.md): lowercase kebab-case derived from the title text, ≤50 chars, unique against every `[slug]` already in PLAN.md. Recommended pattern for audit findings: `<category-prefix>-<file-basename>-<short-hint>` (e.g. `[sec-routes-pr-validation]`, `[dry-cli-output-dedup]`). _(Issue mode skips slugs entirely — the issue number is the ID.)_
 
-!read lib/plan-issue-setup.md
-!read lib/plan-issue-filing.md
-
 6. Print a summary table (short labels → full category → branch slug):
    - Security → Security & Secrets → `security`
    - Code Quality → Code Quality & Style → `code-quality`
@@ -120,20 +87,4 @@ Omit the **UX** row when `HAS_UI=false`, the **Structural** row when `STRICT_MOD
 
 **Filing every surviving finding** means all of them — not just the ones the disposition rules would defer. A scan-only run remediates nothing, so "deferred" covers the whole set; the filed issues ARE the run's output. Apply the same labels, dedup-against-`EXISTING_ISSUES`, and title/body rules the disposition partial specifies, and report the created and reused `#<number>`s in the summary. Do not open a worktree or write any code. **Then remove `SPOOL_DIR`** (`rm -rf "$SPOOL_DIR"`, same errored-filer exception) — a scan-only run has no Phase 3c or 4c to read the bodies, so filing is the last read.
 
-**Hand the filing to per-category filer agents when the surviving set exceeds ~20.**
-A `--scan-only --issues` run on a real codebase is exactly the case the partial's
-"Bulk filing" section exists for: every surviving finding gets filed, so the volume
-is the whole audit. Dispatch one filer agent per category **in parallel**, giving
-each the surviving ids for its category, the `$SPOOL_DIR/<category-slug>.md` file
-those bodies live in, `CLI_TOOL`, `PLAN_LABEL`, the label rules, the `${URL##*/}`
-number-capture form, and the secondary-rate-limit retry rule. Each returns only its
-`<id> -> #<number>` map. One agent per category is the correct fan-out — your dedup
-already gave each finding exactly one category, so no two filers can collide, and
-sharding a category further only makes rate limiting more likely.
-
-Merge the returned maps for the summary. **An id a filer returned as `ERROR` was not
-filed** — report those separately with their spool path so they can be filed by hand,
-and keep `SPOOL_DIR` on disk when any error occurred. At or below ~20 surviving
-findings, skip the fan-out and file them inline — still `--body-file`ing each block
-verbatim out of the spool, never retyped from the index line; only the fan-out overhead
-isn't worth it at that size.
+File through [lib/better-issue-mode.md](./better-issue-mode.md)'s filer-fan-out rules.

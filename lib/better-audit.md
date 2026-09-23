@@ -45,12 +45,9 @@ Each agent must report findings in this format:
 ```
 
 **Issue mode (`--issues`) changes where this format goes, not what it contains.**
-Only when `ISSUE_MODE=true`, read the issue/spool contract before dispatching any agent:
-
-!read lib/plan-issue-setup.md
-!read lib/plan-issue-filing.md
-
-Then create the spool directory:
+Only when `ISSUE_MODE=true` (the shared contract was already loaded once at
+pipeline start, see [lib/better-issue-mode.md](./better-issue-mode.md)), create the
+spool directory before dispatching any agent:
 
 ```bash
 SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_DIR"
@@ -58,36 +55,18 @@ SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_D
 
 Record the printed path as `SPOOL_DIR` in run state and pass **that literal path**
 to every agent — a shell variable does not survive between tool calls, so
-re-deriving it later would hand the filer agents an empty directory.
-
-Pass `SPOOL_DIR` to every audit agent along with the **"Bulk filing — spool the
-bodies, dedup on an index"** contract from
-[lib/plan-issue-filing.md](./plan-issue-filing.md) (the partial Phase 2 reads
-in). Under that contract each agent writes one ready-to-file issue body per finding
-to `$SPOOL_DIR/<category-slug>.md` — using its own category slug from Phase 2's
-summary table (`security`, `code-quality`, `dry`, `architecture`, `bugs-perf`,
-`stack-specific`, `deps`, `tests`, `ux`, `structural`, `cognitive-load`), so no two
-agents write the same file — and **returns only the compact index**:
+re-deriving it later would hand the filer agents an empty directory. Each agent
+writes one ready-to-file issue body per finding to `$SPOOL_DIR/<category-slug>.md` —
+using its own category slug from Phase 2's summary table (`security`, `code-quality`,
+`dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`, `ux`,
+`structural`, `cognitive-load`), so no two agents write the same file — per
+[lib/better-issue-mode.md](./better-issue-mode.md)'s spooling rules, and **returns
+only the compact index**:
 
 ```
 <id> | <SEVERITY-or-UNCERTAIN> | <category> | <file:line> | <one-line title>
 ```
 
-Preserve `[UNCERTAIN]` as `UNCERTAIN` in the index and in the spooled body; do not assign a confirmed severity just to fit the index. Phase 2 reads only those bodies and their cited source for targeted validation.
-
-Audit agents are `Explore` agents, which have no `Write` tool — they write their
-spool file with a quoted-heredoc `cat > "$SPOOL_DIR/<slug>.md" <<'EOF'` via Bash,
-so backticks and `$` in quoted evidence survive verbatim. **Only the first write
-uses `>`; every later one must use `>>`** — an agent that spools findings across more
-than one Bash call and reaches for `cat >` a second time truncates everything it has
-already written, which is the tail-dropping this whole path exists to prevent.
-
-A large audit surfaces hundreds of findings, and the alternative pulls every body
-through this orchestrator's context twice — once reading the agent's report, once
-re-emitting it into a `gh issue create` body. That second pass is where bodies get
-truncated and tail findings get dropped. Everything Phase 2 actually decides —
-cross-agent dedup, dedup against `EXISTING_ISSUES`, [gate 3](./better-simplify.md)'s churn
-adjustment, and the `FILE_OWNER_MAP` — keys off the index fields alone, so the
-bodies stay on disk until the filer agents move them to the tracker.
+Preserve `[UNCERTAIN]` as `UNCERTAIN` in the index and in the spooled body; do not assign a confirmed severity just to fit the index.
 
 **Evidence bar:** inspect the relevant caller and at least 30 surrounding lines before flagging. Quote the failing code, explain its actual effect under the project's documented contracts, and name a concrete fix. Check downstream awaits/guards and framework idioms before calling a pattern a bug. Local security/trust conventions override generic checklists. Mark unresolved hypotheses `[UNCERTAIN]`; consolidation must validate or defer them, never silently promote them. Wait for all selected workers before Phase 2 and report failed/uncovered scopes.

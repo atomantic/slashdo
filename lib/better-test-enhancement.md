@@ -14,12 +14,13 @@ PHASE_4C_START_SHA="$(git rev-parse HEAD)"
 
 ### 4c.1: Test Audit Triage
 
-**In issue mode Agent 8's findings are on disk, not in this context.** Phase 1 returned
-only index lines, and the index (`<id> | <SEVERITY> | <category> | <file:line> | <title>`)
-carries no `[VACUOUS]`/`[WEAK]`/`[MISSING]` tag at all — triaging off it is not merely
-lossy, it is impossible. Read `$SPOOL_DIR/tests.md` (the literal path from run state) and
-triage off each finding's full body, then populate `{VACUOUS_AND_WEAK_FINDINGS}` /
-`{MISSING_FINDINGS}` from those bodies, never from the index titles.
+**In issue mode Agent 8's findings are on disk, not in this context.** The index
+(`<id> | <SEVERITY> | <category> | <file:line> | <title>`) carries no
+`[VACUOUS]`/`[WEAK]`/`[MISSING]` tag at all — triaging off it is not merely lossy, it
+is impossible. Read `$SPOOL_DIR/tests.md` (the literal path from run state) and triage
+off each finding's full body, populating `{VACUOUS_AND_WEAK_FINDINGS}` /
+`{MISSING_FINDINGS}` from those bodies, never from the index titles. See
+[lib/better-issue-mode.md](./better-issue-mode.md) for the full contract.
 
 Review Agent 8 (Test Quality & Coverage) findings from Phase 1 and categorize them:
 
