@@ -770,7 +770,7 @@ describe('review-loop parse contracts', () => {
     // (The 'never grants blanket permissions' test already bans the long aliases
     // anywhere in the local-agent text.)
     assert.doesNotMatch(invocation[0], /(?:^|\s)(?:-f|--approve-mcps|--auto-review|--sandbox)\b/);
-    assert.match(recipe, /\*\*Never\*\* pass an auto-approve flag — `-f`/);
+    assert.match(recipe, /\*\*Never\*\* pass an auto-approve flag either — `-f`/);
 
     // The classifier: non-zero exit + trust notice on stderr => skipped, deferred
     // past Step 3's restoration check, matched on $ERR_FILE only.
