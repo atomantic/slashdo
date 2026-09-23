@@ -49,16 +49,12 @@ const REVIEWER_LOOP_LIBS = [
 
 const includeIndex = (body, lib) => body.indexOf('!read lib/' + lib + '.md');
 
-// A partial documents its inputs in a `### Inputs` block and then USES them in the
-// phase text below it. Only the phase text is a substitution point: a token that
-// survives as a doc bullet alone has lost the line it was meant to fill.
+// A partial carries no `### Inputs` placeholder-docs block (#325): its phase text
+// is the only substitution point, so every token it reads appears where it is used.
 const partialBody = (lib) => {
   const text = fs.readFileSync(path.join(root, 'lib', `${lib}.md`), 'utf8');
-  const parts = text.split('### Inputs');
-  assert.equal(parts.length, 2, `lib/${lib}.md must have exactly one ### Inputs block`);
-  const start = parts[1].indexOf('\n## ');
-  assert.ok(start > -1, `lib/${lib}.md has no phase section after its ### Inputs block`);
-  return parts[1].slice(start);
+  assert.doesNotMatch(text, /^### Inputs\b/m, `lib/${lib}.md must not document inputs in a ### Inputs block`);
+  return text;
 };
 
 const tokensIn = (text) => new Set([...text.matchAll(/\{([A-Z][A-Z0-9_]+)\}/g)].map((m) => m[1]));

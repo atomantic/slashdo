@@ -16,6 +16,8 @@ Exactly five scopes are eligible, subject to the user's path/focus filter; combi
 
 `security`, `bugs-perf`, `stack-specific`, `deps`, `tests`, and `ux` do **not** run. Phase 0b still records `HAS_UI` (it costs nothing and stays in the state snapshot), but it no longer gates anything in this mode.
 
+Pass each worker gates 1, 2, and 4 below plus `PRIOR_REJECTIONS` and the distilled `DOMAIN_DOCS` glossary (Phase 0e). Only `cognitive-load` gets `HOT_FILES` as a search priority; agents never apply the churn adjustment.
+
 `structural` and `cognitive-load` overlap by design — structural reframings and reader-cost reductions often land on the same code. Phase 2's dedup resolves it: when both flag the same `file:line`, keep the **structural** finding (the larger reframing subsumes the local cleanup) and drop the cognitive-load duplicate.
 
 ### Finding gates
@@ -58,4 +60,21 @@ A finding whose only available fix would change behavior is **deferred**, not re
 
 Every phase that enumerates categories — Phase 2's plan sections and summary table, Phase 3c's worker spawn, Phase 5's branch slugs, Phase 7's summary rows — is restricted to this set.
 
-Other deviations are stated at the phase they apply to, as `When SIMPLIFY_ONLY=true` clauses. `--simplify-only` composes with every other flag: `--scan-only` stops after the narrowed plan, `--interactive` still prompts at each gate, deferred findings are still filed as issues, and the review flags drive Phase 6 as usual.
+Other deviations, by phase (the shared phase partials defer to this list):
+
+- **Phase 0e — inputs.** After Phase 0d, make three cheap reads:
+  1. **`HOT_FILES`** (gate 3) — the files people actually edit:
+     ```bash
+     git -C {REPO_DIR} log --since="6 months ago" --format= --name-only \
+       | grep -Fxf <(git -C {REPO_DIR} ls-files) \
+       | sort | uniq -c | sort -rn | head -40
+     ```
+     Record the paths with their commit counts. If the repo is younger than the window or the list is near-empty, re-run the same pipeline without `--since` rather than treating every file as cold. Never run a bare `git log --name-only` without the aggregation.
+  2. **`PRIOR_REJECTIONS`** (gate 4) — only the closed issues carrying **both** `{PLAN_LABEL}` and `rejected-reframing` (empty when `TRACKER_AVAILABLE=false`): `{CLI_TOOL} issue list --state closed --label "{PLAN_LABEL}" --label rejected-reframing --limit 200 --json number,title,body`.
+  3. **`DOMAIN_DOCS`** — whichever of `CONTEXT.md`, `GOALS.md`, `docs/adr/`, and `docs/decisions/` exist (the index or most recent ADRs, not the whole directory), distilled **once** into a short glossary plus the reframings the ADRs already ruled out. Pass the glossary to audit agents, never the documents, so proposed names use the project's own vocabulary.
+- **Phase 2.** Apply gate 3 here, and only here.
+- **Phase 3c.** Only the five in-scope workers spawn, each with the behavior-preservation rule above verbatim.
+- **Phase 4.** A failing test is a regression by definition: fix the refactor or revert it; never edit the test to match.
+- **Phase 4b.** Carry one extra question through the internal review: *does any hunk change what this program does?* — a different return value, side effect, error type or message, validation, output format, or public API without a re-export. Revert every such hunk rather than fixing it, then **defer** the finding behind it (it needs behavior review) or, when the transformation cannot be done without changing behavior, record a gate-4 rejection.
+- **Phase 4c** is skipped entirely: the Phase 2 `FILE_OWNER_MAP` is final, and every test-enhancement stat reports `— (skipped: --simplify-only)`.
+- **Phase 5.** Each PR body also carries: `Behavior-preserving refactor: no observable change to return values, side effects, errors, or public API. Verified by {TEST_CMD} passing unmodified.` `--simplify-only` composes with every other flag: `--scan-only` stops after the narrowed plan, `--interactive` still prompts at each gate, deferred findings are still filed as issues, and the review flags drive Phase 6 as usual.

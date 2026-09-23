@@ -23,6 +23,55 @@ describe('better progressive context', () => {
     }
   });
 
+  it('keeps a default run\'s orchestrator path within its byte budget (#325)', () => {
+    // The entrypoint budget above let the progressive-disclosure split move text
+    // into phase partials without shrinking it. This sums what a default run
+    // (no --simplify-only, --strict, or reviewers) actually reads: better.md plus
+    // every `!read` it reaches, recursively, except those whose gate prose
+    // directly above opens with "Only when/with/for/on …".
+    //
+    // #325's target is 60 KB. Since tracker filing became unconditional (#375),
+    // the shared tracker partials (plan-issue-filing/-setup) sit on this path, so
+    // the budget holds today's size until those shrink — lower it, never raise it.
+    const BUDGET = 84000;
+    const GATE = /^(?:\d+[a-z]?\.\s+)?Only (?:when|with|for|on)\b/;
+    const reached = new Map();
+    const gated = new Set();
+    const visit = (file) => {
+      if (reached.has(file)) return;
+      const body = read(file);
+      reached.set(file, Buffer.byteLength(body));
+      const lines = body.split('\n');
+      lines.forEach((line, i) => {
+        const target = line.match(/^!read (lib\/[\w.-]+\.md)$/)?.[1];
+        if (!target) return;
+        let j = i - 1;
+        while (j >= 0 && (!lines[j].trim() || lines[j].startsWith('!read '))) j--;
+        if (j >= 0 && GATE.test(lines[j].trim())) gated.add(target);
+        else visit(target);
+      });
+    };
+    visit('commands/do/better.md');
+
+    // Pin the gated set so a new gate can't silently drop a partial from the budget.
+    assert.deepEqual([...gated].filter((f) => !reached.has(f)).sort(), [
+      'lib/better-review-loop.md',
+      'lib/better-simplify.md',
+      'lib/review-flags.md',
+      'lib/review-structural-ambition.md',
+    ]);
+    const total = [...reached.values()].reduce((a, b) => a + b, 0);
+    const breakdown = [...reached].sort((a, b) => b[1] - a[1]).map(([f, n]) => `${n} ${f}`).join('\n');
+    assert.ok(total <= BUDGET, `default /do:better path is ${total} bytes (budget ${BUDGET}):\n${breakdown}`);
+
+    // Contracts, not how-to: no placeholder-docs block and no checklist include.
+    for (const file of reached.keys()) {
+      const body = read(file);
+      assert.doesNotMatch(body, /^### Inputs\b/m, `${file} carries an ### Inputs placeholder-docs block`);
+      assert.doesNotMatch(body, /^!read lib\/[\w.-]*checklist[\w.-]*\.md$/m, `${file} pulls a checklist onto the default path`);
+    }
+  });
+
   it('keeps better-swift a thin caller over the shared pipeline', () => {
     const entry = read('commands/do/better-swift.md');
     assert.ok(Buffer.byteLength(entry) <= 10000);
@@ -109,8 +158,9 @@ describe('better progressive context', () => {
   });
 
   it('preserves uncertainty and simplify-only behavior through phase boundaries', () => {
-    assert.match(read('lib/better-audit.md'), /<SEVERITY-or-UNCERTAIN>/);
+    assert.match(read('lib/better-audit.md'), /Mark unresolved hypotheses `\[UNCERTAIN\]`/);
     const issueMode = read('lib/better-issue-mode.md');
+    assert.match(issueMode, /<SEVERITY-or-UNCERTAIN>/);
     assert.match(issueMode, /targeted validation of `UNCERTAIN` findings/);
     assert.match(issueMode, /never auto-remediate them/);
     const template = read('lib/remediation-agent-template.md');
