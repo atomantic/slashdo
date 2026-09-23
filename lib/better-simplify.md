@@ -4,19 +4,19 @@ When `SIMPLIFY_ONLY=true`, the pipeline runs end to end exactly as documented (d
 
 ### Audit roster (Phase 1)
 
-Exactly five scopes are eligible, subject to the user's path/focus filter; combine overlapping scopes and dispatch selected workers in **one parallel batch** — the Batch 1 → Batch 2 ordering exists only to feed Batch 1's findings to the Test Quality agent, which does not run here.
+Exactly five scopes are eligible, subject to the user's path/focus filter; combine overlapping scopes and dispatch selected workers in **one parallel batch** — the test scope does not run in this mode, so there is no later scope waiting on an index from these.
 
-| # | Agent | In this mode |
-|---|-------|--------------|
-| 2 | Code Quality & Style | Runs, narrowed to its structural focus — the split is marked at the agent |
-| 3 | DRY & YAGNI | Runs unchanged; its whole remit is in scope |
-| 4 | Architecture & SOLID | Runs, narrowed to its structural focus — the split is marked at the agent |
-| 10 | Structural Ambition | Always on (`--simplify-only` implies `--strict`), blocker-tier findings promoted to CRITICAL as usual |
-| 11 | Cognitive Load & Readability | Runs only in this mode |
+| Scope | In this mode |
+|-------|--------------|
+| `code-quality` | Runs, narrowed to its structural focus — the split is marked at the scope |
+| `dry` | Runs unchanged; its whole remit is in scope |
+| `architecture` | Runs, narrowed to its structural focus — the split is marked at the scope |
+| `structural` | Always on (`--simplify-only` implies `--strict`), blocker-tier findings promoted to CRITICAL as usual |
+| `cognitive-load` | Runs only in this mode |
 
-Agents **1** (Security & Secrets), **5** (Bugs, Performance & Error Handling), **6** (Stack-Specific), **7** (Dependency Freedom), **8** (Test Quality & Coverage), and **9** (UX Consistency & Responsive Layout) do **not** run. Phase 0b still records `HAS_UI` (it costs nothing and stays in the state snapshot), but it no longer gates anything in this mode.
+`security`, `bugs-perf`, `stack-specific`, `deps`, `tests`, and `ux` do **not** run. Phase 0b still records `HAS_UI` (it costs nothing and stays in the state snapshot), but it no longer gates anything in this mode.
 
-Agents 10 and 11 overlap by design — structural reframings and reader-cost reductions often land on the same code. Phase 2's dedup resolves it: when both flag the same `file:line`, keep the **structural** finding (the larger reframing subsumes the local cleanup) and drop the cognitive-load duplicate.
+`structural` and `cognitive-load` overlap by design — structural reframings and reader-cost reductions often land on the same code. Phase 2's dedup resolves it: when both flag the same `file:line`, keep the **structural** finding (the larger reframing subsumes the local cleanup) and drop the cognitive-load duplicate.
 
 ### Finding gates
 
