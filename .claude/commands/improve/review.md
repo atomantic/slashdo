@@ -227,8 +227,11 @@ After all updates, re-read each modified file and check:
 **Never `cp` source files into `~/.claude`** — the installer transforms `!read
 lib/…` lines, lib paths, and `CLAUDE_CONFIG_DIR` on the way in (`src/transformer.js`);
 a raw copy leaves the installed `/do:review` with literal, unexecuted `!read` text.
-Reinstall through the CLI instead (see CONTRIBUTING.md), scoped to just this command
-so other installed commands are untouched:
+Reinstall through the CLI instead (see CONTRIBUTING.md). Scoping the positional
+argument to `review` limits which *command* file is reinstalled (`/do:review`
+itself, so other installed commands aren't touched), but `lib/` is a shared,
+global directory for this environment, so every lib file (not just `review-*.md`)
+gets refreshed too — that's expected, not a bug:
 
 ```bash
 node bin/cli.js --env claude review
