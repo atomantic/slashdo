@@ -100,9 +100,10 @@ accept either `--flag=value` or `--flag value`. Order is free.
    the repo already **has** — `area`, most often — is the exception: match the
    separator its existing labels use, per Phase 4, or the issue lands on a second,
    unfilterable label.
-2. **Fetch the repo's label taxonomy** — `gh label list --json name --jq '.[].name'`
-   (glab: `glab label list --output json --per-page 100 | jq -r '.[].name'`) — and
-   record it as `EXISTING_LABELS` for Phase 4's label inference and dispatch hint.
+2. **Fetch the repo's label taxonomy** — `gh label list --limit 200 --json name --jq
+   '.[].name'` (glab: `glab label list --output json --per-page 100 --jq
+   '.[].name'`) — and record it as `EXISTING_LABELS` for Phase 4's label inference
+   and dispatch hint.
    This command files at most one issue per run, so per
    [lib/plan-issue-filing.md](../../lib/plan-issue-filing.md) "Fetch existing open
    issues" it skips that fetch's full open-issue `--json …,body` dump; Phase 2 dedups
