@@ -128,7 +128,7 @@ Before dispatching agents, understand what this change set claims to do:
 
 ## Dispatch Review Agents
 
-The host CLI is the review orchestrator. Inspect the scoped diff, run the selection protocol below, then spawn only the focused agents it selects — **in parallel** via the Agent tool at the **`heavy` tier** (this host's strongest model by alias, `model: "opus"` on Claude Code, per [lib/model-tiers.md](../../lib/model-tiers.md); never a version ID, never the session's own tier). If that tier is rejected for lack of entitlement, retry once with `model` omitted, say so, and continue. Each selected agent reviews ALL changed files independently; its checklist seeds the lens, not the conclusions.
+The host CLI is the review orchestrator. Inspect the scoped diff, run the selection protocol below, then spawn only the focused agents it selects — **in parallel** via the Agent tool at the **`heavy` tier** (this host's strongest model by alias, `model: "opus"` on Claude Code, per [lib/model-tiers.md](../../lib/model-tiers.md); never a version ID, never the session's own tier). If that tier is rejected for lack of entitlement, retry once with `model` omitted, say so, and continue. Each selected agent reviews ALL changed files independently.
 
 The host orchestrator does the full review itself even when no focused agent is selected. Do not dispatch a focused agent merely because it exists below or because strict mode is active; use the selection protocol and record the decision.
 
@@ -215,7 +215,7 @@ For each selected agent, construct its prompt by combining:
 2. Project convention overrides from CLAUDE.md (the PR's CLAUDE.md/AGENTS.md when `PR_MODE=true`)
 3. The list of changed files from the diff stat (or `gh pr diff --name-only` in PR mode) AND, in PR mode, the path to each file's full content under `/tmp/do-review-pr-{PR_NUM}/`
 4. In PR mode only: the path to `/tmp/do-review-pr-{PR_NUM}-lines.json` (the commentable-lines map) and an instruction that **every finding MUST cite a `file:line` where `line` appears in the commentable-lines map** — otherwise the finding cannot be posted inline and is downgraded to a summary-only finding
-5. Instruction: "Read each changed file in full (not just diff hunks). Apply your reading lens — the checklist seeds attention but is NOT a script. Reason from principles about each new shape, flow, or contract: what's the smallest input that breaks this? What does the producer believe vs the consumer? What does the fallback path actually deliver? What does the documentation claim vs what the code does? Report findings that demonstrate consequence reasoning, not just pattern matches."
+5. Instruction: "Read each changed file in full (not just diff hunks). Report findings that demonstrate consequence reasoning, not just pattern matches."
 6. In PR mode only: "For every CRITICAL or IMPROVEMENT finding where a concrete fix is obvious, include a `suggestion:` block — the exact replacement text for the cited line(s). Use `start_line` and `line` to span multiple lines when the fix needs more than one line. The reviewer will package these as GitHub inline review suggestions."
 
 Spawn the selected agents simultaneously in one parallel batch. If the selection is

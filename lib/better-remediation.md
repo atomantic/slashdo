@@ -61,16 +61,13 @@ Remediation runs in parallel, one worker per category that has CRITICAL, HIGH, o
 2. Launch all `Agent` calls **in parallel** (multiple tool calls in a single response) and wait for all to return. Each sub-agent returns its results directly — no task board or shutdown step is needed.
 <!-- /if:teams -->
 
-**In issue mode the finding bodies are on disk, not in this context.** Phase 1 spooled
-them and returned only index lines, so a `{FINDINGS}` block built from those lines alone
-hands the worker a one-line title with no evidence and no suggested fix. Build `{FINDINGS}`
+**In issue mode the finding bodies are on disk, not in this context.** Build `{FINDINGS}`
 from each worker's index lines **plus the literal `SPOOL_DIR` path**, and instruct the
 worker to read the full body for each of its ids out of `$SPOOL_DIR/<slug>.md`, where
 `<slug>` is the category on **that id's own index line** — **Conflict avoidance** below
 merges two categories' findings into one worker when they touch the same file, so such a
 worker must open every spool file its ids name, not just the one matching its own category.
-Read the bodies before fixing. "The orchestrator never rewrites a spooled body" keeps the bodies out of
-*this* context — it does not license remediating from titles.
+See [lib/better-issue-mode.md](./better-issue-mode.md) for the full contract.
 
 ### Agent instructions template:
 

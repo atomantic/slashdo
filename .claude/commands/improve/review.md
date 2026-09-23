@@ -5,7 +5,7 @@ argument-hint: "<PR URL or owner/repo#number>"
 
 # Improve Review System from PR Feedback
 
-Analyze code review feedback on a PR, identify patterns our review system missed, update the master checklist and agent-specific instruction files, and evaluate whether the agent architecture itself needs restructuring.
+Analyze code review feedback on a PR, identify patterns our review system missed, update the agent-specific instruction files, and evaluate whether the agent architecture itself needs restructuring.
 
 ## Architecture Overview
 
@@ -24,7 +24,7 @@ no sub-agents at all:
 | Structural Ambition | `lib/review-structural-ambition.md` | Strict-mode structural concerns: code-judo simplifications, file-size growth, abstraction sprawl, boundary leaks, and bespoke duplicates |
 
 Additionally:
-- `lib/code-review-checklist.md` — master source-of-truth (canonical reference, not directly used by agents)
+- `lib/review-preferences.md` — shared review preferences (logic not lint, evidence, severity) inlined into `/do:pr`, `/do:fpr`, `/do:release`, and the better pipeline; it holds no catalog items
 - `commands/do/review.md` — orchestrator (dispatches agents, deduplicates, fixes, reports)
 - `lib/review-agent-selection.md` — orchestrator's evidence-based lens-selection policy
 
@@ -116,7 +116,7 @@ Record this assignment for each theme — it determines which files to update in
 
 Read all source-of-truth files:
 ```
-lib/code-review-checklist.md          # master checklist
+lib/review-preferences.md             # shared review preferences
 lib/review-surface-scan.md            # surface scan agent (runtime)
 lib/review-surface-quality.md         # surface quality agent
 lib/review-security-audit.md          # security agent
@@ -152,31 +152,23 @@ Scan each agent file for:
 
 ## Phase 4: Update Files
 
-### 4a: Update master checklist
+### 4a: Review preferences (rarely)
 
-For each theme:
-- **Already covered**: Skip.
-- **Partially covered**: Broaden the existing item in `lib/code-review-checklist.md`.
-- **Not covered**: Add new item under the appropriate section.
-
-Rules:
-- Maintain existing formatting (indented bullets with bold section headers)
-- No project-specific references, file names, or variable names
-- No language-specific items unless in a clearly language-scoped section
+Change `lib/review-preferences.md` only when a theme changes how every review reasons (evidence, severity, what counts as a finding). Never add a what-to-look-for item to it.
 
 ### 4b: Update agent files
 
 For each theme, update the **assigned agent's instruction file** (`lib/review-surface-scan.md`, `lib/review-surface-quality.md`, `lib/review-security-audit.md`, `lib/review-cross-file-tracing.md`, or `lib/review-cross-file-contract.md`):
 
 - **New item**: Add under the most appropriate section in the agent file
-- **Broadened item**: Edit the existing item in the agent file to match the broadened master
+- **Broadened item**: Edit the existing item in the agent file
 - **Misplaced item**: Move from the current agent file to the correct one
 - **Wrong agent**: If a theme was found in one agent but belongs in another, move the item
 
 When adding items to agent files:
-- Match the agent file's existing style (more concise than the master checklist)
+- Match the agent file's existing style
 - Place adjacent to related items
-- Include the key pattern + consequence, not every sub-clause from the master
+- Include the key pattern + consequence, not every sub-clause
 
 ### 4c: Update orchestrator (if needed)
 
@@ -197,7 +189,7 @@ After all updates, re-read each modified file and check:
 ### 4e: Sync to installed locations
 
 ```bash
-cp lib/code-review-checklist.md ~/.claude/lib/code-review-checklist.md
+cp lib/review-preferences.md ~/.claude/lib/review-preferences.md
 cp lib/review-surface-scan.md ~/.claude/lib/review-surface-scan.md
 cp lib/review-surface-quality.md ~/.claude/lib/review-surface-quality.md
 cp lib/review-security-audit.md ~/.claude/lib/review-security-audit.md
@@ -228,7 +220,7 @@ cp commands/do/review.md ~/.claude/commands/do/review.md
 ### Files Modified
 | File | Items Added | Items Broadened | Items Moved In | Items Moved Out |
 |---|---|---|---|---|
-| code-review-checklist.md | N | N | — | — |
+| review-preferences.md | N | N | — | — |
 | review-surface-scan.md | N | N | N | N |
 | review-surface-quality.md | N | N | N | N |
 | review-security-audit.md | N | N | N | N |
@@ -270,5 +262,4 @@ After all changes:
 - When in doubt about specificity, generalize one level: "PostgreSQL index" → "database index" → "query performance"
 - If the PR review feedback is all noise (no actionable items), report that and exit without changes
 - Structural recommendations (new agents, merges, splits) are logged in the report but never auto-implemented — they require user approval
-- The master checklist is the canonical reference; agent files are focused extracts. New agent items should normally have a corresponding (possibly broader) item in the master; if they don't, either add one or explicitly document why the item is agent-specific
 - When moving items between agents, verify the item's reading strategy matches the destination agent's mandate

@@ -16,7 +16,7 @@ Resolve these before Phase 4:
 - `{VERIFY_FAILURE_SCOPE}` = *(empty)*
 - `{VERIFY_FAILURE_COMMIT_SLOT}` = *(empty)*
 - `{VERIFY_STATUS_CLAUSE}` = *(empty)*
-- `{REVIEW_CHECKLIST}` = `Code Review Checklist` (the section below)
+- `{REVIEW_CHECKLIST}` = `Review Preferences` (the section below)
 - `{VERSION_BUMP_SECTION}` = `Version Bump Procedure` (the section below)
 - `{SIMPLIFY_ONLY}` — `true` when `--simplify-only` / `--refactor-only` was passed, else `false`
 - `{COMPAT_SHIM}` = `re-export`, `{COMPAT_HOST}` = `module`
@@ -34,11 +34,11 @@ Resolve these before Phase 4:
 - `{REVIEW_STATUS_EXTRA}` = *(empty)*
 - `{SUMMARY_TABLE_ROWS}` / `{SUMMARY_TABLE_ROW_RULES}` / `{SUMMARY_TABLE_FOOTER}` = see the **Final Summary Table** section below
 
-### Code Review Checklist
+### Review Preferences
 
-The checklist Phase 4b reviews the remediation diff against:
+The preferences Phase 4b reviews the remediation diff under:
 
-!read lib/code-review-checklist.md
+!read lib/review-preferences.md
 
 ### Version Bump Procedure
 

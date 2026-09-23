@@ -102,16 +102,17 @@ OLD_LIBS=(
   better-audit-code-quality better-audit-cognitive-load better-audit-deps
   better-audit-dry better-audit-security better-audit-stack-specific
   better-audit-structural better-audit-tests better-audit-ux
+  code-review-checklist
 )
 
 # NOTE: keep in sync with install.sh LIBS — see comment there.
 LIBS=(
   better-audit
-  better-discovery better-options better-pipeline-inputs
+  better-discovery better-issue-mode better-options better-pipeline-inputs
   better-plan better-remediation better-simplify
   better-state better-test-enhancement
   better-cleanup better-pr-and-ci better-review-loop better-verification
-  ci-flake-handling code-review-checklist commit-conventions config-defaults-issues-merge copilot-review-loop
+  ci-flake-handling commit-conventions config-defaults-issues-merge copilot-review-loop
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
   gh-host github-reviewer-loop graphql-escaping
@@ -119,6 +120,7 @@ LIBS=(
   per-finding-root-cause plan-id-format plan-issue-setup plan-issue-filing pr-write-access
   post-review-doc-recommendations rebase-conflict-resolution remediation-agent-template
   release-documented review-agent-selection review-config-defaults review-convergence-gate review-flags
+  review-preferences
   swift-review-checklist swift-gotchas
   review-surface-scan review-surface-quality review-security-audit
   review-cross-file-tracing review-cross-file-contract
