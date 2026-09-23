@@ -141,15 +141,38 @@ describe('/do:next --trusted-authors union', () => {
   });
 });
 
+describe('/do:next claim snippet', () => {
+  it('keeps the sibling-race hard stop without repeated teardown rationale', () => {
+    const claim = next.split('### Phase 2 — mark the issue in progress')[1].split('## Phase 3')[0];
+    assert.match(claim, /if printf '%s' "\$ASSIGNEES"[\s\S]*?git push origin --delete "next\/\$\{SLUG\}"[\s\S]*?exit 1/);
+    assert.doesNotMatch(claim, /Claim exclusivity is best-effort/);
+    assert.doesNotMatch(claim, /race-detected branch is a hard stop/);
+    assert.doesNotMatch(claim, /HARD STOP/);
+  });
+});
+
 describe('swarm workers inherit the orchestrator gates', () => {
-  it('passes --self/--no-self, --collaborators/--no-collaborators, and --trusted-authors', () => {
-    assert.match(swarm, /explicit `--self` or `--no-self`/);
-    assert.match(swarm, /explicit `--collaborators` or `--no-collaborators`/);
-    assert.match(swarm, /`--trusted-authors <list>` or `--trusted-authors none`/);
+  it('passes the exact resolved self, collaborators, and trusted-authors decisions', () => {
+    assert.match(
+      swarm,
+      /resolved `--self\|--no-self`, `--collaborators\|--no-collaborators`, `--trusted-authors <list>\|none` explicitly/,
+    );
     assert.match(
       swarm,
       /who is not a collaborator on <owner\/repo> \(and not on --trusted-authors\)/,
     );
+    assert.doesNotMatch(swarm, /per-run override that widened or narrowed the batch/);
+    assert.doesNotMatch(swarm, /Also pass the orchestrator's resolved claim gates explicitly/);
+  });
+});
+
+describe('swarm prose slimming keeps executable rules', () => {
+  it('retains named-blocker holds, dispatch resolution, and reviewer preflight', () => {
+    assert.match(swarm, /repeatedly hold any dependent whose named blocker is still open but was removed/);
+    assert.match(swarm, /Re-run the hold pass if A2e drops cycle members/);
+    assert.match(swarm, /light.*cheapest capable coding model.*medium.*workhorse.*heavy.*strongest available alias/);
+    assert.match(swarm, /lack of entitlement, retry once with the session model/);
+    assert.match(swarm, /exact orchestrator-owned `REVIEWER_PREFLIGHT` block/);
   });
 });
 
