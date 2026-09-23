@@ -38,17 +38,14 @@ Two optional labels (`:` here means `LABEL_SEP`) recommending **how to run the w
   high when the work is wide, fiddly, or easy to get subtly wrong.
 
 The axes are independent (`model:light` + `effort:max` is a mechanical change across
-forty call sites); moving both together is a size estimate, not a hint. Record **tier
-names only**, never model slugs — consumers resolve them per
-[model-tiers.md](./model-tiers.md). **An unlabeled issue is normal**: apply an axis
+forty call sites). Record **tier names only**, never model slugs — consumers resolve
+them per [model-tiers.md](./model-tiers.md). **An unlabeled issue is normal**: apply an axis
 only when the investigated work justifies it; a reflexive `medium`/`medium` is noise.
-`/do:next` consumes both: `--model` / `--effort` filter its queue (label matching,
-every host), and `--swarm` sets each worker's model from the tier where the host can.
+`/do:next --model` / `--effort` filter its queue by these labels, and `--swarm` sets
+each worker's model from the tier.
 
 ## Label colors
 
-`severity:critical` `B60205`, `severity:high` `D93F0B`, `severity:medium` `FBCA04`,
-`severity:low` `0E8A16`; every category label `0366D6`; `model:light` `D4C5F9`,
-`model:medium` `A371F7`, `model:heavy` `6F42C1`; `effort:low` `BFE5E5`,
-`effort:medium` `76C7C7`, `effort:high` `1D7874`, `effort:xhigh` `0E4F4C`,
-`effort:max` `05403D`. Build each real name as `<key>${LABEL_SEP}<value>`.
+`severity`: critical `B60205`, high `D93F0B`, medium `FBCA04`, low `0E8A16`. Every
+category: `0366D6`. `model`: light `D4C5F9`, medium `A371F7`, heavy `6F42C1`.
+`effort`: low `BFE5E5`, medium `76C7C7`, high `1D7874`, xhigh `0E4F4C`, max `05403D`.

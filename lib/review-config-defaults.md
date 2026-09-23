@@ -6,7 +6,7 @@ deciding a flag was omitted. The first source that provides a value wins:
 1. **Explicit flag in `$ARGUMENTS`.** `--review-with none` means no external reviewer
    this run: `REVIEW_AGENTS=[]`, ignoring any saved `review-with`.
 2. **Per-project** — `.slashdo.json` at the repo root, its `defaults` object.
-3. **Global** — `~/.claude/.slashdo-config.json` (path rewritten per host CLI at install time), its `defaults` object.
+3. **Global** — `~/.claude/.slashdo-config.json`, its `defaults` object.
 4. **Built-in default** — the command's own documented default.
 
 Procedure (once, during argument parsing):
@@ -17,11 +17,9 @@ Procedure (once, during argument parsing):
 3. `EFFECTIVE = { ...GLOBAL_DEFAULTS, ...PROJECT_DEFAULTS }` (project wins key by key).
 4. For each shared flag **this command supports** that is **not present in
    `$ARGUMENTS`** — decided purely by the flag's absence from the command line, NOT by
-   whether a variable already holds a provisional built-in value (e.g.
-   `REVIEW_ITERATIONS=1`) — take `EFFECTIVE`'s value and run it through the command's
-   normal parsing and validation exactly as if typed (model brackets, slug checks,
-   dedupe, integer and mutual-exclusion rules), so a malformed saved value gets the
-   typed error. Keys:
+   whether a variable holds a provisional built-in value — parse and validate
+   `EFFECTIVE`'s value exactly as if typed, so a malformed saved value gets the typed
+   error. Keys:
    - `review-with` → `--review-with` (string). Per-entry `~opt`, `~max=<n>`, and
      `~effort=<level>` suffixes ride through verbatim; a per-entry `~max` overrides
      `review-iterations` for that entry. **Tombstone:** an effective value of `none`
@@ -36,10 +34,8 @@ Procedure (once, during argument parsing):
    - `review-models` → `EFFECTIVE_REVIEW_MODELS`, a map of agent slug
      (`codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`ollama`) to model,
      **deep-merged per agent** (project overrides global for that agent only). It
-     supplies a reviewer's model only when its `--review-with` entry has no
-     `[<model>]` bracket (else the reviewer's built-in default; `copilot` and
-     `@<login>` take none), never selects reviewers, and is passed to the
-     multi-reviewer loop as `{REVIEW_MODELS}`.
+     fills a model only for an entry with no `[<model>]` bracket, never selects
+     reviewers, and is passed to the multi-reviewer loop as `{REVIEW_MODELS}`.
    - `review-iterations` → `--review-iterations` (integer).
    - `reviewer-applies` → `--reviewer-applies` (`true` = set).
    - `review-stop-mode` → `"on-findings"` ≡ `--review-stop-on-findings`,
@@ -53,8 +49,6 @@ Procedure (once, during argument parsing):
 
 Only flags the command documents are eligible: `/do:rpr` reads `review-with`,
 `reviewer-applies`, and `review-models` and ignores `review-iterations` /
-`review-stop-mode` / `review-mode`. Commands accepting
-`--issues-label`/`--self`/`--collaborators`/`--trusted-authors`/`--merge`/`--merge-method`
-resolve those keys under this precedence via
-[lib/config-defaults-issues-merge.md](./config-defaults-issues-merge.md) — except
-`/do:next`, `/do:replan`, and `/do:better` (`lib/better-options.md`), which resolve them inline.
+`review-stop-mode` / `review-mode`. Non-review keys (`issues-label`, `merge`, …)
+follow this precedence via [lib/config-defaults-issues-merge.md](./config-defaults-issues-merge.md)
+or the command's own inline rules.

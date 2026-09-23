@@ -24,9 +24,8 @@ tier → model mapping**. A command that hardcodes a slug is a bug; fix it here.
 ## Reasoning effort
 
 Five advisory levels: `low`, `medium`, `high`, `xhigh`, `max`. The level mainly
-*describes the work* (for filtering and for how carefully to approach it), so it works
-on every host as metadata. Setting it on a dispatch is optional: do so only where the
-dispatch API actually has an effort control, **clamped to the nearest level the host
+*describes the work*, so it works on every host as metadata. Setting it on a dispatch
+is optional, only where the dispatch API has an effort control, **clamped to the nearest level the host
 has** (a three-level host runs `xhigh`/`max` at its highest). Never report its absence
 as a degraded run, and never trade one axis for the other.
 
@@ -43,6 +42,5 @@ The `Agent` tool has **no `effort` parameter** — never pass one (an unknown ke
 input validation and takes the dispatch down); carry the level in the brief instead.
 Other dispatch APIs (e.g. slashdo `Workflow` scripts) may accept one; check first.
 
-The `model:` / `effort:` tracker labels in [plan-issue-setup.md](./plan-issue-setup.md)
-use this vocabulary. `/do:config --review-models` is unrelated: it pins each external
-*reviewer*'s model by explicit choice and is not tiered.
+The tracker's `model:` / `effort:` labels use this vocabulary. `/do:config
+--review-models` is unrelated: it pins each external *reviewer*'s model, untiered.
