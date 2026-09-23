@@ -83,7 +83,7 @@ describe('worktree-safe merge contracts', () => {
     // An absent required-checks set makes `gh pr checks --required` exit non-zero;
     // without this carve-out the chain could never merge on such a repo.
     // Pin next.md's own paragraph — next-swarm.md (read in with it) says the same thing.
-    assert.match(body, /\*\*If `gh pr checks` prints `no required checks reported`\*\*, it still exits non-zero\. The gate is vacuously satisfied, so run the `gh pr merge` line alone/);
+    assert.match(body, /\*\*If `gh pr checks` prints `no required checks reported`\*\*, it still exits non-zero\. The gate is vacuously satisfied, so run the merge alone with the resolved method written in literally/);
   });
 
   it('never hardcodes the merge method on a /do:next gh merge', () => {

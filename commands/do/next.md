@@ -590,9 +590,9 @@ git push && \
 git push && glab ci status --wait && glab mr merge <num> --yes --remove-source-branch
 ```
 
-**If `gh pr checks` prints `no required checks reported`**, it still exits non-zero. The gate is vacuously satisfied, so run the `gh pr merge` line alone. Checks for a just-pushed SHA can take a few seconds to register, so re-run the watch once before treating "no checks" as vacuous.
+**If `gh pr checks` prints `no required checks reported`**, it still exits non-zero. The gate is vacuously satisfied, so run the merge alone with the resolved method written in literally (e.g. `gh pr merge <num> --squash`); a bare `--"$MERGE_METHOD"` in a fresh Bash call expands to `--` and `gh` refuses it. Checks for a just-pushed SHA can take a few seconds to register, so re-run the watch once before treating "no checks" as vacuous.
 
-**If a required check fails**, apply the **CI flake handling** routine: one conservative re-run on the same commit. If the same SHA passes, it was a flake, so merge and log which check flaked. If it fails again, leave the PR open, report the failing check, and skip Phase 7, as for `dirty`. Read the routine only when a required check fails:
+**If a required check fails**, apply the **CI flake handling** routine: one conservative re-run on the same commit. If the same SHA passes, it was a flake, so merge (method written in literally, as above) and log which check flaked. If it fails again, leave the PR open, report the failing check, and skip Phase 7, as for `dirty`. Read the routine only when a required check fails:
 
 !read lib/ci-flake-handling.md
 
