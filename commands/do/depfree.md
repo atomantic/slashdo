@@ -607,10 +607,10 @@ for pkg in {REMOVED_PACKAGES}; do
     --include='*.ts' --include='*.js' --include='*.tsx' --include='*.jsx' \
     --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build . \
     && echo "WARN: $pkg still imported (JS/TS)"
-  grep -rnE "^(from|import) ${pkg}([. ]|$)" \
+  grep -rnE "^[[:space:]]*(from|import) ${pkg}([. ]|$)" \
     --include='*.py' --exclude-dir=.venv --exclude-dir=venv . \
     && echo "WARN: $pkg still imported (Python)"
-  grep -rnE "^use ${pkg//-/_}(::| |;)" \
+  grep -rnE "^[[:space:]]*use ${pkg//-/_}(::| |;)" \
     --include='*.rs' --exclude-dir=target . \
     && echo "WARN: $pkg still used (Rust)"
   grep -rnE "\"[^\"]*/${pkg}\"" \
