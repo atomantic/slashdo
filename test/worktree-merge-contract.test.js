@@ -102,6 +102,14 @@ describe('worktree-safe merge contracts', () => {
     assert.match(body, /\*\*Merge method \(GitHub\)\.\*\* Resolve `MERGE_METHOD` \*\*once per invocation\*\*/);
   });
 
+  it('re-runs the swarm MERGED read-back after any standalone merge', () => {
+    // The flake and no-required-checks paths merge outside the && chain, after the
+    // read-back already printed "not MERGED"; step 4 closes the issue only on MERGED.
+    const body = readCommand('next.md');
+    assert.match(body, /flake → run the merge alone with the resolved method written in literally[^\n]*then run the `MERGED` read-back \/ remote-delete block below/);
+    assert.match(body, /vacuously satisfied: run the merge alone with the resolved method written in literally[^\n]*then run the `MERGED` read-back \/ remote-delete block below/);
+  });
+
   it('chains the swarm GitLab push into the pipeline wait', () => {
     // A failed push leaves `glab ci status --wait` watching the stale (possibly green)
     // pipeline, which would merge the MR without its re-sync commit.
