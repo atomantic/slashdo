@@ -26,7 +26,7 @@ writes one ready-to-file issue body per finding (the Phase 1 finding format) to
 compact index**:
 
 ```
-<id> | <SEVERITY-or-UNCERTAIN> | <category> | <file:line> | <one-line title>
+<N> | <SEVERITY-or-UNCERTAIN> | <category> | <file:line> | <one-line title>
 ```
 
 Preserve `[UNCERTAIN]` as `UNCERTAIN` in the index and in the spooled body; do not
