@@ -178,7 +178,7 @@ OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 # enumerates lib/ dynamically, so it doesn't need updating.
 LIBS=(
   better-audit
-  better-discovery better-options better-pipeline-inputs
+  better-discovery better-issue-mode better-options better-pipeline-inputs
   better-plan better-remediation better-simplify
   better-state better-test-enhancement
   better-cleanup better-pr-and-ci better-review-loop better-verification
