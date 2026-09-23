@@ -141,6 +141,8 @@ Run the shared issue-mode setup — it reuses the `CLI_TOOL` the Pre-flight dete
 
 !read lib/plan-issue-mode.md
 
+> **Skip that file's Setup step 3 ("Fetch existing open issues" / `EXISTING_ISSUES`).** It exists for commands that file and dedup *findings*; `/do:next` files none, so dumping every open issue's body into context buys nothing. The step-1 walk below is the only open-issue listing this phase needs. If Phase 4 does file a discovered-work issue, check for a duplicate with a targeted search (`gh issue list --search "<keywords>"` / `glab issue list --search "<keywords>"`) instead.
+
 > **Issue mode works on GitHub or GitLab.** The claim (Phase 2) uses the tracker's **assignee** field as the cross-machine marker on either host — GitHub via `gh issue edit --add-assignee`/`--remove-assignee`, GitLab via `glab issue update --assignee "+<user>"`/`--assignee "-<user>"` (the `+`/`-` prefix adds/removes one assignee without clobbering others, which the race read-back depends on). Every `gh` call in this phase has a `glab` equivalent selected by `$CLI_TOOL`. One structural gap: GitHub has a native project-scoped **sub-issues** API for epic/child resolution (step 3); GitLab's analog (group-level Epics) is a different, tier-gated feature, so on GitLab the **convention fallback** (body task-lists + `Part of #N` back-references, per [lib/epic-children.md](../../lib/epic-children.md)) is the primary path.
 
 **GitLab only — probe for `jq` before the first plain `glab api` call.** `glab api` has no
@@ -215,13 +217,14 @@ Then:
    # after EVERY prioritized one — a finite sentinel like 9999 would tie a real
    # `priority<SEP>9999` label and let unlabeled work jump ahead of it — and
    # createdAt breaks ties. With no priority labels anywhere the order collapses to
-   # plain oldest-first — fully backward compatible. `body` is fetched here for the
-   # step-4 dependency parse.
+   # plain oldest-first — fully backward compatible. `body` is deliberately NOT
+   # listed: steps 3–4 fetch it per candidate, so the walk never loads every open
+   # issue's body into context just to pick one.
    LIST_ARGS=(--state open)
    [ -n "$LABEL_FILTER" ] && LIST_ARGS+=(--label "$LABEL_FILTER")
    [ "$SELF_MODE" = "true" ] && LIST_ARGS+=(--author "@me")
    gh issue list "${LIST_ARGS[@]}" --limit 500 \
-     --json number,title,assignees,labels,createdAt,body,author \
+     --json number,title,assignees,labels,createdAt,author \
      --jq "sort_by([ (([.labels[].name | select(test(\"^priority${LABEL_SEP}[0-9]+\$\")) | ltrimstr(\"priority${LABEL_SEP}\") | tonumber] | min) // infinite), .createdAt ]) | .[]"
    ```
    The `--limit 500` avoids truncating the queue before the client-side sort (`gh issue list` defaults to 30). A repo with >500 open candidates is pathologically large (`/do:replan --issues` to prune, or `--issues-label` to scope); note the cap rather than silently dropping the overflow. **Priority is advisory ordering, not a gate** — an unprioritized issue is still claimable.
@@ -251,8 +254,9 @@ Then:
        echo "GitLab returned an empty username — --self cannot be enforced. Aborting."; exit 1; }
      LIST_ARGS+=(--author "$ME")
    fi
+   # Project away `description` (GitLab's body) — steps 3–4 fetch it per candidate.
    glab issue list "${LIST_ARGS[@]}" --per-page 100 \
-     --jq "sort_by([ (([.labels[] | select(test(\"^priority${LABEL_SEP}[0-9]+\$\")) | ltrimstr(\"priority${LABEL_SEP}\") | tonumber] | min) // infinite), .created_at ]) | .[]"
+     --jq "sort_by([ (([.labels[] | select(test(\"^priority${LABEL_SEP}[0-9]+\$\")) | ltrimstr(\"priority${LABEL_SEP}\") | tonumber] | min) // infinite), .created_at ]) | .[] | {iid,title,labels,assignees,author,created_at}"
    ```
    GitLab's `--per-page` maxes out at 100 with no "give me everything" pagination for a plain open-issue list — same "note the cap" guidance at a lower threshold; `--issues-label` keeps a busy GitLab tracker under it.
 
@@ -272,7 +276,7 @@ Then:
    ```bash
    # GitHub ($LABEL_SEP is ":")
    gh issue list "${LIST_ARGS[@]}" --limit 500 \
-     --json number,title,assignees,labels,createdAt,body,author \
+     --json number,title,assignees,labels,createdAt,author \
      --jq "map(select(any(.labels[].name; . == \"model${LABEL_SEP}light\")
                     or ([.labels[].name | select(startswith(\"model${LABEL_SEP}\"))] | length == 0)))
          | map(select(any(.labels[].name; . == \"effort${LABEL_SEP}max\")))
@@ -283,11 +287,11 @@ Then:
      --jq "map(select(any(.labels[]; . == \"model${LABEL_SEP}light\")
                    or ([.labels[] | select(startswith(\"model${LABEL_SEP}\"))] | length == 0)))
          | map(select(any(.labels[]; . == \"effort${LABEL_SEP}max\")))
-         | sort_by([ (([.labels[] | select(test(\"^priority${LABEL_SEP}[0-9]+\$\")) | ltrimstr(\"priority${LABEL_SEP}\") | tonumber] | min) // infinite), .created_at ]) | .[]"
+         | sort_by([ (([.labels[] | select(test(\"^priority${LABEL_SEP}[0-9]+\$\")) | ltrimstr(\"priority${LABEL_SEP}\") | tonumber] | min) // infinite), .created_at ]) | .[] | {iid,title,labels,assignees,author,created_at}"
    ```
    Omit the `map` for an inactive axis entirely rather than emitting `select(true)`. **This filter runs before every other skip**, so an excluded issue is never considered for the parking-label / dependency / epic checks — and exclusion here means "not what you asked for," not "not workable." Report it that way in step 7: if the filter emptied a queue that had eligible work, say which filter did it, **writing the flags space-separated, exactly as they'd be typed** (`no eligible issue matching --model light --effort max — 14 open issues carry no dispatch hint; add `none` to include them`) — comma-joined they'd read as one axis's OR-list.
 2. **Determine in-flight issues.** Issue `N` is in flight if EITHER `issue-N` appears in the raw in-flight set, OR the issue **already has an assignee** (the Phase 2 marker — a local-only branch on a sibling machine is invisible here, but its assignee is not).
-3. **Resolve epics before picking (child-aware).** An epic (umbrella issue) is **not** a single claimable unit — its done-ness depends on its children. For any candidate that is an epic (carries `epic`/a repo umbrella label, has native sub-issues, or whose body task-lists other issues), classify it with the shared epic logic — read it only when a candidate is an epic:
+3. **Resolve epics before picking (child-aware).** An epic (umbrella issue) is **not** a single claimable unit — its done-ness depends on its children. For any candidate that is an epic (carries `epic`/a repo umbrella label, has native sub-issues, or whose body — fetched per candidate, see step 4 — task-lists other issues), classify it with the shared epic logic — read it only when a candidate is an epic:
 
 !read lib/epic-children.md
 
@@ -296,7 +300,7 @@ Then:
    - `epic-done` (all children CLOSED, no wrap-up tasks) → nothing to implement; **close it inline** using [lib/epic-children.md](../../lib/epic-children.md)'s "Closing an epic" step (GitHub: `gh issue close "$N" --comment "..."`; GitLab: `glab issue note "$N" -m "..." && glab issue close "$N"`), note it, and keep scanning.
    - `epic-wrapup` (all children CLOSED, wrap-up tasks remain) → **this IS claimable work**: "complete epic #N's remaining wrap-up tasks." Claim it like any issue — Phase 4 does the wrap-up (and ticks the wrap-up checkboxes in the epic body), and the Phase 6 PR carries `Closes #<N>`.
    - `epic-empty` (no children resolvable either way) → treat as an ordinary issue.
-4. **Resolve declared dependencies before picking (blocked-by).** A candidate may declare a hard dependency in its **body**: a line matching `Depends on #<N>` or `Blocked by #<N>` (case-insensitive; one line may list several, e.g. `Depends on #12, #15`). Collect every `#<N>` on those lines. A candidate is **blocked** when ANY referenced issue is still open — check the freshest state (GitHub: `gh issue view <N> --json state -q .state`; GitLab: `glab issue view <N> --output json --jq .state`) and test for "closed" rather than an exact "open" match (`OPEN`/`CLOSED` vs `opened`/`closed`); a referenced number that is closed, or doesn't exist, does not block. Resolve **lazily** as you walk (only for the candidate you're about to pick).
+4. **Resolve declared dependencies before picking (blocked-by).** A candidate may declare a hard dependency in its **body**: a line matching `Depends on #<N>` or `Blocked by #<N>` (case-insensitive; one line may list several, e.g. `Depends on #12, #15`). Collect every `#<N>` on those lines. The step-1 walk omits bodies, so **fetch the body for this candidate only**, when you evaluate it (GitHub: `gh issue view <N> --json body -q .body`; GitLab: `glab issue view <N> --output json --jq .description`) — the same fetch serves step 3's task-list check. A candidate is **blocked** when ANY referenced issue is still open — check the freshest state (GitHub: `gh issue view <N> --json state -q .state`; GitLab: `glab issue view <N> --output json --jq .state`) and test for "closed" rather than an exact "open" match (`OPEN`/`CLOSED` vs `opened`/`closed`); a referenced number that is closed, or doesn't exist, does not block. Resolve **lazily** as you walk (only for the candidate you're about to pick).
    - `blocked` (≥1 referenced issue still open) → **skip** in auto-pick; note `#N blocked by #M (open)`. Self-clearing: when #M closes, #N becomes eligible.
    - Also honor each host's **native** blocked-by relationship when the API surfaces it — GitHub's GraphQL `blockedBy` connection, or GitLab's Issue Links API filtered to `link_type: "is_blocked_by"` (GitLab: capture first, then filter — `LINKS_JSON="$(glab api projects/:id/issues/<N>/links)" || <treat as UNRESOLVED>` then `printf '%s' "$LINKS_JSON" | jq '.[] | select(.link_type == "is_blocked_by")'`). Two steps because plain `glab api` has no `--jq` and a pipeline reports only **jq's** exit status, which succeeds on empty input — collapsed into one pipeline, a links-API outage reads as "no native blockers" and the picker would **fail open**. **A failed lookup is UNRESOLVED, not unblocked:** fall back to the body convention alone for that candidate and say so (`#N: native blocked-by lookup failed — using the body convention only`). The two sources are OR'd (blocked by *either* ⇒ skip).
    - **Cycle / unresolvable chain** (A depends on B, B depends on A) → both stay skipped; note the cycle so a human can break it. Never loop trying to resolve one.

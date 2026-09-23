@@ -59,11 +59,25 @@ describe('/do:next --collaborators claim gate', () => {
   it('requests author on the GitHub issue list so the walk can skip outsiders', () => {
     // Only the /do:next picker lists (priority/oldest walk) need author; other
     // `gh issue list` examples in included libs are unrelated.
-    const picker = next.match(/--json number,title,assignees,labels,createdAt,body[^\n]*/g) || [];
+    const picker = next.match(/--json number,title,assignees,labels,createdAt[^\n]*/g) || [];
     assert.ok(picker.length >= 2, `expected picker json shapes, got ${picker.length}`);
     for (const call of picker) {
       assert.match(call, /author/, `missing author on: ${call}`);
     }
+  });
+
+  it('keeps issue bodies out of the walk list and skips the EXISTING_ISSUES dump (#291)', () => {
+    // Bodies are fetched per candidate (steps 3-4), never for every open issue.
+    const picker = next.match(/--json number,title,assignees,labels,createdAt[^\n]*/g) || [];
+    for (const call of picker) {
+      assert.doesNotMatch(call, /\bbody\b/, `walk list must not fetch body: ${call}`);
+    }
+    // GitLab walks project away `description`.
+    const glabProjected = next.match(/\| \.\[\] \| \{iid,title,labels,assignees,author,created_at\}"/g) || [];
+    assert.ok(glabProjected.length >= 2, `expected projected GitLab walks, got ${glabProjected.length}`);
+    assert.match(next, /gh issue view <N> --json body -q \.body/);
+    assert.match(next, /glab issue view <N> --output json --jq \.description/);
+    assert.match(next, /Skip that file's Setup step 3/);
   });
 
   it('refuses an explicit #num for a non-collaborator, not overridden', () => {
