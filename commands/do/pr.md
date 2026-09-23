@@ -67,7 +67,7 @@ Print: `PR flow: {current_branch} → {default_branch}`
    c. For each finding, quote the specific code line and explain why it's a problem
 4. After reviewing all files, verify: does the code actually deliver what the commits claim?
 5. Print a review summary table: | finding | file | line | severity | fixable |
-6. Fix any issues, run tests, verify tests cover the changed code paths, then **commit and push those fixes** — using the upstream-derived push in [lib/upstream-push.md](../../lib/upstream-push.md), never a bare `git push` and never a destination built from the local branch name. Leaving the fixes uncommitted is invisible to "Open the PR"'s assertion below, which compares against the upstream ref and so only ever sees *committed* work
+6. Fix any issues, run tests, verify tests cover the changed code paths, then **commit and push those fixes** — using "Open the PR"'s upstream-derived push below (see [lib/upstream-push.md](../../lib/upstream-push.md) for why), never a bare `git push` and never a destination built from the local branch name. Leaving the fixes uncommitted is invisible to that section's assertion, which compares against the upstream ref and so only ever sees *committed* work
 7. Only after printing the review summary may you proceed to "Pre-PR Local Reviews"
 
 If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.

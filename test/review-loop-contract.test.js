@@ -545,10 +545,10 @@ describe('review-loop parse contracts', () => {
     // compares against the upstream ref, so a fix left uncommitted in the working tree
     // is invisible to it and the PR opens from the pre-fix tree regardless.
     assert.match(pr, /\*\*commit and push those fixes\*\*/);
-    assert.match(pr, /Leaving the fixes uncommitted is invisible to "Open the PR"'s assertion below/);
+    assert.match(pr, /Leaving the fixes uncommitted is invisible to that section's assertion/);
     // The gate's push must name its form, not leave it to the orchestrator — the two
     // forms it would otherwise reach for are the two this file forbids.
-    assert.match(pr, /using the upstream-derived push in \[lib\/upstream-push\.md\]/);
+    assert.match(pr, /using "Open the PR"'s upstream-derived push below/);
     // Without a stop-on-failure clause the orchestrator falls through to gh pr create
     // and opens exactly the stale pre-review PR this guard exists to prevent.
     assert.match(pr, /\*\*If the push still fails after that one retry, do NOT create the PR\*\*/);
