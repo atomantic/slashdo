@@ -6,16 +6,11 @@ verbatim.
 
 ### Inputs
 
-In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines and
-`~/.claude/lib/better-verification.md` documents:
-
-- `{SUMMARY_TABLE_ROWS}` — the pipeline's category rows for the final summary
-  table, one `| Category | … |` line per category it can produce, TOTAL row
-  included.
-- `{SUMMARY_TABLE_ROW_RULES}` — instructions to the agent about which rows to
-  omit in which mode, or empty. Printed nowhere; read before building the table.
-- `{SUMMARY_TABLE_FOOTER}` — extra line(s) that belong in the printed output
-  under the table (e.g. platform / deployment-target lines), or empty.
+In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines:
+`{SUMMARY_TABLE_ROWS}`, `{SUMMARY_TABLE_ROW_RULES}`, and
+`{SUMMARY_TABLE_FOOTER}`. What each one means and where its value comes from
+is documented once, in CONTRIBUTING.md's "Shared `better-*` pipeline
+placeholders".
 
 ## Phase 7: Cleanup
 
