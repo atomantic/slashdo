@@ -20,8 +20,8 @@ checkbox brackets**:
   - [ ] [phase-a-data-model] **Phase A — Data model + migration.** Nested sub-item.
 ```
 
-Headings, prose, numbered "Next Up" intros, and bare bullets without a
-checkbox are NOT given IDs — the unit of work is the checkbox.
+Headings, prose, numbered intros, and bare bullets without a checkbox are NOT
+given IDs — the unit of work is the checkbox.
 
 ## Slug derivation
 
