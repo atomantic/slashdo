@@ -82,7 +82,8 @@ describe('worktree-safe merge contracts', () => {
     );
     // An absent required-checks set makes `gh pr checks --required` exit non-zero;
     // without this carve-out the chain could never merge on such a repo.
-    assert.match(body, /no required checks reported/);
+    // Pin next.md's own paragraph — next-swarm.md (read in with it) says the same thing.
+    assert.match(body, /\*\*If `gh pr checks` prints `no required checks reported`\*\*, it still exits non-zero\. The gate is vacuously satisfied, so run the `gh pr merge` line alone/);
   });
 
   it('never hardcodes the merge method on a /do:next gh merge', () => {
@@ -99,6 +100,13 @@ describe('worktree-safe merge contracts', () => {
       /gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed[^\n]*\\\n[^\n]*"squash"\), \(select\(\.mergeCommitAllowed\) \| "merge"\), \(select\(\.rebaseMergeAllowed\) \| "rebase"\)\] \| first \/\/ empty/,
     );
     assert.match(body, /\*\*Merge method \(GitHub\)\.\*\* Resolve `MERGE_METHOD` \*\*once per invocation\*\*/);
+  });
+
+  it('chains the swarm GitLab push into the pipeline wait', () => {
+    // A failed push leaves `glab ci status --wait` watching the stale (possibly green)
+    // pipeline, which would merge the MR without its re-sync commit.
+    const body = readCommand('next.md');
+    assert.match(body, /git -C "<worktree>" push && glab ci status --wait && glab mr merge <pr_number>/);
   });
 
   it('reads the MR state back on the GitLab swarm path too', () => {

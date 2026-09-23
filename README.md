@@ -324,7 +324,7 @@ By default `/do:pr` opens the PR and hands it back for manual merge. Pass `--mer
 
 **How CI is awaited:** slashdo first enables GitHub-native auto-merge (`gh pr merge --auto`), so the merge lands when required checks pass even if your session ends. If the repo hasn't enabled auto-merge, it falls back to watching checks in-session (`gh pr checks --watch`) and merging once green — leaving the PR open if a required check fails. On GitLab it uses `glab mr merge --auto-merge`. It never merges on a non-clean review aggregate, before checks pass, or over branch protection.
 
-Save the behavior once with `/do:config --merge` (see [Configuration](#configuration-doconfig)). Only `/do:pr` reads the saved `merge`/`merge-method` defaults — `/do:better`, `/do:better-swift`, `/do:simplify`, `/do:depfree`, and `/do:release` keep their own documented merge behavior.
+Save the behavior once with `/do:config --merge` (see [Configuration](#configuration-doconfig)). Only `/do:pr` reads the saved `merge` default; the saved `merge-method` is read by `/do:pr` and by `/do:next`, which always uses it to pick the method for its own merge — `/do:better`, `/do:better-swift`, `/do:simplify`, `/do:depfree`, and `/do:release` keep their own documented merge behavior.
 
 ## Issue mode (`--issues`)
 

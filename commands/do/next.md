@@ -563,7 +563,7 @@ cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit 
 
 **Resolve the merge method (GitHub) — never hardcode `--merge`.** A repo that allows only squash or rebase rejects `gh pr merge --merge` on every run. Resolve `MERGE_METHOD` the way `/do:pr`'s merge step 3 does. The first match wins:
 1. A method this run was explicitly given, if Parse Arguments recorded one as `MERGE_METHOD`.
-2. The saved `merge-method` default: per-project `.slashdo.json` over global `~/.claude/.slashdo-config.json`, with the precedence in [lib/review-config-defaults.md](../../lib/review-config-defaults.md). It must be `squash`, `rebase`, or `merge`; abort on anything else, as for a typed value. Read only the method here, never the saved `merge` on/off key.
+2. The saved `merge-method` default: per-project `.slashdo.json` over global `~/.claude/.slashdo-config.json`, with the precedence in [lib/review-config-defaults.md](../../lib/review-config-defaults.md). It must be `squash`, `rebase`, or `merge`. Read only the method here, never the saved `merge` on/off key.
 3. The repo's allowed methods, preferring `squash`, then `merge`, then `rebase`:
    ```bash
    MERGE_METHOD="$(gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed \
@@ -572,7 +572,7 @@ cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit 
    echo "MERGE_METHOD=$MERGE_METHOD"
    ```
 
-State the chosen method, then substitute it literally into the merge below, because shell variables do not survive between Bash calls. On GitLab, skip this step: `glab mr merge` takes no method flag and uses the project default, as `/do:pr` does.
+**If the saved value is invalid or no method resolves, do not merge**: leave the PR open, report why, and skip Phase 7, as for `dirty`. Otherwise state the chosen method, then substitute it literally into the merge below, because shell variables do not survive between Bash calls. On GitLab, skip this step: `glab mr merge` takes no method flag and uses the project default, as `/do:pr` does.
 
 **Gate on required CI, then merge.** `/do:pr` ran with `--no-merge`, so its CI gate never fired, and the push below publishes a **new SHA** whose checks haven't run yet. Merging right after the push would merge before CI on an unprotected repo, and fail on pending checks on a protected one. Wait on the **required** checks first, chained with `&&` so a red gate or a failed push stops the merge:
 
