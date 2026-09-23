@@ -183,7 +183,7 @@ Every `/do:better` flag works here — `--interactive`, `--scan-only`, `--no-mer
 | `opencode` | OpenCode CLI, headless (aliases `zen`, `opencode-zen`) | yes |
 | `ollama` | Local Ollama model, review-only. Bare `ollama` auto-selects your most capable installed model | yes |
 | `cmd[<invocation>]` | **Escape hatch** for any other harness — your own shell command, review prompt on stdin. Command line or global config only, never a repo's `.slashdo.json` ([docs/review-loop.md](docs/review-loop.md)) | n/a |
-| `@<login>` | Any GitHub user or App/bot (e.g. `@octocat`) — slashdo requests their review on the PR and fixes what it surfaces. GitHub only | no |
+| `@<login>` | Any user or App/bot on the project's code host (e.g. `@octocat` on GitHub, `@jane.doe` on GitLab) — slashdo requests their review on the PR/MR and fixes what it surfaces | no |
 | `copilot` | **Legacy.** GitHub's cloud Copilot review (GitHub only); still supported when named, but never auto-selected | no |
 
 Reviewers run **in the order listed** — nothing is ever added implicitly.

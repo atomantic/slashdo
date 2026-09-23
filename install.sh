@@ -185,7 +185,7 @@ LIBS=(
   ci-flake-handling commit-conventions config-defaults-issues-merge copilot-review-loop
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
-  gh-host github-reviewer-loop
+  gh-host host-github host-gitlab host-reviewer-loop
   local-agent-review-loop local-agent-agy local-agent-claude local-agent-cmd local-agent-cursor local-agent-opencode local-cli-runner
   merge-gate model-tiers multi-reviewer-loop multi-reviewer-parallel next-gitlab next-swarm ollama-review-loop
   plan-issue-setup plan-issue-filing pr-write-access

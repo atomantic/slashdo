@@ -12,7 +12,7 @@ Launch one general-purpose sub-agent per PR, in parallel, and wait for all. Each
 
 Pass each sub-agent: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (`series` default, or `parallel`), `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (the copilot/`@<login>` cap; default 1), `{REVIEW_MODELS}` (the saved per-agent default models — without it a saved default model is silently ignored), `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so GitHub-side `gh api` calls hit the right host on GitHub Enterprise), `{BRANCH_PREFIX}/{CATEGORY_SLUG}`, and `{BUILD_CMD}`. When a loop reaches its guardrail, default mode stops; `--interactive` asks the user whether to continue.
 
-For each GitHub-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
+For each host-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
 
 - `copilot` — max wait 3 minutes in iteration 1, 2 minutes in iteration 2, 90 seconds in iteration 3, 60 seconds in iteration 4, then 45 seconds; poll every 15 seconds.
 - `@<login>` — expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s.
@@ -27,11 +27,11 @@ Always read the wrapper when this phase applies:
 
 !read lib/multi-reviewer-loop.md
 
-For every `copilot` or `@<login>` entry, read the shared GitHub-reviewer template:
+For every `copilot` or `@<login>` entry, read the shared host-reviewer template (its sub-agent runs the `{CODE_HOST}` verb file):
 
-!read lib/github-reviewer-loop.md
+!read lib/host-reviewer-loop.md
 
-Only for `copilot` entries, also read the Copilot delta:
+Only for `copilot` entries on GitHub, also read the Copilot delta:
 
 !read lib/copilot-review-loop.md
 

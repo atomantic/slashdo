@@ -109,14 +109,14 @@ const LIB_BACKTICK_RE = /`lib\/([A-Za-z0-9._-]+\.md)`/g;
 // file rather than being left to infer it. Environments with runtime `!cat`
 // (Claude/OpenCode) never reach this path and are unaffected.
 const ON_DEMAND_LIBS = new Map([
-  // Reviewer bodies: `--review-with` dispatches to one GitHub-side template
+  // Reviewer bodies: `--review-with` dispatches to one host-side template
   // (plus Copilot's delta) or one local backend per reviewer. The dispatcher
   // (multi-reviewer-loop.md) deliberately stays inline — it is always on the taken
   // path and is what names which body to load.
   ['copilot-review-loop.md',
-    { what: 'Copilot delta for the shared GitHub-reviewer loop', when: 'the reviewer list includes `copilot`' }],
-  ['github-reviewer-loop.md',
-    { what: 'shared GitHub-reviewer loop', when: 'the reviewer list includes `copilot` or an `@<login>` reviewer' }],
+    { what: 'Copilot delta for the shared host-reviewer loop', when: 'the reviewer list includes `copilot` on GitHub' }],
+  ['host-reviewer-loop.md',
+    { what: 'shared host-reviewer loop', when: 'the reviewer list includes `copilot` or an `@<login>` reviewer' }],
   ['local-agent-review-loop.md',
     { what: 'local-agent reviewer loop', when: 'the reviewer list includes `codex`, `claude`, `agy`, `grok`, `pi`, `cursor`, `opencode`, or `cmd`' }],
   ['ollama-review-loop.md',
