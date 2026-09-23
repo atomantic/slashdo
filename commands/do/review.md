@@ -222,6 +222,7 @@ When `PR_MODE=true` and `PR_DISPOSITION=apply`, first follow "Fix Issues — PR-
 
 Only when `ISSUE_MODE=true` and a finding is being deferred:
 
+!read lib/vcs-host.md
 !read lib/plan-issue-setup.md
 !read lib/plan-issue-filing.md
 

@@ -1,12 +1,8 @@
 ### Can we push to the PR's head branch? (`{CAN_PUSH_HEAD}`)
 
-**Why this exists.** A review that can *land* its own fixes is worth far more than one
-that files them as comments the author has to re-apply by hand — but only when the PR's
-head branch actually accepts our push. That is not the same question as "do we own this
-repo": a fork-to-upstream PR lives on someone else's fork, and an upstream maintainer can
-push to it **only** when the author left *Allow edits by maintainers* on. So probe the
-capability first, then pick the disposition — push fixes when we can, post inline review
-comments when we can't. Never assume one or the other from the repo slug.
+Choose push-versus-comment from actual branch permissions: same-repo collaborators and
+fork authors with maintainer edits can land fixes; otherwise review inline. Probe the
+capability, never infer it from matching owner/repo logins.
 
 Requires `{GH_HOST}` (derive it first — see `~/.claude/lib/gh-host.md`), the **base** repo
 `{OWNER}/{REPO}`, and `{PR_NUM}`.
@@ -45,14 +41,9 @@ Otherwise `CAN_PUSH_HEAD=false`.
 
 #### A `false` is a routing signal, never an error
 
-`maintainerCanModify` reads `false` in several ordinary situations that are not
-misconfiguration and must not abort the run: a fork owned by an **organization** (GitHub
-offers the *Allow edits by maintainers* checkbox only on user-owned forks), a PR whose
-author deliberately turned it off, and any query made by an account that isn't a
-maintainer of the base repo. All of them mean the same thing — **review inline** — and the
-command continues normally. Say which disposition was chosen and why in one line
-(`Fork PR and maintainer edits are off — posting inline review comments instead of fixes`)
-so the outcome is never mistaken for a failure.
+A false `maintainerCanModify` is ordinary for organization-owned forks, disabled settings,
+and non-maintainer queries; it routes to inline review rather than aborting. State the
+chosen disposition so the downgrade is not mistaken for failure.
 
 #### Pushing
 
