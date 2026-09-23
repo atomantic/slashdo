@@ -22,6 +22,7 @@ const LOOPS_WITH_OPTIONAL_ARRAYS = [
   'local-agent-review-loop.md',
   'ollama-review-loop.md',
   'enhance-loop.md',
+  'local-cli-runner.md',
 ];
 
 // Per-harness recipes the local-agent core loads with a gated `!read` (#347).
@@ -173,9 +174,17 @@ describe('review-loop parse contracts', () => {
     // The strict verdict contract above rejects anything that is not `NO FINDINGS`
     // or a complete FINDING block, so a merged CLI banner/progress line on stderr
     // would turn a clean review into a parse failure and block the merge.
-    const body = readLib('local-agent-review-loop.md');
+    // The launch lives in the shared runner (#349); every loop that launches through it
+    // must read it rather than carry its own copy.
+    const body = readLib('local-cli-runner.md');
     assert.match(body, /> "\$LOG_FILE" 2> "\$ERR_FILE"/);
     assert.doesNotMatch(body, /\{INVOCATION\} > "\$LOG_FILE" 2>&1/);
+    for (const name of ['local-agent-review-loop.md', 'enhance-loop.md']) {
+      const loop = readLib(name);
+      assert.match(loop, /^!read lib\/local-cli-runner\.md$/m, `${name} must read the shared runner`);
+      assert.doesNotMatch(loop, /\{INVOCATION\} > "\$LOG_FILE"/, `${name} must not restate the runner's launch`);
+      assert.doesNotMatch(loop, /seq 1 55/, `${name} must not restate the runner's poll`);
+    }
   });
 
   it('treats malformed Ollama output as a coverage gap rather than an empty review', () => {
@@ -193,8 +202,15 @@ describe('review-loop parse contracts', () => {
     // and block the merge on a diff that simply had nothing to review.
     const body = readLib('ollama-review-loop.md');
     const matches = body.match(/`REVIEWABLE > 0` and `REVIEW_ERRORS \+ PARSE_ERRORS >= REVIEWABLE`/g) || [];
-    assert.equal(matches.length, 2, 'both total-failure checks must carry the REVIEWABLE > 0 guard');
+    assert.equal(matches.length, 1, 'the total-failure check is defined once, with the REVIEWABLE > 0 guard');
     assert.match(body, /counted in at most ONE of REVIEW_ERRORS \/ PARSE_ERRORS/);
+    // #349: the coverage gap is defined ONCE and includes PARSE_ERRORS; the old
+    // `REVIEW_ERRORS + TRUNCATED > 0` definition contradicted the partial branch.
+    assert.doesNotMatch(body, /`REVIEW_ERRORS \+ TRUNCATED > 0`/);
+    const gaps = body.match(/REVIEW_ERRORS \+ PARSE_ERRORS \+ TRUNCATED > 0/g) || [];
+    assert.equal(gaps.length, 1, 'COVERAGE_GAP must be defined in exactly one place');
+    assert.match(body, /`COVERAGE_GAP=true` when `REVIEW_ERRORS \+ PARSE_ERRORS \+ TRUNCATED > 0`/);
+    assert.match(body, /\*\*Status override\.\*\* This is the loop's only coverage rule/);
   });
 
   it('threads the per-reviewer ~max cap through to the loops that honor it', () => {
@@ -368,28 +384,43 @@ describe('review-loop parse contracts', () => {
     // commit/push. Mirror local-agent-review-loop.md's git-metadata guard: capture
     // it as a fifth baseline artifact and restore it FIRST, before any other git
     // command runs in the restore sequence.
+    // #349: the snapshot/restore now lives ONCE in lib/local-cli-runner.md, used by
+    // enhance, the local-agent loop, and the parallel barrier, so the guard can no
+    // longer drift between copies (the local-agent copy had lost the mode-bit hash).
     const enhance = readLib('enhance-loop.md');
-    const step2 = enhance.slice(enhance.indexOf('Also snapshot the working-tree baseline'), enhance.indexOf('3. **Invoke** per the table above.'));
-    assert.match(step2, /GIT_COMMON="\$\(git rev-parse --git-common-dir\)"/);
-    assert.match(step2, /cp "\$GIT_COMMON\/config" "\$GIT_META_BAK\/config"/);
-    assert.match(step2, /tar -cf "\$GIT_META_BAK\/hooks\.tar" -C "\$GIT_COMMON" hooks/);
-    assert.match(step2, /git_meta_hash\(\) \{/);
+    const step2 = enhance.slice(enhance.indexOf('2. **Rebuild `$ENHANCE_PROMPT`**'), enhance.indexOf('3. **Invoke** per the table above.'));
+    assert.match(step2, /take the runner's \*\*Snapshot\*\*/);
+    const step4 = enhance.slice(enhance.indexOf('4. **Verify the read-only contract'));
+    assert.match(step4, /Run the runner's\s+\*\*Verify and restore\*\*/);
+    assert.match(step4, /no-op \(modified the working tree — contract violation\)/);
+    assert.match(step4, /\*\*If the restore failed\*\*, stop the\s+pipeline/);
+    for (const [name, body] of [['enhance-loop.md', enhance], ['local-agent-review-loop.md', readLib('local-agent-review-loop.md')]]) {
+      assert.doesNotMatch(body, /git_meta_hash\(\) \{|UNTRACKED_TAR=|git stash create/, `${name} must not restate the runner's snapshot`);
+    }
+
+    const runner = readLib('local-cli-runner.md');
+    const snapshot = runner.slice(runner.indexOf('### Snapshot'), runner.indexOf('### Launch and wait'));
+    assert.match(snapshot, /GIT_COMMON="\$\(git rev-parse --git-common-dir\)"/);
+    assert.match(snapshot, /cp "\$GIT_COMMON\/config" "\$GIT_META_BAK\/config"/);
+    assert.match(snapshot, /tar -cf "\$GIT_META_BAK\/hooks\.tar" -C "\$GIT_COMMON" hooks/);
+    assert.match(snapshot, /git_meta_hash\(\) \{/);
     // Content/path alone misses a hook flipped from non-executable to executable
     // with no other change -- that flip is what makes it run, so the fingerprint
     // must include mode bits too.
-    assert.match(step2, /stat -f '%Lp' "\$f" 2>\/dev\/null \|\| stat -c '%a' "\$f"/);
-    assert.match(step2, /GIT_META_BASELINE=\$\(git_meta_hash\)/);
-    assert.match(step2, /these five artifacts capture the caller's ENTIRE pre-pass state/);
+    assert.match(snapshot, /stat -f '%Lp' "\$f" 2>\/dev\/null \|\| stat -c '%a' "\$f"/);
+    assert.match(snapshot, /GIT_META_BASELINE=\$\(git_meta_hash\)/);
+    assert.match(snapshot, /MTIME_STAMP=/);
 
-    const step4 = enhance.slice(enhance.indexOf('4. **Verify the read-only contract'));
-    assert.match(step4, /Compare the git-metadata hash first and, on a mismatch, restore it before\s+running any other git command/);
-    assert.match(step4, /rm -rf "\$GIT_COMMON\/hooks"/);
-    assert.match(step4, /tar -xf "\$GIT_META_BAK\/hooks\.tar" -C "\$GIT_COMMON"/);
+    const restore = runner.slice(runner.indexOf('### Verify and restore'));
+    assert.match(restore, /Compare the git-metadata hash first\. On a mismatch, restore the metadata before running any other git command/);
+    assert.match(restore, /rm -rf "\$GIT_COMMON\/hooks"/);
+    assert.match(restore, /tar -xf "\$GIT_META_BAK\/hooks\.tar" -C "\$GIT_COMMON"/);
     // The restore-first ordering must precede the HEAD/index/tracked/untracked steps.
     assert.ok(
-      step4.indexOf('Compare the git-metadata hash first') < step4.indexOf('**HEAD** — if it moved'),
+      restore.indexOf('Compare the git-metadata hash first') < restore.indexOf('**HEAD**: if it moved'),
       'git metadata must be restored before HEAD/index/worktree/untracked',
     );
+    assert.match(restore, /-newer "\$MTIME_STAMP"/, 'gitignored edits must still be detected');
   });
 
   it('tells the in-process claude reviewer what to do with ~effort, and what not to reach for', () => {
@@ -431,10 +462,20 @@ describe('review-loop parse contracts', () => {
     );
     const reviewerApplies = loop.slice(loop.indexOf('**When `REVIEWER_APPLIES=true` (reviewer applies)**'));
 
+    // The apply rules live once in the shared fix tail (#349), used by local-agent and Ollama.
+    const tail = readLib('review-fix-tail.md');
+    const apply = tail.slice(tail.indexOf('### Apply'), tail.indexOf('### 4.'));
     assert.ok(
-      reviewOnly.indexOf('If recomputed `UNCOMMITTED > 0`') < reviewOnly.indexOf('If recomputed `NEW_COMMITS == 0`'),
+      apply.indexOf('If recomputed `UNCOMMITTED > 0`') < apply.indexOf('If recomputed `NEW_COMMITS == 0`'),
     );
-    assert.match(reviewOnly, /address review \(\$REVIEW_AGENT\): orchestrator-applied/);
+    assert.match(apply, /address review \(\{FIX_LABEL\}\): orchestrator-applied — remaining changes/);
+    assert.match(reviewOnly, /shared tail's \*\*Apply\*\* section, with `\{FIX_LABEL\}` set to `\$REVIEW_AGENT`/);
+    assert.match(readLib('ollama-review-loop.md'), /shared tail's \*\*Apply\*\* section, with `\{FIX_LABEL\}` set to `ollama`/);
+    for (const name of ['local-agent-review-loop.md', 'ollama-review-loop.md']) {
+      const body = readLib(name);
+      assert.equal(body.split('!read lib/review-fix-tail.md').length, 2, `${name} must read the shared tail exactly once`);
+      assert.doesNotMatch(body, /orchestrator-applied — remaining changes|PUSH_REMOTE=|CEILING/, `${name} must not restate the shared tail`);
+    }
     assert.match(reviewerApplies, /leave its changes uncommitted/);
     assert.match(reviewerApplies, /git reset --soft "\$LOOP_START_SHA"/);
     assert.match(reviewerApplies, /address review \(\$REVIEW_AGENT\): <summary>/);
@@ -578,7 +619,8 @@ describe('review-loop parse contracts', () => {
       /git push [^\n`]*HEAD:refs\/heads\//,
       'no prescribed push may re-prefix refs/heads/ (naming it in a warning is fine)',
     );
-    for (const name of ['local-agent-review-loop.md', 'ollama-review-loop.md']) {
+    // The local-agent and Ollama loops push through the one shared fix tail (#349).
+    for (const name of ['review-fix-tail.md']) {
       const loop = readLib(name);
       assert.match(loop, /PUSH_REMOTE="\$\(git config --get "branch\.\$BR\.remote"\)"/, `${name} must derive its push remote from branch config`);
       assert.match(loop, /PUSH_BRANCH="\$\(git config --get "branch\.\$BR\.merge"\)"/, `${name} must derive its push ref from branch config`);
@@ -688,7 +730,7 @@ describe('review-loop parse contracts', () => {
     assert.match(resolver, /only then use `git rebase --skip`/);
     assert.match(resolver, /a resolved rebase is not a terminal status/);
 
-    for (const name of ['local-agent-review-loop.md', 'ollama-review-loop.md']) {
+    for (const name of ['review-fix-tail.md']) {
       const loop = readLib(name);
       assert.match(loop, /rebase-conflict-resolution\.md/, `${name} must use the shared resolver`);
       assert.match(loop, /resolve and continue the rebase/, `${name} must continue after resolving`);
@@ -980,24 +1022,26 @@ describe('review-loop parse contracts', () => {
     // alone is not enough: both blocks say "capture the command exactly as shown",
     // so a cmd pass run from the plain form launches the reviewer with no stdin and
     // blocks until the timeout or reads EOF and reports nothing.
-    const cmdStdinForm = /if \[ "\$REVIEW_AGENT" = cmd \]; then[^\n]*\n\s*printf '%s' "\$LOCAL_PROMPT" \| \$\{TIMEOUT_CMD\[@\]\+"\$\{TIMEOUT_CMD\[@\]\}"\} \{INVOCATION\}/g;
-    assert.equal(
-      (loop.match(cmdStdinForm) || []).length,
-      2,
-      'both the background and foreground Step-2 templates must pipe $LOCAL_PROMPT into a cmd invocation',
-    );
+    // The launch is the shared runner's (#349): one block, whose stdin branch pipes the
+    // caller's PROMPT_ON_STDIN in front of the timed line, and the local-agent loop
+    // must set it to $LOCAL_PROMPT for cmd (and empty for everyone else).
+    const runner = readLib('local-cli-runner.md');
+    const stdinForm = /if \[ -n "\$PROMPT_ON_STDIN" \]; then\n\s*printf '%s' "\$PROMPT_ON_STDIN" \| \$\{TIMEOUT_CMD\[@\]\+"\$\{TIMEOUT_CMD\[@\]\}"\} \{INVOCATION\}/;
+    assert.match(runner, stdinForm, 'the runner launch must pipe the stdin prompt into the timed invocation');
+    assert.match(runner, /run the identical launch block in the foreground/, 'the no-background fallback must reuse the same stdin-aware block');
+    assert.match(loop, /Set `PROMPT_ON_STDIN="\$LOCAL_PROMPT"` for `cmd`[^\n]*`PROMPT_ON_STDIN=""` for every other reviewer/);
 
     // The .git snapshot has to see a SYMLINKED hook. git executes one just the same,
     // and `find -type f` alone skips it — so `ln -s /tmp/payload .git/hooks/pre-commit`
     // would leave the baseline hash unchanged and survive the wholesale restore.
-    assert.match(loop, /find "\$GIT_COMMON\/hooks" \\\( -type f -o -type l \\\)/);
-    assert.match(loop, /readlink "\$f" 2>\/dev\/null \|\| cat "\$f"/);
+    assert.match(runner, /find "\$GIT_COMMON\/hooks" \\\( -type f -o -type l \\\)/);
+    assert.match(runner, /readlink "\$f" 2>\/dev\/null \|\| cat "\$f"/);
 
     // The restore's `rm -rf "$GIT_COMMON/hooks"` must be guarded: GIT_COMMON is a
-    // step-1 variable and step 3 is a separate shell on most hosts, so an unbound one
-    // makes that line `rm -rf /hooks`.
-    assert.match(loop, /GIT_COMMON="\$\{GIT_COMMON:-\$\(git rev-parse --git-common-dir\)\}"/);
-    assert.match(loop, /if \[ -z "\$GIT_COMMON" \] \|\| \[ -z "\$GIT_META_BAK" \]/);
+    // snapshot variable and the restore is a separate shell on most hosts, so an
+    // unbound one makes that line `rm -rf /hooks`.
+    assert.match(runner, /GIT_COMMON="\$\{GIT_COMMON:-\$\(git rev-parse --git-common-dir\)\}"/);
+    assert.match(runner, /if \[ -z "\$GIT_COMMON" \] \|\| \[ -z "\$GIT_META_BAK" \]/);
 
     // Parsing cmd is not the same as dispatching it — review.md names the
     // local-agent loop's actual per-agent dispatch line inline (not via a shared
@@ -1081,14 +1125,15 @@ describe('review-loop parse contracts', () => {
 
     // The snapshot+revert that lets those reviewers run must cover .git/ too —
     // write-tree/stash/ls-files never see a planted hook or a core.hooksPath edit.
-    assert.match(loop, /GIT_META_BASELINE=\$\(git_meta_hash\)/);
-    assert.match(loop, /git_meta_hash\s+# vs \$GIT_META_BASELINE/);
+    assert.match(runner, /GIT_META_BASELINE=\$\(git_meta_hash\)/);
+    assert.match(runner, /git_meta_hash\s+# vs \$GIT_META_BASELINE/);
     // ...and parallel mode, which runs only Step 2 per reviewer, must take that
     // snapshot once before the fan-out and compare once after the barrier.
     // Parallel-only content now lives in its own on-demand partial.
     const parallelLib = readLib('multi-reviewer-parallel.md');
-    assert.match(parallelLib, /take the local-agent loop's Step-1 snapshot once, here/);
-    assert.match(parallelLib, /Step-3 five-artifact comparison and wholesale restore \*\*once\*\*/);
+    assert.match(parallelLib, /take the shared runner's Snapshot once, here\*\* \(\[local-cli-runner\.md\]\(\.\/local-cli-runner\.md\)/);
+    assert.match(parallelLib, /runner's Verify and restore \(five-artifact comparison and wholesale restore\) \*\*once\*\*/);
+    assert.match(parallelLib, /never end your turn while a review is in flight/);
 
     // An oversized prompt on an argv path is a launch failure, not a verdict —
     // it must degrade to no-verdict rather than a hard cli-error.
@@ -1336,5 +1381,55 @@ describe('local-agent loop loads only the launched harness recipe (#347)', () =>
     const all = readLocalAgent();
     assert.doesNotMatch(all, /keep the two in sync|Same split as/);
     assert.doesNotMatch(all, /`lib\/(?:enhance-loop|ollama-review-loop|multi-reviewer-loop|review-config-defaults)\.md`|\]\(\.\/(?:enhance-loop|ollama-review-loop|multi-reviewer-loop)\.md\)/);
+  });
+});
+
+describe('local CLI runner and review fix tail are single-owner partials (#349)', () => {
+  const { buildPromptBundle } = require('../src/transformer');
+  const libDir = path.join(__dirname, '..', 'lib');
+  const bundleFiles = (name) => Object.keys(buildPromptBundle(_read('commands', 'do', name), libDir).files);
+
+  it('bundles the shared partials with their users and no whole-loop cross-citations', () => {
+    // enhance-loop.md used to cite local-agent-review-loop.md ("same pattern as"),
+    // and the local-agent loop once cited enhance-loop.md, so each command shipped the
+    // other's entire loop. Now both cite only the runner they actually execute.
+    for (const name of ['pr.md', 'rpr.md', 'review.md', 'release.md']) {
+      const files = bundleFiles(name);
+      for (const lib of ['local-cli-runner.md', 'review-fix-tail.md']) {
+        assert.ok(files.includes(lib), `${name} must bundle ${lib}`);
+      }
+      assert.ok(!files.includes('enhance-loop.md'), `${name} never runs the enhance loop`);
+    }
+    assert.ok(bundleFiles('plan-task.md').includes('local-cli-runner.md'), 'plan-task must bundle the runner enhance uses');
+    // What the enhance loop itself pulls in: the runner and its per-CLI recipes, never
+    // a review loop or the review fix tail.
+    const enhanceFiles = Object.keys(buildPromptBundle(readLib('enhance-loop.md'), libDir).files);
+    assert.ok(enhanceFiles.includes('local-cli-runner.md'));
+    for (const lib of ['local-agent-review-loop.md', 'ollama-review-loop.md', 'review-fix-tail.md']) {
+      assert.ok(!enhanceFiles.includes(lib), `enhance-loop.md must not bundle ${lib}`);
+    }
+    assert.doesNotMatch(readLib('enhance-loop.md'), /local-agent-review-loop\.md/);
+  });
+
+  it('keeps each timeout block and the fix-tail mechanics in one place', () => {
+    // The runner owns the 1800 s wrapper; Ollama keeps only its own per-file 600 s bound.
+    const timeoutOwners = fs.readdirSync(path.join(__dirname, '..', 'lib'))
+      .filter((f) => f.endsWith('.md') && /TIMEOUT_CMD=\(timeout 1800\)/.test(readLib(f)));
+    assert.deepEqual(timeoutOwners, ['local-cli-runner.md']);
+    for (const name of ['ollama-review-loop.md', 'enhance-loop.md']) {
+      assert.doesNotMatch(readLib(name), /Stock macOS ships/, `${name} must point at empty-array-expansion.md, not restate it`);
+    }
+    // Ollama's old shell-expansion aside is gone: the guarded expansion already prevents it.
+    assert.doesNotMatch(readLib('ollama-review-loop.md'), /rule out the shell-expansion false positive/);
+
+    const tail = readLib('review-fix-tail.md');
+    assert.match(tail, /### 4\. Verify in the main thread/);
+    assert.match(tail, /### 5\. Push verified changes/);
+    assert.match(tail, /### 6\. Re-loop or stop/);
+    assert.match(tail, /review-convergence-gate\.md/);
+    assert.match(tail, /fix-regression-guard\.md/);
+    assert.match(tail, /`STATUS=capped`/);
+    assert.match(tail, /`STATUS=guardrail`/);
+    assert.match(tail, /\*\*Status override\.\*\*/);
   });
 });
