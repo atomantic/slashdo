@@ -48,4 +48,5 @@ fi
 Print `Code host: {CODE_HOST} (via {CLI_TOOL}), tracker: {TRACKER}`; carry these and
 `GH_HOST` through later phases. Say `{CR_NOUN}` in messages; build prefixed labels as
 `<key>${LABEL_SEP}<value>`. **Tracker gate:** issue calls use `TRACKER_CLI`; empty =
-no backend for `{TRACKER}` here = no tracker.
+no backend for `{TRACKER}` here = no tracker (`jira`: set only by
+`lib/tracker-jira.md`'s pre-flight).

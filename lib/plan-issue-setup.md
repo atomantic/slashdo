@@ -1,9 +1,8 @@
 # Tracker Issue Setup
 
-Shared setup for any command that reads or files tracker issues. The caller's own
-argument parsing already resolved `PLAN_LABEL` (`--issues-label`, saved
-`issues-label`, default `plan`). Dedup, `--scan-only` recording, severity/category
-labels, and bulk filing live in [plan-issue-filing.md](./plan-issue-filing.md).
+Shared setup for any command that reads or files tracker issues; the caller already
+resolved `PLAN_LABEL` (`--issues-label`, saved `issues-label`, default `plan`).
+Dedup, `--scan-only` recording, severity/category labels, and bulk filing live in [plan-issue-filing.md](./plan-issue-filing.md).
 
 ## Setup
 
@@ -16,9 +15,9 @@ labels, and bulk filing live in [plan-issue-filing.md](./plan-issue-filing.md).
    continues, files nothing, and lists each deferral (title, one-line rationale,
    file:line) in its final report under "Deferred (not filed — no issue tracker
    available)".
-2. **Label creation — lazy, not upfront.** Never create labels as a preamble: a run
-   that files nothing must not write to the tracker. Create each label
-   **immediately before the first issue that applies it**, idempotently:
+2. **Label creation — lazy.** A run that files nothing must not write to the
+   tracker: create each label **immediately before the first issue that applies
+   it**, idempotently:
    ```bash
    gh label create <name> --color <hex> 2>/dev/null || true               # gh
    glab label create --name <name> --color "#<hex>" 2>/dev/null || true   # glab: color required
