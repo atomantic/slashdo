@@ -4,8 +4,13 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const { readCommandDocs } = require('./helpers/command-docs');
 
 const body = fs.readFileSync(path.join(__dirname, '..', 'commands', 'do', 'release.md'), 'utf8');
+// The documented-delivery path lives in lib/release-documented.md, loaded on demand
+// via `!read` so recovery/generic-promotion runs don't pay for it — resolve it here
+// so the contract below still pins its text.
+const resolved = readCommandDocs('release.md', { eager: true });
 
 describe('/do:release remote promotion contracts', () => {
   it('requires ordered remote checkpoints before reporting completion', () => {
@@ -112,7 +117,7 @@ describe('/do:release remote promotion contracts', () => {
 
 
 describe('/do:release documented project delivery', () => {
-  const selection = body.slice(body.indexOf('## Select the Project Release Procedure'), body.indexOf('## Detect Release Workflow'));
+  const selection = resolved.slice(resolved.indexOf('## Select the Project Release Procedure'), resolved.indexOf('## Detect Release Workflow'));
 
   it('selects the native procedure before any promotion branch mutation', () => {
     assert.match(selection, /docs\/RELEASING\.md/);

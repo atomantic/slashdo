@@ -20,6 +20,8 @@ After parsing the flags above, apply any **saved defaults** (set via `/do:config
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
+!`cat ~/.claude/lib/config-defaults-issues-merge.md`
+
 - **`--issues`** / **`--no-issues`** / **`--issues-label <name>`** (optional): when a finding is **deferred** (local-branch mode only — see Finding Disposition), file it as a GitHub/GitLab issue instead of a PLAN.md line. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`. If the user passes **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`. No effect in PR mode.
 - **PR reference** — any non-flag token that looks like a pull-request reference. **Match on URL *shape*, never on the hostname** — a self-managed GitHub Enterprise host often carries no `github` substring; the host-independent `/pull/{number}` path segment is what identifies a GitHub-flavored PR. A token matches if **any** of the following holds:
   - Full URL of the shape `{scheme}://{host}/{owner}/{repo}/pull/{number}` — **any** `{host}`, including `github.com`, `github.example.com`, and a GHES host with no `github` substring. Trailing subpaths (`/files`, `/commits`, `/checks`) and a `#discussion_r…` fragment are allowed and ignored.
