@@ -76,7 +76,11 @@ describe('review-loop parse contracts', () => {
     assert.match(core, /WAIT SCHEDULE:\n\{WAIT_SCHEDULE\}/);
     assert.doesNotMatch(core, /TIMEOUT SCHEDULE|WAIT BUDGET|Iteration 1: max wait/);
     assert.match(wrapper, /caller-selected `\{WAIT_SCHEDULE\}`/);
-    assert.match(wrapper, /shared GitHub-reviewer template's steps 1–3 plus the Copilot delta[\s\S]+accept only a current-head review/);
+    // Parallel-only content now lives in its own on-demand partial.
+    assert.match(
+      readLib('multi-reviewer-parallel.md'),
+      /shared GitHub-reviewer template's steps 1–3 plus the Copilot delta[\s\S]+accept only a current-head review/,
+    );
   });
 
   it('removes the redundant GraphQL escaping partial and include', () => {
@@ -412,8 +416,10 @@ describe('review-loop parse contracts', () => {
     assert.match(wrapper, /else\n\s*UNPUSHED=""/, 'no upstream must skip the assertion');
     assert.match(wrapper, /`git status` is not a substitute/);
     assert.match(wrapper, /\*\*record the pass as `push-failed`\*\*/);
-    // The union apply in parallel mode is the only writer, so it needs the same guard.
-    assert.match(wrapper, /\*\*Assert the applied fixes reached the remote\*\*/);
+    // The union apply in parallel mode is the only writer, so it needs the same guard
+    // (parallel-only content now lives in its own on-demand partial).
+    const parallelLib = readLib('multi-reviewer-parallel.md');
+    assert.match(parallelLib, /\*\*Assert the applied fixes reached the remote\*\*/);
   });
 
   it('routes push-failed to inconclusive and refuses to let ~opt excuse it', () => {
@@ -475,9 +481,10 @@ describe('review-loop parse contracts', () => {
     assert.match(wrapper, /if \[ "\$PASS_START_SHA" = "\$\(git rev-parse HEAD\)" \]; then/);
     // Parallel mode reuses the whole block (derivation + scoping + push together)
     // rather than restating a push whose variables nothing in that section defines.
+    // Parallel-only content now lives in its own on-demand partial.
     assert.match(
-      wrapper,
-      /\*\*the same block\*\* the series dispatch's step 5 defines, verbatim, with `PARALLEL_START_SHA` substituted for `PASS_START_SHA`/,
+      readLib('multi-reviewer-parallel.md'),
+      /\*\*the same block\*\* the series dispatch's step 5 defines.*, verbatim, with `PARALLEL_START_SHA` substituted for `PASS_START_SHA`/,
       'parallel mode needs the same zero-commit scoping and target derivation',
     );
     // The destination must come from @{u}, never from the local branch name:
@@ -558,7 +565,7 @@ describe('review-loop parse contracts', () => {
     assert.match(pr, /Leaving the fixes uncommitted is invisible to that section's assertion/);
     // The gate's push must name its form, not leave it to the orchestrator — the two
     // forms it would otherwise reach for are the two this file forbids.
-    assert.match(pr, /using the upstream-derived push described under "Open the PR"/);
+    assert.match(pr, /using "Open the PR"'s upstream-derived push below/);
     // Without a stop-on-failure clause the orchestrator falls through to gh pr create
     // and opens exactly the stale pre-review PR this guard exists to prevent.
     assert.match(pr, /\*\*If the push still fails after that one retry, do NOT create the PR\*\*/);
@@ -774,8 +781,10 @@ describe('review-loop parse contracts', () => {
     assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode`/);
     assert.match(wrapper, /Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot/);
     assert.match(wrapper, /`zen`\/`opencode-zen` both probe the `opencode` binary/);
-    assert.match(wrapper, /In \*\*parallel mode\*\* the same rules apply[\s\S]*no-verdict/);
-    assert.match(wrapper, /non-optional\*\* reviewer's review was inconclusive[\s\S]*no-verdict/);
+    // Parallel-mode aggregate rules now live in their own on-demand partial.
+    const parallelLib = readLib('multi-reviewer-parallel.md');
+    assert.match(parallelLib, /In \*\*parallel mode\*\* the same rules apply[\s\S]*no-verdict/);
+    assert.match(parallelLib, /non-optional\*\* reviewer's review was inconclusive[\s\S]*no-verdict/);
 
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'rpr.md', 'config.md']) {
       const body = readCommandDocs(name, { eager: true });
@@ -806,7 +815,8 @@ describe('review-loop parse contracts', () => {
   });
 
   it('preserves per-reviewer OpenCode admission outcomes across the parallel restoration barrier', () => {
-    const parallel = readLib('multi-reviewer-loop.md')
+    // Parallel-only content now lives in its own on-demand partial.
+    const parallel = readLib('multi-reviewer-parallel.md')
       .split('### Parallel dispatch')[1].split('### Aggregate report')[0];
     const [launch, barrier] = parallel.split('3. **Barrier**');
 
@@ -894,10 +904,12 @@ describe('review-loop parse contracts', () => {
     assert.match(loop, /GIT_COMMON="\$\{GIT_COMMON:-\$\(git rev-parse --git-common-dir\)\}"/);
     assert.match(loop, /if \[ -z "\$GIT_COMMON" \] \|\| \[ -z "\$GIT_META_BAK" \]/);
 
-    // Parsing cmd is not the same as dispatching it — pr.md/release.md/review.md
-    // each name the local-agent loop's actual per-agent dispatch line inline
-    // (not via a shared partial), so `cmd` has to be added to each one by hand.
-    assert.match(readCommand('pr.md'), /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode` \| `cmd` → local-agent headless review loop/);
+    // Parsing cmd is not the same as dispatching it — review.md names the
+    // local-agent loop's actual per-agent dispatch line inline (not via a shared
+    // partial), so `cmd` has to be added there by hand. pr.md and release.md have
+    // no inline dispatch list — their exclusion-gated `!read`s (asserted above)
+    // are the dispatch.
+    assert.match(readCommand('pr.md'), /hands off to the \*\*multi-reviewer wrapper\*\*[^\n]*`LOCAL_AGENTS`[^\n]*`cmd` included/);
     // release.md has no inline dispatch list — its exclusion-gated `!read`s (asserted
     // above) are the dispatch — but it must forward the saved per-agent models.
     assert.match(readCommand('release.md'), /hand off to the \*\*multi-reviewer loop\*\*[^\n]*`\{REVIEW_MODELS\}`/);
@@ -978,8 +990,10 @@ describe('review-loop parse contracts', () => {
     assert.match(loop, /git_meta_hash\s+# vs \$GIT_META_BASELINE/);
     // ...and parallel mode, which runs only Step 2 per reviewer, must take that
     // snapshot once before the fan-out and compare once after the barrier.
-    assert.match(wrapper, /take the local-agent loop's Step-1 snapshot once, here/);
-    assert.match(wrapper, /Step-3 five-artifact comparison and wholesale restore \*\*once\*\*/);
+    // Parallel-only content now lives in its own on-demand partial.
+    const parallelLib = readLib('multi-reviewer-parallel.md');
+    assert.match(parallelLib, /take the local-agent loop's Step-1 snapshot once, here/);
+    assert.match(parallelLib, /Step-3 five-artifact comparison and wholesale restore \*\*once\*\*/);
 
     // An oversized prompt on an argv path is a launch failure, not a verdict —
     // it must degrade to no-verdict rather than a hard cli-error.

@@ -118,7 +118,7 @@ LIBS=(
   finding-disposition fix-regression-guard
   gh-host github-reviewer-loop
   local-agent-review-loop local-agent-agy local-agent-claude local-agent-cmd local-agent-cursor local-agent-opencode
-  merge-gate model-tiers multi-reviewer-loop next-gitlab next-swarm ollama-review-loop
+  merge-gate model-tiers multi-reviewer-loop multi-reviewer-parallel next-gitlab next-swarm ollama-review-loop
   plan-id-format plan-issue-setup plan-issue-filing pr-write-access
   rebase-conflict-resolution remediation-agent-template
   release-documented replan-issues review-agent-selection review-config-defaults review-convergence-gate review-flags
@@ -129,6 +129,7 @@ LIBS=(
   review-surface-scan review-surface-quality review-security-audit
   review-cross-file-tracing review-cross-file-contract
   review-structural-ambition
+  upstream-push
   vcs-host
 )
 
