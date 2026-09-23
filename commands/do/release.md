@@ -221,7 +221,7 @@ if [ -z "$PREPARED_RELEASE" ] && [ -n "$TARGET_PREPARED_RELEASE" ]; then
   if ! printf '%s\n' "$TARGET_TAG" | grep -Eq '^[0-9a-f]{40}$'; then
     TARGET_TAG="$(git ls-remote origin "refs/tags/v${TARGET_VERSION}" | awk 'NF { print $1; exit }')"
   fi
-  TARGET_RELEASE_STATUS="$(gh api --include "repos/{owner}/{repo}/releases/tags/v${TARGET_VERSION}" 2>/dev/null | awk '$1 ~ /^HTTP\// { print $2; exit }' || true)"
+  TARGET_RELEASE_STATUS="$(gh api --include --hostname "{GH_HOST}" "repos/{owner}/{repo}/releases/tags/v${TARGET_VERSION}" 2>/dev/null | awk '$1 ~ /^HTTP\// { print $2; exit }' || true)"
   case "$TARGET_RELEASE_STATUS" in
     200)
       TARGET_RELEASE_JSON="$(gh release view "v${TARGET_VERSION}" --json isDraft,isPrerelease,publishedAt 2>/dev/null)" || {
@@ -517,8 +517,8 @@ If `PR_STATE=MERGED`, skip the CI gate and merge command below and continue
 directly to **Checkpoint 3**, so an interrupted rerun can recover from a merge
 that already succeeded remotely. Otherwise:
 
-- **Gate on required CI first.** Watch the target branch's required checks in-session before merging: `gh pr checks <number> --required --watch --fail-fast`. (No required checks ⇒ the gate is vacuously satisfied — merge directly.)
-  - On a required-check **failure**, apply the **CI flake handling** routine — one conservative re-run on the same commit (see `~/.claude/lib/ci-flake-handling.md`, inlined above). If the same SHA passes on the re-run, treat it as a flake and proceed (logging which check flaked); if it fails again, **abort the release merge** and report which check failed.
+- **Gate on required CI first, following the same rule as step 6 above.** Check once, without watching: `gh pr checks <number> --required`. If the output matches `no (required )?checks reported`, that is not automatically green: when a workflow is configured to run on PRs into `{target}`, poll for up to five minutes for a required check to attach (re-running the same command), then report INCOMPLETE if none does; when no such workflow exists for `{target}`, the gate is vacuously satisfied — merge directly. Once at least one required check is reported, watch it in-session: `gh pr checks <number> --required --watch --fail-fast`.
+  - On a required-check **failure**, apply the **CI flake handling** routine — one conservative re-run on the same commit (see **CI flake handling** above). If the same SHA passes on the re-run, treat it as a flake and proceed (logging which check flaked); if it fails again, **abort the release merge** and report which check failed.
 - Once confirmed clean, merge:
   ```bash
   PR_NUMBER="<number>"
@@ -609,6 +609,19 @@ that already succeeded remotely. Otherwise:
    if ! printf '%s\n' "$TAG_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
      TAG_SHA="$(git ls-remote origin "refs/tags/v{version}" | awk 'NF { print $1; exit }')"
    fi
+   if ! printf '%s\n' "$TAG_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "{publishes_github_release}" = "true" ]; then
+     # Automation owns tag creation for this project — poll for it with the
+     # same bound Checkpoint 6 uses; never pre-create it here (see step 7 above).
+     for ATTEMPT in $(seq 1 30); do
+       TAG_SHA="$(git ls-remote origin "refs/tags/v{version}^{}" | awk 'NF { print $1; exit }')"
+       if ! printf '%s\n' "$TAG_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+         TAG_SHA="$(git ls-remote origin "refs/tags/v{version}" | awk 'NF { print $1; exit }')"
+       fi
+       printf '%s\n' "$TAG_SHA" | grep -Eq '^[0-9a-f]{40}$' && break
+       TAG_SHA=""
+       [ "$ATTEMPT" -lt 30 ] && sleep 10
+     done
+   fi
    if printf '%s\n' "$TAG_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
      TAG_COMMIT="$TAG_SHA"
      if ! git merge-base --is-ancestor "$PREPARED_RELEASE_SHA" "$TAG_COMMIT" \
@@ -616,6 +629,9 @@ that already succeeded remotely. Otherwise:
        echo "INCOMPLETE — Version tag v{version} is not on the merged release lineage; refusing to overwrite it."
        exit 1
      fi
+   elif [ "{publishes_github_release}" = "true" ]; then
+     echo "INCOMPLETE — Version tag v{version} is unverified after the bounded wait; automation owns tag creation for this project, so it was never pre-created here. Preserve the prepared release state and retry."
+     exit 1
    else
      if git rev-parse --verify --quiet "refs/tags/v{version}^{commit}" >/dev/null; then
        LOCAL_TAG_COMMIT="$(git rev-parse --verify --quiet "refs/tags/v{version}^{commit}")" || {
