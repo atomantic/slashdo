@@ -41,7 +41,7 @@ describe('/do:release remote promotion contracts', () => {
     const determineVersion = body.indexOf('## Determine Version and Finalize Changelog');
     assert.ok(recovery >= 0 && recovery < determineVersion, 'prepared recovery must precede version determination');
     assert.match(body, /Skip this entire section when `PREPARED_RELEASE` is non-empty/);
-    assert.match(body, /PREPARED_RELEASE="\$\(git log[^\n]+origin\/\{target\}\.\.HEAD/);
+    assert.match(body, /PREPARED_RELEASE="\$\(prepared_release_sha "origin\/\{target\}\.\.HEAD"\)"/);
     assert.doesNotMatch(body, /PREVIOUS_TAG=.*git describe/);
     assert.match(body, /PR_STATE="\$\(printf '[^\n]+' \"\$MATCHING_RELEASE_PRS\" \| jq -r '\.\[0\]\.state'/);
     assert.match(body, /If the selected PR already has `PR_STATE=MERGED`, skip this section entirely[\s\S]*?Do not request another review/);
@@ -72,7 +72,7 @@ describe('/do:release remote promotion contracts', () => {
     assert.match(body, /git tag "v\{version\}" "\$MERGE_COMMIT"/);
     assert.match(body, /publishes_github_release/);
     assert.match(body, /\[ "\$ATTEMPT" -lt 30 \] && sleep 10/);
-    assert.match(body, /TARGET_PREPARED_RELEASE="\$\(git log[\s\S]*?origin\/\{target\}/);
+    assert.match(body, /TARGET_PREPARED_RELEASE="\$\(prepared_release_sha "origin\/\{target\}"\)"/);
     assert.match(body, /RELEASE_PR_HANDOFF/);
     assert.match(body, /case "\{publishes_github_release\}" in[\s\S]*true\|false/);
     assert.match(body, /TARGET_RELEASE_STATUS=.*gh api --include/);
@@ -86,7 +86,27 @@ describe('/do:release remote promotion contracts', () => {
     assert.match(body, /\.tagName == "v\{version\}"/);
     assert.match(body, /\.isDraft == false/);
     assert.match(body, /\.isPrerelease == false/);
-    assert.match(body, /GitHub Release is unverified after the bounded wait/);
+    assert.match(body, /incomplete "GitHub Release" "no published release was found after the bounded wait\."/);
+    assert.match(body, /incomplete\(\) \{\n {2}echo "INCOMPLETE — \$1 is unverified; \$2 Preserve the prepared release state and retry\."/);
+  });
+
+  it('deduplicates repeated checkpoint logic into shared shell helpers', () => {
+    assert.match(body, /prepared_release_sha\(\) \{/);
+    assert.match(body, /remote_tag_commit\(\) \{/);
+    assert.match(body, /release_published_json\(\) \{/);
+    assert.match(body, /release_is_published\(\) \{/);
+    assert.match(body, /incomplete\(\) \{/);
+
+    const publishesFlagGuards = (body.match(/case "\{publishes_github_release\}" in/g) || []).length;
+    assert.equal(publishesFlagGuards, 1, 'the publishes_github_release guard must not be duplicated as a case statement');
+
+    const extendedRegexpUses = (body.match(/--extended-regexp/g) || []).length;
+    assert.equal(extendedRegexpUses, 0, 'the no-op --extended-regexp flag must be removed');
+
+    // Checkpoint 3's merge read-back must not be a standalone fenced block anymore —
+    // it runs inside the merged Checkpoints 3-6 invocation alongside Checkpoint 4.
+    const mergedPrHandoffPrintfs = (body.match(/printf 'RELEASE_PR_HANDOFF\\tPR_NUMBER=%s\\tPR_URL=%s\\tPR_STATE=MERGED\\tMERGE_COMMIT=%s\\n'/g) || []).length;
+    assert.equal(mergedPrHandoffPrintfs, 1, 'the merged-PR handoff print must appear exactly once, not once per duplicated checkpoint block');
   });
 });
 
