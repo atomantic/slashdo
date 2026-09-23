@@ -8,38 +8,26 @@ Commit changes, push to your fork, and open a pull request against the upstream 
 
 ## Detect Fork Relationship
 
-1. **Resolve the fork from the `origin` remote** — by convention `origin` is the user's push target. A bare `gh repo view` can pick the wrong repo when both `origin` and `upstream` remotes exist (or when the user's default login resolves elsewhere), so always pass the origin slug explicitly.
+1. **Resolve the fork from the authoritative `origin`.** The shared preflight selects the forge from the remote, confirms that CLI can read the checkout, rejects unsupported forges, and seeds `{GH_HOST}`. `/do:fpr` supports GitHub only:
 
-   **Derive the host; never hardcode `github.com`.** A GitHub Enterprise fork lives on the customer's own domain — `github.example.com`, and just as often one with no `github` substring at all (`git.example.com`, `scm.internal`) — so matching the remote against a literal `github.com` rejects every Enterprise fork outright. Split the remote into host and slug instead, and use `gh` itself as the arbiter of whether the host is a GitHub the user is authenticated to:
+   !read lib/vcs-host.md
+
+   If `CLI_TOOL` is not `gh`, stop and report that `/do:fpr` requires a GitHub origin.
+
+   By convention `origin` is the user's push target. A bare `gh repo view` can select the wrong repository when both `origin` and `upstream` exist, so derive its slug and pass the full host-qualified name explicitly:
+
    ```sh
-   # Strip trailing slash first so a `.git/` suffix still gets removed; then strip `.git`.
    ORIGIN_URL=$(git remote get-url origin 2>/dev/null || true)
-   ORIGIN_HOST=$(printf '%s\n' "$ORIGIN_URL" | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')
-   # Anchor the strip on the derived host, not on a literal domain. Match `$ORIGIN_HOST`
-   # followed by the `:` (SSH) or `/` (HTTPS) separator — anything before it is scheme/userinfo.
-   ORIGIN_SLUG=$(printf '%s\n' "$ORIGIN_URL" | sed -E "s|/+$||; s|.*$ORIGIN_HOST[:/]||; s|\.git$||; s|/+$||")
-   # Guard (POSIX): slug must be exactly OWNER/REPO (one slash, no whitespace) AND a host must
-   # have parsed out — otherwise a remote whose path merely looks like owner/repo (a bare local
-   # path, say) would slip through.
-   case "$ORIGIN_SLUG" in
-     ""|*/*/*|*[[:space:]]*) VALID=no ;;
-     */*)                    VALID=yes ;;
-     *)                      VALID=no ;;
-   esac
-   [ -n "$ORIGIN_HOST" ] || VALID=no
-   # A GitLab remote reaches here with a well-formed slug, so let `gh` reject it: authenticating
-   # to the host is the portable test for "this is a GitHub we can talk to", and it is the same
-   # test on github.com and on any Enterprise domain.
-   if [ "$VALID" = "yes" ] && gh auth token --hostname "$ORIGIN_HOST" >/dev/null 2>&1; then
-     GH_HOST="$ORIGIN_HOST"
-     gh repo view "$GH_HOST/$ORIGIN_SLUG" --json isFork,parent,owner,name,defaultBranchRef
-   else
-     echo "ERROR: origin is missing, is not a repo gh can reach, or gh is not authenticated to its host (origin URL: '$ORIGIN_URL', host: '$ORIGIN_HOST', slug: '$ORIGIN_SLUG'). Add an 'origin' remote pointing at your fork and run: gh auth login --hostname $ORIGIN_HOST" >&2
-     # No `exit` — this snippet may be pasted into an interactive shell; the caller should stop here.
-   fi
+   ORIGIN_PATH="${ORIGIN_URL#*://}"
+   ORIGIN_PATH="${ORIGIN_PATH#*@}"
+   ORIGIN_PATH="${ORIGIN_PATH#"$GH_HOST"}"
+   ORIGIN_PATH="${ORIGIN_PATH#[/:]}"
+   ORIGIN_PATH="${ORIGIN_PATH%/}"
+   ORIGIN_SLUG="${ORIGIN_PATH%.git}"
+   ORIGIN_SLUG="${ORIGIN_SLUG%/}"
+   gh repo view "$GH_HOST/$ORIGIN_SLUG" --json isFork,parent,owner,name,defaultBranchRef || exit 1
    ```
-   - If the guard prints the ERROR above: STOP and relay it — the user needs an `origin` remote pointing at their fork on a GitHub host `gh` is logged in to.
-   - Carry `{GH_HOST}` for the rest of the run; every URL this command prints or writes is built from it, never from a literal `github.com`.
+
    - If `isFork` is `false` or `parent` is null: STOP and tell the user this repo is not a fork. Suggest using `/do:pr` instead.
 
 2. **Extract upstream info** from the `parent` field:

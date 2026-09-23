@@ -109,8 +109,11 @@ describe('VCS host portability', () => {
     assert.doesNotMatch(fpr, /\*github\.com:\*\|\*github\.com\/\*/);
     assert.doesNotMatch(fpr, /https:\/\/github\.com\/\{UPSTREAM_OWNER\}/);
 
-    assert.match(fpr, /ORIGIN_HOST=/);
-    assert.match(fpr, /gh auth token --hostname "\$ORIGIN_HOST"/);
+    assert.match(fpr, /!read lib\/vcs-host\.md/);
+    assert.match(fpr, /If `CLI_TOOL` is not `gh`/);
+    assert.doesNotMatch(fpr, /ORIGIN_HOST=|gh auth token --hostname "\$ORIGIN_HOST"/);
+    assert.match(fpr, /ORIGIN_SLUG=/);
+    assert.match(fpr, /gh repo view "\$GH_HOST\/\$ORIGIN_SLUG"/);
     assert.match(fpr, /git remote add upstream "https:\/\/\{GH_HOST\}\//);
 
     // `gh pr create --repo` does not infer the host from the local remote (unlike
