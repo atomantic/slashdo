@@ -120,6 +120,7 @@ LIBS=(
   per-finding-root-cause plan-id-format plan-issue-setup plan-issue-filing pr-write-access
   post-review-doc-recommendations rebase-conflict-resolution remediation-agent-template
   release-documented replan-issues review-agent-selection review-config-defaults review-convergence-gate review-flags
+  review-pr-mode
   review-preferences
   swift-review-checklist swift-gotchas
   review-surface-scan review-surface-quality review-security-audit
