@@ -104,7 +104,7 @@ renders the two halves in two tones, and — the part that matters functionally 
 one silently replaces the first). GitHub has no equivalent feature, so it keeps the
 plain single colon. Build every prefixed label as `<key>${LABEL_SEP}<value>`, and
 match one the same way (a hardcoded `:` in a jq/grep pattern silently stops matching
-GitLab's `::` labels) — see [plan-issue-mode.md](./plan-issue-mode.md) "Setup" for
+GitLab's `::` labels) — see [plan-issue-setup.md](./plan-issue-setup.md) "Setup" for
 the full convention and the label color table.
 
 #### Rules this encodes

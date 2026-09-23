@@ -24,12 +24,14 @@ const root = path.join(__dirname, '..');
 const read = (...segments) => fs.readFileSync(path.join(root, ...segments), 'utf8');
 const partial = read('lib', 'vcs-host.md');
 
-// Commands that legitimately carry their own copy of the selection. /do:pr and
-// /do:next run it as a pre-flight the user sees before any claim, and
-// /do:plan-task needs no GH_HOST at all; all three predate the partial. Pinned so a
-// NEW command cannot join them by re-typing the logic instead of reading the file.
+// Commands that legitimately carry their own copy of the selection. /do:pr runs it
+// as a pre-flight the user sees before any claim, and /do:plan-task needs no
+// GH_HOST at all; both predate the partial. /do:next used to as well, but issue
+// #293 moved its pre-flight onto `!read lib/vcs-host.md` (see "GitLab-only blocks
+// and a drifted copy of host detection load on every GitHub run"), so it now reads
+// the partial like everything else. Pinned so a NEW command cannot join this set by
+// re-typing the logic instead of reading the file.
 const INLINE_IMPLEMENTERS = new Set([
-  'commands/do/next.md',
   'commands/do/pr.md',
   'commands/do/plan-task.md',
 ]);
@@ -208,7 +210,7 @@ describe('VCS host selection, executed', () => {
       /startswith\("(?:model|effort|severity|area):"\)/,
       /== "(?:model|effort|severity):[a-z]/,
     ];
-    for (const rel of ['commands/do/next.md', 'lib/next-swarm.md', 'lib/plan-issue-mode.md', 'commands/do/plan-task.md']) {
+    for (const rel of ['commands/do/next.md', 'lib/next-gitlab.md', 'lib/next-swarm.md', 'lib/plan-issue-setup.md', 'commands/do/plan-task.md']) {
       const body = read(rel);
       for (const shape of HARDCODED) {
         assert.ok(
@@ -314,18 +316,18 @@ describe('VCS host selection stays in one partial', () => {
     }
   });
 
-  it("derives lib/plan-issue-mode.md's own CLI_TOOL fallback from the remote first", () => {
+  it("derives lib/plan-issue-setup.md's own CLI_TOOL fallback from the remote first", () => {
     // This partial's issue-mode setup used to probe `gh auth status` before
     // `glab auth status` with no remote check at all when the calling command
     // (e.g. /do:review's local-branch --issues path) never pre-detects CLI_TOOL —
     // the exact bug lib/vcs-host.md exists to prevent, just re-typed with different
     // wording ("Otherwise ... else") that evaded the AUTH_FIRST regex above.
-    const issueMode = read('lib', 'plan-issue-mode.md');
+    const issueMode = read('lib', 'plan-issue-setup.md');
     const origin = issueMode.indexOf('ORIGIN_HOST="$(git remote get-url origin');
-    assert.ok(origin > -1, 'plan-issue-mode.md must derive ORIGIN_HOST from the origin remote in its fallback');
+    assert.ok(origin > -1, 'plan-issue-setup.md must derive ORIGIN_HOST from the origin remote in its fallback');
     const firstAuth = issueMode.indexOf('auth status');
-    assert.ok(firstAuth > -1, 'plan-issue-mode.md must still keep a no-remote/no-CLI_TOOL fallback');
-    assert.ok(origin < firstAuth, 'plan-issue-mode.md probes credentials before reading the remote');
+    assert.ok(firstAuth > -1, 'plan-issue-setup.md must still keep a no-remote/no-CLI_TOOL fallback');
+    assert.ok(origin < firstAuth, 'plan-issue-setup.md probes credentials before reading the remote');
   });
 
   it('lets only the pinned pre-flights carry their own copy of the selection', () => {

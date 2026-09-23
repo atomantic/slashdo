@@ -4,17 +4,15 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+// A command's contract spans the file plus the lib docs it includes (`!cat` and
+// on-demand `!read` alike): those are one document to the agent, and splitting a
+// section into lib/ (e.g. issue #293's lib/next-gitlab.md) must not move it out of
+// a contract's reach.
+const { readCommandDocs } = require('./helpers/command-docs');
 
 const root = path.join(__dirname, '..');
-const resolveIncludes = (body) =>
-  body.replace(/!`cat ~\/\.claude\/lib\/(.+?)`/g, (match, name) => {
-    const libFile = path.join(root, 'lib', name);
-    return fs.existsSync(libFile) ? fs.readFileSync(libFile, 'utf8') : match;
-  });
 
-const next = resolveIncludes(
-  fs.readFileSync(path.join(root, 'commands', 'do', 'next.md'), 'utf8'),
-);
+const next = readCommandDocs('next.md', { eager: true });
 const config = fs.readFileSync(path.join(root, 'commands', 'do', 'config.md'), 'utf8');
 const defaults = fs.readFileSync(
   path.join(root, 'lib', 'review-config-defaults.md'),
@@ -59,11 +57,25 @@ describe('/do:next --collaborators claim gate', () => {
   it('requests author on the GitHub issue list so the walk can skip outsiders', () => {
     // Only the /do:next picker lists (priority/oldest walk) need author; other
     // `gh issue list` examples in included libs are unrelated.
-    const picker = next.match(/--json number,title,assignees,labels,createdAt,body[^\n]*/g) || [];
+    const picker = next.match(/--json number,title,assignees,labels,createdAt[^\n]*/g) || [];
     assert.ok(picker.length >= 2, `expected picker json shapes, got ${picker.length}`);
     for (const call of picker) {
       assert.match(call, /author/, `missing author on: ${call}`);
     }
+  });
+
+  it('keeps issue bodies out of the walk list and skips the EXISTING_ISSUES dump (#291)', () => {
+    // Bodies are fetched per candidate (steps 3-4), never for every open issue.
+    const picker = next.match(/--json number,title,assignees,labels,createdAt[^\n]*/g) || [];
+    for (const call of picker) {
+      assert.doesNotMatch(call, /\bbody\b/, `walk list must not fetch body: ${call}`);
+    }
+    // GitLab walks project away `description`.
+    const glabProjected = next.match(/\| \.\[\] \| \{iid,title,labels,assignees,author,created_at\}"/g) || [];
+    assert.ok(glabProjected.length >= 2, `expected projected GitLab walks, got ${glabProjected.length}`);
+    assert.match(next, /gh issue view <N> --json body -q \.body/);
+    assert.match(next, /glab issue view <N> --output json --jq \.description/);
+    assert.match(next, /reads only the setup partial, not \[lib\/plan-issue-filing\.md\]/);
   });
 
   it('refuses an explicit #num for a non-collaborator, not overridden', () => {

@@ -49,6 +49,29 @@ describe('worktree-safe merge contracts', () => {
     assert.doesNotMatch(body, /remote no-op after --delete-branch merge/);
   });
 
+  it('syncs Phase 7\'s default branch without switching the main repo\'s checkout', () => {
+    // Phase 7 runs from the MAIN repo, which may have a different branch (or a
+    // dirty tree) checked out than the default branch — an unconditional
+    // `git checkout "${DEFAULT_BRANCH}"` there switches the user's branch out from
+    // under them and, on a dirty tree, aborts outright, breaking the `&&` chain
+    // before the claim branch is ever deleted.
+    const body = readCommand('next.md');
+    assert.doesNotMatch(
+      body,
+      /git fetch origin "\$\{DEFAULT_BRANCH\}" && \\\ngit checkout "\$\{DEFAULT_BRANCH\}" && \\\ngit pull --rebase --autostash/,
+    );
+    // The replacement syncs the ref in place instead of switching to it: a
+    // fast-forward pull when the default branch is already checked out, or a
+    // plain fetch refspec update when it isn't.
+    assert.match(
+      body,
+      /if \[ "\$\(git branch --show-current\)" = "\$\{DEFAULT_BRANCH\}" \]; then\n\s+git pull --ff-only --autostash\nelse\n\s+git fetch origin "\$\{DEFAULT_BRANCH\}:\$\{DEFAULT_BRANCH\}" \|\| \{/,
+    );
+    // `git branch -d` still runs right after — the sync change must not have
+    // disturbed the pinned adjacency the prior test locks in.
+    assert.match(body, /fi && \\\ngit branch -d "next\/\$\{SLUG\}" && \\/);
+  });
+
   it('gates the swarm remote delete on a read-back MERGED state', () => {
     // An ungated delete retracts the head branch of a PR that is still open —
     // the merge failed, or a merge queue accepted it without merging yet — and
@@ -67,8 +90,54 @@ describe('worktree-safe merge contracts', () => {
     const body = readCommand('next.md');
     assert.match(
       body,
-      /gh pr checks <pr_number> --required --watch --fail-fast && \\\n\s+gh pr merge <pr_number> --merge/,
+      /git -C "<worktree>" push && \\\n\s+gh pr checks <pr_number> --required --watch --fail-fast && \\\n\s+gh pr merge <pr_number> --"\$MERGE_METHOD"/,
     );
+  });
+
+  it('gates the single-issue merge on the pushed SHA\'s required checks', () => {
+    // /do:pr ran with --no-merge, so its CI gate never fired, and Phase 6's push
+    // publishes a NEW SHA. Merging straight after the push merges before CI on an
+    // unprotected repo — the GitLab line below it already waits, and so must this.
+    const body = readCommand('next.md');
+    assert.match(
+      body,
+      /git push && \\\n\s+gh pr checks <num> --required --watch --fail-fast && \\\n\s+gh pr merge <num> --"\$MERGE_METHOD"/,
+    );
+    // An absent required-checks set makes `gh pr checks --required` exit non-zero;
+    // without this carve-out the chain could never merge on such a repo.
+    // Pin next.md's own paragraph — next-swarm.md (read in with it) says the same thing.
+    assert.match(body, /\*\*If `gh pr checks` prints `no required checks reported`\*\*, it still exits non-zero\. The gate is vacuously satisfied, so run the merge alone with the resolved method written in literally/);
+  });
+
+  it('never hardcodes the merge method on a /do:next gh merge', () => {
+    // `--merge` means a merge commit, which a squash- or rebase-only repo rejects on
+    // every run — /do:next could then never merge there.
+    const body = readCommand('next.md');
+    for (const line of fencedLines(body).filter((l) => /gh pr merge /.test(l))) {
+      assert.match(line, /gh pr merge <(num|pr_number)> --"\$MERGE_METHOD"/, line.trim());
+    }
+    // Resolved like /do:pr step 3: the repo's allowed methods, squash > merge > rebase.
+    assert.match(body, /\*\*Resolve the merge method \(GitHub\) — never hardcode `--merge`\.\*\*/);
+    assert.match(
+      body,
+      /gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed[^\n]*\\\n[^\n]*"squash"\), \(select\(\.mergeCommitAllowed\) \| "merge"\), \(select\(\.rebaseMergeAllowed\) \| "rebase"\)\] \| first \/\/ empty/,
+    );
+    assert.match(body, /\*\*Merge method \(GitHub\)\.\*\* Resolve `MERGE_METHOD` \*\*once per invocation\*\*/);
+  });
+
+  it('re-runs the swarm MERGED read-back after any standalone merge', () => {
+    // The flake and no-required-checks paths merge outside the && chain, after the
+    // read-back already printed "not MERGED"; step 4 closes the issue only on MERGED.
+    const body = readCommand('next.md');
+    assert.match(body, /flake → run the merge alone with the resolved method written in literally[^\n]*then run the `MERGED` read-back \/ remote-delete block below/);
+    assert.match(body, /vacuously satisfied: run the merge alone with the resolved method written in literally[^\n]*then run the `MERGED` read-back \/ remote-delete block below/);
+  });
+
+  it('chains the swarm GitLab push into the pipeline wait', () => {
+    // A failed push leaves `glab ci status --wait` watching the stale (possibly green)
+    // pipeline, which would merge the MR without its re-sync commit.
+    const body = readCommand('next.md');
+    assert.match(body, /git -C "<worktree>" push && glab ci status --wait && glab mr merge <pr_number>/);
   });
 
   it('reads the MR state back on the GitLab swarm path too', () => {

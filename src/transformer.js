@@ -115,15 +115,21 @@ const ON_DEMAND_LIBS = new Map([
     { what: 'Ollama reviewer loop', when: 'the reviewer list includes `ollama`' }],
 
   // Issue-tracker machinery: only reached in issues mode. PLAN.md mode — the
-  // default — never opens the tracker at all.
-  ['plan-issue-mode.md',
-    { what: 'issue-mode setup and filing rules', when: 'this run is in issues mode' }],
+  // default — never opens the tracker at all. Split so a pure consumer (/do:next
+  // picking work) reads only setup, not the filing/dedup/spool machinery it never
+  // uses; a command that files findings reads both.
+  ['plan-issue-setup.md',
+    { what: 'issue-mode setup: host/LABEL_SEP reuse, lazy label creation, and the dispatch-hint vocabulary', when: 'this run is in issues mode' }],
+  ['plan-issue-filing.md',
+    { what: 'issue-mode filing rules: dedup, --scan-only recording, labels, and bulk spool filing', when: 'this run is in issues mode and files a finding as a tracker issue' }],
   ['epic-children.md',
     { what: 'epic/child issue resolution rules', when: 'a candidate issue is an epic or carries children' }],
 
   // Explicitly flag-gated or situational paths.
   ['next-swarm.md',
     { what: 'parallel swarm flow (phases A-D)', when: '`--swarm` was passed' }],
+  ['next-gitlab.md',
+    { what: 'GitLab-specific /do:next steps', when: 'the origin remote is GitLab (`CLI_TOOL=glab`)' }],
   ['enhance-loop.md',
     { what: 'draft-enhancement loop', when: '`--enhance-with` was passed' }],
   ['ci-flake-handling.md',

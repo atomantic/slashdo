@@ -81,7 +81,8 @@ When `SIMPLIFY_ONLY=true`, emit only the [`SIMPLIFY_CATEGORIES`](./better-simpli
 
 **Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents (`feature-ideas`, `plan-task`, manual fix-up sessions) can claim distinct findings via worktree branch names. Slug rules per [lib/plan-id-format.md](./plan-id-format.md): lowercase kebab-case derived from the title text, ≤50 chars, unique against every `[slug]` already in PLAN.md. Recommended pattern for audit findings: `<category-prefix>-<file-basename>-<short-hint>` (e.g. `[sec-routes-pr-validation]`, `[dry-cli-output-dedup]`). _(Issue mode skips slugs entirely — the issue number is the ID.)_
 
-!read lib/plan-issue-mode.md
+!read lib/plan-issue-setup.md
+!read lib/plan-issue-filing.md
 
 6. Print a summary table (short labels → full category → branch slug):
    - Security → Security & Secrets → `security`

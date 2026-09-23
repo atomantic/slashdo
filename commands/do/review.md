@@ -261,7 +261,8 @@ When `PR_MODE=true` and `PR_DISPOSITION=apply`, run this section against the PR'
 
 Only when `ISSUE_MODE=true` and a finding is being deferred:
 
-!read lib/plan-issue-mode.md
+!read lib/plan-issue-setup.md
+!read lib/plan-issue-filing.md
 
 For each verified finding (local branch mode):
 1. Classify severity: **CRITICAL** (runtime crash, data leak, security) vs **IMPROVEMENT** (consistency, robustness, conventions)
