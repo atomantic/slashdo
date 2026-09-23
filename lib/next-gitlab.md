@@ -40,19 +40,6 @@ command -v jq >/dev/null 2>&1 || {
   echo "/do:next's GitLab issue mode pipes 'glab api' output through jq, which is not installed. Install it (e.g. 'brew install jq' or 'apt-get install jq') and re-run."; exit 1; }
 ```
 
-## Phase 1 — issues mode: collaborator fetch
-
-The `--collaborators` gate's live member fetch stays inline in `next.md`'s
-"Collaborator set" step (its `if [ "$CLI_TOOL" = gh ]; then … else … fi` sets
-`COLLAB_LOGINS` inside a shared `$OWNER_REPO`/`TRUSTED_CLAIM_POOL` wrapper both
-hosts need, so splitting the branch out would duplicate that wrapper). The GitLab
-branch (`MEMBERS_JSON="$(glab api --paginate "projects/:id/members/all")"`, then
-`COLLAB_LOGINS="$(printf '%s' "$MEMBERS_JSON" | jq -r '.[] | select(.access_level
->= 30) | .username')"`) follows the glab api capture rule above — a failed fetch
-must read as "could not list them," never as "no collaborators." GitLab
-collaborators are project members who can push
-(`access_level >= 30` Developer, including inherited members via `members/all`).
-
 ## Phase 1 — issues mode: candidate list
 
 `glab issue list` in place of `gh issue list` for the priority/oldest walk — same
@@ -92,31 +79,10 @@ at a lower threshold; `--issues-label` keeps a busy GitLab tracker under it.
 clauses without `.name`:
 
 ```bash
-glab issue list "${LIST_ARGS[@]}" --output json --per-page 100 \
+glab issue list "${LIST_ARGS[@]}" --per-page 100 \
   --jq "map(select(any(.labels[]; . == \"model${LABEL_SEP}light\")
                 or ([.labels[] | select(startswith(\"model${LABEL_SEP}\"))] | length == 0)))
       | map(select(any(.labels[]; . == \"effort${LABEL_SEP}max\")))
       | PRIORITY_SORT | .[] | {iid,title,labels,assignees,author,created_at}"
 ```
 `PRIORITY_SORT` (Conventions, in next.md) with the two filter clauses above prepended.
-
-## Phase 2 — claim
-
-The GitLab branches of `next.md`'s "mark the issue in progress" step stay inline
-there (its `if [ "$CLI_TOOL" = gh ]; then … else … fi` blocks are one continuous
-script with a shared fail-closed `|| { … }` wrapper and exclusivity re-read, so
-splitting the GitLab half out would either duplicate that wrapper or leave an
-`else` branch with no command to fail) — this section is the "why", not a second
-copy of the "what":
-
-- **The claim marker** resolves the login per the glab api capture rule above,
-  then `glab issue update "$ISSUE_NUM" --assignee "+$ME"`. The `+` prefix
-  **adds** one assignee without touching whatever's already there — a bare
-  `--assignee "$ME"` would **replace** the whole list and defeat the read-back
-  that follows.
-- **The yield/release path** uses the `-` prefix (`--assignee "-$ME"`) for the same
-  reason in reverse: it removes exactly your one assignee without touching a
-  sibling's.
-- **The read-back** (`glab issue view "$ISSUE_NUM" --output json --jq
-  '[.assignees[].username] | join(",")'`) is why the assignee marker is close to,
-  but not, a compare-and-swap — both hosts allow multiple assignees.
