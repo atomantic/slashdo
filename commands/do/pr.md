@@ -49,17 +49,11 @@ Print: `PR flow: {current_branch} → {default_branch}`
 - **Sync the branch onto the latest `origin/{default_branch}` first.** Reviewers diff the branch against `{REVIEW_BASE}` (`git diff {REVIEW_BASE}...HEAD`) anchored on the merge-base; an un-rebased branch makes them flag unrelated changes that landed on the default branch since it was cut:
   - `git fetch origin {default_branch}:{default_branch}` to fast-forward the **local** `{default_branch}` ref (a plain `git fetch origin {default_branch}` only moves the remote-tracking ref, which the reviewers don't diff against). **In a linked worktree it can still fail** — `fatal: refusing to fetch into branch 'refs/heads/{default_branch}' checked out at …` means the *parent* repo holds it, the normal state when `/do:next` or a claim flow invoked `/do:pr`. That is not a divergence: fall back to `git fetch origin {default_branch}` and `git rebase origin/{default_branch}`, and have the reviewers diff `origin/{default_branch}...HEAD`. **Record the resolved base as `{REVIEW_BASE}`** — `{default_branch}` normally, `origin/{default_branch}` on this fallback — and pass it to the review loops as their `{BASE_BRANCH}` input; that is the only name they read. If your local `{default_branch}` has diverged from origin and cannot fast-forward (unusual), surface that and stop rather than forcing it.
   - `git rebase {default_branch}` to replay this branch's commits on top.
-  - If the rebase hits conflicts, **resolve them and continue the rebase**. Do not abort or stop merely because conflicts exist. Follow [lib/rebase-conflict-resolution.md](../../lib/rebase-conflict-resolution.md): inspect the replayed commit and both sides, resolve human-authored sources semantically, regenerate generated artifacts from their canonical inputs (for example `server/lib/apiRouteCatalog.generated.json`), run the focused checks, stage the resolution, and repeat `git rebase --continue` until complete. Only the playbook's last-resort, evidence-backed ambiguity may abort the rebase; a generated-file conflict alone never qualifies.
+  - If the rebase hits conflicts, **resolve them and continue the rebase**. Do not abort or stop merely because conflicts exist. Follow [lib/rebase-conflict-resolution.md](../../lib/rebase-conflict-resolution.md): inspect the replayed commit and both sides, resolve human-authored sources semantically, regenerate generated artifacts from their canonical inputs, run the focused checks, stage the resolution, and repeat `git rebase --continue` until complete. Only the playbook's last-resort, evidence-backed ambiguity may abort the rebase; a generated-file conflict alone never qualifies.
   - After a clean rebase, `git diff {REVIEW_BASE}...HEAD` shows only this branch's own changes.
-- Push the branch (use `--force-with-lease` if the rebase rewrote already-pushed history; never a bare `--force`). **Which form depends on whether the branch's upstream names a remote** — `-u` *rewrites* `branch.<name>.remote`/`.merge`, so using it unconditionally would re-point an existing upstream at `origin/{current_branch}` and defeat the config-derived guard under "Open the PR". Discriminate on `branch.<name>.remote`, **not** on whether `@{u}` resolves: a branch tracking a *local* ref (`branch.<name>.remote=.`, what `git branch --set-upstream-to=main` produces) resolves `@{u}` fine, and would be pushed into the local repository:
+- Push the branch — use `--force-with-lease` (never a bare `--force`) if the rebase above rewrote already-pushed history, otherwise the plain form below:
 
-  ```bash
-  BR="$(git branch --show-current)"
-  PUSH_REMOTE="$(git config --get "branch.$BR.remote")"
-  ```
-
-  - **Not yet published to a remote** — `PUSH_REMOTE` is empty (no upstream at all) **or** `.` (upstream is a local branch): `git push -u origin {current_branch}`, which publishes the branch and re-points a local upstream at the remote.
-  - **A genuine remote upstream** (`PUSH_REMOTE` is a real remote name): push to the ref that upstream names, derived from config exactly as "Open the PR" does — never `-u`, and never a destination built from the local branch name (an upstream of `upstream/feature-x` or `origin/pr-123-head` must keep pointing there).
+!read lib/upstream-push.md
 
 ## Local Code Review (REQUIRED GATE)
 
@@ -73,7 +67,7 @@ Print: `PR flow: {current_branch} → {default_branch}`
    c. For each finding, quote the specific code line and explain why it's a problem
 4. After reviewing all files, verify: does the code actually deliver what the commits claim?
 5. Print a review summary table: | finding | file | line | severity | fixable |
-6. Fix any issues, run tests, verify tests cover the changed code paths, then **commit and push those fixes** — using the upstream-derived push described under "Open the PR" below, never a bare `git push` and never a destination built from the local branch name. Leaving the fixes uncommitted is invisible to that section's assertion, which compares against the upstream ref and so only ever sees *committed* work
+6. Fix any issues, run tests, verify tests cover the changed code paths, then **commit and push those fixes** — using the upstream-derived push in [lib/upstream-push.md](../../lib/upstream-push.md), never a bare `git push` and never a destination built from the local branch name. Leaving the fixes uncommitted is invisible to "Open the PR"'s assertion below, which compares against the upstream ref and so only ever sees *committed* work
 7. Only after printing the review summary may you proceed to "Pre-PR Local Reviews"
 
 If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.
@@ -97,21 +91,18 @@ Partition `REVIEW_AGENTS` into two ordered sublists, preserving relative order:
 - `LOCAL_AGENTS` — every entry that is neither `copilot` nor an `@<login>`: `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, `ollama[…]`, `cmd[<invocation>]`. These review the working tree locally and need no PR.
 - `PR_SIDE_AGENTS` — `copilot` plus every `@<login>` entry; these review the PR cloud-side and need it to exist.
 
-**If `LOCAL_AGENTS` is non-empty**, run the multi-reviewer loop now, **before the PR is created**, over `LOCAL_AGENTS` only, so every local reviewer's fixes land before the PR opens. Pass `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (no effect on local agents, but forward for consistency), and `{REVIEW_MODELS}` (the saved per-agent default models — every local reviewer but `cmd` reads it). Record the result as `LOCAL_OVERALL_STATUS`.
+**If `LOCAL_AGENTS` is non-empty**, run the multi-reviewer loop now, **before the PR is created**, over `LOCAL_AGENTS` only, so every local reviewer's fixes land before the PR opens. Pass `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`, and `{REVIEW_MODELS}` (the saved per-agent default models — every local reviewer but `cmd` reads it). Record the result as `LOCAL_OVERALL_STATUS`.
 
 - If `LOCAL_OVERALL_STATUS` is `dirty` (broken build / test failure / rejected), **abort before creating the PR** — print the proximate failure and stop.
 - Any other status (`clean`, `partial`, `inconclusive`) allows proceeding — a non-clean local pass is a signal to the user, not a hard block on PR creation.
 
 **If `LOCAL_AGENTS` is empty**, skip this section.
 
-This phase drives the **multi-reviewer wrapper** (under "Reviewer loop bodies" below) over `LOCAL_AGENTS`, dispatching:
-
-- `codex` | `agy` | `claude` | `grok` | `pi` | `cursor` | `opencode` | `cmd` → local-agent headless review loop (`lib/local-agent-review-loop.md`) — host-agnostic. The local CLI runs a self-contained single-agent review prompt against the branch (codex uses its built-in `codex review`) — deliberately **not** the `/do:review` multi-sub-agent skill, which hangs under a headless/print-mode invocation; this main thread then verifies its output, runs build + tests, and pushes the verified fixes
-- `ollama` → Ollama local-model review loop (`lib/ollama-review-loop.md`) — host-agnostic and fully offline. The orchestrator resolves the model, feeds the per-file diff to `ollama run`, parses the findings, applies the fixes itself (Ollama is non-agentic), then verifies build + tests and pushes
+This phase hands off to the **multi-reviewer wrapper** (under "Reviewer loop bodies" below) over `LOCAL_AGENTS` — its own gated `!read`s are the dispatch for every local-agent slug, `cmd` included.
 
 ## Open the PR
 
-- **First, assert the branch's commits reached the remote.** The Local Code Review gate and every pre-PR local reviewer commit their fixes onto this branch; if a push step didn't run, `gh pr create` opens a PR missing those fixes. Confirm `git log --oneline @{u}..HEAD` is empty; if it isn't, push first — deriving the destination from the branch's upstream config exactly as `lib/multi-reviewer-loop.md` step 5 does, as **one block** (shell variables do not persist across Bash calls):
+- **First, assert the branch's commits reached the remote.** The Local Code Review gate and every pre-PR local reviewer commit their fixes onto this branch; if a push step didn't run, `gh pr create` opens a PR missing those fixes. Confirm `git log --oneline @{u}..HEAD` is empty; if it isn't, push first — deriving the destination from the branch's upstream config the same way [lib/upstream-push.md](../../lib/upstream-push.md) does, as **one block** (shell variables do not persist across Bash calls). Unlike that shared rule's default, an unpublished branch here means an earlier push step didn't run — refuse rather than silently auto-publishing this late:
 
   ```bash
   BR="$(git branch --show-current)"
@@ -128,7 +119,7 @@ This phase drives the **multi-reviewer wrapper** (under "Reviewer loop bodies" b
 
   The `"$PUSH_REMOTE" = "."` guard is load-bearing: on a local upstream `@{u}` resolves, so the no-upstream carve-out never fires, and an unguarded push runs `git push . HEAD:refs/heads/main` — which silently fast-forwards the *local* default branch, exits 0, leaves `@{u}..HEAD` empty, and opens a PR for a branch never pushed to any remote.
 
-  Never a bare `git push` (under `push.default=matching` it fans out to every same-named local branch), and never `git push origin {current_branch}` (it hardcodes the *local* branch name as the destination: on a differently-named or non-origin upstream it pushes a spurious branch, leaves the real PR head stale, and `@{u}..HEAD` stays non-empty while the push "succeeded"). On a non-fast-forward, retry once behind `git pull --rebase --autostash`. If that rebase conflicts, **resolve it through [lib/rebase-conflict-resolution.md](../../lib/rebase-conflict-resolution.md), continue until the rebase completes, rerun the focused checks affected by the resolution, then retry the same upstream-derived push**. Do not classify an active rebase conflict as a push failure and do not stop merely to ask the user to resolve it — `/do:pr` is invoked programmatically by `/do:next` and `/do:pr-better`, so leave the expected branch checked out and fully rebased. **If the push still fails after that one retry, do NOT create the PR** — print the unpushed SHAs and the push error and stop. Skip the check only when the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1` fails — detached HEAD or no origin); a *local* upstream resolves, so the check runs and the `"."` guard stops it. `git status` is not a substitute — a clean tree says nothing about committed-but-unpushed commits.
+  See [lib/upstream-push.md](../../lib/upstream-push.md) for why the destination must be config-derived — never a bare `git push`, never `git push origin {current_branch}`. On a non-fast-forward, retry once behind `git pull --rebase --autostash`. If that rebase conflicts, **resolve it through [lib/rebase-conflict-resolution.md](../../lib/rebase-conflict-resolution.md), continue until the rebase completes, rerun the focused checks affected by the resolution, then retry the same upstream-derived push**. Do not classify an active rebase conflict as a push failure and do not stop merely to ask the user to resolve it — `/do:pr` is invoked programmatically by `/do:next` and `/do:pr-better`, so leave the expected branch checked out and fully rebased. **If the push still fails after that one retry, do NOT create the PR** — print the unpushed SHAs and the push error and stop. Skip the check only when the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1` fails — detached HEAD or no origin); a *local* upstream resolves, so the check runs and the `"."` guard stops it. `git status` is not a substitute — a clean tree says nothing about committed-but-unpushed commits.
 - Create a PR / merge request from `{current_branch}` to `{default_branch}`:
   - GitHub: `gh pr create --base {default_branch} --head {current_branch} --title "..." --body "..."`
   - GitLab: `glab mr create --source-branch {current_branch} --target-branch {default_branch} --title "..." --description "..."` (add `--yes` to skip the interactive prompt; `--remove-source-branch` if the project deletes merged branches)
@@ -168,10 +159,7 @@ For each GitHub-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before di
 
 Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass both schedules.
 
-The stop-mode flags still apply **within** this wrapper invocation (e.g. stopping after the first of several `@<login>` entries that comes back clean); the cross-phase check only handles the boundary. Reviewer types:
-
-- `copilot` → shared GitHub-reviewer template plus the Copilot delta (`lib/github-reviewer-loop.md`, `lib/copilot-review-loop.md`)
-- `@<login>` → shared GitHub-reviewer template (`lib/github-reviewer-loop.md`), forwarding `{REVIEWER_LOGIN}`
+The stop-mode flags still apply **within** this wrapper invocation (e.g. stopping after the first of several `@<login>` entries that comes back clean); the cross-phase check only handles the boundary. Run the multi-reviewer wrapper over `PR_SIDE_AGENTS` — its own gated `!read`s (under "Reviewer loop bodies" below) are the dispatch for `copilot` and `@<login>` alike.
 
 **GitHub only** — both drive `gh`/GraphQL against a GitHub PR. When `VCS_HOST=gitlab` and `PR_SIDE_AGENTS` is non-empty, print a warning (`copilot and @<login> reviewers are GitHub-only and were skipped on this GitLab MR; use a local-agent reviewer (codex/agy/claude/grok/pi/cursor/opencode, or cmd[<invocation>] for anything else) instead`) and set `PR_SIDE_OVERALL_STATUS=inconclusive`.
 
