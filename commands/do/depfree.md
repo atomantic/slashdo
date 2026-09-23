@@ -172,7 +172,7 @@ Based on `PROJECT_TYPE`, extract the full dependency list:
 **Ruby:**
 - Read `Gemfile`
 
-Then run the whole-tree vulnerability audit **once** (`npm audit --json`, `cargo audit --json`, `pip-audit -f json`, etc., per `PROJECT_TYPE`) and index the results by package name as `VULN_MAP`. Phase 1c's per-package usage analysis reads from `VULN_MAP` instead of re-running the audit for every Tier 2/3 dependency.
+Then run the whole-tree vulnerability audit **once** (`npm audit --json`, `cargo audit --json`, `pip-audit -f json`, etc., per `PROJECT_TYPE`) and index the results as `VULN_MAP`, keyed by **package name + installed version** (not name alone — a monorepo or lock file can carry multiple versions of the same package, and a finding against one version must not be attributed to another). Phase 1c's per-package usage analysis reads from `VULN_MAP` instead of re-running the audit for every Tier 2/3 dependency.
 
 ### 1b: Classify Dependencies
 
@@ -274,7 +274,7 @@ Each agent should:
    - **Moderate** (20-100 lines): multi-function utility, needs tests, edge cases to handle
    - **Complex** (100-300 lines): significant logic, crypto, parsing, protocol implementation
    - **Infeasible** (300+ lines or requires deep domain expertise): keep the dependency
-5. Look up known vulnerabilities for the package in the whole-tree `VULN_MAP` from Phase 1a (do not re-run the audit per package)
+5. Look up known vulnerabilities for the package's installed version in the whole-tree `VULN_MAP` from Phase 1a (do not re-run the audit per package)
 6. Check last publish date and maintenance status
 7. Check for **consolidation opportunities**: does this package overlap in purpose with another dependency (two state managers, two HTTP clients, two date libraries, two test runners)? If so, flag which kept dependency could absorb this one's usage
 
