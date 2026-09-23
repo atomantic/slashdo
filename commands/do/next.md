@@ -614,7 +614,7 @@ WORKTREE="../next-${SLUG}" && \
 # THAT branch's local ref explicitly — not "whatever HEAD happens to be" — WITHOUT
 # switching the main repo's checkout. /do:next may have been launched from a feature
 # branch in the main repo, and this phase never touches that checkout (see the
-# Phase 2 box, :312-315): if the default branch is already checked out, fast-forward
+# Phase 2 box): if the default branch is already checked out, fast-forward
 # it in place; otherwise update its ref via a plain fetch refspec, leaving whatever
 # branch the user had open untouched.
 DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)" && \
