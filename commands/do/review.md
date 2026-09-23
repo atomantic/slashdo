@@ -213,9 +213,7 @@ For each finding, ground it in evidence before classifying:
 3. If the fix involves async/state changes, **trace the execution path** to confirm the issue is real
 4. If you cannot quote specific code for a finding, downgrade it to **[UNCERTAIN]**
 
-After verifying all findings, run the project's build and test commands to confirm no false positives.
-
-In `PR_MODE` with `PR_DISPOSITION=inline`, skip the local build/test step (nothing is checked out; the PR's CI is the source of truth) and verify by reading code only. With `PR_DISPOSITION=apply` the build/test step is mandatory: it runs after the fixes in "Fix Issues", and a failure blocks the push.
+Verification here is reading code, not running it — a build/test pass over unfixed code cannot show a finding is a false positive. The project's build and test commands run once, after fixes, in "Fix Issues" (local branch mode and `PR_DISPOSITION=apply`); a failure there blocks the commit/push. `PR_DISPOSITION=inline` skips the local build/test step entirely (nothing is checked out; the PR's CI is the source of truth) and verifies by reading code only.
 
 ## Fix Issues (local branch mode, and PR mode when `PR_DISPOSITION=apply`)
 
