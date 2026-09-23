@@ -101,15 +101,18 @@ After the barrier, merge the wave's returned PRs **one at a time, never concurre
 
 1. **Skip non-mergeable results.** A result with `status: "yielded"`/`"skipped"` (no `pr_number`) has nothing to merge — record it. For the rest, apply **single-issue Phase 6's merge gate** to `review_status`: never merge `dirty` (build/test broken) or `inconclusive` (a non-optional reviewer missing/timed-out/errored) — leave that PR open and record why; merge only `clean`, `opened-no-review` (Local gate passed, no external reviewer selected or all selected entries unavailable-and-optional in this run's preflight), or `partial` **with** an explicit `--review-stop-on-*` flag. (Agents that never returned are reconciled in Phase D, not here.)
 2. **Re-sync onto the advanced default branch** from the PR's worktree — `git fetch origin <default>` then `git merge --no-edit origin/<default>` — resolving any PLAN.md/changelog conflict **deletions-win** (a line removed on either side stays removed; keep additions from both). If the merge **can't be resolved cleanly**, leave that PR open, record it for human follow-up, and move to the next — **never force it**.
-3. **Gate on required CI, then merge.** Because each swarm agent opened its PR with `/do:pr --no-merge`, `/do:pr`'s own CI merge gate never ran — and the re-sync in step 2 just pushed a new SHA whose checks are pending — so the orchestrator must run the CI gate here, exactly as the single-issue Phase 6 / `/do:pr` merge does, before merging. Push the re-synced SHA, wait for CI, and only then merge; on a check failure apply **CI flake handling** (one re-run on the same commit; flake → proceed, real → leave that PR open, record it, and move to the next — see `~/.claude/lib/ci-flake-handling.md`).
-   - GitHub (`gh`) — scope the watch to **required** checks only so an optional/non-required job can't block a merge branch protection would allow (vacuously satisfied when no required checks exist):
+3. **Gate on required CI, then merge.** Because each swarm agent opened its PR with `/do:pr --no-merge`, `/do:pr`'s own CI merge gate never ran — and the re-sync in step 2 just pushed a new SHA whose checks are pending — so the orchestrator must run the CI gate here, exactly as the single-issue Phase 6 / `/do:pr` merge does, before merging. Push the re-synced SHA, wait for CI, and only then merge; on a check failure apply **CI flake handling** (one re-run on the same commit; flake → run the merge alone with the resolved method written in literally (e.g. `gh pr merge <pr_number> --squash`), **then run the `MERGED` read-back / remote-delete block below**, and log which check flaked; real → leave that PR open, record it, and move to the next — see `~/.claude/lib/ci-flake-handling.md`).
+   - **Merge method (GitHub).** Resolve `MERGE_METHOD` **once per invocation**, before the first merge, exactly as single-issue Phase 6's "Resolve the merge method" step does: the orchestrator's explicitly given method, then the saved `merge-method` default, then the repo's allowed methods (squash, then merge, then rebase). Never hardcode `--merge`: a squash- or rebase-only repo rejects it on every PR in the batch. Substitute the resolved value literally into each merge below. On GitLab there is no method flag; the project default applies.
+   - GitHub (`gh`) — scope the watch to **required** checks only so an optional/non-required job can't block a merge branch protection would allow. `gh pr checks --required` exits non-zero with `no required checks reported` when the branch has none; re-run the watch once (a just-pushed SHA's checks can take a few seconds to register), and if it still reports none, the gate is vacuously satisfied: run the merge alone with the resolved method written in literally (e.g. `gh pr merge <pr_number> --squash`), **then run the `MERGED` read-back / remote-delete block below** — step 4's issue close-out depends on that read-back:
      ```bash
-     git -C "<worktree>" push
-     # &&, not three separate lines: `--fail-fast` makes `gh pr checks` exit non-zero on
+     MERGE_METHOD="<resolved method>"
+     # &&, not separate lines: `--fail-fast` makes `gh pr checks` exit non-zero on
      # a failing required check, but an unchained next line merges anyway — which is the
-     # opposite of what this step's own prose promises. Chain it so a red gate stops here.
-     gh pr checks <pr_number> --required --watch --fail-fast && \
-       gh pr merge <pr_number> --merge
+     # opposite of what this step's own prose promises. Chain it so a red gate (or a
+     # failed push, which would leave CI watching the stale SHA) stops here.
+     git -C "<worktree>" push && \
+       gh pr checks <pr_number> --required --watch --fail-fast && \
+       gh pr merge <pr_number> --"$MERGE_METHOD"
      # Delete the head branch ONLY once the PR really reads MERGED.
      if [ "$(gh pr view <pr_number> --json state -q .state)" = "MERGED" ]; then
        if ! git push origin --delete "<branch>"; then
@@ -125,8 +128,7 @@ After the barrier, merge the wave's returned PRs **one at a time, never concurre
      **No `--delete-branch`** — it deletes the *local* branch too, and `<branch>` (the `branch` field the worker returned, normally `next/issue-<num>`) is checked out in the agent's worktree, so git refuses (`cannot delete branch 'next/issue-<num>' used by worktree at …`) and **`gh` exits non-zero after the merge already succeeded**. That reads as a merge failure and fires any `||` fallback wrapped around the merge. Delete the remote branch with the explicit `git push origin --delete` above — it needs no local checkout — and let Phase D remove the worktree and the local branch from the main repo, where that works. **The `MERGED` read-back is load-bearing**: `--delete-branch` only ever deleted the head branch *because* the merge had happened, and an ungated delete would retract the head of a PR that is still open — either the merge failed (unmergeable, branch protection, a lost race) or, on a repo with a **merge queue**, `gh pr merge` returned success having merely *queued* it. GitHub auto-closes a PR whose head branch disappears, which destroys both the "leave that PR open, record it, and move to the next" outcome step 3 requires and the queued merge itself. Read the state back rather than trusting the merge command's exit status.
    - GitLab (`glab`) — there's no discrete "required checks" list to scope to; the project's own merge/pipeline-success requirement governs, so wait on the pipeline explicitly and merge only then:
      ```bash
-     git -C "<worktree>" push
-     glab ci status --wait && glab mr merge <pr_number> --yes --remove-source-branch
+     git -C "<worktree>" push && glab ci status --wait && glab mr merge <pr_number> --yes --remove-source-branch
      # Read the state back for the same reason the gh path does: --auto-merge returns
      # while the MR is still queued behind the pipeline, and step 4 gates issue closure
      # on this answer.
