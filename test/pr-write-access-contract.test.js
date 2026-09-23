@@ -95,10 +95,11 @@ describe('VCS host portability', () => {
     assert.match(parse, /no `github` substring/);
     assert.doesNotMatch(parse, /substring `github`/);
 
-    // A GitLab MR URL must abort with a usable message rather than fall through to
-    // the base-branch branch, which would review the wrong thing without saying so.
+    // A GitLab MR URL must never fall through to the base-branch branch, which would
+    // review the wrong thing without saying so; it routes to GitLab MR mode
+    // (test/review-mr-mode-contract.test.js pins that path).
     assert.match(parse, /merge_requests/);
-    assert.match(parse, /cannot review a GitLab merge request yet/);
+    assert.match(parse, /never a GitHub PR or a base branch/);
   });
 
   it('keeps /do:fpr working on Enterprise hosts', () => {

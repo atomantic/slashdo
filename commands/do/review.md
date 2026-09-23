@@ -1,13 +1,13 @@
 ---
 description: Deep code review of changed files against software engineering best practices
-argument-hint: "[--strict|--nuclear] [--draft] [--apply|--no-apply] [--merge|--merge=<method>] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues-label <name>] [PR-URL | base-branch]"
+argument-hint: "[--strict|--nuclear] [--draft] [--apply|--no-apply] [--merge|--merge=<method>] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues-label <name>] [PR-URL | MR-URL | base-branch]"
 ---
 
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for:
 - **`--strict`** (alias: **`--nuclear`**): raise the structural-review bar — permit the Structural Ambition lens when the diff contains structural signals, and promote structural findings to blocker tier. Strict mode does not force a focused agent when the orchestrator finds no structural concern.
-- **`--draft`** (PR mode only): write the review payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the `gh api` command to publish it manually, instead of posting the review. Ignored when `PR_MODE=false`. Implies `--no-apply` — a draft publishes nothing, so it must not push commits either.
+- **`--draft`** (PR mode only): write the review payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the command(s) to publish it manually (`gh api` on GitHub, the retargeted `glab` calls on GitLab), instead of posting the review. Ignored when `PR_MODE=false`. Implies `--no-apply` — a draft publishes nothing, so it must not push commits either.
 - **`--apply` / `--no-apply`** (mutually exclusive, PR mode only): how verified findings are delivered. Default `PR_APPLY=auto` — **commit the fixes onto the PR's head branch when we can push to it, post inline review comments when we can't** (see "Determine write access"). `--no-apply` forces review-only; `--apply` forces fix-and-push and aborts with `--apply was requested but the PR head branch is not writable ({reason}) — rerun without --apply to post an inline review instead.` when `CAN_PUSH_HEAD=false`. Abort with `--apply and --no-apply cannot be combined` if both appear.
 - **`--merge` / `--merge=<method>`** (optional, PR mode only): after the review finishes **clean**, merge the PR. Off by default — without this flag `/do:review` never merges anything. `<method>` ∈ {`squash`, `rebase`, `merge`}; abort on anything else with `--merge=<method> must be one of squash, rebase, merge (got: {value}).` Record `MERGE_ENABLED=true` and, when given, `MERGE_METHOD`. Every gate in "Merge the PR" must pass — the flag requests a merge, it does not authorize one.
 
@@ -24,8 +24,10 @@ After parsing the flags above, apply any **saved defaults** (set via `/do:config
   - Full URL of the shape `{scheme}://{host}/{owner}/{repo}/pull/{number}` — **any** `{host}`, including `github.com`, `github.example.com`, and a GHES host with no `github` substring. Trailing subpaths (`/files`, `/commits`, `/checks`) and a `#discussion_r…` fragment are allowed and ignored.
   - SSH-style URL (`git@{host}:{owner}/{repo}`) carrying the same `/pull/{number}` segment — again on any host.
   - Shorthand: the argument matches `^[^/]+/[^/]+#[0-9]+$` AND `gh repo view {owner}/{repo}` confirms it resolves. Take `{GH_HOST}` from the `origin` remote here — a shorthand carries no host of its own.
-  - Extract `OWNER`, `REPO`, and `PR_NUM`. Set `PR_MODE=true` and `PR_URL` to the canonical URL. Capture the URL's **host** as `{GH_HOST}` — `gh api` ignores the repo remote and defaults to github.com, so the calls below pass it explicitly (see `~/.claude/lib/gh-host.md`). It comes from the **PR URL**, not `origin` — the PR can live on a different host than the checkout.
-  - **GitLab-shaped URL** (a `/-/merge_requests/{number}` or `/merge_requests/{number}` segment, on `gitlab.com` or any self-managed GitLab host): PR mode is GitHub-only today, so do **not** fall through to base-branch mode. Abort with `/do:review cannot review a GitLab merge request yet (got: {token}). Check the branch out locally and run /do:review with no argument to review it as a local diff.`
+  - Extract `OWNER`, `REPO`, and `PR_NUM`. Set `PR_MODE=true`, `CODE_HOST=github`, `CR_NOUN=PR`, and `PR_URL` to the canonical URL. Capture the URL's **host** as `{GH_HOST}` — `gh api` ignores the repo remote and defaults to github.com, so the calls below pass it explicitly (see `~/.claude/lib/gh-host.md`). It comes from the **PR URL**, not `origin` — the PR can live on a different host than the checkout.
+- **MR reference** (GitLab), also matched by URL *shape* on any host, whether `gitlab.com` or self-managed. **Check it before the PR shapes**, because a token carrying `/merge_requests/` is never a GitHub PR or a base branch. A token matches if it is:
+  - A URL with a `/-/merge_requests/{iid}` segment, or the legacy `/merge_requests/{iid}` one: `{scheme}://{host}/{project path}/-/merge_requests/{iid}`. The project path can carry subgroups (`group/sub/project`). Trailing subpaths (`/diffs`, `/commits`, `/pipelines`), a query, and a `#note_…` fragment are ignored.
+  - Record the token as `MR_REF`. Set `PR_MODE=true`, `CODE_HOST=gitlab`, and `CR_NOUN=MR`. "GitLab MR mode" under Determine Scope parses `MR_REF` into `PR_NUM` (the MR **iid**) and the target `GL_HOST` / `GL_PROJECT`. The target comes from the reference, not `origin`, because the MR can live on a different host or project than the checkout.
 - Any other non-flag token: treat as the base branch override (only when `PR_MODE=false`).
 
 Set `STRICT_MODE=true` if either strict flag is present.
@@ -48,13 +50,19 @@ If there are no changes, inform the user and stop.
 
 !`cat ~/.claude/lib/gh-host.md`
 
-### GitHub PR mode (`PR_MODE=true`)
+### PR / MR mode (`PR_MODE=true`)
 
-Do NOT use the local working tree as the source of truth; review the PR as published on GitHub. This entire mode — fetching the PR, probing write access, fixing on the PR branch, pushing, posting the review, and merging — is PR-only content a local run never touches, so it is loaded in one shot, gated on this branch:
+Do NOT use the local working tree as the source of truth; review the PR or MR as published on its code host. This entire mode (fetching the change, probing write access, fixing on its branch, pushing, posting the review, and merging) is content a local run never touches. It is loaded in one shot, one partial per code host.
+
+GitHub PR mode, only when `CODE_HOST=github` (a GitHub PR reference):
 
 !read lib/review-pr-mode.md
 
-Resolve `PR_DISPOSITION` from `PR_APPLY` and `CAN_PUSH_HEAD` (the write-access probe in `lib/review-pr-mode.md` sets `CAN_PUSH_HEAD`):
+GitLab MR mode, only when `CODE_HOST=gitlab` (a GitLab MR reference):
+
+!read lib/review-mr-mode.md
+
+Resolve `PR_DISPOSITION` from `PR_APPLY` and `CAN_PUSH_HEAD`. The write-access probe in the loaded partial sets `CAN_PUSH_HEAD`:
 
 | `PR_APPLY` | `CAN_PUSH_HEAD` | `PR_DISPOSITION` |
 |---|---|---|
@@ -72,7 +80,7 @@ off, posting review comments`. A `false` here is an ordinary outcome, not a fail
 
 Use CLAUDE.md's rules (code style, error handling, logging, security model, scope exclusions) as overrides to generic best practices, and pass the relevant overrides to each agent.
 
-In `PR_MODE`, the local CLAUDE.md may not apply to the PR (fork or different repo). Also fetch the target repo's CLAUDE.md and AGENTS.md if they exist:
+In `PR_MODE`, the local CLAUDE.md may not apply to the PR (fork or different repo). Also fetch the target repo's CLAUDE.md and AGENTS.md if they exist. The command below is for GitHub; GitLab MR mode fetches them in `lib/review-mr-mode.md` step 6:
 ```bash
 gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/contents/CLAUDE.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}-CLAUDE.md || true
 gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/contents/AGENTS.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}-AGENTS.md || true
@@ -179,10 +187,10 @@ Lens body — read only if this lens was selected:
 For each selected agent, construct its prompt by combining:
 1. The agent's instruction content (from the sections above), plus the orchestrator's recorded reason for selecting that lens
 2. Project convention overrides from CLAUDE.md (the PR's CLAUDE.md/AGENTS.md when `PR_MODE=true`)
-3. The list of changed files from the diff stat (or `gh pr diff --name-only` in PR mode) AND, in PR mode, the path to each file's full content under `/tmp/do-review-pr-{PR_NUM}/`
+3. The list of changed files from the diff stat (or the PR/MR changed-files list in PR mode) AND, in PR mode, the path to each file's full content under `/tmp/do-review-pr-{PR_NUM}/`
 4. In PR mode only: the path to `/tmp/do-review-pr-{PR_NUM}-lines.json` (the commentable-lines map) and an instruction that **every finding MUST cite a `file:line` where `line` appears in the commentable-lines map** — otherwise the finding cannot be posted inline and is downgraded to a summary-only finding
 5. Instruction: "Read each changed file in full (not just diff hunks). Report findings that demonstrate consequence reasoning, not just pattern matches."
-6. In PR mode only: "For every CRITICAL or IMPROVEMENT finding where a concrete fix is obvious, include a `suggestion:` block — the exact replacement text for the cited line(s). Use `start_line` and `line` to span multiple lines when the fix needs more than one line. The reviewer will package these as GitHub inline review suggestions."
+6. In PR mode only: "For every CRITICAL or IMPROVEMENT finding where a concrete fix is obvious, include a `suggestion:` block — the exact replacement text for the cited line(s). Use `start_line` and `line` to span multiple lines when the fix needs more than one line. The reviewer will package these as inline review suggestions."
 
 Spawn the selected agents simultaneously in one parallel batch. If the selection is
 empty, spawn no focused agents and continue with the host orchestrator's self-review.
@@ -214,9 +222,9 @@ Verification here is reading code, not running it — a build/test pass over unf
 
 ## Fix Issues (local branch mode, and PR mode when `PR_DISPOSITION=apply`)
 
-**Skip this section when `PR_MODE=true` and `PR_DISPOSITION=inline`** — jump to "Post Review to GitHub PR" (in `lib/review-pr-mode.md`, already loaded above).
+**Skip this section when `PR_MODE=true` and `PR_DISPOSITION=inline`** — jump to the loaded partial's review-posting section ("Post Review to GitHub PR" in `lib/review-pr-mode.md`, or "Post Review to GitLab MR" in `lib/review-mr-mode.md`).
 
-When `PR_MODE=true` and `PR_DISPOSITION=apply`, first follow "Fix Issues — PR-branch checkout" in `lib/review-pr-mode.md` (already loaded above) — it checks out the PR branch and sets the commit-attribution convention — then run this section against that branch instead of the local one, then continue to "Push fixes to the PR branch" (also in `lib/review-pr-mode.md`).
+When `PR_MODE=true` and `PR_DISPOSITION=apply`, first follow the loaded partial's branch-checkout step ("Fix Issues — PR-branch checkout" on GitHub, "Fix Issues — MR-branch checkout" on GitLab). It checks out the change's branch and sets the commit-attribution convention. Then run this section against that branch instead of the local one, then continue to the partial's push step ("Push fixes to the PR branch" / "Push fixes to the MR branch").
 
 !`cat ~/.claude/lib/finding-disposition.md`
 
@@ -238,7 +246,7 @@ For each verified finding (local branch mode):
 6. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
 7. Commit fixes: `address review (self): <summary>` — the parenthesized reviewer name matches the convention used by delegated `--review-with` passes.
 
-`PR_MODE=true` and `PR_DISPOSITION=apply` continues from here to "Push fixes to the PR branch", `PR_DISPOSITION=inline` to "Post Review to GitHub PR", and `--merge` to "Merge the PR" — all three in `lib/review-pr-mode.md`, already loaded above.
+`PR_MODE=true` and `PR_DISPOSITION=apply` continues from here to "Push fixes to the PR branch", `PR_DISPOSITION=inline` to "Post Review to GitHub PR", and `--merge` to "Merge the PR". All three are in the partial already loaded above, and GitLab MR mode names them with "MR" ("Post Review to GitLab MR", "Merge the MR").
 
 ## Report
 
@@ -267,7 +275,7 @@ Omit all focused-lens rows when none were selected.
 
 If no issues were found, confirm the code is clean and ready for PR.
 
-In `PR_MODE`, follow "Report additions" in `lib/review-pr-mode.md` (already loaded above) instead — it replaces the sections above with the PR-disposition variants and the merge outcome.
+In `PR_MODE`, follow "Report additions" in the PR/MR-mode partial loaded above instead — it replaces the sections above with the PR-disposition variants and the merge outcome.
 
 ## Convention Encoding
 
@@ -303,7 +311,7 @@ Inputs to the wrapper:
 - `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot/`@<login>` iteration cap (`0` = loop until clean)
 - `{REVIEW_MODELS}` — the saved per-agent default models (`EFFECTIVE_REVIEW_MODELS` from the saved-defaults step); every local reviewer but `cmd` reads it when an entry's own `[<model>]` bracket is absent
 - `{GH_HOST}` — the GitHub API host established in "Determine Scope" (the PR URL's host in PR mode, the `origin` remote's host in local mode); forwarded to the GitHub loops so their `gh api` calls target the right host on GitHub Enterprise
-- `{CODE_HOST}` / `{CR_NOUN}` — in PR mode, `github` / `PR` (PR mode takes GitHub PR URLs). In local mode, use the `origin` code host from `lib/vcs-host.md`. When the list has a `copilot` or `@<login>` entry and the deferral path has not already resolved it, read and run that partial now. It selects the verb file the host-side loops run, so `@<login>` works on the branch's GitLab MR too.
+- `{CODE_HOST}` / `{CR_NOUN}` — in PR mode, the reference's host from Parse Arguments: `github` / `PR` for a GitHub PR, `gitlab` / `MR` for a GitLab MR. Never re-derive them from `origin` there. In local mode, use the `origin` code host from `lib/vcs-host.md`. When the list has a `copilot` or `@<login>` entry and the deferral path has not already resolved it, read and run that partial now. It selects the verb file the host-side loops run, so `@<login>` works on the branch's GitLab MR too.
 - `{WAIT_SCHEDULE}` — the single schedule selected below for the current host-side entry
 
 For each host-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
@@ -315,7 +323,7 @@ Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass bot
 
 Per-agent dispatch inside the wrapper:
 
-- `copilot` and `@<login>` — host-side and PR/MR-bound: only meaningful when a PR/MR exists for the current branch (local mode) or when `PR_MODE=true`. `copilot` (GitHub only) requests a review through the shared host-reviewer template plus the Copilot delta; `@<login>` requests a review from the code-host user `{REVIEWER_LOGIN}` through the shared template. If no PR is associated with the current branch in local mode, print `Skipping copilot pass: no open PR on {branch}.` / `Skipping @{REVIEWER_LOGIN} pass: no open PR on {branch}.` and continue to the next agent.
+- `copilot` and `@<login>` — host-side and PR/MR-bound: only meaningful when a PR/MR exists for the current branch (local mode) or when `PR_MODE=true`. `copilot` (GitHub only) requests a review through the shared host-reviewer template plus the Copilot delta; `@<login>` requests a review from the code-host user `{REVIEWER_LOGIN}` through the shared template. If no PR is associated with the current branch in local mode, print `Skipping copilot pass: no open PR on {branch}.` / `Skipping @{REVIEWER_LOGIN} pass: no open PR on {branch}.` and continue to the next agent. In GitLab MR mode, the GitLab verbs resolve the project from `origin`, so an `@<login>` pass runs only when `MR_IN_CHECKOUT=true` (set in `lib/review-mr-mode.md`). Otherwise print `Skipping @{REVIEWER_LOGIN} pass: this checkout is not {GL_PROJECT}; run /do:review from a clone of it to add host reviewers.` and record the pass `skipped`.
 - `codex` | `agy` | `claude` | `grok` | `pi` | `cursor` | `opencode` | `cmd` | `ollama` — invoke the local-agent review loop (ollama: the Ollama review loop). The CLI runs a self-contained single-agent review prompt headless (codex: `codex review --base "$BASE_BRANCH"`; the others: `git diff $BASE_BRANCH...HEAD` inside the prompt) — never the `/do:review` multi-sub-agent skill, which hangs headless. The loop publishes nothing to the PR; in review-only mode it emits findings to stdout and the orchestrator owns any PR comment.
   - In **local branch mode**, set the wrapper's `BASE_BRANCH=$BASE_BRANCH` so the inner loop reviews against the same base this self-review used (with the host's just-committed fixes in HEAD).
   - In **PR mode**, a local `git diff` needs a checked-out branch and a resolvable base ref — a PR URL won't resolve — so **these passes are skipped** unless the PR branch is checked out locally with a resolvable base (`copilot` is the PR-by-URL reviewer), printing `Skipping {agent} pass in PR mode: the local-agent loop reviews a local git diff and cannot resolve a PR URL. Use --review-with {agent} against a local branch instead.` Each skip is recorded in the per-pass table as status `skipped`, treated like a non-fix inconclusive for `{OVERALL_STATUS}` purposes.
