@@ -31,9 +31,10 @@ describe('better progressive context', () => {
     // directly above opens with "Only when/with/for/on …".
     //
     // #325's target is 60 KB. Since tracker filing became unconditional (#375),
-    // the shared tracker partials (plan-issue-filing/-setup) sit on this path, so
-    // the budget holds today's size until those shrink — lower it, never raise it.
-    const BUDGET = 84000;
+    // the shared tracker partials sit on this path; setup, model tiers, saved
+    // defaults, and host selection are now contracts, and plan-issue-filing /
+    // better-issue-mode are what remain. Lower it, never raise it.
+    const BUDGET = 70000;
     const GATE = /^(?:\d+[a-z]?\.\s+)?Only (?:when|with|for|on)\b/;
     const reached = new Map();
     const gated = new Set();
