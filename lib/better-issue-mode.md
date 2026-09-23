@@ -62,6 +62,26 @@ isn't worth it at that size.
 
 ### Phase 1 (Audit) — spooling a finding
 
+Create the spool directory before dispatching any audit agent:
+
+```bash
+SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_DIR"
+```
+
+Record the printed path as `SPOOL_DIR` in run state and pass **that literal path**
+to every agent — a shell variable does not survive between tool calls, so
+re-deriving it later would hand the filer agents an empty directory. Each agent
+writes one ready-to-file issue body per finding (the Phase 1 finding format) to
+`$SPOOL_DIR/<category-slug>.md`, using its own category slug, so no two agents write
+the same file, and **returns only the compact index**:
+
+```
+<id> | <SEVERITY-or-UNCERTAIN> | <category> | <file:line> | <one-line title>
+```
+
+Preserve `[UNCERTAIN]` as `UNCERTAIN` in the index and in the spooled body; do not
+assign a confirmed severity just to fit the index.
+
 Audit agents are `Explore` agents, which have no `Write` tool — they write their
 spool file with a quoted-heredoc `cat > "$SPOOL_DIR/<slug>.md" <<'EOF'` via Bash,
 so backticks and `$` in quoted evidence survive verbatim. **Only the first write
@@ -81,9 +101,8 @@ bodies stay on disk until the filer agents move them to the tracker.
 
 **In issue mode the finding bodies are on disk, not in this context.** Build
 `{FINDINGS}` from each worker's index lines plus the literal `SPOOL_DIR` path, and
-instruct the worker to read the full body for each of its ids out of
-`$SPOOL_DIR/<slug>.md`, where `<slug>` is the category on that id's own index line —
-Conflict avoidance may merge two categories' findings into one worker when they
+instruct the worker to read the full body for each of its ids out of `$SPOOL_DIR/<slug>.md`, where
+`<slug>` is the category on that id's own index line — the Phase 3c ownership rule may merge two categories' findings into one worker when they
 touch the same file, so such a worker must open every spool file its ids name, not
 just the one matching its own category. "The orchestrator never rewrites a spooled
 body" keeps the bodies out of *this* context — it does not license remediating from
