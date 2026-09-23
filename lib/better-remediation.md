@@ -5,7 +5,7 @@ Only CRITICAL, HIGH, and MEDIUM findings are remediated. LOW findings stay track
 ### 3a: Setup
 
 - If `IS_DIRTY` is true, stash first: `git stash --include-untracked -m "better: pre-scan stash"`.
-- `DATE` is today (`YYYY-MM-DD`). The staging worktree is `WORKTREE_DIR=../better-{DATE}` on a new branch `better/{DATE}` (`git worktree add ../better-{DATE} -b better/{DATE}`).
+- Use the `DATE` already recorded in [0d](./better-discovery.md) (today's date, plus any suffix 0d added to keep it unique against `git worktree list`) — do not recompute or reset it here, or a second run on the same day collides with the worktree/branch 0d already resolved. The staging worktree is `WORKTREE_DIR=../better-{DATE}` on a new branch `better/{DATE}` (`git worktree add ../better-{DATE} -b better/{DATE}`).
 
 ### 3b: Foundation Utilities
 
@@ -17,7 +17,7 @@ Skip when Phase 2 identified no Foundation work. Otherwise you (the orchestrator
 ### 3c: Parallel Remediation
 
 One worker per category with CRITICAL, HIGH, or MEDIUM findings: Security & Secrets, Code Quality & Style, DRY & YAGNI, Architecture & SOLID, Bugs, Performance & Error Handling, Stack-Specific, and the categories below, which carry their own rules:
-- Dependency Freedom — for each removable dependency: write the replacement (utility or native API call), update every import/require, remove the package from the manifest, and regenerate the lock file; no source file may still reference it. See `/do:depfree` Phase 3b for the full agent template.
+- Dependency Freedom — for each removable dependency: write the replacement (utility or native API call), update every import/require, remove the package from the manifest, and regenerate the lock file; no source file may still reference it.
 - UX Consistency & Responsive Layout _(UI projects only)_ — conservative and verifiable: fix layout, markup, and CSS mechanics without redesigning. Above-the-fold fixes first (reserve dimensions, fix LCP loading, unblock first paint). Consolidating one-off values into design tokens or shared components changes call sites mechanically and preserves rendered output; never change copy or visual design intent. When a finding needs a design decision (e.g., which of two button styles is canonical), pick the variant with the most call sites and note the choice in the commit message.
 - Structural Ambition _(strict mode only)_ — apply the specific reframing each finding names (extract module, collapse condition chain, delete wrapper, move logic to canonical layer); a "cleaner version of the same idea" does not count. If the finding says "delete this branch by reframing X as Y," the branch is deleted. A reframing that proves infeasible is left as-is with the reason in the commit message, never replaced by a cosmetic change — and when `SIMPLIFY_ONLY=true`, recorded as a rejection per [gate 4](./better-simplify.md).
 - Cognitive Load & Readability _(simplify-only mode)_ — apply the named transformation (extract, invert, rename, table-ize, early-return, split file) and nothing else. A rename covers every call site in the same commit; an extraction leaves a backward-compatible re-export at the original path.
@@ -27,9 +27,9 @@ One worker per category with CRITICAL, HIGH, or MEDIUM findings: Security & Secr
 **Ownership:** every file has exactly one worker. When two categories touch the same file, one worker gets both sets of findings — Security takes validation logic, DRY takes import consolidation, and Dependency Freedom takes files that are solely import/usage sites of a removed package.
 
 <!-- if:teams -->
-Use `TeamCreate` named `better-{DATE}` and one `TaskCreate` per category with actionable findings, then spawn up to 5 general-purpose teammates. **Resolve `REMEDIATION_MODEL_TIER` to this host's model per [lib/model-tiers.md](./model-tiers.md) and pass it as the `model` parameter on each agent** (`heavy` → this host's strongest alias, `model: "opus"` on Claude Code). Each teammate marks its task complete via `TaskUpdate`.
+Use `TeamCreate` named `better-{DATE}` and one `TaskCreate` per category with actionable findings, then spawn one teammate per category, batched to the host's available slots (do not infer an arbitrary subset to save tokens — cap concurrency, not coverage, matching the Phase 1 audit fan-out). **Resolve `REMEDIATION_MODEL_TIER` to this host's model per [lib/model-tiers.md](./model-tiers.md) and pass it as the `model` parameter on each agent** (`heavy` → this host's strongest alias, `model: "opus"` on Claude Code). Each teammate marks its task complete via `TaskUpdate`.
 <!-- else -->
-Spawn up to 5 general-purpose `Agent` sub-agents in parallel (multiple tool calls in one response), one per category with actionable findings, and wait for all to return. **Resolve `REMEDIATION_MODEL_TIER` to this host's model per [lib/model-tiers.md](./model-tiers.md) and pass it as the `model` parameter on each `Agent` call** (`heavy` → this host's strongest alias, `model: "opus"` on Claude Code).
+Spawn one general-purpose `Agent` sub-agent per category with actionable findings, in parallel (multiple tool calls in one response) batched to the host's available slots, and wait for all to return. **Resolve `REMEDIATION_MODEL_TIER` to this host's model per [lib/model-tiers.md](./model-tiers.md) and pass it as the `model` parameter on each `Agent` call** (`heavy` → this host's strongest alias, `model: "opus"` on Claude Code).
 <!-- /if:teams -->
 
 **In issue mode the finding bodies are on disk, not in this context.** Build `{FINDINGS}`

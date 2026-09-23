@@ -31,7 +31,7 @@ Invariants:
 
 **Skip when Phase 0b recorded `HAS_VERSION_BUMP=false`** — no version-bump commit on any branch.
 
-Otherwise, only once ALL category branches build{VERIFY_SCOPE_SUFFIX}: set `FIRST_CATEGORY` to the first slug in order that has a branch, compute the aggregate SemVer `{LEVEL}` across every category branch's commits (`breaking:`/`BREAKING CHANGE` → major, any `feat:` → minor, else patch), and on `{BRANCH_PREFIX}/{FIRST_CATEGORY}` bump per the **{VERSION_BUMP_SECTION}** section of this command, committed as `chore: bump version to {NEW_VERSION}` and pushed. If `HAS_CHANGELOG`, the same commit adds an entry to `CHANGELOG_TARGET` in the project's established format.
+Otherwise, only once ALL category branches build{VERIFY_SCOPE_SUFFIX}: set `FIRST_CATEGORY` to the first slug in order that has a branch, compute the aggregate SemVer `{LEVEL}` across every category branch's commits (a `!` after the type/scope, e.g. `feat!:`, or a `BREAKING CHANGE:` footer → major, any `feat:` → minor, else patch), and on `{BRANCH_PREFIX}/{FIRST_CATEGORY}` bump per the **{VERSION_BUMP_SECTION}** section of this command, committed as `chore: bump version to {NEW_VERSION}` and pushed. If `HAS_CHANGELOG`, the same commit adds an entry to `CHANGELOG_TARGET` in the project's established format.
 
 ### 5c: Create PRs
 
