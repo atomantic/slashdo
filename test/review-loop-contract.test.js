@@ -1037,4 +1037,27 @@ describe('shared review-flag parse partial (#311)', () => {
     assert.match(raw('pr.md'), /and `\{REVIEW_MODELS\}` \(the saved per-agent default models/);
     assert.doesNotMatch(raw('release.md'), /copilot iteration cap/);
   });
+
+  it('review.md and rpr.md also include lib/review-flags.md instead of restating the grammar (#332)', () => {
+    for (const name of ['review.md', 'rpr.md']) {
+      const body = raw(name);
+      assert.match(body, /!`cat ~\/\.claude\/lib\/review-flags\.md`/, `${name} must include the shared partial`);
+      assert.doesNotMatch(body, /Accepted values per slot/, `${name} must not carry its own copy of the --review-with grammar`);
+      assert.doesNotMatch(body, /Accepted slugs: `codex`, `agy`/, `${name} must not carry a hand-copied slug list`);
+    }
+    // review.md's other own flags (parsed outside the shared partial) must survive the swap.
+    const reviewBody = raw('review.md');
+    assert.match(reviewBody, /--strict`\*\* \(alias: \*\*`--nuclear/);
+    assert.match(reviewBody, /--draft`\*\* \(PR mode only\)/);
+    assert.match(reviewBody, /--apply` \/ `--no-apply`\*\*/);
+    // rpr's own consequences of the grammar (never in the shared partial) must survive the swap.
+    const rprBody = raw('rpr.md');
+    assert.match(rprBody, /@<login>` entries are accepted by the parser but never requested/);
+    assert.match(rprBody, /forwarded as `\{MAX_ITERATIONS\}`/);
+    assert.match(rprBody, /rpr does not support `--review-iterations`/);
+  });
+
+  it('review.md forwards {REVIEW_MODELS} to the multi-reviewer wrapper (#332)', () => {
+    assert.match(raw('review.md'), /`\{REVIEW_MODELS\}` — the saved per-agent default models/);
+  });
 });
