@@ -113,6 +113,36 @@ This is why commit subjects matter (below): a vague subject becomes a vague rele
 - CI runs the full test suite, a `shellcheck` pass on `install.sh`/`uninstall.sh`, and validates every command's frontmatter across Node 18/20/22 — make sure it's green before requesting review.
 - No AI-attribution footers or co-author trailers in commits or PR descriptions, regardless of what tooling you used to help write the change.
 
+## Embedding command prompts (integrator API)
+
+Hosts that want to embed slashdo's commands without going through one of the five bundled environments can use the same dependency-free renderer as the skill installer:
+
+```js
+const { buildPromptBundle, parseFrontmatter } = require('slash-do/src/transformer');
+const { body } = parseFrontmatter(commandMarkdown);
+const bundle = buildPromptBundle(body, sourceLibDirectory, {
+  teams: false,
+  skipIncludes: [], // library filenames intentionally supplied or excluded by the host
+  defer: true,
+});
+```
+
+Write `bundle.body` beside a `lib/` directory containing `bundle.files` (an object
+keyed by bare library filenames). References in the body use `lib/name.md`;
+references between supporting files use `./name.md`. Give the agent access to
+that directory. Use `defer: false` when file tools are unavailable: the returned
+body includes dependencies once and `files` is empty. Conditions are resolved
+before dependencies; missing required files fail with a named error. For legacy
+recipe consumers that intentionally include only explicit `!cat`/`!read` content,
+set `followReferences: false` to avoid traversing see-also citations. Eager mode
+also preserves bare backticked library names as citations rather than includes.
+
+In command or library source, put `!read lib/name.md` on its own line immediately
+after the phase or condition requiring it. The renderer emits a required read
+at that step, including for native Claude/OpenCode commands. Keep `!`-backticked
+`cat ~/.claude/lib/name.md` includes for content needed immediately. Deferred
+skills bundle citations instead of appending their transitive contents.
+
 ## License
 
 By contributing, you agree your contribution is licensed under the project's [MIT License](./LICENSE).
