@@ -70,7 +70,10 @@ A prompt-driven reviewer gets `$LOCAL_PROMPT`, never slashdo's `/do:review` skil
 
 The invocations run **non-interactively** through each CLI's documented unattended profile. The flags select the narrowest supported permissions and never grant blanket approval, write access, or bypass controls; where a CLI requires a non-interactive approval setting, combine it with the enforced restrictions below.
 
-Compute the shared inputs once, before invoking any local agent, and run the block verbatim without narrating it:
+The shared local-CLI runner owns the timeout wrapper, the Step 1 snapshot, the Step 2 launch and wait, and the Step 3 verify-and-restore. Read it now and run its timeout wrapper block:
+!read lib/local-cli-runner.md
+
+Then, in the same shell, compute the shared inputs once before invoking any local agent. Run the block verbatim without narrating it:
 
 ```bash
 REVIEW_TITLE=$(git log -1 --format=%s HEAD)
@@ -104,10 +107,6 @@ CODEX_APPLY_PROMPT="$REVIEW_TASK Edit only the reviewed source files to fix real
 [ -n "$REVIEW_EFFORT" ] && CODEX_APPLY_PROMPT="$CODEX_APPLY_PROMPT Target reasoning effort level: $REVIEW_EFFORT."
 
 # Arrays, never strings, expanded only as ${ARR[@]+"${ARR[@]}"} — see ~/.claude/lib/empty-array-expansion.md.
-TIMEOUT_CMD=()
-if command -v timeout >/dev/null 2>&1; then TIMEOUT_CMD=(timeout 1800)
-elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_CMD=(gtimeout 1800); fi
-
 MODEL_FLAG=()
 [ -n "$REVIEW_MODEL" ] && MODEL_FLAG=(--model "$REVIEW_MODEL")
 
@@ -124,7 +123,7 @@ if [ -n "$REVIEW_EFFORT" ]; then
 fi
 ```
 
-Then run the recipe's pre-flight block, if it has one, in the same shell. An empty `TIMEOUT_CMD` (stock macOS) is a supported configuration, never a reviewer failure.
+Then run the recipe's pre-flight block, if it has one, in the same shell.
 
 **Codex invocations** (after isolated-config verification):
 - Review-only: `codex ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"} --sandbox read-only review --base "$BASE_BRANCH" --title "$REVIEW_TITLE"`
@@ -162,178 +161,50 @@ Verify prompt size before invocation: Linux caps a single argv string at 128 KiB
 
 Initialize `ITERATION=0`, `STATUS=""`, `REVIEW_DIAGNOSTIC=""`, `REVIEW_REMEDY=""`, and `REPORT_LOG_FILE=""`, plus `MAX_ITERATIONS` / `MAX_EXPLICIT` from Pre-flight step 7 (`MAX_ITERATIONS=3`, `MAX_EXPLICIT=false` when the caller passed nothing). When `MAX_ITERATIONS=0` (unlimited), the effective ceiling is the 10-iteration safety guardrail.
 
+Every pass ends in the shared fix tail, which holds the apply rules and steps 4–6 (verify, push, re-loop) plus the report closing. Read it now:
+!read lib/review-fix-tail.md
+
 1. **Capture baseline**: `LOOP_START_SHA=$(git rev-parse HEAD)`
 
-   **When `REVIEWER_APPLIES=false`, also snapshot the pre-review tree** — defense in depth after enforced isolation, never a substitute for it. Preserve staged, unstaged and untracked content, including pre-existing dirty files, plus git metadata:
-   ```bash
-   HEAD_BASELINE="$LOOP_START_SHA"
-   INDEX_TREE=$(git write-tree)                              # caller's staged state
-   DIFF_BASELINE=$(git diff HEAD | git hash-object --stdin)  # catches edits to ALREADY-dirty tracked files
-   SNAPSHOT=$(git stash create)                              # dirty tracked worktree ('' when clean)
-   UNTRACKED_TAR="$(mktemp -t review-untracked.XXXXXX.tar)"
-   git ls-files --others --exclude-standard -z | tar --null -T - -cf "$UNTRACKED_TAR" 2>/dev/null
-   # --stdin-paths so filenames never pass through a shell.
-   UNTRACKED_BASELINE=$({ git ls-files --others --exclude-standard | sort
-                          git ls-files --others --exclude-standard | sort | git hash-object --stdin-paths
-                        } | git hash-object --stdin)
-   # A planted hook or core.hooksPath/fsmonitor/pager/alias in .git/config runs on the next git command.
-   GIT_COMMON="$(git rev-parse --git-common-dir)"
-   GIT_META_BAK="$(mktemp -d -t review-gitmeta.XXXXXX)"
-   cp "$GIT_COMMON/config" "$GIT_META_BAK/config"
-   { tar -cf "$GIT_META_BAK/hooks.tar" -C "$GIT_COMMON" hooks 2>/dev/null; } || : > "$GIT_META_BAK/hooks.tar"
-   git_meta_hash() {
-     { cat "$GIT_COMMON/config"
-       # Symlinked hooks execute too: hash the link target path, not its content.
-       find "$GIT_COMMON/hooks" \( -type f -o -type l \) 2>/dev/null | sort | while IFS= read -r f; do printf '%s\n' "$f"; readlink "$f" 2>/dev/null || cat "$f"; done
-     } | git hash-object --stdin
-   }
-   GIT_META_BASELINE=$(git_meta_hash)
-   ```
-   A bare `git status --porcelain` count is **not** sufficient: editing an already-dirty file leaves its ` M` line unchanged, and editing or deleting a pre-existing untracked file leaves its `??` line unchanged; the diff hash and the untracked hash catch those cases.
+   **When `REVIEWER_APPLIES=false`, also take the runner's Snapshot** (all five artifacts). This is defense in depth on top of enforced isolation, never a replacement for it. Skip it when `REVIEWER_APPLIES=true`, where writes are the expected outcome.
 
-   Skip this block when `REVIEWER_APPLIES=true` — writes are the expected outcome there.
+2. **Invoke the chosen reviewer**, capturing its output to a log so context stays clean. If the recipe replaces this Bash launch (claude under Claude Code), follow the recipe and go to Step 3. Run any recipe pre-launch step first (claude: stdin preparation), and stop this pass if it set `STATUS=no-verdict`.
 
-2. **Invoke the chosen reviewer** (capture output to a log so context stays clean). If the recipe replaces this Bash launch (claude under Claude Code), follow it and go to Step 3. Run any recipe pre-launch step first (claude: stdin preparation) and stop this pass if it set `STATUS=no-verdict`.
+   Launch with the runner's **Launch and wait**, with `RUN_TAG="local-review-${REVIEW_AGENT}"`. Set `PROMPT_ON_STDIN="$LOCAL_PROMPT"` for `cmd` (its recipe), and `PROMPT_ON_STDIN=""` for every other reviewer.
 
-   **Run the invocation in the BACKGROUND, not as a blocking foreground Bash call.** A real multi-file review routinely runs longer than ten minutes, and **the host CLI's Bash tool caps a single foreground command at ~10 minutes** (Claude Code's Bash `timeout` maxes out at 600000 ms). A foreground call is killed at that mark *by the host* before the reviewer prints its findings. Launch the reviewer detached and poll its log instead:
+   - After capturing `EXIT_CODE`, run any recipe post-launch cleanup (claude: its stdin file). Then run any recipe exit classifier (opencode: provider admission; cursor: workspace trust) **before** the generic branch below.
+   - If `EXIT_CODE != 0`, no recipe classifier claimed it, and the CLI produced no commits, set `STATUS=cli-error`. Print the last 80 lines of **`$ERR_FILE`** (fall back to `$LOG_FILE` if it is empty), surface both paths, and exit the loop. A timed-out run (the runner's `124` or gave-up case) is `cli-error` with the log paths, never `clean`.
 
-   - **Claude Code / hosts with a backgroundable Bash tool**: run the command below in the host's background mode (Claude Code: `run_in_background: true` on the Bash tool call). Capture it exactly as shown — the trailing `; echo $? > "$DONE_FILE"` records the real exit code for the wait loop:
+3. **Detect changes and apply fixes** (the logic depends on `{REVIEWER_APPLIES}`):
 
-     ```bash
-     LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
-     ERR_FILE="${LOG_FILE}.err"
-     DONE_FILE="${LOG_FILE}.exit"
-     # cmd reads the prompt on stdin: the pipe goes in FRONT of the timed line (cmd recipe).
-     if [ "$REVIEW_AGENT" = cmd ]; then
-       printf '%s' "$LOCAL_PROMPT" | ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"; echo $? > "$DONE_FILE"
-     else
-       ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"; echo $? > "$DONE_FILE"
-     fi
-     ```
-
-     **Keep stderr OUT of `$LOG_FILE` (`2> "$ERR_FILE"`, never `2>&1`).** Step 3 validates `$LOG_FILE` as a *strict* verdict document, and every CLI writes non-verdict chatter to stderr — banners, auth notices, progress, a `timeout` kill message — so a merged stream would turn a clean review into a parse failure that blocks the merge.
-
-     Then wait with **bounded blocking-chunk foreground calls** — do NOT end your turn and wait to be notified. Repeat this call (each blocks ~9 minutes, under the host cap) until `$DONE_FILE` exists, then read `EXIT_CODE=$(cat "$DONE_FILE")`:
-
-     ```bash
-     for i in $(seq 1 55); do [ -f "$DONE_FILE" ] && break; sleep 10; done; [ -f "$DONE_FILE" ] && cat "$DONE_FILE" || echo "STILL_RUNNING"
-     ```
-
-     On `STILL_RUNNING`, immediately issue the same call again (tail `$LOG_FILE` between chunks only if you need a progress signal) until `$DONE_FILE` appears; the run is bounded by `TIMEOUT_CMD` or the CLI's own timeout.
-
-     **NEVER end your turn while a reviewer is in flight.** "The host will re-notify me when the background task exits" holds only for a top-level interactive session. Inside a **subagent** (a `/do:next --swarm` worker, a CoS/background agent, anything spawned via an Agent/Task tool), ending the turn *terminates the run* and the findings are lost. The blocking-chunk loop is correct in both contexts, so use it unconditionally.
-
-   - **Hosts with no background Bash mechanism**: use the foreground call below with the host tool's timeout at its maximum; a review cut at that maximum is reported as `cli-error` (timed out), never silently truncated to zero findings:
-
-     ```bash
-     LOG_FILE="$(mktemp -t local-review-${REVIEW_AGENT}.XXXXXX.log)"
-     ERR_FILE="${LOG_FILE}.err"
-     if [ "$REVIEW_AGENT" = cmd ]; then   # same stdin rule as the background form above
-       printf '%s' "$LOCAL_PROMPT" | ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"
-     else
-       ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"
-     fi
-     EXIT_CODE=$?
-     ```
-
-   - After capturing `EXIT_CODE`, run any recipe post-launch cleanup (claude: its stdin file), then any recipe exit classifier (opencode: provider admission; cursor: workspace trust) **before** the generic branch below.
-   - If `EXIT_CODE != 0`, no recipe classifier claimed it, and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of **`$ERR_FILE`** (fall back to `$LOG_FILE` if it is empty), surface both paths, and exit the loop. A `124` exit (from `timeout`/`gtimeout`) or an empty log after the poll loop gave up means the review ran past 30 minutes — report `cli-error` with the log paths, never `clean`.
-
-3. **Detect changes and apply fixes** (logic depends on `{REVIEWER_APPLIES}`):
-
-   First, snapshot the post-CLI git state. These values drive every `REVIEWER_APPLIES=true` decision. In `REVIEWER_APPLIES=false` they should be zero but are **not** the enforcement — the five-artifact check below is:
+   First, snapshot the post-CLI git state. These values drive every `REVIEWER_APPLIES=true` decision. With `REVIEWER_APPLIES=false` they should be zero, but they are **not** the enforcement; the runner's five-artifact check is:
    ```bash
    NEW_COMMITS=$(git rev-list "$LOOP_START_SHA..HEAD" --count)
    UNCOMMITTED=$(git status --porcelain | wc -l)
    ```
 
    **When `REVIEWER_APPLIES=false` (default — orchestrator applies)**:
-   - **Enforce the read-only contract before reading the findings.** Recompute all five step-1 artifacts and compare; a mismatch is an isolation failure, not permission to continue:
-     ```bash
-     git rev-parse HEAD                              # vs $HEAD_BASELINE
-     git write-tree                                  # vs $INDEX_TREE
-     git diff HEAD | git hash-object --stdin         # vs $DIFF_BASELINE
-     { git ls-files --others --exclude-standard | sort
-       git ls-files --others --exclude-standard | sort | git hash-object --stdin-paths
-     } | git hash-object --stdin                     # vs $UNTRACKED_BASELINE
-     git_meta_hash                                   # vs $GIT_META_BASELINE (.git/config + hooks)
-     ```
-     **Compare the git-metadata hash first and, on a mismatch, restore it before running any other git command** — a planted hook or `core.pager`/`core.fsmonitor` setting would otherwise fire inside the very `git read-tree`/`git restore` that is supposed to undo it. **Re-derive and check both paths before the `rm`** — step 3 is a separate shell on most hosts, so an unbound `GIT_COMMON` turns the restore into `rm -rf /hooks`:
-
-     ```bash
-     GIT_COMMON="${GIT_COMMON:-$(git rev-parse --git-common-dir)}"
-     if [ -z "$GIT_COMMON" ] || [ -z "$GIT_META_BAK" ] || [ ! -d "$GIT_META_BAK" ]; then
-       echo "cannot restore git metadata: snapshot paths unavailable" >&2
-       exit 1   # STATUS=cli-error — never continue on a tree you failed to restore
-     fi
-     cp "$GIT_META_BAK/config" "$GIT_COMMON/config"
-     rm -rf "$GIT_COMMON/hooks"
-     [ -s "$GIT_META_BAK/hooks.tar" ] && tar -xf "$GIT_META_BAK/hooks.tar" -C "$GIT_COMMON"
-     ```
-
-     **If any differ**, the reviewer applied instead of reporting. Restore the caller's entire pre-review state wholesale from the step-1 artifacts — do NOT surgically enumerate what it touched (per-path choreography produces destructive edge cases):
-     1. **HEAD** — if it moved: `git reset --soft "$HEAD_BASELINE"` (never `--mixed`, which wipes the caller's staged state; never `--hard`, which destroys uncommitted work swept into the reviewer's commit).
-     2. **Index** — `git read-tree "$INDEX_TREE"`.
-     3. **Tracked worktree** — `git restore --source="${SNAPSHOT:-$HEAD_BASELINE}" --worktree -- .`.
-     4. **Untracked** — delete every currently-untracked path not listed in `$UNTRACKED_TAR` (files the reviewer created), then `tar -xf "$UNTRACKED_TAR"` (files it edited or deleted).
-
-     Re-run the five comparisons; if the tree is not back at baseline, **stop the loop** with `STATUS=cli-error` and a loud warning naming the log — never continue reviewing on top of a tree you failed to restore.
-
-     Then print `{REVIEW_AGENT} modified the working tree during a review-only pass — reverted; findings kept` and **continue with the findings**: a reviewer's product is its findings list, which stays useful even if it also (wrongly) tried to apply them, and the orchestrator re-derives every fix in this session regardless. Gitignored files stay outside this guarantee (hashing `node_modules/` is unbounded).
+   - **Enforce the read-only contract before reading the findings.** Run the runner's **Verify and restore**. A mismatch is an isolation failure, not permission to continue. If the restore failed, **stop the loop** with `STATUS=cli-error` and a loud warning naming the log. If it succeeded, print `{REVIEW_AGENT} modified the working tree during a review-only pass — reverted; findings kept` and **continue with the findings**. A reviewer's product is its findings list, which stays useful even if the reviewer also (wrongly) tried to apply them, and the orchestrator re-derives every fix in this session regardless.
    - Apply any recipe Step-3 rule now (opencode: a flagged provider-admission denial returns `no-verdict` here; cursor: a flagged workspace-trust refusal returns `skipped`).
    - Read `$LOG_FILE` and extract the findings. **For a prompt-driven reviewer, parse a verdict before considering the findings:** after stripping blank lines, the result must be either exactly `NO FINDINGS`, or only one or more complete `FINDING <N>:` blocks. Every block must contain non-empty `file`, numeric `line`, `severity` (`CRITICAL`, `IMPROVEMENT`, or `NIT`), `description`, and `fix` fields. Treat a missing, malformed, or contradictory result (for example, a prose response, an incomplete block, or both `NO FINDINGS` and a finding) as `STATUS=no-verdict`, print the log path, and exit the loop. **Never infer a clean result from prose or an empty log.**
 
-     `no-verdict` is **inconclusive, not a hard error** — the reviewer ran and the tree is fine; it either didn't answer in the contract's format or was denied provider admission. It must not be `cli-error`: a hard error fires the wrapper's short-circuit (skipping every remaining reviewer over one chatty CLI), and `~opt` promises to excuse `no-verdict` from the merge gate while never excusing a hard error. A required reviewer's `no-verdict` still blocks the merge as inconclusive; an `~opt` one doesn't.
+     `no-verdict` is **inconclusive, not a hard error**. The reviewer ran and the tree is fine; it either didn't answer in the contract's format or was denied provider admission. It must not be `cli-error`: a hard error fires the wrapper's short-circuit, skipping every remaining reviewer over one chatty CLI, and `~opt` promises to excuse `no-verdict` from the merge gate while never excusing a hard error. A required reviewer's `no-verdict` still blocks the merge as inconclusive; an `~opt` one doesn't.
    - For a prompt-driven reviewer, set `STATUS=clean` only for the exact `NO FINDINGS` sentinel; otherwise hand the validated finding blocks to the orchestrator.
    - For `codex`, retain its native severity-tagged output handling: a native clean verdict (`NO FINDINGS` or `no issues`) is `STATUS=clean`; otherwise hand its actionable findings to the orchestrator. This Codex-specific fallback must not be used for prompt-driven reviewers.
-   - Otherwise, the orchestrator applies each fix in this session:
-     - For each finding, read the cited file at the cited line and apply the fix, using the `fix:` field as a starting point; if it is wrong or imprecise, your judgment overrides — this is *your* commit, not the CLI's.
-     - After each cohesive set of fixes, run `{BUILD_CMD}` (skip when empty) and `{TEST_CMD}`. If either fails, fix forward; if the failure stems from a bad finding, drop that finding and continue.
-     - Commit each fix (or coherent group) as `address review (<agent>): <summary>` where `<agent>` is `$REVIEW_AGENT` — for `cmd`, its `cmd:<first token>` label, never the raw slug or invocation. No co-author or "Generated with" lines.
-   - After the apply pass, **recompute** the change counts — the orchestrator's commits since `$LOOP_START_SHA` are what step 4 verifies and step 5 pushes; the pre-apply values would falsely report `clean` and leave them unverified and unpushed:
-     ```bash
-     NEW_COMMITS=$(git rev-list "$LOOP_START_SHA..HEAD" --count)
-     UNCOMMITTED=$(git status --porcelain | wc -l)
-     ```
-   - If recomputed `UNCOMMITTED > 0`, print the uncommitted diff, stage the explicitly listed files, and commit them as `address review ($REVIEW_AGENT): orchestrator-applied — remaining changes`; then recompute both `NEW_COMMITS` and `UNCOMMITTED`. This must happen before the zero-commit check, or a dirty tree could exit `clean` without verification or a push.
-   - If recomputed `NEW_COMMITS == 0` **and** `UNCOMMITTED == 0` (every finding was rejected and the tree is clean), set `STATUS=clean` and exit.
+   - Otherwise, apply the findings per the shared tail's **Apply** section, with `{FIX_LABEL}` set to `$REVIEW_AGENT`. For `cmd`, use its `cmd:<first token>` label, never the raw slug or invocation.
 
    **When `REVIEWER_APPLIES=true` (reviewer applies)**:
    - The reviewer is expected to edit the working tree but leave its changes uncommitted; the prompt above forbids it from committing or pushing. The orchestrator owns the commit.
    - If `NEW_COMMITS > 0`, the reviewer committed despite that contract. This is an anomaly: run `git reset --soft "$LOOP_START_SHA"` so the changes remain available without the reviewer's commit, then recompute both counts.
    - If `UNCOMMITTED > 0`, print the diff, stage the explicitly listed files (not `git add -A`), and commit them as `address review ($REVIEW_AGENT): <summary>`. Then recompute both counts and continue to verification. This is the normal reviewer-applies path; do not ask the user to approve the expected commit.
    - If `NEW_COMMITS == 0` and `UNCOMMITTED == 0`, the reviewer found nothing to fix. Set `STATUS=clean` and exit the loop.
-   - After the orchestrator commit, continue to verification; a reviewer-created commit has been replaced by the orchestrator's attributed commit.
+   - After the orchestrator commit, continue to verification; the orchestrator's attributed commit has replaced any reviewer-created commit.
 
-4. **Verify in the main thread** (never delegate this step to a sub-agent):
-   - Read `git diff "$LOOP_START_SHA..HEAD"` and inspect each new commit's message + changes for: changes beyond the stated review scope (out-of-bounds refactors, unrelated files); commits that revert legitimate behavior to make a flaky test pass; disabled tests, skipped assertions, or `// TODO` placeholders; secrets, hardcoded credentials, or other content that must not land.
-   - **Run the fix regression guard** on the same `$LOOP_START_SHA..HEAD` diff before building: scan for unscoped state-clearing/restoring writes (a "restore"/"reset" keyed to a whole collection instead of the one record the finding named) and for side effects folded onto a hot path (an `updatedAt`/event/cache write on every tick), and add a focused regression test when the fix touches scoping or timestamp/side-effect logic. See `~/.claude/lib/fix-regression-guard.md`. A fix that fails the guard is itself a finding — re-scope it now, not next round.
-   - Run `{BUILD_CMD}` (skip when empty). On failure — **default mode**: revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=broken-build`, exit the loop, and report; **interactive mode**: ask whether to retry (re-invoke CLI), revert, or accept-and-fix-manually.
-   - Run `{TEST_CMD}` (skip when empty). Same handling on failure (`STATUS=test-failed`).
-   - If any inspection red flag triggered: revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=rejected`, and exit the loop.
+4. **Verify in the main thread**: the shared tail's step 4.
 
-5. **Push verified changes**:
-    ```bash
-    BR="$(git branch --show-current)"
-    PUSH_REMOTE="$(git config --get "branch.$BR.remote")"
-    PUSH_BRANCH="$(git config --get "branch.$BR.merge")"
-    if [ -z "$PUSH_REMOTE" ] || [ "$PUSH_REMOTE" = "." ] || [ -z "$PUSH_BRANCH" ]; then
-      echo "No remote upstream is configured; leaving this review pass local." >&2
-    else
-      git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"
-    fi
-    ```
-    If a remote upstream is configured and the push fails (e.g. non-fast-forward), run `git pull --rebase --autostash` and retry the same `git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"` once in the same shell. If the pull stops on conflicts, do not abort or report failure merely because the conflict exists: read and follow [rebase-conflict-resolution.md](./rebase-conflict-resolution.md), resolve and continue the rebase, rerun the build/tests affected by the resolution, then retry the same upstream-derived push. Report failure only after the completed resolution and retry still cannot publish the branch. Never guess `origin` or the local branch name when no upstream is configured.
+5. **Push verified changes**: the shared tail's step 5.
 
-6. **Re-loop or stop**:
-   - `ITERATION=$((ITERATION + 1))`
-   - **Apply the convergence gate** (`~/.claude/lib/review-convergence-gate.md`): if the round just completed made zero commits, or landed only *marginal* findings (edge-case guards, refinements of already-correct behavior, hypotheticals with no concrete wrong outcome), **converge — set `STATUS=clean` and exit**, noting the diminishing-returns convergence in the report. Only a round with at least one *substantive* finding earns another pass.
-   - Let `CEILING` be `MAX_ITERATIONS` when it is ≥ 1, or `10` when `MAX_ITERATIONS=0` (unlimited mode's safety guardrail).
-   - If the gate says continue AND `ITERATION < CEILING`: go back to step 1 to re-review the latest commits (catches recursive findings introduced by a fix).
-   - Otherwise exit the loop, with the status determined by *what stopped it*:
-     - **Gate converged**: `STATUS=clean`. This is the normal exit.
-     - **Ceiling stopped a still-productive loop** and the cap was **user-configured** (`MAX_EXPLICIT=true`, a `~max=<n>` with n ≥ 1): `STATUS=capped` — clean-equivalent for the caller's merge gate, not a failure.
-     - **Ceiling stopped a still-productive loop** and the cap was **built-in** (`MAX_EXPLICIT=false` — the default `3` — or the 10-iteration guardrail in unlimited mode): `STATUS=guardrail` — inconclusive.
+6. **Re-loop or stop**: the shared tail's step 6. A re-loop returns to step 1 above.
 
 ### Final report
 
@@ -353,4 +224,4 @@ Remedy: {REVIEW_REMEDY or none}
 Log: {REPORT_LOG_FILE or LOG_FILE path; suppress the raw provider path when the admission branch set REPORT_LOG_FILE}
 ```
 
-If `STATUS=clean` after the first iteration, the PR is ready for the merge gate (release flow) or hand-off back to the user (PR flow). `capped` is likewise merge-eligible. For any other status (including `guardrail` and `skipped`), the calling command decides whether to proceed, re-run, or stop — never auto-merge on a non-clean local-agent status, and never silently substitute `copilot` for a reviewer the user requested.
+Then follow the shared tail's **After the final report**.

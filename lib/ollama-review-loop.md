@@ -22,13 +22,12 @@ When to use this:
 3. **Resolve `{OLLAMA_MODEL}`** (see "Model resolution" below). If resolution yields no usable model, set `STATUS=skipped` and return.
 4. Force review-only: set `REVIEWER_APPLIES=false` regardless of what the caller passed. If the caller passed `--reviewer-applies`, print: `--reviewer-applies has no effect on the ollama pass; Ollama is non-agentic, so the orchestrator always applies the fixes.`
 5. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`. Also record `{MAX_ITERATIONS}` — how many review → fix → re-review cycles this reviewer may run, resolved by the caller (multi-reviewer loop: per-entry `~max=<n>` suffix on the `--review-with` token → this loop's built-in default of `3`). `0` means **unlimited**, bounded by the 10-iteration safety guardrail in the Loop's step 6. Local models are the most common reason to want a small cap — `ollama~max=1` buys one review-and-fix pass without re-review rounds on slow hardware. Record `{MAX_EXPLICIT}` alongside it — `true` only when the cap came from a `~max=<n>` the user typed or saved — which step 6 uses to distinguish `capped` (a user-chosen budget, clean-equivalent for the merge gate) from `guardrail` (a built-in ceiling, inconclusive). The `--review-iterations` flag never reaches this loop; `~max` is the only way to move this cap. Also record `{OLLAMA_EFFORT}` — optional reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`), resolved by the caller (multi-reviewer loop: explicit `~effort=<level>` suffix → empty). Defaults to empty.
-6. **Resolve the timeout wrapper.** Stock macOS ships neither `timeout(1)` nor `gtimeout`, so an empty `TIMEOUT_CMD` is the common case on a Mac and a **supported configuration**: no wrapper, the review runs unbounded, and it must never be recorded as a reviewer failure. It is an ARRAY, not a string, for the same zsh reason as `OLLAMA_FLAGS` below. Settled logic — run it verbatim, do not narrate the probe or the fallback:
+6. **Resolve the per-file timeout wrapper.** Run it verbatim, without narrating the probe. Expand it, `OLLAMA_FLAGS`, and every other possibly-empty array only in the guarded form. An empty array (stock macOS) is a supported configuration, never a reviewer failure. See `~/.claude/lib/empty-array-expansion.md`:
    ```bash
    TIMEOUT_CMD=()
    if command -v timeout >/dev/null 2>&1; then TIMEOUT_CMD=(timeout 600)
    elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_CMD=(gtimeout 600); fi
    ```
-   **Always expand a possibly-empty array as `${ARR[@]+"${ARR[@]}"}`, never as a bare `"${ARR[@]}"`** — the bare form aborts under bash 3.2 + `set -u` before the command runs, which surfaces as a false `cli-error`. Applies to `TIMEOUT_CMD`, `OLLAMA_FLAGS`, and any other array that can legitimately be empty. See `~/.claude/lib/empty-array-expansion.md`.
 7. **Select the structured-output format.** The review asks the model for JSON so the orchestrator parses a data structure instead of scraping free text. Define the schema once and pick the strongest mode the installed Ollama supports — schema-constrained outputs require Ollama ≥ 0.5.0:
    ```bash
    FINDINGS_SCHEMA='{"type":"object","properties":{"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"line":{"type":"integer"},"severity":{"type":"string","enum":["CRITICAL","IMPROVEMENT","NIT"]},"description":{"type":"string"},"fix":{"type":"string"}},"required":["file","line","severity","description","fix"]}}},"required":["findings"]}'
@@ -40,17 +39,15 @@ When to use this:
    else
      OLLAMA_FORMAT="json"               # legacy: valid JSON only; field shape comes from the prompt, parse leniently
    fi
-   # Probe ALL optional flags from the help text and add only the supported ones — including
-   # `--format`. Passing a flag an older `ollama run` doesn't recognize makes it exit non-zero,
-   # which would error every per-file invocation and report cli-error, so detect support rather
-   # than assume it. `--format` itself is absent on very old clients (< ~0.1.17); when it's missing
-   # we drop it and rely on prompt-only JSON (the prompt already asks for a JSON object), parsing
-   # leniently. The version check above only chooses the `--format` VALUE (schema vs bare `json`);
-   # this probe decides whether the flag is passed at all. `--hidethinking` was added mid-0.x
-   # (absent on ~0.5–0.8); `--nowordwrap` is older.
-   # Use a shell ARRAY, not a string: zsh (a common host shell) does not word-split an unquoted
-   # `$OLLAMA_FLAGS`, so a multi-flag string would be passed as one bogus flag. An array expands to
-   # separate words in bash and zsh alike, and to zero words when empty (legacy ollama, no flags).
+   # Probe every optional flag from the help text and pass only the supported ones: a flag an
+   # older `ollama run` doesn't recognize makes every per-file call exit non-zero (cli-error).
+   #   --format        grammar-constrains the output to JSON (schema mode: field names + severity
+   #                   enum). Absent on very old clients (< ~0.1.17); then rely on prompt-only JSON
+   #                   and parse leniently. The version check above picks only its VALUE.
+   #   --hidethinking  suppresses a reasoning model's chain-of-thought, which can precede the JSON
+   #                   even under --format; a no-op on other models, absent on ~0.5–0.8.
+   #   --nowordwrap    stops hard-wrapping to terminal width, which injects newlines into a long `fix`.
+   # An ARRAY, not a string: zsh does not word-split an unquoted expansion.
    OLLAMA_FLAGS=()
    OLLAMA_RUN_HELP=$(ollama run --help 2>&1)
    printf '%s' "$OLLAMA_RUN_HELP" | grep -q -- '--format'       && OLLAMA_FLAGS+=(--format "$OLLAMA_FORMAT")
@@ -91,15 +88,14 @@ REVIEW_ERRORS=0   # files whose review invocation failed entirely (zero coverage
 PARSE_ERRORS=0    # model responses that were non-empty but not a valid findings object
 TRUNCATED=0       # files reviewed only partially (diff exceeded the per-file cap)
 SKIPPED_EMPTY=0   # files in TOTAL_FILES with no reviewable hunks (pure rename/mode) — never sent to the model
-REVIEWABLE=$((TOTAL_FILES - SKIPPED_EMPTY))   # recompute after the loop; this is the denominator for the verdict checks below
-# Any of REVIEW_ERRORS / PARSE_ERRORS / TRUNCATED > 0 is a coverage gap that blocks a `clean` verdict (see step 4).
 # A file is counted in at most ONE of REVIEW_ERRORS / PARSE_ERRORS — an invocation failure leaves nothing to parse.
+# All four counters feed "Parsing and coverage" below.
 PER_FILE_CAP=24000   # max chars of diff sent per file; larger diffs are truncated with a note
 ```
 
 For each file `F` in `$CHANGED`:
 1. Extract the file's diff: `FILE_DIFF=$(git diff "$BASE_BRANCH...HEAD" -- "$F")`. Skip files with an empty diff (pure renames/mode changes with no hunks), incrementing `SKIPPED_EMPTY` for each — they count in `TOTAL_FILES` but were never sent to the model, so they must not inflate the coverage denominator.
-2. If `${#FILE_DIFF}` exceeds `$PER_FILE_CAP`, truncate to the cap and append a line `[diff truncated — file exceeds per-file review budget]` so the model knows it saw a partial diff. Increment `TRUNCATED` and note the file in the final report. This is a coverage gap that blocks a `clean` verdict (step 4), but unlike an invocation error the file *was* partially reviewed, so it does not count toward the "every file errored" → `cli-error` check.
+2. If `${#FILE_DIFF}` exceeds `$PER_FILE_CAP`, truncate to the cap and append a line `[diff truncated — file exceeds per-file review budget]` so the model knows it saw a partial diff. Increment `TRUNCATED` and note the file in the final report. This is a coverage gap. Unlike an invocation error, though, the file *was* partially reviewed, so it does not count toward total failure.
 3. Build the prompt and run the model via **stdin** (never as a positional arg — embedded diffs can exceed `ARG_MAX`). Wrap each file's JSON response with a delimiter line so the orchestrator can attribute and parse each section independently (back-to-back JSON objects are not a single valid document):
    ```bash
    PROMPT="You are a senior code reviewer. A linter, type-checker, compiler, and test suite ALREADY run on this code separately — so syntax errors, lint violations, formatting, import order, unused vars, and build breakage are NOT your job and must NOT be reported. Review the unified diff for '$F' ONLY for logic issues a human finds by reasoning about behavior: correctness bugs, security / data-exposure holes, missing or wrong error handling, broken producer/consumer contracts, race conditions, and missing test coverage of real logic.
@@ -124,62 +120,33 @@ $FILE_DIFF"
    RC=$?
    printf '\n===== FILE: %s =====\n%s\n' "$F" "$RESP" >> "$LOG_FILE"
    ```
-   Three things keep the captured findings parseable:
-   - **`--format "$OLLAMA_FORMAT"` (probed into `$OLLAMA_FLAGS`).** When supported, grammar-constrains the output to JSON (and, in schema mode, to the exact field names and the `severity` enum). On a client too old for `--format` the flag is dropped (see the pre-flight probe) and the loop falls back to prompt-only JSON, parsed leniently. The delimiter lines (`===== FILE: <path> =====`) split `$LOG_FILE` into one JSON object per reviewed file — split on the regex `^===== FILE: (.+) =====$`, capturing the path.
-   - **`2>> "$ERR_FILE"` (not `2>&1`).** `ollama run` writes the model response to **stdout** and its progress spinner — braille frames (`⠙ ⠹ ⠼`) wrapped in ANSI cursor codes — to **stderr**. A separate stderr file leaves `$LOG_FILE` holding only model JSON, with no ANSI stripping needed.
-   - **`${OLLAMA_FLAGS[@]+"${OLLAMA_FLAGS[@]}"}` (`--format`, `--hidethinking`, `--nowordwrap`).** Probed in pre-flight and included only when supported — an unrecognized flag makes `ollama run` exit non-zero and error the whole pass. `--hidethinking` suppresses reasoning models' (e.g. `qwen3`, `deepseek-r1`) chain-of-thought, which can otherwise precede the constrained JSON even under `--format`; it is a no-op on non-thinking models but absent on older ollama versions (~0.5–0.8). `--nowordwrap` stops Ollama hard-wrapping long lines to the terminal width, which would inject newlines into a long `fix` string.
-4. Treat a file as a failed (zero-coverage) review when **either** `RC != 0` **or** `$RESP` is empty/whitespace-only (`[ -z "$(printf '%s' "$RESP" | tr -d '[:space:]')" ]`). The empty-but-exit-0 case is real: a reasoning model can spend its whole token budget on hidden thinking (`--hidethinking`) and emit no JSON while `ollama run` still exits 0 (observed with `qwen3.6:35b`); without this guard the empty section parses as "no findings" and the file is miscounted as cleanly reviewed. On either condition, append a `[ollama error reviewing $F — RC=$RC, empty=$([ -z "$(printf '%s' "$RESP" | tr -d '[:space:]')" ] && echo yes || echo no); see $ERR_FILE]` marker to the log, **increment `REVIEW_ERRORS`**, and continue to the next file. Coverage accounting after the loop — first recompute `REVIEWABLE=$((TOTAL_FILES - SKIPPED_EMPTY))` (the files actually sent to the model), then define a coverage gap as any reviewable file that errored or was truncated (`REVIEW_ERRORS + TRUNCATED > 0`):
-   - If *every reviewable* file errored (`REVIEWABLE > 0` and `REVIEW_ERRORS == REVIEWABLE`), set `STATUS=cli-error`, print the last 80 lines of `$ERR_FILE` (genuine ollama errors live there; in the exit-0 empty-response mode it may hold only spinner noise, so also surface the per-file `[ollama error reviewing …]` markers from `$LOG_FILE`), and exit — nothing was reviewed. **Before reporting it, rule out the shell-expansion false positive**: every file erroring with an empty response and nothing but `unbound variable` in `$ERR_FILE` is the bash-3.2 empty-array symptom (`~/.claude/lib/empty-array-expansion.md`), not a reviewer failure — print `ollama: no timeout/gtimeout on this machine — running unbounded` once and re-run the pass with the guarded expansion rather than recording `cli-error`. (Use `REVIEWABLE`, not `TOTAL_FILES`: an empty-diff skip would otherwise make the total-failure check unreachable and misclassify it as merely `incomplete`.)
-   - JSON parse errors are accounted for after the per-file invocations (see the defensive parsing rule below). Like invocation errors and truncation, they are coverage gaps: a non-empty response that cannot be parsed is not evidence that the file was clean.
-   - If there is any coverage gap but not a total failure (`REVIEW_ERRORS + PARSE_ERRORS + TRUNCATED > 0` and `REVIEW_ERRORS + PARSE_ERRORS < REVIEWABLE`), the diff was only **partially** reviewed. Still process the findings from the reviewed parts (step 3), but the pass **must not report `clean`** — where step 3 would set `STATUS=clean`, set `STATUS=incomplete` instead. `incomplete` is inconclusive for the multi-reviewer aggregate (not eligible to merge), because part of the change was never reviewed.
+4. Treat a file as a failed (zero-coverage) review when **either** `RC != 0` **or** `$RESP` is empty or whitespace-only (`[ -z "$(printf '%s' "$RESP" | tr -d '[:space:]')" ]`). The empty-but-exit-0 case really happens: a reasoning model can spend its whole token budget on hidden thinking (`--hidethinking`) and emit no JSON while `ollama run` still exits 0 (observed with `qwen3.6:35b`). Without this guard the empty section parses as "no findings" and the file is miscounted as cleanly reviewed. On either condition, append a `[ollama error reviewing $F — RC=$RC, empty=$([ -z "$(printf '%s' "$RESP" | tr -d '[:space:]')" ] && echo yes || echo no); see $ERR_FILE]` marker to the log, **increment `REVIEW_ERRORS`**, and continue to the next file.
 
-> `--format` makes the output grammar-constrained JSON, but still parse **defensively** — local models are weaker than agentic CLIs. Split `$LOG_FILE` on the delimiter regex `^===== FILE: (.+) =====$` (the captured group is the file path); for each section, JSON-parse the block and require `findings` to be an array. An empty array means the file is clean. A section that fails to parse, is not an object, or lacks an array `findings` value is a **parse error**, not a clean file: record the path in the report, increment `PARSE_ERRORS`, and do not invent findings from it. **Count each file at most once.** Step 3 writes a `===== FILE: … =====` section for every file *including* the ones whose invocation failed, so skip any section for a file already counted in `REVIEW_ERRORS` (it carries the `[ollama error reviewing …]` marker and has no response to parse); otherwise `REVIEW_ERRORS + PARSE_ERRORS` can exceed `REVIEWABLE` and neither the total-failure nor the partial branch matches. If there was at least one reviewable file and *every* reviewable section is an invocation or parse error (`REVIEWABLE > 0` and `REVIEW_ERRORS + PARSE_ERRORS >= REVIEWABLE`), set `STATUS=cli-error`; otherwise any parse error makes the pass `STATUS=incomplete`, never `clean`. Before acting on a finding, validate it carries the required fields and a `line` that exists in the file (drop hallucinated lines).
+### Parsing and coverage
+
+Run this once per pass, after the per-file loop. First recompute `REVIEWABLE=$((TOTAL_FILES - SKIPPED_EMPTY))`, the number of files actually sent to the model. Using `TOTAL_FILES` would let empty-diff skips inflate the denominator and make total failure unreachable.
+
+`--format` constrains the output to JSON, but still parse **defensively**, because local models are weaker than agentic CLIs. Split `$LOG_FILE` on the regex `^===== FILE: (.+) =====$`, where the captured group is the file path. JSON-parse each section and require `findings` to be an array. An empty array means the file is clean. A section that fails to parse, is not an object, or has no array `findings` value is a **parse error**, not a clean file: record the path in the report, increment `PARSE_ERRORS`, and do not invent findings from it. **Count each file at most once.** Skip the section of any file already counted in `REVIEW_ERRORS`, which carries the `[ollama error reviewing …]` marker and has no response to parse. Before acting on a finding, check that it has the required fields and that its `line` exists in the file. Drop findings with hallucinated lines.
+
+Then classify the pass:
+- **Total failure**: `REVIEWABLE > 0` and `REVIEW_ERRORS + PARSE_ERRORS >= REVIEWABLE`. No file yielded a usable verdict, so set `STATUS=cli-error` and exit. Print the last 80 lines of `$ERR_FILE`, and also the per-file `[ollama error reviewing …]` markers from `$LOG_FILE`, because in the exit-0 empty-response mode `$ERR_FILE` may hold only spinner noise. The check uses `>=`, not `==`, so it still fires if the counters overlap. The `REVIEWABLE > 0` guard keeps a rename-only diff, which has nothing to review, from reporting a hard error.
+- **Coverage gap**: otherwise, set `COVERAGE_GAP=true` when `REVIEW_ERRORS + PARSE_ERRORS + TRUNCATED > 0`, and `COVERAGE_GAP=false` when it is 0. A gap means the diff was only partially reviewed. Still process the findings from the parts that were reviewed.
+
+**Status override.** This is the loop's only coverage rule. Whenever this loop or the shared tail would set `STATUS=clean` or `STATUS=capped` while `COVERAGE_GAP=true`, set `STATUS=incomplete`, never `clean`. `incomplete` is inconclusive for the multi-reviewer aggregate and not eligible to merge, because part of the change was never reviewed. A `~max` budget never turns an unreviewed or unparseable diff into a merge-eligible pass.
 
 ### Loop
 
 Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` from Pre-flight step 5 (`MAX_ITERATIONS=3`, `MAX_EXPLICIT=false` when the caller passed nothing). When `MAX_ITERATIONS=0` (unlimited), the effective ceiling is the 10-iteration safety guardrail.
 
+Every pass ends in the shared fix tail, which holds the apply rules and steps 4–6 (verify, push, re-loop) plus the report closing. Read it now:
+!read lib/review-fix-tail.md
+
 1. **Capture baseline**: `LOOP_START_SHA=$(git rev-parse HEAD)`.
-2. **Run the per-file chunked review** (above), aggregating findings into `$LOG_FILE`. Re-run the Invocation block *in full* on every iteration — re-derive `CHANGED`/`TOTAL_FILES` for the current HEAD, re-initialize `REVIEW_ERRORS=0`, `PARSE_ERRORS=0`, `TRUNCATED=0`, `SKIPPED_EMPTY=0`, and truncate `$LOG_FILE`/`$ERR_FILE` (`$ERR_FILE` is append-written with `2>>`, so a stale tail would otherwise dominate the "last 80 lines" printed on a later `cli-error`) — so a coverage gap from an earlier iteration cannot pin `STATUS=incomplete` after a clean re-review of the new commits.
-3. **Parse findings and apply fixes** (orchestrator-applies — the local-agent loop's review-only flow):
-   - Split `$LOG_FILE` on the delimiter regex `^===== FILE: (.+) =====$` and JSON-parse each section, collecting every entry across valid `findings` arrays (see the defensive-parsing note above). For every malformed section increment `PARSE_ERRORS`; if `REVIEWABLE > 0` and `REVIEW_ERRORS + PARSE_ERRORS >= REVIEWABLE`, set `STATUS=cli-error` and exit because no file yielded a usable verdict (`>=`, not `==`, so the branch still fires if the two counters ever overlap). The `REVIEWABLE > 0` guard is required, as in step 4's total-failure check: a diff of nothing but pure renames/mode changes leaves `REVIEWABLE=0` with zero errors, and an unguarded `0 == 0` would report the hard-error `cli-error` on a diff that had nothing to review. If there are no findings, set `STATUS=clean` — **but if there was any coverage gap (`REVIEW_ERRORS + PARSE_ERRORS + TRUNCATED > 0`), set `STATUS=incomplete` instead** — and exit the loop.
-   - For each finding, read the cited `file` at the cited `line` and apply the fix. The model's `fix` field is a *starting point* — local models hallucinate more than cloud agents, so your judgment overrides: drop any finding that is wrong, out of scope, or references a line that doesn't exist.
-   - After each cohesive set of fixes, run `{BUILD_CMD}` (skip when empty) and `{TEST_CMD}`. If either fails, fix forward; if the failure stems from a bad finding, drop that finding.
-   - Commit each fix (or coherent group) as `address review (ollama): <summary>`. No co-author or "Generated with" lines.
-   - Recompute the change counts after applying:
-     ```bash
-     NEW_COMMITS=$(git rev-list "$LOOP_START_SHA..HEAD" --count)
-     UNCOMMITTED=$(git status --porcelain | wc -l)
-     ```
-   - **Commit leftover edits first.** If `UNCOMMITTED > 0`, stage the explicitly listed files and commit as `address review (ollama): orchestrator-applied — remaining changes`, then **recompute `NEW_COMMITS`**. This MUST run before the zero-commit check below, or a dirty tree (`NEW_COMMITS == 0` but `UNCOMMITTED > 0`) would exit `clean` without verification or push, leaking unverified edits.
-   - If `NEW_COMMITS == 0` **and** `UNCOMMITTED == 0` (every finding rejected, clean tree), set `STATUS=clean` (or `STATUS=incomplete` if there was any coverage gap, `REVIEW_ERRORS + PARSE_ERRORS + TRUNCATED > 0`) and exit.
-4. **Verify in the main thread** (mandatory — the only line of defense between the model's output and the remote branch):
-   - Read the diff `git diff "$LOOP_START_SHA..HEAD"` and inspect each new commit for out-of-scope refactors, reverted behavior to pass tests, disabled tests/assertions, `// TODO` placeholders, or secrets.
-   - **Run the fix regression guard** on the same `$LOOP_START_SHA..HEAD` fix diff: scan for unscoped state-clearing/restoring writes and for side effects added to a hot path, and add a focused regression test when the fix touches scoping or timestamp/side-effect logic — re-scope any failing fix in place before building. See `~/.claude/lib/fix-regression-guard.md`. (Local models over-broaden fixes more than cloud agents, so this guard matters most here.)
-   - Run `{BUILD_CMD}` (skip when empty). On failure: **default mode** revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=broken-build`, exit; **interactive mode** ask retry/revert/accept-and-fix.
-   - Run `{TEST_CMD}` (skip when empty). Same handling on failure (`STATUS=test-failed`).
-   - If any inspection red flag triggered: revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=rejected`, exit.
-5. **Push verified changes**:
-    ```bash
-    BR="$(git branch --show-current)"
-    PUSH_REMOTE="$(git config --get "branch.$BR.remote")"
-    PUSH_BRANCH="$(git config --get "branch.$BR.merge")"
-    if [ -z "$PUSH_REMOTE" ] || [ "$PUSH_REMOTE" = "." ] || [ -z "$PUSH_BRANCH" ]; then
-      echo "No remote upstream is configured; leaving this review pass local." >&2
-    else
-      git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"
-    fi
-    ```
-    If a remote upstream is configured and the push fails (non-fast-forward), run `git pull --rebase --autostash` and then retry the same `git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"` once in the same shell. If the pull stops on conflicts, do not abort or report failure merely because the conflict exists: read and follow [rebase-conflict-resolution.md](./rebase-conflict-resolution.md), resolve and continue the rebase, rerun the build/tests affected by the resolution, then retry the same upstream-derived push. Report failure only after the completed resolution and retry still cannot publish the branch. Never guess `origin` or the local branch name when no upstream is configured.
-6. **Re-loop or stop**:
-   - `ITERATION=$((ITERATION + 1))`
-   - **Apply the convergence gate** (`~/.claude/lib/review-convergence-gate.md`) before another round: if the round just completed made zero commits or landed only *marginal* findings (edge-case guards, hypotheticals with no concrete wrong outcome), **converge — set `STATUS=clean` (or `STATUS=incomplete` if the round had any coverage gap, `REVIEW_ERRORS + PARSE_ERRORS + TRUNCATED > 0`) and exit**, noting the diminishing-returns convergence in the report. A partially-reviewed diff is never `clean`, even when the gate converges. Only a round with at least one *substantive* finding earns another pass.
-   - Let `CEILING` be `MAX_ITERATIONS` when it is ≥ 1, or `10` when `MAX_ITERATIONS=0` (unlimited mode's safety guardrail).
-   - If the gate says continue AND `ITERATION < CEILING`: go back to step 1 to re-review the latest commits (catches recursive findings introduced by a fix).
-   - Otherwise exit the loop, with the status determined by *what stopped it*:
-     - **Gate converged**: `STATUS=clean` — or `STATUS=incomplete` when a coverage gap remains. This is the normal exit.
-     - **Ceiling stopped a still-productive loop** and the cap was **user-configured** (`MAX_EXPLICIT=true`, a `~max=<n>` with n ≥ 1): `STATUS=capped` — clean-equivalent for the caller's merge gate. The coverage-gap exception still overrides it: if `REVIEW_ERRORS + PARSE_ERRORS + TRUNCATED > 0`, set `STATUS=incomplete` instead — a `~max` budget never launders an unreviewed or unparseable diff into a merge-eligible pass.
-     - **Ceiling stopped a still-productive loop** and the cap was **built-in** (`MAX_EXPLICIT=false` — the default `3` — or the 10-iteration guardrail in unlimited mode): `STATUS=guardrail`.
+2. **Run the per-file chunked review** (above), collecting findings into `$LOG_FILE`. Re-run the Invocation block *in full* on every iteration. Re-derive `CHANGED`/`TOTAL_FILES` for the current HEAD, reset `REVIEW_ERRORS=0`, `PARSE_ERRORS=0`, `TRUNCATED=0`, and `SKIPPED_EMPTY=0`, and truncate `$LOG_FILE`/`$ERR_FILE`. `$ERR_FILE` is append-written with `2>>`, so a stale tail would otherwise dominate the "last 80 lines" printed on a later `cli-error`. The reset also stops a coverage gap from an earlier iteration from pinning `STATUS=incomplete` after a clean re-review of the new commits.
+3. **Parse, classify, and apply.** Run "Parsing and coverage" above; a total failure exits with `cli-error`. If there are no findings, set `STATUS=clean` (the status override applies) and exit the loop. Otherwise apply the findings per the shared tail's **Apply** section, with `{FIX_LABEL}` set to `ollama`. Local models hallucinate more than cloud agents, so be quick to drop a finding that is wrong, out of scope, or cites a line that doesn't exist.
+4. **Verify in the main thread**: the shared tail's step 4. Local models over-broaden fixes more than cloud agents, so its fix regression guard matters most here.
+5. **Push verified changes**: the shared tail's step 5.
+6. **Re-loop or stop**: the shared tail's step 6. The status override applies to every `clean` or `capped` exit, even when the convergence gate converges. A re-loop returns to step 1 above.
 
 ### Final report
 
@@ -199,4 +166,4 @@ Truncated files: {any files whose diff exceeded the per-file budget, or "none"}
 Log: {LOG_FILE path}    # findings (stdout); spinner/error output is in {ERR_FILE path}
 ```
 
-If `STATUS=clean` after the first iteration, the PR is ready for the merge gate (release flow) or hand-off back to the user (PR flow). `capped` is likewise merge-eligible — the reviewer spent the iteration budget the user set for it. For any other status (including `guardrail` and `skipped`), the calling command must decide whether to proceed, re-run, or stop — never auto-merge on a non-clean ollama status, and never silently substitute another reviewer for one the user requested.
+Then follow the shared tail's **After the final report**.
