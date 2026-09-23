@@ -1,6 +1,6 @@
 ## Copilot Reviewer Delta
 
-Use this only with `github-reviewer-loop.md`, which owns the sub-agent template,
+Use this only with `host-reviewer-loop.md` on GitHub, which owns the sub-agent template,
 request/wait/check/fix flow, and current-`headRefOid` review gate. This file is
 not a standalone loop.
 

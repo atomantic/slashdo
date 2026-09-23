@@ -312,7 +312,7 @@ candidate; set `OVERALL_STATUS=clean` for the post-merge verification path.
 
 Otherwise, hand off to the **multi-reviewer loop** with the inputs resolved in "Parse Arguments" (`{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`, `{REVIEW_MODELS}`) plus `{GH_HOST}` from "Detect Release Workflow" and the per-entry `{WAIT_SCHEDULE}` selected below. The GitHub-side loops use `{GH_HOST}` on every `gh api` call, and the wrapper dispatches each entry to the single-reviewer loop read below.
 
-For each GitHub-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
+For each host-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
 
 - `copilot` — use the previous Copilot review duration on this PR (default 60 seconds if none); max wait 3x that duration, minimum 90 seconds, maximum 5 minutes; poll every 5s, 5s, 10s, 10s, then 15s.
 - `@<login>` — expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s.
@@ -329,11 +329,11 @@ Read when `REVIEW_AGENTS` is non-empty:
 
 Read only the bodies for reviewer kinds present in the agent list.
 
-For every `copilot` or `@<login>` entry, read the shared GitHub-reviewer template:
+For every `copilot` or `@<login>` entry, read the shared host-reviewer template (its sub-agent runs the `{CODE_HOST}` verb file):
 
-!read lib/github-reviewer-loop.md
+!read lib/host-reviewer-loop.md
 
-Only for `copilot` entries, also read the Copilot delta:
+Only for `copilot` entries on GitHub, also read the Copilot delta:
 
 !read lib/copilot-review-loop.md
 

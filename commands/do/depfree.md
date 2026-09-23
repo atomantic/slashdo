@@ -668,7 +668,7 @@ Record `PR_NUMBER` and `PR_URL`.
 
 Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (series default — reviewers run one-at-a-time so each sees the prior's fixes; `parallel` collects reviews concurrently then applies the union once), `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot and `@<login>` passes only; local-agent and ollama passes use their own fixed iteration caps). Read the wrapper, then only the inner loop bodies it dispatches to for the reviewer kinds in `REVIEW_AGENTS`.
 
-For each GitHub-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
+For each host-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
 
 - `copilot` — use the previous Copilot review duration on this PR (default 60 seconds if none); max wait 3x that duration, minimum 90 seconds, maximum 5 minutes; poll every 5s, 5s, 10s, 10s, then 15s.
 - `@<login>` — expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s.
@@ -681,11 +681,11 @@ Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass bot
 
 Read only the bodies for reviewer kinds present in the agent list.
 
-For every `copilot` or `@<login>` entry, read the shared GitHub-reviewer template:
+For every `copilot` or `@<login>` entry, read the shared host-reviewer template (its sub-agent runs the `{CODE_HOST}` verb file):
 
-!read lib/github-reviewer-loop.md
+!read lib/host-reviewer-loop.md
 
-Only for `copilot` entries, also read the Copilot delta:
+Only for `copilot` entries on GitHub, also read the Copilot delta:
 
 !read lib/copilot-review-loop.md
 
