@@ -67,7 +67,7 @@ Scan entry points, exported APIs/CLI commands, config schemas, data models, and 
 Extract: list of capabilities, deployment model, key domain concepts. **In `--prd` mode**, also enumerate each discrete feature/command/endpoint with its observed inputs, outputs, and error-handling behavior — this seeds functional requirements directly.
 
 ### Agent 3: Evolution & Direction
-Scan recent git log, merged PR/MR history, open issues, `CHANGELOG.md`, `TODO`/`FIXME` comments, and feature branch names for trajectory signals.
+Scan recent git log, merged PR/MR history, open issues and PRs/MRs, `PLAN.md` incomplete items, `CHANGELOG.md`, `TODO`/`FIXME` comments, and feature branch names for trajectory signals.
 
 Sample history broadly rather than just the last few commits: aim for 30-100 merged PR/MR titles and read 8-15 full bodies spread across the range (GitHub: `gh pr list --state merged --limit 100` and `gh pr view`; GitLab: `glab mr list --state merged` and `glab mr view`). Do not filter by the repository owner — organization accounts usually do not author their repositories' pull/merge requests. If that history is unavailable or empty, fall back to the default branch's commit history, filtering by the relevant maintainer when that identity is known.
 
