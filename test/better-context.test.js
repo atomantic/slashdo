@@ -65,6 +65,26 @@ describe('better progressive context', () => {
     }
   });
 
+  it('loads the issue-mode spool/filer contract only once, gated on ISSUE_MODE', () => {
+    // Regression for #321: better-plan.md used to `!read` plan-issue-setup.md /
+    // plan-issue-filing.md unconditionally, so a default PLAN.md-mode run paid for
+    // ~20KB of tracker machinery it never used. The contract now lives in one
+    // partial that better.md reads once, gated, before Phase 1 touches it.
+    const entry = read('commands/do/better.md');
+    const gateLine = entry.split('\n').find((l) => l.includes('!read lib/better-issue-mode.md'));
+    assert.ok(gateLine, 'better.md must route to lib/better-issue-mode.md');
+    const lines = entry.split('\n');
+    const gateIndex = lines.indexOf(gateLine);
+    assert.match(lines.slice(0, gateIndex).reverse().find((l) => l.trim()), /ISSUE_MODE=true/);
+
+    for (const file of ['lib/better-audit.md', 'lib/better-plan.md']) {
+      assert.doesNotMatch(read(file), /^!read lib\/plan-issue-(?:setup|filing)\.md$/m, file);
+    }
+    const issueMode = read('lib/better-issue-mode.md');
+    assert.match(issueMode, /^!read lib\/plan-issue-setup\.md$/m);
+    assert.match(issueMode, /^!read lib\/plan-issue-filing\.md$/m);
+  });
+
   it('keeps the simplify alias pointed at the moved mode contract', () => {
     const alias = read('commands/do/simplify.md');
     assert.match(alias, /!read lib\/better-simplify\.md/);
@@ -73,9 +93,9 @@ describe('better progressive context', () => {
 
   it('preserves uncertainty and simplify-only behavior through phase boundaries', () => {
     assert.match(read('lib/better-audit.md'), /<SEVERITY-or-UNCERTAIN>/);
-    const plan = read('lib/better-plan.md');
-    assert.match(plan, /targeted validation of `UNCERTAIN` findings/);
-    assert.match(plan, /never auto-remediate them/);
+    const issueMode = read('lib/better-issue-mode.md');
+    assert.match(issueMode, /targeted validation of `UNCERTAIN` findings/);
+    assert.match(issueMode, /never auto-remediate them/);
     assert.match(read('lib/remediation-agent-template.md'), /Useful structural\n  refactors are intentionally behavior-preserving/);
     assert.match(read('lib/better-simplify.md'), /bug encountered incidentally is recorded as deferred/);
     assert.match(read('lib/better-pr-and-ci.md'), /`--no-merge`[\s\S]{0,160}Phase 7 safe finalization/);

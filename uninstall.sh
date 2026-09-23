@@ -107,7 +107,7 @@ OLD_LIBS=(
 # NOTE: keep in sync with install.sh LIBS — see comment there.
 LIBS=(
   better-audit
-  better-discovery better-options better-pipeline-inputs
+  better-discovery better-issue-mode better-options better-pipeline-inputs
   better-plan better-remediation better-simplify
   better-state better-test-enhancement
   better-cleanup better-pr-and-ci better-review-loop better-verification

@@ -25,6 +25,10 @@ Execute applicable steps in order. Reading this list does not request loading ev
 
 !read lib/better-discovery.md
 
+Only when `ISSUE_MODE=true` (resolved by `--issues` in step 0's options), read the shared spool/filer contract once, before any phase below touches it:
+
+!read lib/better-issue-mode.md
+
 1. Audit only applicable scopes. Workers read their own lens and receive only their task context; tests follow the other scopes. Carry the compact finding index and literal spool path in issue mode.
 
 !read lib/better-audit.md
