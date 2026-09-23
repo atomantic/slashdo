@@ -160,10 +160,17 @@ Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` fro
    - Run `{TEST_CMD}` (skip when empty). Same handling on failure (`STATUS=test-failed`).
    - If any inspection red flag triggered: revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=rejected`, exit.
 5. **Push verified changes**:
-   ```bash
-   git push origin {BRANCH_NAME}
-   ```
-   If the push fails (non-fast-forward), run `git pull --rebase --autostash` and then retry the push once. If the pull stops on conflicts, do not abort or report failure merely because the conflict exists: read and follow [rebase-conflict-resolution.md](./rebase-conflict-resolution.md), resolve and continue the rebase, rerun the build/tests affected by the resolution, then push. Report failure only after the completed resolution and retry still cannot publish the branch.
+    ```bash
+    BR="$(git branch --show-current)"
+    PUSH_REMOTE="$(git config --get "branch.$BR.remote")"
+    PUSH_BRANCH="$(git config --get "branch.$BR.merge")"
+    if [ -z "$PUSH_REMOTE" ] || [ "$PUSH_REMOTE" = "." ] || [ -z "$PUSH_BRANCH" ]; then
+      echo "No remote upstream is configured; leaving this review pass local." >&2
+    else
+      git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"
+    fi
+    ```
+    If a remote upstream is configured and the push fails (non-fast-forward), run `git pull --rebase --autostash` and then retry the same `git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"` once in the same shell. If the pull stops on conflicts, do not abort or report failure merely because the conflict exists: read and follow [rebase-conflict-resolution.md](./rebase-conflict-resolution.md), resolve and continue the rebase, rerun the build/tests affected by the resolution, then retry the same upstream-derived push. Report failure only after the completed resolution and retry still cannot publish the branch. Never guess `origin` or the local branch name when no upstream is configured.
 6. **Re-loop or stop**:
    - `ITERATION=$((ITERATION + 1))`
    - **Apply the convergence gate** (`~/.claude/lib/review-convergence-gate.md`) before another round: if the round just completed made zero commits or landed only *marginal* findings (edge-case guards, hypotheticals with no concrete wrong outcome), **converge — set `STATUS=clean` (or `STATUS=incomplete` if the round had any coverage gap, `REVIEW_ERRORS + PARSE_ERRORS + TRUNCATED > 0`) and exit**, noting the diminishing-returns convergence in the report. A partially-reviewed diff is never `clean`, even when the gate converges. Only a round with at least one *substantive* finding earns another pass.

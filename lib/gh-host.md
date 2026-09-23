@@ -5,16 +5,16 @@
 `GH_HOST` is set, even when `{owner}`/`{repo}` placeholders are filled from the local
 repo. On a GitHub Enterprise repo every unqualified `gh api` call silently hits
 github.com: REST calls 404, `gh api user` returns the wrong identity, reviewer polls wait
-forever. Derive the host once from `origin` and pass it on **every** `gh api` call —
-github.com repos derive `github.com` unchanged, and no global `GH_HOST` env var is needed.
+forever. Carry one trusted host — from the checkout in local mode or the PR URL in PR
+mode — on **every** `gh api` call; an ambient GitHub login never selects it.
 
 #### Derive `{GH_HOST}`
 
-Parse the `origin` remote host (SSH `git@host:org/repo.git` / `ssh://git@host/...` or
-HTTPS `https://host/...`):
+If `GH_HOST` is already seeded, keep it. Otherwise parse the `origin` remote host (SSH
+`git@host:org/repo.git` / `ssh://git@host/...` or HTTPS `https://host/...`):
 
 ```bash
-GH_HOST=$(git remote get-url origin 2>/dev/null \
+[ -n "$GH_HOST" ] || GH_HOST=$(git remote get-url origin 2>/dev/null \
   | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')
 # Fallbacks if there is no origin or the parse came back empty:
 [ -n "$GH_HOST" ] || GH_HOST=$(gh repo view --json url --jq '.url' 2>/dev/null | awk -F/ '{print $3}')

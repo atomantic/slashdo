@@ -136,7 +136,7 @@ Run the shared issue-mode setup — it reuses the `CLI_TOOL` the Pre-flight dete
 
 **Collaborator set — fetch once when `COLLAB_MODE` is on and `SELF_MODE` is not.** If `SELF_MODE` is on, skip this fetch (self is a subset). If `COLLAB_MODE` is off, skip it and do **not** apply `--trusted-authors` as a standalone gate. **Fail closed:** a failed call or an empty login set (the owner should always be present) aborts — never treat "couldn't list them" as any-author, and never fall open to `--trusted-authors` alone. Compare issue authors to the **trusted claim pool** (collaborators UNION `--trusted-authors`) **case-insensitively**.
 
-**GitHub only — finish the `GH_HOST` derivation with the shared snippet below** before the `gh api` call in the block: `$ORIGIN_HOST` already is its first step, so seed `GH_HOST` with it and continue from the fallbacks, then run the per-host auth precheck. (GitLab: skip — `glab api` resolves the host from the remote itself.)
+**GitHub only — the VCS preflight has already seeded `GH_HOST` from the checkout origin. Read the shared snippet below before the `gh api` call in the block: it preserves that value, continues from the fallbacks when needed, and runs the per-host auth precheck.** (GitLab: skip — `glab api` resolves the host from the remote itself.)
 
 !`cat ~/.claude/lib/gh-host.md`
 

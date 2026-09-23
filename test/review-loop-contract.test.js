@@ -281,6 +281,38 @@ describe('review-loop parse contracts', () => {
     assert.match(inProcess, /\/code-review/);
   });
 
+  it('keeps Claude Code on the in-process reviewer path with snapshot enforcement', () => {
+    const localAgent = readLib('local-agent-review-loop.md');
+    const enhance = readLib('enhance-loop.md');
+    const dispatch = localAgent.slice(localAgent.indexOf('When `REVIEW_AGENT=claude`: dispatch an in-process sub-agent'));
+
+    assert.match(dispatch, /Step 1 snapshot and Step 3 restore/);
+    assert.match(dispatch, /REVIEWER_APPLIES=false/);
+    assert.doesNotMatch(dispatch, /verified `REVIEWER_APPLIES=true`/);
+    assert.doesNotMatch(localAgent, /This rule overrides every in-process dispatch example below/);
+    assert.doesNotMatch(localAgent, /flags below disable each CLI's approval gates/);
+    assert.match(enhance, /Under Claude Code, keep the in-process sub-agent as the\s+plan-billing path/);
+    assert.doesNotMatch(enhance, /The Agent API must enforce a read-only tool set; otherwise/);
+  });
+
+  it('commits leftover edits before clean and normalizes reviewer-applies commits', () => {
+    const loop = readLib('local-agent-review-loop.md');
+    const reviewOnly = loop.slice(
+      loop.indexOf('**When `REVIEWER_APPLIES=false` (default — orchestrator applies)**'),
+      loop.indexOf('**When `REVIEWER_APPLIES=true` (reviewer applies)**'),
+    );
+    const reviewerApplies = loop.slice(loop.indexOf('**When `REVIEWER_APPLIES=true` (reviewer applies)**'));
+
+    assert.ok(
+      reviewOnly.indexOf('If recomputed `UNCOMMITTED > 0`') < reviewOnly.indexOf('If recomputed `NEW_COMMITS == 0`'),
+    );
+    assert.match(reviewOnly, /address review \(\$REVIEW_AGENT\): orchestrator-applied/);
+    assert.match(reviewerApplies, /leave its changes uncommitted/);
+    assert.match(reviewerApplies, /git reset --soft "\$LOOP_START_SHA"/);
+    assert.match(reviewerApplies, /address review \(\$REVIEW_AGENT\): <summary>/);
+    assert.doesNotMatch(reviewerApplies, /chore: local review changes/);
+  });
+
   it('lets ~opt excuse no-verdict and lets capped satisfy partial', () => {
     // Two ways a new status gets stranded: added to a loop's status set but not to
     // the aggregate rules that consume it. A ~opt no-verdict must reach the
@@ -412,6 +444,16 @@ describe('review-loop parse contracts', () => {
       /git push [^\n`]*HEAD:refs\/heads\//,
       'no prescribed push may re-prefix refs/heads/ (naming it in a warning is fine)',
     );
+    for (const name of ['local-agent-review-loop.md', 'ollama-review-loop.md']) {
+      const loop = readLib(name);
+      assert.match(loop, /PUSH_REMOTE="\$\(git config --get "branch\.\$BR\.remote"\)"/, `${name} must derive its push remote from branch config`);
+      assert.match(loop, /PUSH_BRANCH="\$\(git config --get "branch\.\$BR\.merge"\)"/, `${name} must derive its push ref from branch config`);
+      assert.match(loop, /\[ "\$PUSH_REMOTE" = "\." \]/, `${name} must reject a local upstream`);
+      const prescribed = [...loop.matchAll(/git push [^\n`]*?HEAD:[^\s"`]*/g)].map((m) => m[0]);
+      assert.ok(prescribed.length >= 2, `${name} must prescribe the upstream-derived push and retry`);
+      assert.ok(prescribed.every((c) => c === 'git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH'), `${name} has a non-derived push: ${prescribed.join(' | ')}`);
+      assert.doesNotMatch(loop, /git push origin \{BRANCH_NAME\}/, `${name} must not assume origin or the local branch name`);
+    }
     // The variables must be consumed in the shell that set them — spec snippets run
     // as separate Bash calls, where an empty PUSH_REMOTE means `git push "" "HEAD:"`.
     // The point is that the push lives inside the guard, in the same shell — not

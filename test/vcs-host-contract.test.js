@@ -24,17 +24,6 @@ const root = path.join(__dirname, '..');
 const read = (...segments) => fs.readFileSync(path.join(root, ...segments), 'utf8');
 const partial = read('lib', 'vcs-host.md');
 
-// Commands that legitimately carry their own copy of the selection. /do:pr runs it
-// as a pre-flight the user sees before any claim, and predates the partial. /do:next
-// and /do:plan-task used to as well: /do:next moved onto `!read lib/vcs-host.md` in
-// issue #293 (see "GitLab-only blocks and a drifted copy of host detection load on
-// every GitHub run"), and /do:plan-task's hand-copy (with no `repo view` reachability
-// probe) was retired the same way in issue #356. Pinned so a NEW command cannot join
-// this set by re-typing the logic instead of reading the file.
-const INLINE_IMPLEMENTERS = new Set([
-  'commands/do/pr.md',
-]);
-
 const REFERENCES_PARTIAL =
   /!read lib\/vcs-host\.md|!`cat ~\/\.claude\/lib\/vcs-host\.md`|\(\.\.\/\.\.\/lib\/vcs-host\.md\)/;
 
@@ -295,11 +284,34 @@ describe('VCS host selection stays in one partial', () => {
     assert.match(partial, /grep -qi gitlab/);
   });
 
+  it('preserves a GH_HOST seeded by the VCS preflight before applying fallbacks', () => {
+    const ghHost = read('lib', 'gh-host.md');
+    const origin = ghHost.indexOf('[ -n "$GH_HOST" ] || GH_HOST=$(git remote get-url origin');
+    const fallback = ghHost.indexOf('[ -n "$GH_HOST" ] || GH_HOST=$(gh repo view');
+    assert.ok(origin > -1, 'lib/gh-host.md must accept the checkout-derived GH_HOST seed');
+    assert.ok(fallback > origin, 'lib/gh-host.md must apply repository and default fallbacks after origin');
+  });
+
+  it('loads each /do:pr host partial only on the path that needs it', () => {
+    const command = read('commands', 'do', 'pr.md');
+    const detect = command.indexOf('!read lib/vcs-host.md');
+    const side = command.indexOf('## Run the PR-side Reviews');
+    const apiHost = command.indexOf('!read lib/gh-host.md');
+    const handoff = command.indexOf('When no cross-phase skip applies', side);
+    assert.ok(detect > -1 && detect < side, '/do:pr must read the VCS preflight on every run');
+    assert.ok(apiHost > side && apiHost < handoff, '/do:pr must defer gh-host until PR-side dispatch');
+    assert.doesNotMatch(command.slice(0, side), /!read lib\/gh-host\.md/);
+    assert.match(
+      command.slice(Math.max(0, apiHost - 300), apiHost),
+      /On GitHub, when `PR_SIDE_AGENTS` is non-empty/,
+    );
+  });
+
   it('never mutates anything on the way to a stop', () => {
     for (const mutation of ['gh issue create', 'gh pr create', 'glab mr create', 'git worktree add', 'git checkout -b']) {
       assert.ok(!partial.includes(mutation), `lib/vcs-host.md must stay non-mutating; found ${mutation}`);
     }
-    assert.match(partial, /Credentials for the wrong service are not a fallback/);
+    assert.match(partial, /credentials never select or switch the forge/i);
   });
 
   it('never lets a gh auth failure stand in for a GitLab remote, anywhere in the tree', () => {
@@ -315,32 +327,28 @@ describe('VCS host selection stays in one partial', () => {
     }
   });
 
-  it("derives lib/plan-issue-setup.md's own CLI_TOOL fallback from the remote first", () => {
-    // This partial's issue-mode setup used to probe `gh auth status` before
-    // `glab auth status` with no remote check at all when the calling command
-    // (e.g. /do:review's local-branch --issues path) never pre-detects CLI_TOOL —
-    // the exact bug lib/vcs-host.md exists to prevent, just re-typed with different
-    // wording ("Otherwise ... else") that evaded the AUTH_FIRST regex above.
+  it("delegates lib/plan-issue-setup.md's missing host state to the shared partial", () => {
     const issueMode = read('lib', 'plan-issue-setup.md');
-    const origin = issueMode.indexOf('ORIGIN_HOST="$(git remote get-url origin');
-    assert.ok(origin > -1, 'plan-issue-setup.md must derive ORIGIN_HOST from the origin remote in its fallback');
-    const firstAuth = issueMode.indexOf('auth status');
-    assert.ok(firstAuth > -1, 'plan-issue-setup.md must still keep a no-remote/no-CLI_TOOL fallback');
-    assert.ok(origin < firstAuth, 'plan-issue-setup.md probes credentials before reading the remote');
+    assert.match(issueMode, /requires `CLI_TOOL` and `LABEL_SEP`/);
+    assert.match(issueMode, /\[vcs-host\.md\]\(\.\/vcs-host\.md\)/);
+    assert.doesNotMatch(issueMode, /git remote get-url origin|(?:gh|glab) auth status/);
+
+    for (const command of ['rpr.md', 'review.md']) {
+      const body = read('commands', 'do', command);
+      const branch = body.slice(
+        body.indexOf('Only when `ISSUE_MODE=true` and a finding is being deferred'),
+        body.indexOf('!read lib/plan-issue-filing.md'),
+      );
+      assert.match(branch, /!read lib\/vcs-host\.md/);
+    }
   });
 
-  it('lets only the pinned pre-flights carry their own copy of the selection', () => {
+  it('delegates every VCS host selection to the shared partial', () => {
     for (const rel of selectionFiles()) {
-      if (rel === 'lib/vcs-host.md' || INLINE_IMPLEMENTERS.has(rel)) continue;
+      if (rel === 'lib/vcs-host.md') continue;
       assert.ok(
         REFERENCES_PARTIAL.test(read(rel)),
         `${rel} selects a VCS host without reading lib/vcs-host.md — include the partial instead of re-typing it`,
-      );
-    }
-    for (const rel of INLINE_IMPLEMENTERS) {
-      assert.ok(
-        read(rel).includes('git remote get-url origin'),
-        `${rel} is pinned as an inline implementer but no longer derives the host from the remote`,
       );
     }
   });
