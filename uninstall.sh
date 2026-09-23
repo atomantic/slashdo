@@ -102,7 +102,7 @@ OLD_LIBS=(
   better-audit-code-quality better-audit-cognitive-load better-audit-deps
   better-audit-dry better-audit-security better-audit-stack-specific
   better-audit-structural better-audit-tests better-audit-ux
-  code-review-checklist
+  code-review-checklist graphql-escaping
   per-finding-root-cause post-review-doc-recommendations
 )
 
@@ -116,7 +116,7 @@ LIBS=(
   ci-flake-handling commit-conventions config-defaults-issues-merge copilot-review-loop
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
-  gh-host github-reviewer-loop graphql-escaping
+  gh-host github-reviewer-loop
   local-agent-review-loop merge-gate model-tiers multi-reviewer-loop next-gitlab next-swarm ollama-review-loop
   plan-id-format plan-issue-setup plan-issue-filing pr-write-access
   rebase-conflict-resolution remediation-agent-template
