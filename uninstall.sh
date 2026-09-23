@@ -112,7 +112,7 @@ LIBS=(
   better-plan better-remediation better-simplify
   better-state better-test-enhancement
   better-cleanup better-pr-and-ci better-review-loop better-verification
-  ci-flake-handling config-defaults-issues-merge copilot-review-loop
+  ci-flake-handling commit-conventions config-defaults-issues-merge copilot-review-loop
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
   gh-host github-reviewer-loop graphql-escaping

@@ -40,7 +40,7 @@ Commit changes, push to your fork, and open a pull request against the upstream 
    ```
    - If the guard prints the ERROR above: STOP and relay it — the user needs an `origin` remote pointing at their fork on a GitHub host `gh` is logged in to.
    - Carry `{GH_HOST}` for the rest of the run; every URL this command prints or writes is built from it, never from a literal `github.com`.
-   - If `isFork` is `false` or `parent` is null: STOP and tell the user this repo is not a fork. Suggest using `/pr` instead.
+   - If `isFork` is `false` or `parent` is null: STOP and tell the user this repo is not a fork. Suggest using `/do:pr` instead.
 
 2. **Extract upstream info** from the `parent` field:
    - `UPSTREAM_OWNER` = `parent.owner.login`
@@ -65,26 +65,29 @@ Before committing, ensure the fork is up to date with upstream:
    git remote get-url upstream 2>/dev/null || git remote add upstream "https://{GH_HOST}/{UPSTREAM_OWNER}/{UPSTREAM_REPO}.git"
    ```
 2. Fetch upstream: `git fetch upstream`
-3. If on the fork's default branch and there are upstream changes, rebase:
+3. If on the fork's default branch and there are upstream changes, rebase with autostash to preserve uncommitted edits:
    ```bash
-   git rebase upstream/{UPSTREAM_DEFAULT_BRANCH}
+   git rebase --autostash upstream/{UPSTREAM_DEFAULT_BRANCH}
    ```
    If rebase conflicts occur, abort and inform the user — do not auto-resolve.
 
 ## Commit and Push
 
-1. **Identify changes to commit**:
+1. **If on the fork's default branch, create a feature branch first:**
+   - Check if `{CURRENT_BRANCH}` equals `{FORK_DEFAULT_BRANCH}`
+   - If so, create a feature branch named for the change (e.g. `git checkout -b fix/<short-description>`) so the PR doesn't tie up the fork's default branch
+   - Update `{CURRENT_BRANCH}` to the new branch name and print the new flow
+
+2. **Identify changes to commit**:
    - Run `git status` and `git diff --stat` to see what changed
    - If there are no changes, inform the user and stop
    - Do NOT use `git add -A` or `git add .` — add specific files by name
 
-2. **Commit**:
-   - Write a clear, concise commit message describing the changes
-   - Use conventional commit prefixes: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`
-   - Do NOT include Co-Authored-By or generated-by annotations
-   - Do NOT bump version or update changelog — upstream controls those
+3. **Commit** following these conventions (and write no changelog entry — upstream controls that):
 
-3. **Push to fork**:
+!`cat ~/.claude/lib/commit-conventions.md`
+
+4. **Push to fork**:
    ```bash
    git push -u origin {CURRENT_BRANCH}
    ```
@@ -105,11 +108,15 @@ Fork PRs go to upstream maintainers who can't easily ask for changes — getting
    b. Review it under the review preferences below
    c. For each finding, quote the specific code line and explain why it's a problem
 4. After reviewing all files, verify: does the code actually deliver what the commits claim?
-5. Print a review summary table (see do:review for format)
+5. Print a review summary table: | finding | file | line | severity | fixable |
 6. **Worthiness check**: Classify all findings before acting on them:
    - **Fix and recommit** any finding that touches correctness, security, logic, data integrity, or API contracts
    - **Note but don't block** on pure style nitpicks, naming preferences, or "consider..." suggestions — if ALL findings are this type, proceed without fixing and mention them briefly in the PR description
-7. Only after printing the review summary may you proceed to "Open the PR"
+7. **Push fix commits** to the remote if any were made:
+   ```bash
+   git push -u origin {CURRENT_BRANCH}
+   ```
+8. Only after printing the review summary may you proceed to "Open the PR"
 
 If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.
 
@@ -152,5 +159,4 @@ gh pr create \
 ## Important
 
 - Do NOT merge the PR — upstream maintainers handle that
-- Do NOT run Copilot review loops — you don't control the upstream repo's review settings
 - If the fork is significantly behind upstream, warn the user about potential merge conflicts
