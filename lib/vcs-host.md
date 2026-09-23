@@ -1,19 +1,8 @@
 ### Selecting the VCS host (`VCS_HOST` / `CLI_TOOL`)
 
-**Why this exists.** The repository's `origin` remote is what decides which forge a
-repo lives on. `gh auth status` / `glab auth status` only tell you which CLI is
-*usable* — on a machine logged in to both, an auth-first probe picks whichever CLI
-answers first and ignores the checkout entirely. That is how a GitLab repo ends up
-with `VCS_HOST=github`: default-branch lookup, issue filing, and PR/MR operations
-are routed to `gh` against a repository it cannot see, and the run may enter a
-GitHub-only reviewer path. Equally wrong in the other direction, a `gh` auth failure
-is **not** evidence of a GitLab repo — it usually means the user simply needs to log
-in to GitHub.
-
-So: **derive the host from the remote first, then check that host's credentials.**
-This is the same rule `/do:pr`'s "Detect VCS Host" step and `/do:next`'s Phase 1
-pre-flight apply, so no two slashdo commands can disagree about which forge a given
-repo is on.
+The `origin` remote selects the forge; credentials only gate access. Derive the host
+before probing either CLI so an ambient GitHub login cannot route a GitLab checkout to
+GitHub, then confirm the selected CLI can read this repository.
 
 `{COMMAND}` in the messages below is the invoking command's own name (`/do:better`,
 `/do:depfree`, …) — substitute it so the abort tells the user what stopped.
@@ -44,21 +33,9 @@ fi
 
 #### Confirm the selected CLI can reach this repo
 
-One question, asked in two parts: are there credentials at all, and do they reach
-*this* repo. `--active` scopes the `gh` check to the active account — a bare
-`gh auth status` exits non-zero when *any* configured account holds a stale token,
-even while the active one works fine, which would abort every run on a
-multi-account machine. The `repo view` probe then turns "some credentials exist"
-into "this checkout is reachable": both CLIs resolve the concrete host from the
-origin remote, so it also catches a self-managed instance the user has no token
-for. It is skipped when `ORIGIN_HOST` is empty — with no origin to resolve
-*through*, `repo view` always fails, and running it there would abort the very
-no-remote fallback above.
-
-Both parts share one abort, because from the user's side they are one problem: the
-selected CLI cannot see this repo. The message names every reason that is true —
-including that a remote which is neither GitHub nor GitLab lands on the GitHub
-branch and is unsupported — instead of guessing which one applies.
+Check both authentication and repository reachability. The second check matters on
+Enterprise or self-managed hosts, where an ambient login can pass `auth status` while
+the checkout's actual host remains unreadable; every failure stops before mutation.
 
 ```bash
 if [ "$CLI_TOOL" = gh ]; then
@@ -92,29 +69,12 @@ Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`, and carry `VCS_HOST` / `CLI_TOOL
 
 #### The label separator (`LABEL_SEP`)
 
-Any command that creates or matches a prefixed label (`severity:`, `model:`,
-`effort:`, `priority:`, `area:`, …) needs one more variable derived from
-`CLI_TOOL` — folded into the last line of the select block above
-(`[ "$CLI_TOOL" = glab ] && LABEL_SEP="::" || LABEL_SEP=":"`) rather than a
-separate step, since `CLI_TOOL` is already final by then.
-
-GitLab treats any `key::value` label name as a native **scoped label**: the UI
-renders the two halves in two tones, and — the part that matters functionally —
-**only one value per key can be applied to an issue at a time** (applying a second
-one silently replaces the first). GitHub has no equivalent feature, so it keeps the
-plain single colon. Build every prefixed label as `<key>${LABEL_SEP}<value>`, and
-match one the same way (a hardcoded `:` in a jq/grep pattern silently stops matching
-GitLab's `::` labels) — see [plan-issue-setup.md](./plan-issue-setup.md) "Setup" for
-the full convention and the label color table.
+`LABEL_SEP` is `::` for GitLab scoped labels and `:` for GitHub. Build and match every
+prefixed label as `<key>${LABEL_SEP}<value>`; a hardcoded `:` silently misses GitLab
+labels.
 
 #### Rules this encodes
 
-- **Never infer GitLab from a GitHub auth failure**, or the reverse. The remote picks
-  the forge; credentials only gate whether the run can proceed on it.
-- **Every abort above is non-mutating** — it happens before any branch, worktree,
-  issue, or PR/MR is created, so an unsupported or ambiguous remote, or a checkout
-  whose only authenticated CLI belongs to the *other* service, stops the run with an
-  actionable message instead of writing to the wrong forge.
-- **Credentials for the wrong service are not a fallback.** A GitLab checkout on a
-  machine authenticated only to GitHub stops here; it does not silently run as
-  GitHub.
+The remote is authoritative; credentials never select or switch the forge. Every abort
+is non-mutating and names the selected host, so unsupported remotes and wrong-service
+credentials stop before any branch, worktree, issue, or PR/MR is created.

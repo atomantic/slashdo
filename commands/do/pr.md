@@ -22,14 +22,9 @@ Then apply any **saved defaults** (set via `/do:config`) to the flags the user d
 
 ## Detect VCS Host
 
-Determine whether this repo lives on GitHub or GitLab so the right CLI is used for every host-specific step below. The **`origin` remote URL is the authoritative signal** — `auth status` only says which CLI is usable, not where the repo lives. Detect from the remote first, then confirm the matching CLI is authenticated:
+Determine whether this repo lives on GitHub or GitLab so the right CLI is used for every host-specific step below. Use the shared preflight: the **`origin` remote is authoritative**, ambient credentials never select the forge, unsupported remotes stop, and the selected CLI must be able to read this checkout.
 
-1. Read the remote host: `git remote get-url origin`. If the host is a GitLab instance (e.g. `gitlab.com`, or a self-hosted GitLab), set `VCS_HOST=gitlab` and `CLI_TOOL=glab`; otherwise (GitHub or ambiguous) set `VCS_HOST=github` and `CLI_TOOL=gh`.
-2. Confirm the matching CLI is authenticated: `gh auth status --active` for GitHub, `glab auth status` for GitLab. (`--active` scopes the check to the active account — a bare `gh auth status` exits non-zero if any *other* configured account has a stale token.) If it is not, abort with: "`/do:pr` detected a {VCS_HOST} repo but `{CLI_TOOL}` is not authenticated. Run `{CLI_TOOL} auth login`."
-3. If there is no `origin` remote at all, fall back to whichever CLI is authenticated (`gh` first, then `glab`); if neither is authenticated, abort with: "`/do:pr` needs an authenticated `gh` (GitHub) or `glab` (GitLab). Run `gh auth login` or `glab auth login`."
-4. **When `VCS_HOST=github`, derive the API host `{GH_HOST}` from the remote and confirm auth to it.** `gh api` (used by the PR-side reviewer loops) defaults to `github.com` rather than reading the remote, so on a GitHub Enterprise repo the loops would silently poll the wrong host and time out. Derive `{GH_HOST}` once via the snippet below and pass it to the reviewer loops and every `gh api` call; if the snippet's auth precheck fails, abort with its message. (GitLab: skip — `glab` resolves the host from the remote.)
-
-!`cat ~/.claude/lib/gh-host.md`
+!read lib/vcs-host.md
 
 Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`.
 
@@ -154,6 +149,10 @@ Execution order is always local phase, then PR-side phase, however the user inte
   - `REVIEW_STOP_MODE=on-clean`: skip `PR_SIDE_AGENTS` only if `LOCAL_OVERALL_STATUS` is `partial` (the local wrapper's own stop-mode already fired on a zero-change clean pass), **or** `LOCAL_OVERALL_STATUS` is `clean` AND **zero commits** were added between `LOCAL_PHASE_START_SHA` and HEAD. If `clean` but commits WERE added, do **not** skip — per the per-pass on-clean rule ("clean AND made zero changes" is required to stop) the next reviewer in the ordered list — a `PR_SIDE_AGENTS` entry — must still run. When the skip applies, set `PR_SIDE_OVERALL_STATUS=clean` (skipped — already satisfied by the local phase) and continue to "Compute OVERALL_STATUS".
   - `REVIEW_STOP_MODE=on-findings`: skip `PR_SIDE_AGENTS` the same way if `LOCAL_OVERALL_STATUS` is `partial`, OR at least one commit was added between `LOCAL_PHASE_START_SHA` and HEAD.
 - `REVIEW_STOP_MODE=all` (default): no cross-phase skip — always run `PR_SIDE_AGENTS` when non-empty.
+
+**On GitHub, when `PR_SIDE_AGENTS` is non-empty**, read the shared host helper before dispatching any PR-side reviewer. The VCS preflight has already seeded `{GH_HOST}` from the checkout; the helper preserves that value, applies its fallbacks when needed, and confirms authentication.
+
+!read lib/gh-host.md
 
 When no cross-phase skip applies, hand off to the **multi-reviewer wrapper** (under "Reviewer loop bodies" below) over `PR_SIDE_AGENTS` with:
 
