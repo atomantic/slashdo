@@ -151,7 +151,12 @@ Before filing a migration candidate or a new suggestion, check whether an open
 issue already covers it — match on the same file path/symbol or a clearly
 equivalent title, not just an exact string. On a match, **skip creation** and
 reuse that issue's `#<number>` (optionally comment if the new item adds detail).
-Only file when nothing existing covers it.
+`EXISTING_ISSUES` is **every** open issue, not just `PLAN_LABEL`-scoped ones, so
+a reused match may not carry `PLAN_LABEL` yet — **add it**
+(`gh issue edit <n> --add-label <PLAN_LABEL>`; glab:
+`glab issue update <n> --label <PLAN_LABEL>`) so Phase 4's backlog print and
+future replan runs actually see it; skip the add if it already carries the
+label. Only file when nothing existing covers it.
 
 **Apply the triage decisions** as issue operations (GitHub `gh`; glab in parens):
 
