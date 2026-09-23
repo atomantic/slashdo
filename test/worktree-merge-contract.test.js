@@ -37,6 +37,21 @@ const path = require('path');
 const gate = fs.readFileSync(path.join(__dirname, '..', 'lib', 'merge-gate.md'), 'utf8');
 const rawDoc = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
 
+describe('/do:next host verb merge contract (#381)', () => {
+  it('keeps the shared gate as the executable owner of ci_wait_merge', () => {
+    const next = rawDoc('commands/do/next.md');
+    const gitlab = rawDoc('lib/next-gitlab.md');
+    assert.match(next, /`ci_wait_merge <PR> <method>` — `gh pr checks <PR> --required --watch --fail-fast && gh pr merge <PR> --<method>`/);
+    assert.match(gate, /executable `ci_wait_merge` host verb/);
+    assert.match(gitlab, /`ci_wait_merge <PR> <method>`/);
+    assert.match(gitlab, /glab ci status --wait --branch "\$\{UP_REF#refs\/heads\/\}"/);
+    assert.match(gitlab, /intentionally keeps `--remove-source-branch`/);
+    assert.match(next, /GitLab form intentionally keeps `--remove-source-branch`/);
+    assert.match(next, /!read lib\/merge-gate\.md/);
+    assert.doesNotMatch(next.split('## Phase 1: Pick')[1], /gh pr checks|glab ci status/);
+  });
+});
+
 describe('lib/merge-gate.md — the shared merge procedure (#335)', () => {
   it('never passes --delete-branch on a fenced gh merge, and appends it only outside a worktree', () => {
     const merges = fencedLines(gate).filter((line) => line.includes('gh pr merge'));

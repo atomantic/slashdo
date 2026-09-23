@@ -27,10 +27,10 @@ describe('glab api / jq contracts', () => {
     // leaves ME empty when glab fails — `--author ""` drops the --self filter, and
     // `--assignee "+"` claims nothing while looking like a successful claim.
     assert.doesNotMatch(next, /ME="\$\(glab api user \| jq/);
-    // Both call sites capture glab's status separately and use `jq -e`, which exits
+    // The identity-bearing call sites capture glab's status separately and use `jq -e`, which exits
     // non-zero (4) when no valid result was produced.
     const twoStep = next.match(/ME_JSON="\$\(glab api user\)"/g) || [];
-    assert.equal(twoStep.length, 2, 'both the --self list filter and the claim marker');
+    assert.equal(twoStep.length, 3, 'the --self list filter and both assignment verbs');
     assert.equal((next.match(/jq -er \.username/g) || []).length, 3, 'two snippets + the prose contract');
   });
 
@@ -50,8 +50,8 @@ describe('glab api / jq contracts', () => {
     // ahead of its blocker. The lookup captures glab's status first and treats a failure
     // as UNRESOLVED (fall back to the body convention), never as unblocked.
     assert.doesNotMatch(next, /glab api projects\/:id\/issues\/<N>\/links \| jq/);
-    assert.match(next, /LINKS_JSON="\$\(glab api projects\/:id\/issues\/<N>\/links\)"/);
-    assert.match(next, /A failed lookup is UNRESOLVED, not unblocked/);
+    assert.match(next, /LINKS_JSON="\$\(glab api "projects\/:id\/issues\/<N>\/links"\)"/);
+    assert.match(next, /A failed lookup is \*\*UNRESOLVED\*\*, not unblocked/);
   });
 
   it('probes for jq on the swarm path too', () => {

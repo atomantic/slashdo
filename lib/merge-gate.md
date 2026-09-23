@@ -1,6 +1,6 @@
 # Merge gate
 
-This is the merge procedure for `/do:pr --merge`, `/do:next` Phase 6, and `/do:next --swarm` Phase C. The caller has already applied its own review gate and decided the PR/MR should merge. This file does the rest: it resolves the method, waits on required CI, runs the merge, and reads the result back. It never overrides branch protection.
+This is the merge procedure for `/do:pr --merge`, `/do:next` Phase 6, and `/do:next --swarm` Phase C. The caller has already applied its own review gate and decided the PR/MR should merge. This file does the rest: it resolves the method, waits on required CI, runs the merge, and reads the result back. It never overrides branch protection. The wait-mode command is the executable `ci_wait_merge` host verb; callers use this shared partial rather than copying a forge branch.
 
 ## Inputs
 
