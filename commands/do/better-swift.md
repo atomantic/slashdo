@@ -250,86 +250,29 @@ For each potential finding:
 Skip step 4 if steps 1-3 reveal the code is correct.
 </approach>
 
-### Batch 1 (5 parallel Explore agents via Task tool):
+### Batch 1 (5 parallel Explore agents via the `Agent` tool):
 
 **Model**: Resolve `AUDIT_MODEL_TIER` to this host's model per [lib/model-tiers.md](../../lib/model-tiers.md) and pass it as the `model` parameter on each agent (`heavy` → this host's strongest alias, `model: "opus"` on Claude Code).
 
 1. **Security & Secrets**
    Sources: authentication checks, credential exposure, data protection, input validation, dependency health
-   Focus: hardcoded credentials, API keys, exposed secrets in source or Info.plist, authentication bypasses, disabled security checks, PII exposure, insecure network configurations
-   Swift-specific:
-   - `NSAllowsArbitraryLoads` or domain-specific ATS exceptions in Info.plist without justification
-   - Sensitive data in `UserDefaults` instead of Keychain (`SecItemAdd`/`SecItemCopyMatching`)
-   - `os_log` / `Logger` with sensitive data not marked `privacy: .private`
-   - Missing SSL pinning for high-security API endpoints
-   - Exported URL schemes / universal links without input validation in `onOpenURL` or `application(_:open:)`
-   - Unprotected Core Data / SwiftData stores (missing `NSPersistentStoreFileProtectionKey`)
-   - Clipboard (`UIPasteboard`) operations exposing sensitive data
-   - Missing data protection entitlement (`NSFileProtectionComplete`)
-   - Biometric authentication (`LAContext`) without fallback and proper error handling
-   Supply chain: `Package.resolved` committed and CI builds with `--disable-automatic-resolution`, SPM dependencies use `.upToNextMajor(from:)` not `.branch("main")`
+   Focus: hardcoded credentials, API keys, exposed secrets in source or Info.plist, authentication bypasses, disabled security checks, PII exposure, insecure network configurations. Swift preference: Keychain over `UserDefaults` for sensitive data, `Logger` with `privacy: .private` over plain interpolation, pinned SPM dependencies (`Package.resolved` + `--disable-automatic-resolution`, no `.branch("main")`).
 
 2. **Code Quality & Style**
    Sources: code brittleness, convention violations, Swift idiom violations, logging & observability
-   Focus: magic numbers, brittle conditionals, stringly-typed patterns, dead/unreachable code, unused imports/variables
-   Swift-specific:
-   - Classes where structs suffice (value semantics preferred in Swift)
-   - Missing `final` on classes that shouldn't be subclassed
-   - Overuse of `Any` / `AnyObject` instead of protocols or generics
-   - Force unwraps (`!`) and force casts (`as!`) in production code
-   - Implicit returns hiding complex logic — make multi-statement bodies explicit
-   - `enum` raw values that don't add semantic meaning
-   - Mutable `var` where `let` suffices
-   - Closures capturing `self` strongly in long-lived contexts (subscriptions, NotificationCenter, async tasks)
-   - Empty `catch` blocks or `try?` on operations where errors should surface
-   - Missing structured logging — raw `print()` in production paths instead of `Logger`/`os_log`
-   - Inconsistent error messages (different phrasing for similar failures)
+   Focus: magic numbers, brittle conditionals, stringly-typed patterns, dead/unreachable code, unused imports/variables. Swift preference: value types and `final` by default, `let` over `var` where possible, `Logger`/`os_log` over `print()`, errors surfaced rather than silently swallowed.
 
 3. **DRY & YAGNI**
    Sources: duplication patterns, speculative abstractions
-   Focus: duplicate view modifiers, copy-paste view structs, redundant model definitions, repeated inline color/font definitions instead of design system constants
-   Swift-specific:
-   - Duplicate view modifier chains that should be custom `ViewModifier`s
-   - Repeated color/font/spacing literals instead of design tokens (extension on `Color`, `Font`, or custom design system)
-   - Copy-pasted networking code instead of a shared API client
-   - Duplicate model types for the same API entity (one per screen/feature)
-   - Speculative protocols with single conformers
-   - Unused protocol requirements (conformers implement but nobody calls)
-   - Premature abstraction: generic coordinator/router patterns for apps with 3 screens
+   Focus: duplicate view modifiers, copy-paste view structs, redundant model definitions, repeated inline color/font/spacing literals instead of design tokens. Swift preference: shared `ViewModifier`s/API clients over copy-paste, no protocols or coordinator/router layers with a single conformer or call site.
 
 4. **Architecture & SOLID**
    Sources: structural violations, coupling analysis, modularity, SwiftUI patterns
-   Focus: god files >500 lines, views with business logic in `body`, mixed concerns
-   Swift-specific:
-   - Views containing network calls, data transformation, or business logic directly in `body` or `onAppear` — extract to view model or service
-   - View models (ObservableObject / @Observable) with >20 published properties — split by feature
-   - Tight coupling between views and specific data sources (Core Data fetch requests in views instead of repository pattern)
-   - Missing dependency injection — views creating their own services instead of receiving them via `@Environment` or init parameters
-   - Navigation logic spread across views instead of centralized (NavigationStack path management)
-   - Circular dependencies between Swift packages/modules
-   - Feature modules importing App-level dependencies instead of working through protocol abstractions
-   - Preview-hostile architecture — views that can't be previewed without real network/database
+   Focus: god files >500 lines, views with business logic in `body`, mixed concerns. Swift preference: network/data logic extracted to a view model or service rather than living in `body`/`onAppear`, dependency injection over views constructing their own services, no circular module dependencies.
 
 5. **Bugs, Performance & Error Handling**
    Sources: runtime safety, memory management, async correctness, SwiftUI performance
-   Focus: retain cycles, main thread violations, SwiftUI rendering performance
-   Swift-specific:
-   - Retain cycles: closures capturing `self` strongly in stored properties, Combine sinks, or long-lived `Task`s
-   - Main thread violations: UI updates from background threads, `@Published` mutations off main actor
-   - `@State` initialized from props (only reads initial value once)
-   - `@StateObject` vs `@ObservedObject` misuse (ownership confusion)
-   - `List` / `ForEach` with unstable `id` causing excessive view recreation
-   - Missing `@ViewBuilder` on functions returning conditional views (type erasure with `AnyView` instead)
-   - `GeometryReader` in `ScrollView` causing layout thrashing
-   - Heavy computation in `body` (filtering, sorting, mapping large collections on every render)
-   - Images loaded synchronously — use `AsyncImage` or pre-cached loading
-   - Missing `.equatable()` or custom `Equatable` on views with expensive `body` computations
-   - N+1 fetch patterns: `@FetchRequest` / `@Query` without relationship prefetching
-   - Unbounded in-memory caches (`NSCache` without `countLimit`/`totalCostLimit`)
-   - `Timer.publish()` or `DispatchSource` without invalidation — leaks and battery drain
-   - `withAnimation` wrapping async operations — only synchronous state changes animate
-   - Race conditions: concurrent `Task`s modifying shared `@State` without actor isolation
-   - `Task.detached` with `[self]` (strong capture) — use `[weak self]` for cancelable work
+   Focus: retain cycles, main-thread / `@MainActor` violations, and SwiftUI rendering performance (unstable `List`/`ForEach` ids, `GeometryReader` in `ScrollView`, heavy work in `body`, `@State`/`@StateObject` vs `@ObservedObject` misuse).
    - **Gotcha catalogue:** check in-scope entries #1–#5 and #12 (CloudKit eager-init crash, SwiftData missing inverse relationship, SwiftData CloudKit sharing gap, iCloud ubiquity container, iCloud symlink corruption, Keychain test failures) against this codebase using the excerpts passed in; cite the entry number (`gotcha catalogue #N`) in any finding rather than restating the fix.
 
 ### Batch 2 (3 agents after Batch 1 completes):
@@ -340,7 +283,7 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    This is the critical Swift-specific agent. Dynamically focus based on `PLATFORMS` detected in Phase 0.
 
    **Multi-platform coverage (ALL projects):**
-   - For every `#if os(iOS)` or `#if os(macOS)` block: verify all declared platforms in `PLATFORMS` are handled. Missing `#else` for a supported platform = **[HIGH]** finding
+   - For every `#if os(iOS)` / `#if os(macOS)` block, check whether the missing platform is reachable there and the code genuinely needs a counterpart on it (not a no-op) — flag only that case, not every bare `#if` lacking an `#else`
    - UIKit types used unconditionally (`UIImage`, `UIColor`, `UIFont`, `UIScreen`) — use SwiftUI-native types or platform-conditional typealiases
    - `.navigationBarTitleDisplayMode()`, `.toolbar(.visible, for: .navigationBar)` — iOS-only modifiers applied in shared views without `#if os(iOS)`
    - `UIApplication.shared` references — unavailable on macOS; use `@Environment(\.openURL)` or `NSApplication` with platform check
@@ -351,7 +294,7 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - Touch-specific interactions without pointer alternatives
    - Fixed sizes that don't adapt to Mac window resizing
    - Missing `Settings` scene for macOS apps
-   - **macOS window lifecycle (App Store Guideline 4):** Missing `NSApplicationDelegate` with `applicationShouldTerminateAfterLastWindowClosed` returning `false` (app quits on window close instead of staying in Dock). Missing `applicationShouldHandleReopen(_:hasVisibleWindows:)` (Dock click does nothing when window is closed). `WindowGroup` without stable `id:` parameter prevents programmatic reopening via `openWindow(id:)`. Missing "Show Main Window" menu command (Cmd+0) in Window menu. Missing `reopenWindow` closure bridge between AppDelegate and SwiftUI `openWindow`. Menu bar commands that don't ensure main window is visible before acting = **[HIGH]**
+   - **macOS Dock-reopen (App Store Guideline 4):** after the last window closes, clicking the Dock icon should reopen it — check `applicationShouldHandleReopen(_:hasVisibleWindows:)` (or an equivalent `reopenWindow`/`openWindow` bridge) exists and actually recovers the window. Flag as **[MEDIUM]** only when the app has no way to reopen a closed window at all; don't require every possible sub-mechanism (stable `WindowGroup` id, a Window-menu "Show Main Window" command) unless the window genuinely can't be recovered without it
    - watchOS complications not updated, widget timelines not refreshed
    - visionOS: missing `.windowStyle(.volumetric)` or `.immersionStyle()` where appropriate
 
@@ -373,11 +316,10 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - `@Binding` used where `let` suffices (read-only props don't need binding)
    - Sheet/alert presented via boolean when item-based presentation is cleaner
    - `AnyView` type erasure instead of `@ViewBuilder`, `Group`, or conditional modifiers
-   - Missing `.animation()` or `.withAnimation()` for state transitions that should animate
+   - Missing `.animation()` or `withAnimation { }` for state transitions that should animate
    - Inconsistent use of `@Observable` (iOS 17+) vs `ObservableObject` — pick one per minimum deployment target
    - Missing Transferable conformance for drag & drop on shareable data types
    - `@AppStorage` with string keys that risk collision — use namespaced enum
-   - View preview providers not covering the Dynamic Type test matrix: `.large` (baseline), `.xxxLarge` (largest non-accessibility), `.accessibility5` (AX5). Also Dark Mode, RTL layout, smallest/largest device for each platform
 
    **Accessibility (ALL projects):**
    - Images without `.accessibilityLabel()` or `.accessibilityHidden(true)` for decorative images
@@ -389,29 +331,7 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - Animations not respecting `@Environment(\.accessibilityReduceMotion)`
 
    **Dynamic Type responsive-layout audit (iOS, iPadOS, watchOS, visionOS — HIGH priority):**
-   Users can set text size from Settings > Display & Brightness > Text Size AND Settings > Accessibility > Display & Text Size > Larger Text, scaling text up through `AX1`–`AX5`. Most layout bugs only surface at the accessibility tiers (AX1–AX5), not at `xxxLarge`. App Store reviewers routinely test at the largest size — clipped or unreachable UI is a rejection vector.
-
-   **Test matrix — verify every user-facing view renders correctly at these three points:**
-   - `.large` — baseline (default system size)
-   - `.xxxLarge` — largest non-accessibility tier, catches most truncation
-   - `.accessibility5` (AX5) — catches clipping, overflow, broken layouts, and unreachable controls
-
-   **Patterns to flag as findings:**
-   - Hardcoded font sizes (`.font(.system(size: 14))`, `Font.custom(_, size:)` without `relativeTo:`) that won't scale. Fix: use semantic styles (`.font(.body)`, `.headline`, etc.) or `.font(.custom("Name", size: 14, relativeTo: .body))`, or gate numeric spacing with `@ScaledMetric`
-   - Hardcoded spacing / frame sizes (padding, width, height, corner radius on text-bearing containers) that don't grow with text. Fix: `@ScaledMetric(relativeTo: .body) var padding: CGFloat = 16`
-   - Multi-line `Text` that truncates or clips in constrained layouts (especially inside `HStack`s or narrow/fixed-width containers) — SwiftUI sometimes prefers horizontal truncation (ellipsis) over wrapping, so long strings can clip instead of expanding vertically. Verify the text actually wraps and expands vertically at AX5. If it truncates instead of wrapping, apply `.fixedSize(horizontal: false, vertical: true)` as a targeted fix — do NOT apply it as a blanket rule to every multi-line `Text`, since it can fight parent layout constraints when wrapping already works correctly.
-   - Full-screen content views (screens, sheets, detail views) NOT wrapped in a `ScrollView` — at AX5, almost any content taller than ~4 rows overflows. Flag any top-level view body that uses `VStack` / `Form`-less layouts without a scroll container. If the view needs a `Spacer` to push content, wrap in `ScrollView` + `GeometryReader` with a `.frame(minHeight: geo.size.height)` inner container instead of dropping the scroll
-   - Fixed `.frame(height:)` or `.frame(width:height:)` on containers that hold `Text` — flag unless paired with `@ScaledMetric` or `.dynamicTypeSize(...DynamicTypeSize.xxxLarge)` cap
-   - `HStack` layouts with multiple text elements and no wrap fallback — at AX sizes these truncate off-screen. Suggest `ViewThatFits { HStack { ... }; VStack { ... } }` or split to `VStack` when `dynamicTypeSize.isAccessibilitySize` is true
-   - `Label`, `Button`, list rows, and tab/toolbar items with adjacent icons + text using fixed `HStack` spacing — verify icons also scale (`Image(systemName:).imageScale(.large)` or `@ScaledMetric` for sized assets)
-   - Views that call `.lineLimit(1)` or `.truncationMode(.tail)` on content users must read in full (titles, button labels, form values) — at AX5 the ellipsis hides critical UI. Allow only for non-critical captions or metadata
-   - Views that use `.minimumScaleFactor(...)` below `0.8` as a "fix" for Dynamic Type — this shrinks text back below the user's chosen size and defeats the accessibility request. Prefer wrapping/scrolling
-   - **Hero typography / fixed-size displays that legitimately can't grow (slider numbers, countdown digits, watch face values, tight chrome)**: use `.dynamicTypeSize(...DynamicTypeSize.xxxLarge)` as an upper cap on that subtree — **cap, don't ignore**. Flag any such element that uses `.dynamicTypeSize(.large)` or a narrower cap, or that uses hardcoded fonts without any cap (silent regression when user bumps text size)
-   - TabView items, NavigationStack titles, and alert buttons that truncate at AX sizes — test with `.dynamicTypeSize(.accessibility5)` in previews
-   - Custom `Text` measurements with `GeometryReader` or `TextRenderer` that assume a fixed size category
-   - Forms and list rows where trailing controls (Toggle, disclosure indicator, value text) collide with leading labels at AX sizes — use `LabeledContent` (iOS 16+) or switch to vertical layout via `if dynamicTypeSize.isAccessibilitySize`
-   - Missing `@Environment(\.dynamicTypeSize) var dynamicTypeSize` branch in custom layouts that need to reflow (e.g., side-by-side → stacked) at accessibility sizes
-   - Launch screens / onboarding / paywall screens specifically — these are the most common rejection points because they're full-bleed and often pixel-designed
+   Check layout at `.large` (baseline), `.xxxLarge` (largest non-accessibility), and `.accessibility5` (AX5) — most layout bugs (clipping, overflow, unreachable controls) only surface at the accessibility tiers, and App Store reviewers test at the largest size. Flag: hardcoded font sizes or fixed frame/spacing on text-bearing containers that don't scale (prefer semantic text styles or `@ScaledMetric`); `.lineLimit(1)`/`.minimumScaleFactor()` below `0.8` on content users must read in full (titles, button labels, form values); hero/fixed-size displays that legitimately can't grow (slider numbers, countdown digits) but ignore Dynamic Type entirely instead of capping it with `.dynamicTypeSize(...DynamicTypeSize.xxxLarge)` — **cap, don't ignore**; and launch/onboarding/paywall screens specifically, the most common rejection points because they're full-bleed and often pixel-designed.
 
    **Dark Mode & theming:**
    - Hardcoded colors (`.white`, `.black`, `Color(red:green:blue:)`) instead of semantic colors (`.primary`, `.secondary`, asset catalog colors with dark variant)
@@ -419,21 +339,19 @@ Skip step 4 if steps 1-3 reveal the code is correct.
    - `colorScheme` environment not tested in previews
 
 7. **Test Quality & Coverage**
-   Uses Batch 1 findings as context to prioritize.
+   Uses Batch 1 findings as context to prioritize. Identify the project's actual test framework (XCTest or Swift Testing's `@Test`/`#expect`) from its existing test files and phrase findings/examples in that idiom — don't assume XCTest.
    Focus areas:
 
    **Coverage gaps:**
    - Missing test files for critical modules, untested edge cases, tests that only cover happy paths
    - Areas with high complexity (identified by agents 1-5) but no tests
    - Remediation changes from agents 1-6 that lack corresponding test coverage
-   - **Platform coverage in tests**: tests only run on one platform when the app supports multiple — verify `XCTest` targets include all supported platforms in their `destinations`
+   - **Platform coverage in tests**: tests only run on one platform when the app supports multiple — verify test targets include all supported platforms in their `destinations`
 
    **Swift-specific test gaps:**
-   - Missing `Codable` round-trip tests (encode → decode → equality) for all model types
    - Missing view model state transition tests (initial → action → expected state)
    - Missing `@Published` / `@Observable` property change sequence tests
    - Missing `XCUITest` for critical navigation flows and platform-specific interactions
-   - Missing preview coverage: all views should have `#Preview` for each platform × Dark Mode × the Dynamic Type test matrix (`.large`, `.xxxLarge`, `.accessibility5`). Previews with only the default size ship blind to accessibility layout bugs
    - Missing error path tests for network failures, decode failures, and permission denials
    - **Missing `testModelContainerSchemaIsValid()` test** when `@Model` classes are present — every project using SwiftData should construct an in-memory `ModelContainer` with ALL model types in a unit test. This catches missing inverse relationships before they reach production (the actual error message gives no hint which relationship is broken). Required pattern:
      ```swift
@@ -450,15 +368,15 @@ Skip step 4 if steps 1-3 reveal the code is correct.
 
    **Vacuous tests (tests that don't actually test anything):**
    - Tests that assert on mocked return values instead of real behavior (testing the mock, not the code)
-   - Tests that only check truthiness (`XCTAssertNotNil(result)`) when they should verify specific values or shapes
+   - Tests that only check truthiness (`XCTAssertNotNil(result)` / `#expect(result != nil)`) when they should verify specific values or shapes
    - Tests with assertions that can never fail (e.g., asserting a hardcoded value equals itself)
-   - `XCTAssertTrue(true)` or `XCTAssert(result != nil)` when the function always returns non-nil
+   - `XCTAssertTrue(true)` / `#expect(true)`, or an assertion of non-nil-ness when the function under test always returns non-nil
    - Tests that re-implement the logic under test instead of importing the real function
 
    **Weak test patterns:**
    - Tests that verify internal state instead of observable behavior
    - Tests where all assertions pass even if the function under test returns nil — verify by mentally substituting a no-op
-   - Async tests using `sleep()` instead of `XCTestExpectation` or `async` test methods
+   - Async tests using `sleep()` instead of an `async` test method
    - Tests with shared mutable state between cases (`setUp` that doesn't reset, class-level properties)
    - Missing negative cases (invalid input, error paths, boundary conditions)
    - UI tests that depend on text content instead of accessibility identifiers
@@ -758,11 +676,9 @@ Phases 4, 4b, 5, 5d, 6, and 7 are the **shared `better-*` pipeline** this comman
 
 ### Swift Code Review Checklist
 
-The checklist Phase 4b reviews the remediation diff against:
+The checklist Phase 4b reviews the remediation diff against. Not needed for `--scan-only`, which stops before Phase 3/4 — read it at Phase 4b:
 
-```
-!`cat ~/.claude/lib/swift-review-checklist.md`
-```
+!read lib/swift-review-checklist.md
 
 ### Version Bump Procedure
 
@@ -845,6 +761,8 @@ Your job is to fix weak/vacuous tests and write missing tests that verify REAL B
 
 ## Rules for writing good Swift tests
 
+Match the project's existing test framework (XCTest or Swift Testing's `@Test`/`#expect`) — don't introduce a second framework alongside it.
+
 1. **Test observable behavior, not implementation.** Assert on return values, published property changes, and view model state transitions — never on internal variable names or private method invocations.
 
 2. **Every assertion must be falsifiable.** For each assertion you write, mentally substitute a broken implementation (returns nil, returns wrong value, throws instead of succeeding). If your assertion would still pass, it's vacuous — rewrite it.
@@ -857,7 +775,7 @@ Your job is to fix weak/vacuous tests and write missing tests that verify REAL B
    - Invalid input that should error
    - Boundary values (0, -1, empty string vs nil, empty array vs nil)
 
-5. **Use concrete expected values.** `XCTAssertEqual(result, "expected string")` not `XCTAssertNotNil(result)`. `XCTAssertEqual(viewModel.items.count, 3)` not `XCTAssertTrue(viewModel.items.count > 0)`.
+5. **Use concrete expected values.** `XCTAssertEqual(result, "expected string")` / `#expect(result == "expected string")` — not `XCTAssertNotNil(result)` / `#expect(result != nil)`.
 
 6. **One behavior per test.** Each test method tests exactly one scenario. The test name describes the scenario: `test_fetchUsers_whenNetworkFails_setsErrorState()`.
 
@@ -865,9 +783,9 @@ Your job is to fix weak/vacuous tests and write missing tests that verify REAL B
 
 8. **Multi-platform test coverage.** Ensure test targets include destinations for ALL platforms in {PLATFORMS}. If a feature is platform-specific (#if os(iOS)), the test should also be platform-specific.
 
-9. **Async testing.** Use Swift's async test support (`func testX() async throws {}`) instead of `XCTestExpectation` + `waitForExpectations` for new tests. Use `@MainActor` on tests that verify main-actor-isolated state.
+9. **Async testing.** Write `async throws` test functions and `await` the code under test directly, instead of `XCTestExpectation` + `waitForExpectations` or manual `sleep()` — both XCTest and Swift Testing support `async` test methods natively. Use `@MainActor` on tests that verify main-actor-isolated state.
 
-10. **Codable round-trip tests.** For every Codable model, test encode → decode → equality. Test with missing optional fields and extra unknown fields.
+10. **Codable round-trip tests.** For Codable models this change touches (not every model in the codebase), test encode → decode → equality, including missing optional fields and extra unknown fields.
 
 ## Task list
 
