@@ -358,8 +358,12 @@ describe('review-loop parse contracts', () => {
     // silence the hard-error short-circuit and downgrade the aggregate from dirty
     // to inconclusive, past do:pr's "abort before creating the PR on dirty" gate.
     assert.match(wrapper, /\*\*except a hard-error\*\* \(`cli-error`\/`broken-build`\/`test-failed`\/`rejected`\), which keeps its own status/);
-    // The consumers that restate the aggregate rule must agree with it.
-    assert.match(readCommand('release.md'), /or `push-failed`, a pass whose fix commits never reached the remote/);
+    // /do:release must consume the aggregate, not restate it: its old copy of the
+    // `inconclusive` rule had no ~opt exception and refused merges the wrapper cleared.
+    const release = fs.readFileSync(path.join(__dirname, '..', 'commands', 'do', 'release.md'), 'utf8');
+    assert.match(release, /Merge only when the wrapper's `\{OVERALL_STATUS\}` is `clean`, or `partial` with an explicit/);
+    assert.doesNotMatch(release, /\*\*at least one\*\* executed pass was inconclusive/);
+    assert.doesNotMatch(release, /Copilot-specific checks|Awaiting requested review/);
   });
 
   it('scopes the push assertion to the pass and never pushes by fan-out', () => {
@@ -614,7 +618,7 @@ describe('review-loop parse contracts', () => {
     assert.match(enhance, /`cursor` \| Verified tool-free fallback/);
 
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'rpr.md', 'config.md']) {
-      const body = readCommand(name);
+      const body = readCommandDocs(name, { eager: true });
       assert.match(
         body,
         /`cursor`/,
@@ -666,7 +670,7 @@ describe('review-loop parse contracts', () => {
     assert.match(wrapper, /non-optional\*\* reviewer's review was inconclusive[\s\S]*no-verdict/);
 
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'rpr.md', 'config.md']) {
-      const body = readCommand(name);
+      const body = readCommandDocs(name, { eager: true });
       assert.match(
         body,
         /`opencode`/,
@@ -744,7 +748,7 @@ describe('review-loop parse contracts', () => {
     );
 
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'better-swift.md', 'rpr.md', 'config.md', 'depfree.md']) {
-      const body = readCommand(name);
+      const body = readCommandDocs(name, { eager: true });
       assert.match(body, /cmd\[<invocation>\]/, `${name} must document and accept cmd[<invocation>]`);
     }
 
@@ -787,7 +791,9 @@ describe('review-loop parse contracts', () => {
     // each name the local-agent loop's actual per-agent dispatch line inline
     // (not via a shared partial), so `cmd` has to be added to each one by hand.
     assert.match(readCommand('pr.md'), /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode` \| `cmd` → local-agent headless review loop/);
-    assert.match(readCommand('release.md'), /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode` \| `cmd` → local-agent headless review loop/);
+    // release.md has no inline dispatch list — its exclusion-gated `!read`s (asserted
+    // above) are the dispatch — but it must forward the saved per-agent models.
+    assert.match(readCommand('release.md'), /hand off to the \*\*multi-reviewer loop\*\*[^\n]*`\{REVIEW_MODELS\}`/);
     assert.match(readCommand('review.md'), /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode` \| `cmd` \| `ollama` — invoke the local-agent review loop/);
     assert.match(readCommand('pr.md'), /`ollama\[…\]`, `cmd\[<invocation>\]`\. These review the working tree locally/);
 
@@ -817,7 +823,7 @@ describe('review-loop parse contracts', () => {
     // Scope it to the --review-with bullet: config.md's --trusted-authors bullet
     // legitimately splits on every comma (logins can't contain one).
     for (const name of ['pr.md', 'release.md', 'rpr.md', 'review.md', 'config.md', 'depfree.md', 'better-swift.md']) {
-      const bullet = readCommand(name)
+      const bullet = readCommandDocs(name, { eager: true })
         .split('\n')
         .find((line) => /^\s*-\s.*`--review-with/.test(line) && /[Ss]plit on `,`/.test(line));
       assert.ok(bullet, `${name} must carry a --review-with bullet that states how the list is split`);
@@ -837,7 +843,7 @@ describe('review-loop parse contracts', () => {
     assert.match(loop, /so `agy`\/`grok`\/`pi`\/`cursor`\/`opencode`\/`cmd` always run review-only/);
     for (const name of ['pr.md', 'release.md', 'review.md', 'rpr.md', 'depfree.md', 'better-swift.md']) {
       assert.match(
-        readCommand(name),
+        readCommandDocs(name, { eager: true }),
         /only.{0,40}`codex`|`codex` pass/,
         `${name} must say --reviewer-applies reaches only the codex pass`,
       );
@@ -899,7 +905,7 @@ describe('review-loop parse contracts', () => {
     // command's prose but unrecognized by the shared dispatch/validation libs
     // would make `--review-with pi` silently unsupported there.
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'better-swift.md', 'rpr.md', 'config.md']) {
-      const body = readCommand(name);
+      const body = readCommandDocs(name, { eager: true });
       assert.match(
         body,
         /`pi`/,
@@ -1009,5 +1015,26 @@ describe('review-loop parse contracts', () => {
         `${name} must point at the shared empty-array-expansion partial rather than restating it`,
       );
     }
+  });
+});
+
+describe('shared review-flag parse partial (#311)', () => {
+  const raw = (name) => _read('commands', 'do', name);
+
+  it('pr.md and release.md include lib/review-flags.md instead of restating the grammar', () => {
+    for (const name of ['pr.md', 'release.md']) {
+      const body = raw(name);
+      assert.match(body, /!`cat ~\/\.claude\/lib\/review-flags\.md`/, `${name} must include the shared partial`);
+      assert.doesNotMatch(body, /Accepted values per slot/, `${name} must not carry its own copy of the --review-with grammar`);
+    }
+    assert.match(readLib('review-flags.md'), /Accepted values per slot/);
+  });
+
+  it('forwards saved review-models and names the full --review-iterations scope', () => {
+    const flags = readLib('review-flags.md');
+    assert.match(flags, /`\{REVIEW_MODELS\}` — the `EFFECTIVE_REVIEW_MODELS` map/);
+    assert.match(flags, /`\{REVIEW_ITERATIONS\}` \(the copilot \/ `@<login>` cycle cap\)/);
+    assert.match(raw('pr.md'), /and `\{REVIEW_MODELS\}` \(the saved per-agent default models/);
+    assert.doesNotMatch(raw('release.md'), /copilot iteration cap/);
   });
 });
