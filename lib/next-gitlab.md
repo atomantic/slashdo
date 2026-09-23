@@ -3,9 +3,8 @@
 GitLab-only behavior for `/do:next`, read once — near the top of Phase 1 issues mode
 setup, before the first plain `glab api` call — so every later phase can just point
 back here by heading instead of re-explaining `glab`/`jq` quirks inline. **A GitHub
-run never reads this file.** If a run reaches Phase 6 without having read it yet (a
-PLAN.md-mode GitLab run never enters issues mode), `next.md` reads it again there —
-this is the same file, so nothing here is missed.
+run never reads this file.** The Phase 6 merge (for GitHub and GitLab) is in
+[merge-gate.md](./merge-gate.md).
 
 Field names and shapes differ from GitHub's REST/GraphQL payloads, not just the
 binary — every jq expression in `next.md` and this file is built from this mapping:
@@ -121,17 +120,3 @@ copy of the "what":
 - **The read-back** (`glab issue view "$ISSUE_NUM" --output json --jq
   '[.assignees[].username] | join(",")'`) is why the assignee marker is close to,
   but not, a compare-and-swap — both hosts allow multiple assignees.
-
-## Phase 6 — merge
-
-```bash
-git push && glab ci status --wait && glab mr merge <num> --yes --remove-source-branch
-```
-
-**Why `glab ci status --wait` and not `--auto-merge`:** `--auto-merge` sets
-merge-when-pipeline-succeeds server-side and returns while the MR is still
-`opened`, so Phase 7's state read-back would never see `merged` and the worktree,
-claim branch, issue, and `in-progress` label would be stranded on every run. Waiting
-first makes one read authoritative. `glab mr merge` takes no method flag (unlike
-`gh pr merge`) — it uses the project's default merge method, so `next.md`'s "Resolve
-the merge method" step is GitHub-only.
