@@ -124,8 +124,10 @@ SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_D
 A shell variable does not survive from one tool call to the next, so re-deriving
 `SPOOL_DIR` later gives a different directory and the filer agents find nothing.
 
-Each agent writes its findings to `$SPOOL_DIR/<category>.md` — one file per agent,
-so no two agents write the same path. An agent that spools across more than one call
+Each finding goes to `$SPOOL_DIR/<category>.md`, named for **that finding's own
+category** — one file per category, owned by the one agent covering that category, so
+no two agents write the same path. An agent covering several categories writes each
+finding to its own category's file, so later phases find it by its index line's category. An agent that spools across more than one call
 **appends** after the first write (`cat >` once, `cat >>` thereafter); a second `cat >`
 silently truncates the findings already spooled. Each finding is a **ready-to-file issue body**
 under a finding marker and a `title:` line, not raw notes. **No line inside a body may
