@@ -215,8 +215,8 @@ release with no prepared release commit.
 2. Run `git diff {target}...{source}` to get the list of changed files
 3. For every changed file:
    a. Read the entire file using the Read tool (not just diff hunks)
-   b. Check it against the tiered checklist below (always check Tiers 1+4; check Tiers 2-3 when relevance filters match). Load the checklist now, the first time this step runs:
-      !read lib/code-review-checklist.md
+   b. Review it under the review preferences. Load them now, the first time this step runs:
+      !read lib/review-preferences.md
    c. For each finding, quote the specific code line and explain why it's a problem
 4. After reviewing all files, verify: does the aggregate change set deliver what the release claims?
 5. Print a review summary table (see do:review for format)
@@ -229,7 +229,7 @@ If the diff touches more than 15 files, delegate later batches to a subagent to 
 
 Verification — self-check before proceeding (no user prompt needed):
 - [ ] Read every changed file in full (not just diffs)
-- [ ] Checked each file against the relevant checklist tiers
+- [ ] Every finding names a concrete wrong outcome, not a style preference
 - [ ] Quoted specific code for each finding
 - [ ] Printed a review summary table with findings
 

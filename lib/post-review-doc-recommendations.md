@@ -17,7 +17,7 @@ A finding earns an encoding action when ALL of the following apply:
 A finding is **NOT** an encoding candidate when:
 - It's a one-off bug (typo, missed null check, copy-paste error, isolated logic mistake).
 - The fix itself made the convention discoverable (e.g., introducing a `request()` helper that callers will find by grep).
-- It's a generic best practice already covered by the review checklists.
+- It's a generic best practice.
 
 ## Action selection — prefer code over docs
 

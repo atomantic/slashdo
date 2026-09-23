@@ -40,8 +40,7 @@ all changed files, but reports only findings within its own mandate.
 | Structural Ambition | `--strict` is active **and** the diff contains non-trivial refactoring, new abstraction layers, large-file growth, conditional sprawl, boundary leakage, or duplicated canonical logic | `--strict` is absent, or strict mode is active only for a small isolated behavior/doc fix |
 
 These signals are prompts for judgment, not an exhaustive classifier. Select more
-than one lens when the change crosses concerns, and do not select a lens solely
-because its category appears in the generic review checklist.
+than one lens when the change crosses concerns.
 
 ## Dispatch record
 
