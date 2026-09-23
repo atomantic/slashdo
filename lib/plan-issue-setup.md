@@ -1,22 +1,28 @@
-# Issue-Mode Setup
+# Tracker Issue Setup
 
-Shared setup for any command that resolves **`ISSUE_MODE=true`** (via `--issues`, a
-saved `issues=true` default, or an auto-redirect) before it touches the GitHub/GitLab
-tracker: consuming the VCS host and `LABEL_SEP`, creating labels lazily, and the
+Shared setup for any command that reads or files GitHub/GitLab tracker issues:
+consuming the VCS host and `LABEL_SEP`, creating labels lazily, and the
 `model:`/`effort:` dispatch-hint vocabulary. **This file assumes the caller's own
-argument parsing already resolved `ISSUE_MODE` and `PLAN_LABEL`** — every command
-that supports `--issues` defines that flag (and `--issues-label`) itself in its own
-Parse Arguments (see e.g. `/do:next`'s), so this file does not redefine them.
+argument parsing already resolved `PLAN_LABEL`** (`--issues-label`, saved
+`issues-label`, default `plan`), so this file does not redefine it.
 
 Dedup, `--scan-only` recording, severity/category labels, and bulk spool filing are
 **not** here — see [plan-issue-filing.md](./plan-issue-filing.md), which any command
 that actually files a finding as an issue should also read.
 
-## Setup — only when `ISSUE_MODE` is true
+## Setup
 
 1. **Host state.** This partial requires `CLI_TOOL` and `LABEL_SEP` from the caller.
    If either is unset, read and run [vcs-host.md](./vcs-host.md) before continuing;
-   do not infer either value from ambient credentials or re-derive them here.
+   do not infer either value from ambient credentials or re-derive them here. If the
+   confirmed `CLI_TOOL` cannot reach this repo's issues (not authenticated, or the
+   issues feature is disabled), there is no tracker. Never fall back to a local
+   backlog file.
+
+   **No tracker:** a backlog command (`/do:replan`, `/do:next`, `/do:plan-task`)
+   aborts in pre-flight. A command that only defers findings continues, files
+   nothing, and lists each deferral (title, one-line rationale, file:line) in its
+   final report under "Deferred (not filed — no issue tracker available)".
 2. **Label creation — lazy, not upfront.** Do **not** create `PLAN_LABEL` (or any
    other label) here as a preamble step — a pure consume run (e.g. `/do:next`
    picking work to claim) that files nothing this run never needs to write to the

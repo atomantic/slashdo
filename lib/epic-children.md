@@ -1,4 +1,4 @@
-# Epic Children & Lifecycle (issue mode)
+# Epic Children & Lifecycle
 
 Shared logic for resolving an **epic** (umbrella issue) to its child issues,
 deciding when the epic is complete, and closing it. Consumed by `/do:next`

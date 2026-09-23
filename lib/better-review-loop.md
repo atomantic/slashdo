@@ -1,10 +1,3 @@
-## Better pipeline — Review Loop (Phase 6, GitHub only)
-
-### Inputs
-
-In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines:
-`{REVIEW_LOOP_EXTRA_INSTRUCTION}` and `{REVIEW_STATUS_EXTRA}`.
-
 ## Phase 6: Review Loop (GitHub only)
 
 **GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this entire phase AND the Phase 6.3 merge.** There is no default reviewer. Leave every PR open, print the PR URLs and summary (Review column `none — left open`), and proceed to Phase 7.

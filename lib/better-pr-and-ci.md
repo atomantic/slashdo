@@ -1,22 +1,10 @@
-## Better pipeline — Per-Category PR Creation & CI Verification (Phases 5 / 5d)
-
-### Inputs
-
-In addition to `{BRANCH_PREFIX}`, `{VERIFY_SCOPE_SUFFIX}`, and `{SIMPLIFY_ONLY}`,
-which every `better-*` command defines: `{PIPELINE_TITLE}`, `{CATEGORY_SLUGS}`,
-`{CATEGORY_SLUG_RULE}`, `{COMMIT_PREFIX_RULE}`, `{MULTI_CATEGORY_FILE_EXAMPLE}`,
-`{COMPAT_SHIM}`, `{COMPAT_HOST}`, `{VERSION_BUMP_SECTION}`,
-`{PR_BODY_SUMMARY_EXTRA}`, `{PR_BODY_EXTRA_SECTIONS}`, and
-`{CI_FAILURE_CAUSES_EXTRA}` (bullets for the column-0 list it lands in). The
-substitution rules in `~/.claude/lib/better-verification.md` apply.
-
 ## Phase 5: Per-Category PR Creation
 
 One branch and one PR per category, never one combined PR.
 
 ### 5a: Build the Category Branches
 
-Each category in `FILE_OWNER_MAP` (as updated in Phase 4c.3) gets a branch `{BRANCH_PREFIX}/{CATEGORY_SLUG}`, cut from `{DEFAULT_BRANCH}` and carrying exactly that category's files from `{BRANCH_PREFIX}/{DATE}` (added, modified, and deleted), in one commit `{prefix}: {category summary}`.
+Each category in `FILE_OWNER_MAP` (as updated in Phase 4c) gets a branch `{BRANCH_PREFIX}/{CATEGORY_SLUG}`, cut from `{DEFAULT_BRANCH}` and carrying exactly that category's files from `{BRANCH_PREFIX}/{DATE}` (added, modified, and deleted), in one commit `{prefix}: {category summary}`.
 - Slugs: {CATEGORY_SLUGS}
 - {CATEGORY_SLUG_RULE}
 - {COMMIT_PREFIX_RULE}
@@ -24,7 +12,7 @@ Each category in `FILE_OWNER_MAP` (as updated in Phase 4c.3) gets a branch `{BRA
 Invariants:
 - **File isolation** — every file is in exactly one branch. A file with changes from several categories (e.g., {MULTI_CATEGORY_FILE_EXAMPLE}) ships whole in the category that owns it in `FILE_OWNER_MAP`; file-level changes are never split across PRs.
 - **Independent build** — each branch passes `{BUILD_CMD}`{VERIFY_SCOPE_SUFFIX} on its own. When a branch references something another branch creates, add a backward-compatible {COMPAT_SHIM} in the original {COMPAT_HOST} (in the branch that owns it), move the new file to the branch that needs it, or revert the import to the original path.
-- **Push** — push with upstream tracking. On failure, `git pull --rebase --autostash` and retry once; if it still fails, report that branch as blocked and continue with the others.
+- **Push** — push with upstream tracking; a branch that still fails after one `git pull --rebase --autostash` retry is reported blocked while the others continue.
 - **`CREATED_CATEGORY_SLUGS`** — a space-delimited list of every slug whose branch was created and pushed. Phase 7 deletes only from this set, and only after merge is confirmed.
 
 ### 5b: Version Bump
@@ -52,15 +40,10 @@ Each PR targets `{DEFAULT_BRANCH}` from its category branch (`gh pr create` on G
 
 {PR_BODY_EXTRA_SECTIONS}
 ### Merge Order
-{dependency info if applicable, e.g., "Depends on Security PR for shared helper exports" or "Independent — can be merged in any order"}
+{e.g. "Depends on the Security PR" or "Independent"}
 ```
 
-When `SIMPLIFY_ONLY=true`, each body also carries:
-
-```markdown
-Behavior-preserving refactor: no observable change to return values, side
-effects, errors, or public API. Verified by `{TEST_CMD}` passing unmodified.
-```
+When `SIMPLIFY_ONLY=true`, add the simplify contract's Phase 5 body line.
 
 Record each category's PR number and URL.
 

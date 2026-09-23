@@ -167,9 +167,12 @@ as a positional argument (never via stdin) and prints the improved draft to stdo
 <!-- /if:teams -->
 | `codex` | `codex ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} --sandbox read-only -a never exec "$ENHANCE_PROMPT"` |
 | `agy` | Tool-free fallback as defined in `lib/local-agent-agy.md` (with `--disable-slash-commands`); unavailable if it is not enforceable |
-| `grok` | Verified tool-free fallback; unavailable if tools/MCP/hooks cannot be isolated |
-| `pi` | Pi enhancement runner below; enforced tool-free with model and thinking pins |
-| `cursor` | Verified tool-free fallback; unavailable if tools/MCP/hooks cannot be isolated |
+| `grok` | `grok -p "$ENHANCE_PROMPT" ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"}` — prompt-only, no tools granted (unverified against a live install — check `grok --help` for the print-mode flag first; a wrong flag fails fast as a `no-op`, not a hang) |
+| `pi` | Pi enhancement runner below |
+| `cursor` | Binary probe + invocation in `lib/local-agent-cursor.md`, substituting `$ENHANCE_PROMPT` for `$LOCAL_PROMPT` (this loop has no `{REVIEW_EFFORT}`, so skip that recipe's effort-fold step) |
+
+Only when `{AGENT}` is `cursor`:
+!read lib/local-agent-cursor.md
 
 **Required isolation:** follow the enforced reviewer permissions and tool-free
 fallback in `lib/local-agent-review-loop.md` before any invocation, including an
@@ -226,11 +229,33 @@ one's output):
                           git ls-files --others --exclude-standard | sort | git hash-object --stdin-paths
                         } | git hash-object --stdin)
    MTIME_STAMP="$(mktemp -t enhance-stamp.XXXXXX)"   # for the cheap gitignored-file check in step 4
+   # A planted hook or core.hooksPath/fsmonitor/pager/alias in .git/config runs on
+   # the next git command — including the git read-tree/git restore in step 4 that
+   # is supposed to undo it — so it is captured here and restored FIRST, same
+   # guard and same reason as lib/local-agent-review-loop.md's git-metadata check:
+   # enhance runs agy/grok/cursor/pi with real tools against repo content, and a
+   # reviewer that plants a hook or sets core.hooksPath gets code execution on the
+   # orchestrator's very next git commit/push.
+   GIT_COMMON="$(git rev-parse --git-common-dir)"
+   GIT_META_BAK="$(mktemp -d -t enhance-gitmeta.XXXXXX)"
+   cp "$GIT_COMMON/config" "$GIT_META_BAK/config"
+   { tar -cf "$GIT_META_BAK/hooks.tar" -C "$GIT_COMMON" hooks 2>/dev/null; } || : > "$GIT_META_BAK/hooks.tar"
+   git_meta_hash() {
+     { cat "$GIT_COMMON/config"
+       # Symlinked hooks execute too: hash the link target path, not its content.
+       # Also fingerprint the mode bits — flipping a non-executable hook file to
+       # executable (no content or path change) is what makes it run, so a
+       # content-only hash would miss exactly the edit that matters.
+       find "$GIT_COMMON/hooks" \( -type f -o -type l \) 2>/dev/null | sort | while IFS= read -r f; do printf '%s\n' "$f"; readlink "$f" 2>/dev/null || cat "$f"; stat -f '%Lp' "$f" 2>/dev/null || stat -c '%a' "$f" 2>/dev/null; done
+     } | git hash-object --stdin
+   }
+   GIT_META_BASELINE=$(git_meta_hash)
    ```
-   Together these four artifacts capture the caller's ENTIRE pre-pass state — HEAD
+   Together these five artifacts capture the caller's ENTIRE pre-pass state — HEAD
    (`HEAD_BASELINE`), index (`INDEX_TREE`), tracked worktree content (`SNAPSHOT`),
-   and untracked content (`UNTRACKED_TAR`) — which is what lets step 4 restore
-   wholesale instead of surgically enumerating what a misbehaving agent touched.
+   untracked content (`UNTRACKED_TAR`), and git metadata (`GIT_META_BAK` — `.git/config`
+   plus hooks) — which is what lets step 4 restore wholesale instead of surgically
+   enumerating what a misbehaving agent touched.
 
 3. **Invoke** per the table above.
 <!-- if:teams -->
@@ -271,18 +296,38 @@ one's output):
      then read `EXIT_CODE=$(cat "$DONE_FILE")` and `$OUTPUT=$(cat "$LOG_FILE")`.
 
 4. **Verify the read-only contract, then parse the output.** After the enforced isolation preflight, independently recompute `git status --porcelain`, `git rev-parse
-   HEAD`, `git diff HEAD | git hash-object --stdin`, and the untracked-files hash
-   (same pipeline as `UNTRACKED_BASELINE`) and compare all four against the step-2
-   baselines (the diff hash catches an edit to a *tracked* file that was already
-   dirty at baseline; the untracked hash catches an edit to — or deletion of — a
-   pre-existing *untracked* file, which neither of the other checks can see). **If any
-   changed**, the enhancer implemented instead of enhancing — restore the ENTIRE
-   pre-pass state wholesale from the step-2 artifacts. Do NOT try to surgically
-   enumerate what the agent touched (per-path choreography here has repeatedly proven
-   to have destructive edge cases: a mixed reset unstages the caller's staged work
-   and then porcelain-line comparison misclassifies `M ` as ` M`; `git checkout --`
-   no-ops on staged-but-uncommitted content; stash misses untracked files). The
-   wholesale sequence, run from the repo root, restores every layer exactly:
+   HEAD`, `git diff HEAD | git hash-object --stdin`, the untracked-files hash
+   (same pipeline as `UNTRACKED_BASELINE`), and `git_meta_hash` (vs `GIT_META_BASELINE`
+   — `.git/config` plus hooks) and compare all five against the step-2 baselines (the
+   diff hash catches an edit to a *tracked* file that was already dirty at baseline;
+   the untracked hash catches an edit to — or deletion of — a pre-existing *untracked*
+   file, which neither of the other checks can see).
+
+   **Compare the git-metadata hash first and, on a mismatch, restore it before
+   running any other git command** — a planted hook or `core.pager`/`core.fsmonitor`
+   setting would otherwise fire inside the very `git read-tree`/`git restore` below
+   that is supposed to undo it. **Re-derive and check both paths before the `rm`** —
+   step 4 may run in a separate shell from step 2, so an unbound `GIT_COMMON` turns
+   the restore into `rm -rf /hooks`:
+   ```bash
+   GIT_COMMON="${GIT_COMMON:-$(git rev-parse --git-common-dir)}"
+   if [ -z "$GIT_COMMON" ] || [ -z "$GIT_META_BAK" ] || [ ! -d "$GIT_META_BAK" ]; then
+     echo "cannot restore git metadata: snapshot paths unavailable" >&2
+     exit 1   # never continue on a tree you failed to restore
+   fi
+   cp "$GIT_META_BAK/config" "$GIT_COMMON/config"
+   rm -rf "$GIT_COMMON/hooks"
+   [ -s "$GIT_META_BAK/hooks.tar" ] && tar -xf "$GIT_META_BAK/hooks.tar" -C "$GIT_COMMON"
+   ```
+
+   **If any of the five changed**, the enhancer implemented instead of enhancing —
+   restore the ENTIRE pre-pass state wholesale from the step-2 artifacts. Do NOT try
+   to surgically enumerate what the agent touched (per-path choreography here has
+   repeatedly proven to have destructive edge cases: a mixed reset unstages the
+   caller's staged work and then porcelain-line comparison misclassifies `M ` as
+   ` M`; `git checkout --` no-ops on staged-but-uncommitted content; stash misses
+   untracked files). The wholesale sequence, run from the repo root (git metadata is
+   restored above, first; then):
    1. **HEAD** — if it moved: `git reset --soft "$HEAD_BASELINE"` (`--soft` touches
       neither index nor worktree; never `--mixed`, which would wipe the caller's
       staged state, and never `--hard`, which would destroy uncommitted work swept
@@ -297,7 +342,7 @@ one's output):
       --others --exclude-standard`) that is NOT listed in `$UNTRACKED_TAR` (files
       the agent created), then `tar -xf "$UNTRACKED_TAR"` to restore baseline
       untracked content (files the agent edited or deleted).
-   Re-run the four comparisons afterward to confirm the tree is back at baseline;
+   Re-run all five comparisons afterward to confirm the tree is back at baseline;
    surface a loud warning if not (never silently continue on a still-dirty tree).
 
    **Gitignored files are outside the snapshot/restore guarantee** — hashing or
@@ -347,10 +392,19 @@ gate — a human still approves the final text.
 
 ### Pi enhancement runner
 
-`pi` accepts the same model brackets and per-entry suffixes as local reviewers.
-Resolve its binary with `command -v pi`. Follow the Pi tool-free isolation
-recipe in `lib/local-agent-review-loop.md`, supplying `$ENHANCE_PROMPT` instead
-of `$LOCAL_PROMPT` and the entry's model and `--thinking` effort. Include all
-source material in the prompt; do not grant tools or project trust to enhance a
-draft. Verify the installed binary supports every isolation flag or report the
-entry unavailable. Its stdout is the enhanced draft.
+`pi` accepts the same `[<model>]` bracket as every other entry here, stripped by
+the caller into this entry's `{ENH_MODEL}`. Unlike `--review-with`, plan-task's
+`--enhance-with` parser has no `~opt`/`~max`/`~effort` suffix grammar (see the
+caller's Parse Arguments) — there is no `{REVIEW_EFFORT}` to pass, so no
+`--thinking` flag is included. Resolve its binary with `command -v pi`. `{INVOCATION}`
+(same tool-free isolation flags as the Pi reviewer recipe in
+`lib/local-agent-review-loop.md`, minus the effort flag):
+
+```bash
+pi --print --no-approve --no-tools --no-builtin-tools --no-extensions --no-skills --no-prompt-templates --no-themes --no-context-files --no-session ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} -- "$ENHANCE_PROMPT"
+```
+
+Include all source material in the prompt; do not grant tools or project trust
+to enhance a draft. Verify the installed binary supports every isolation flag
+above (`pi --help`) or report the entry unavailable. Its stdout is the enhanced
+draft.

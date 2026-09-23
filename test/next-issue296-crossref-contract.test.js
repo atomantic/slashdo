@@ -69,31 +69,28 @@ describe('#296 — Phase 7 parent-epic re-evaluation', () => {
   });
 });
 
-describe('#296 — next-swarm.md A1 delegates to Phase 1 issues mode by name, not "below"', () => {
-  it('does not claim Phase 1 — issues mode is "below" (next-swarm.md is a separate file)', () => {
-    assert.doesNotMatch(swarm, /Phase 1 — issues mode\*\* below/);
+describe('#296 — next-swarm.md A1 delegates to Phase 1 by name, not "below"', () => {
+  it('does not claim the Phase 1 issue queue is "below" (next-swarm.md is a separate file)', () => {
+    assert.doesNotMatch(swarm, /Phase 1 — issue queue\*\* below/);
   });
 
-  it('explicitly runs next.md\'s Phase 1 — issues mode section to build the queue', () => {
+  it('explicitly runs next.md\'s Phase 1 — issue queue section to build the queue', () => {
     assert.match(
       swarm,
-      /A1 — Run `next\.md`'s `### Phase 1 — issues mode` to build the eligible queue/,
+      /A1 — Build the eligible queue by running `next\.md`'s `### Phase 1 — issue queue`/,
     );
     assert.match(swarm, /it applies every skip and filter\. Do not invent a second picker/);
+    assert.match(next, /^### Phase 1 — issue queue$/m);
   });
 });
 
 describe('#296 — next-swarm.md jq probe no longer contradicts "reuse Phase 1 verbatim"', () => {
-  it('scopes the explicit jq probe to the A1e path that needs it', () => {
+  it('routes every swarm path, A1e included, through the shared Pre-flight jq probe', () => {
     assert.doesNotMatch(swarm, /Swarm replaces Phases 1–7, so the\n\s*Phase 1 probe never runs/);
     assert.match(
       swarm,
-      /On GitLab, probe for `jq` after resolving issue mode\.\*\* A1e bypasses Phase 1's setup/,
+      /Swarm replaces Phases 1–7 but not that Pre-flight: the \*\*A1e\*\* \(explicit-list\) path never runs Phase 1/,
     );
-  });
-
-  it('still probes for jq on GitLab before the swarm batch is built', () => {
-    assert.match(swarm, /if \[ "\$CLI_TOOL" = glab \]; then\n\s*command -v jq >\/dev\/null 2>&1 \|\| \{/);
   });
 });
 
