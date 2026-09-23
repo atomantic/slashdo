@@ -29,6 +29,10 @@ Thanks for considering a contribution. slashdo is a small, actively-maintained p
    - `npm test` — run the full test suite
 5. If your change affects behavior covered by an existing test, update it; if it adds new behavior worth locking in, add a test under `test/`.
 
+## Releasing
+
+`/do:release` opens a PR from `main` into `release` (generic promotion; there is no temporary release-prep branch). Merging that PR triggers `.github/workflows/release.yml`, which publishes the package to npm and creates the `v{version}` tag and GitHub Release (`softprops/action-gh-release`, `target_commitish: github.sha`). `/do:release` must wait for that tag and release rather than create them itself.
+
 ## Changelog
 
 **Do not write a changelog entry in your PR.** There is no unreleased/staging changelog file in this repo — no `NEXT.md`, no `## Unreleased` section. **The commit history is the changelog.**
