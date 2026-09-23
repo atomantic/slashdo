@@ -1,14 +1,13 @@
 # Plan-Item ID Format
 
-PLAN.md items use stable slug IDs so concurrent agents can claim distinct
-work by encoding the slug in their worktree branch name
-(`cos/<task>/<plan-id>/<agent>`). Other agents detect the claim by scanning
-git branches and open PRs for the slug.
+PLAN.md items use stable slug IDs so concurrent agents can claim distinct work.
+Claims encode the slug in a branch name — for example, `/do:next` uses
+`next/<slug>`, while other commands may use different branch-name patterns.
+Other agents detect the claim by scanning git branches and open PRs for the slug.
 
-The 50-char slug cap (see step 3 below) is sized for the branch-name
-budget: many CI/hosting integrations cap full ref names at ~244 chars, so
-keeping each segment tight leaves room for the `cos/<task>/<plan-id>/<agent>`
-wrapper and any `-2`/`-3` collision suffix without bumping that limit.
+The 50-char slug cap (see step 3 below) balances readability with branch-name
+constraints: many CI/hosting integrations cap full ref names at ~244 chars, so
+keeping slugs modest leaves room for any wrapper prefix and collision suffixes.
 
 ## Shape
 
@@ -100,9 +99,8 @@ later edited, the slug stays the same. This is intentional: the slug
 identifies the work item across PR titles, branches, commit messages, and
 changelog entries.
 
-The ID-assignment pass (run by `/do:replan` and the PortOS `do-replan`
-scheduled task) only assigns slugs to items that are missing one — it
-never rewrites an existing slug.
+The ID-assignment pass (run by `/do:replan`) only assigns slugs to items
+that are missing one — it never rewrites an existing slug.
 
 ### Strict positional pattern for the Phase 0 collision scan
 
