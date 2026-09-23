@@ -59,50 +59,11 @@ When `SWARM` is true the swarm flow **replaces Phases 1–7**: it claims and shi
 
 ## Phase 1: Pick
 
-> **Pre-flight — `/do:next` requires GitHub (`gh`) or GitLab (`glab`), in BOTH modes.** It ships via `/do:pr`, which supports both hosts (including GitHub Enterprise and self-managed GitLab — both CLIs resolve a custom host from the `origin` remote), so even PLAN.md mode (git-only claiming) needs a working `gh`/`glab`. **Detect the host up front and abort if the matching CLI isn't authenticated — before claiming or implementing anything.** Same rule as `/do:pr`'s "Detect VCS Host" step (the `origin` remote is authoritative for the host; `auth status` only says which CLI is *usable*):
-> ```bash
-> # Derive VCS_HOST/CLI_TOOL from the origin remote. A GitLab remote may be
-> # gitlab.com, gitlab.<company>.com, or any self-managed hostname that happens to
-> # contain "gitlab" — matching on that substring (rather than an exact-domain list)
-> # is what lets this work on a custom/Enterprise instance with zero configuration.
-> ORIGIN_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"
-> if printf '%s' "$ORIGIN_HOST" | grep -qi gitlab; then
->   VCS_HOST=gitlab; CLI_TOOL=glab
-> elif [ -n "$ORIGIN_HOST" ]; then
->   VCS_HOST=github; CLI_TOOL=gh
-> else
->   # No origin remote at all — fall back to whichever CLI is authenticated.
->   if gh auth status --active >/dev/null 2>&1; then VCS_HOST=github; CLI_TOOL=gh
->   elif glab auth status >/dev/null 2>&1; then VCS_HOST=gitlab; CLI_TOOL=glab
->   else
->     echo "/do:next needs an authenticated gh (GitHub) or glab (GitLab). Run 'gh auth login' or 'glab auth login'."; exit 1
->   fi
-> fi
-> # `--active` scopes the gh check to the active account. A bare `gh auth status` exits
-> # non-zero if ANY configured account has a stale/invalid token — even when the active
-> # account is authenticated fine — which would fail this pre-flight on every run.
-> if [ "$CLI_TOOL" = gh ]; then
->   gh auth status --active >/dev/null 2>&1 && gh repo view >/dev/null 2>&1 || {
->     echo "/do:next detected a GitHub repo ($ORIGIN_HOST) but gh is not authenticated to it. Run 'gh auth login'."; exit 1; }
->   # Seed the API host for the `gh api` calls below. `gh api` ignores the repo remote
->   # and defaults to github.com, so on a GHES repo it must be passed --hostname "$GH_HOST".
->   # `gh issue`/`gh pr` calls resolve the host on their own. This is only the seed — the
->   # shared snippet at the end of this section finishes the derivation.
->   GH_HOST="$ORIGIN_HOST"
-> else
->   glab auth status >/dev/null 2>&1 || {
->     echo "/do:next detected a GitLab repo ($ORIGIN_HOST) but glab is not authenticated to it. Run 'glab auth login'."; exit 1; }
->   # No GH_HOST-style workaround needed here: unlike `gh api`, `glab api` and
->   # `glab issue`/`glab mr` already resolve the host from the repo's origin remote.
->   # NOTE: the jq probe is deliberately NOT here. Piping `glab api` to the standalone
->   # jq binary makes jq a dependency of the ISSUE-MODE GitLab path only — PLAN.md mode
->   # never calls plain `glab api`, so probing in this shared pre-flight would abort a
->   # GitLab + PLAN.md repo that has always worked without jq. The probe lives at the
->   # top of "Phase 1 — issues mode" instead.
-> fi
-> [ "$CLI_TOOL" = glab ] && LABEL_SEP="::" || LABEL_SEP=":"
-> ```
-> Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`. Carry `CLI_TOOL`/`VCS_HOST` (and `GH_HOST` on GitHub) through every later phase — [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md)'s own setup step reuses `CLI_TOOL` rather than re-detecting it. **Also carry `LABEL_SEP`** — GitLab's `::` gives `model`/`effort`/`priority`/etc. native scoped-label rendering and mutual exclusivity (see [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) "Setup"); every prefixed-label match below (the priority sort key, the dispatch-hint filter) is built from it, not a hardcoded `:` — a hardcoded colon would silently stop matching `priority::5` / `model::light` on a GitLab tracker.
+**Pre-flight — `/do:next` requires GitHub (`gh`) or GitLab (`glab`), in BOTH modes.** It ships via `/do:pr`, which supports both hosts (including GitHub Enterprise and self-managed GitLab — both CLIs resolve a custom host from the `origin` remote), so even PLAN.md mode (git-only claiming) needs a working `gh`/`glab`. **Detect the host up front and abort if the matching CLI isn't authenticated — before claiming or implementing anything.** Same rule as `/do:pr`'s "Detect VCS Host" step and every other command that resolves `VCS_HOST`/`CLI_TOOL` (the `origin` remote is authoritative for the host; `auth status` only says which CLI is *usable*):
+
+!read lib/vcs-host.md
+
+Carry `CLI_TOOL`/`VCS_HOST` (and `GH_HOST` on GitHub) and `LABEL_SEP` through every later phase — [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md)'s own setup step reuses `CLI_TOOL` rather than re-detecting it, and every prefixed-label match below (the priority sort key, the dispatch-hint filter) is built from `LABEL_SEP`, not a hardcoded `:` — a hardcoded colon would silently stop matching `priority::5` / `model::light` on a GitLab tracker.
 
 Build the in-flight set (identical in both modes):
 
@@ -117,10 +78,6 @@ fi
 ```
 
 For every ref, split on `/` and collect each segment — that's the raw in-flight set.
-
-**GitHub only — finish the `GH_HOST` derivation with the shared snippet below.** `$ORIGIN_HOST` already is its first step, so seed `GH_HOST` with it and continue from the fallbacks, then run the per-host auth precheck before any `gh api` call.
-
-!`cat ~/.claude/lib/gh-host.md`
 
 ### Phase 1 — PLAN.md mode (default)
 
@@ -147,19 +104,23 @@ Run the shared issue-mode setup — it reuses the `CLI_TOOL` the Pre-flight dete
 
 > **Issue mode works on GitHub or GitLab.** The claim (Phase 2) uses the tracker's **assignee** field as the cross-machine marker on either host — GitHub via `gh issue edit --add-assignee`/`--remove-assignee`, GitLab via `glab issue update --assignee "+<user>"`/`--assignee "-<user>"` (the `+`/`-` prefix adds/removes one assignee without clobbering others, which the race read-back depends on). Every `gh` call in this phase has a `glab` equivalent selected by `$CLI_TOOL`. One structural gap: GitHub has a native project-scoped **sub-issues** API for epic/child resolution (step 3); GitLab's analog (group-level Epics) is a different, tier-gated feature, so on GitLab the **convention fallback** (body task-lists + `Part of #N` back-references, per [lib/epic-children.md](../../lib/epic-children.md)) is the primary path.
 
-**GitLab only — probe for `jq` before the first plain `glab api` call.** `glab api` has no
-built-in `--jq` flag (only `glab issue`/`glab mr` do), so this phase and Phase 2 pipe it to
-the **standalone** jq binary. Probe here, not in the shared Pre-flight: PLAN.md mode never
-calls plain `glab api`, so a pre-flight probe would abort a GitLab + PLAN.md repo that never needed jq.
+**GitLab only — read `lib/next-gitlab.md` now, before the first plain `glab api` call.**
+It carries every GitLab-specific step this phase and the rest of `/do:next` need from
+here on — the `jq` probe (`glab api` has no built-in `--jq` flag, only `glab issue`/
+`glab mr` do, so this phase and Phase 2 pipe it to the standalone binary), the
+collaborator fetch, the candidate-list walk, the Phase 2 claim, and the Phase 6 merge
+— keyed by heading, plus the GitHub↔GitLab field-mapping table the jq expressions
+below build on. Probe for `jq` now, not in the shared Pre-flight: PLAN.md mode never
+calls plain `glab api`, so a pre-flight probe would abort a GitLab + PLAN.md repo that
+never needed jq. A GitHub run never reads this file.
 
-```bash
-if [ "$CLI_TOOL" = glab ]; then
-  command -v jq >/dev/null 2>&1 || {
-    echo "/do:next's GitLab issue mode pipes 'glab api' output through jq, which is not installed. Install it (e.g. 'brew install jq' or 'apt-get install jq') and re-run."; exit 1; }
-fi
-```
+!read lib/next-gitlab.md
 
 **Collaborator set — fetch once when `COLLAB_MODE` is on and `SELF_MODE` is not.** If `SELF_MODE` is on, skip this fetch (self is a subset). If `COLLAB_MODE` is off, skip it and do **not** apply `--trusted-authors` as a standalone gate. **Fail closed:** a failed call or an empty login set (the owner should always be present) aborts — never treat "couldn't list them" as any-author, and never fall open to `--trusted-authors` alone. Compare issue authors to the **trusted claim pool** (collaborators UNION `--trusted-authors`) **case-insensitively**.
+
+**GitHub only — finish the `GH_HOST` derivation with the shared snippet below** before the `gh api` call in the block: `$ORIGIN_HOST` already is its first step, so seed `GH_HOST` with it and continue from the fallbacks, then run the per-host auth precheck. (GitLab: skip — `glab api` resolves the host from the remote itself.)
+
+!`cat ~/.claude/lib/gh-host.md`
 
 ```bash
 # owner/repo from origin for abort messages (gh/glab fill :owner/:repo themselves)
@@ -173,9 +134,9 @@ if [ "$COLLAB_MODE" = "true" ] && [ "$SELF_MODE" != "true" ]; then
     COLLAB_LOGINS="$(gh api --hostname "$GH_HOST" repos/:owner/:repo/collaborators --paginate -q '.[].login')" || {
       echo "Could not list collaborators for $OWNER_REPO — /do:next --collaborators cannot be enforced. Aborting."; exit 1; }
   else
-    # Two-step capture — never pipeline-fail-open. A failed `glab api` piped to jq
-    # would report jq's status, and jq exits 0 on empty input, which would look like
-    # "no collaborators" instead of "could not list them."
+    # GitLab — lib/next-gitlab.md § Phase 1 — collaborator fetch has the two-step
+    # `glab api`/jq -e capture (never pipeline-fail-open) that sets these same two
+    # variables the same fail-closed way.
     MEMBERS_JSON="$(glab api --paginate "projects/:id/members/all")" || {
       echo "Could not list collaborators for $OWNER_REPO — /do:next --collaborators cannot be enforced. Aborting."; exit 1; }
     COLLAB_LOGINS="$(printf '%s' "$MEMBERS_JSON" | jq -r '.[] | select(.access_level >= 30) | .username')" || {
@@ -231,36 +192,7 @@ Then:
    ```
    The `--limit 500` avoids truncating the queue before the client-side sort (`gh issue list` defaults to 30). A repo with >500 open candidates is pathologically large (`/do:replan --issues` to prune, or `--issues-label` to scope); note the cap rather than silently dropping the overflow. **Priority is advisory ordering, not a gate** — an unprioritized issue is still claimable.
 
-   **On GitLab, the same walk uses `glab issue list` — field names and shapes differ, not just the binary.** GitLab returns `iid` (not `number`), `labels` as a flat string array (not `.name` objects), `assignees[].username` / `author.username` (not `.login`), `created_at` (not `createdAt`), `description` (not `body`), and `state` of `"opened"`/`"closed"` (not `OPEN`/`CLOSED`) — every jq expression below is adjusted accordingly:
-   ```bash
-   LIST_ARGS=(--output json)
-   [ -n "$LABEL_FILTER" ] && LIST_ARGS+=(--label "$LABEL_FILTER")
-   # glab's --author takes a username. Unlike `gh`, it does not resolve the
-   # GitHub-CLI token `@me` — pass the authenticated login so --self actually
-   # filters (the explicit-#num path below already compares against this same
-   # `glab api user` value).
-   # Resolve the login in TWO steps, never one `glab api user | jq -r .username`
-   # pipeline: the pipeline's exit status is jq's, and `jq -r .username` exits 0 on
-   # empty input, so a failed `glab api user` would leave ME empty. Then GUARD ON
-   # NON-EMPTY separately: `jq -e` only fails on `null`/`false`, and an empty-string
-   # username ({"username":""}) is truthy to jq, so it exits 0 with no login. Either
-   # way an empty ME means `--author ""`, which glab reads as NO author filter — the
-   # --self security gate would silently enumerate and claim other people's issues.
-   # All three checks must pass before the filter is added.
-   if [ "$SELF_MODE" = "true" ]; then
-     ME_JSON="$(glab api user)" || {
-       echo "Could not read the authenticated GitLab user — --self cannot be enforced. Aborting."; exit 1; }
-     ME="$(printf '%s' "$ME_JSON" | jq -er .username)" || {
-       echo "Could not read the authenticated GitLab user — --self cannot be enforced. Aborting."; exit 1; }
-     [ -n "$ME" ] || {
-       echo "GitLab returned an empty username — --self cannot be enforced. Aborting."; exit 1; }
-     LIST_ARGS+=(--author "$ME")
-   fi
-   # Project away `description` (GitLab's body) — steps 3–4 fetch it per candidate.
-   glab issue list "${LIST_ARGS[@]}" --per-page 100 \
-     --jq "sort_by([ (([.labels[] | select(test(\"^priority${LABEL_SEP}[0-9]+\$\")) | ltrimstr(\"priority${LABEL_SEP}\") | tonumber] | min) // infinite), .created_at ]) | .[] | {iid,title,labels,assignees,author,created_at}"
-   ```
-   GitLab's `--per-page` maxes out at 100 with no "give me everything" pagination for a plain open-issue list — same "note the cap" guidance at a lower threshold; `--issues-label` keeps a busy GitLab tracker under it.
+   **On GitLab, the same walk uses `glab issue list` — field names and shapes differ, not just the binary** (see the mapping table in [lib/next-gitlab.md](../../lib/next-gitlab.md), read above). **See that file's "Phase 1 — issues mode: candidate list"** for the equivalent `glab issue list` call — the two-step `ME` resolution (a `--self` run needs the authenticated username, since `glab` doesn't resolve `@me`), the `--per-page 100` cap (lower than `gh`'s 500, same "note the cap" guidance), and the `description`-projected walk.
 
    **Dispatch-hint filter — client-side, in the same list-and-filter program.** When `MODEL_FILTER` / `EFFORT_FILTER` is non-empty, `map(select(…))` the array **before** `sort_by`, one clause per active axis. It cannot go in `LIST_ARGS`: repeated `--label` flags AND together on both hosts — the opposite of the OR this flag means. Build each clause from the **validated enum values only**, where `<axis>` is `model`/`effort`, `V1…Vn` are the requested values with the `none` sentinel removed, and `<SEP>` is `$LABEL_SEP` (`:` on GitHub, `::` on GitLab — an exact-match clause built with a hardcoded `:` never matches a GitLab issue's `model::light`):
    ```
@@ -283,14 +215,8 @@ Then:
                     or ([.labels[].name | select(startswith(\"model${LABEL_SEP}\"))] | length == 0)))
          | map(select(any(.labels[].name; . == \"effort${LABEL_SEP}max\")))
          | sort_by([ (([.labels[].name | select(test(\"^priority${LABEL_SEP}[0-9]+\$\")) | ltrimstr(\"priority${LABEL_SEP}\") | tonumber] | min) // infinite), .createdAt ]) | .[]"
-
-   # GitLab ($LABEL_SEP is "::")
-   glab issue list "${LIST_ARGS[@]}" --output json --per-page 100 \
-     --jq "map(select(any(.labels[]; . == \"model${LABEL_SEP}light\")
-                   or ([.labels[] | select(startswith(\"model${LABEL_SEP}\"))] | length == 0)))
-         | map(select(any(.labels[]; . == \"effort${LABEL_SEP}max\")))
-         | sort_by([ (([.labels[] | select(test(\"^priority${LABEL_SEP}[0-9]+\$\")) | ltrimstr(\"priority${LABEL_SEP}\") | tonumber] | min) // infinite), .created_at ]) | .[] | {iid,title,labels,assignees,author,created_at}"
    ```
+   **GitLab ($LABEL_SEP is `::`)** — the same worked example against `glab issue list`, same two clauses without `.name`: see [lib/next-gitlab.md](../../lib/next-gitlab.md) "Phase 1 — issues mode: candidate list".
    Omit the `map` for an inactive axis entirely rather than emitting `select(true)`. **This filter runs before every other skip**, so an excluded issue is never considered for the parking-label / dependency / epic checks — and exclusion here means "not what you asked for," not "not workable." Report it that way in step 7: if the filter emptied a queue that had eligible work, say which filter did it, **writing the flags space-separated, exactly as they'd be typed** (`no eligible issue matching --model light --effort max — 14 open issues carry no dispatch hint; add `none` to include them`) — comma-joined they'd read as one axis's OR-list.
 2. **Determine in-flight issues.** Issue `N` is in flight if EITHER `issue-N` appears in the raw in-flight set, OR the issue **already has an assignee** (the Phase 2 marker — a local-only branch on a sibling machine is invisible here, but its assignee is not).
 3. **Resolve epics before picking (child-aware).** An epic (umbrella issue) is **not** a single claimable unit — its done-ness depends on its children. For any candidate that is an epic (carries `epic`/a repo umbrella label, has native sub-issues, or whose body — fetched per candidate, see step 4 — task-lists other issues), classify it with the shared epic logic — read it only when a candidate is an epic:
@@ -369,20 +295,10 @@ if [ "$CLI_TOOL" = gh ]; then
   ME="$(gh api --hostname "$GH_HOST" user -q .login)"
   gh issue edit "$ISSUE_NUM" --add-assignee @me
 else
-  # Plain `glab api` has no built-in --jq flag; pipe to the standalone jq binary
-  # (probed at the top of Phase 1 issues mode). Resolve the login in TWO steps, not one
-  # pipeline: a pipeline reports only jq's exit status, and `jq -r .username` exits 0 on
-  # empty input, so a failed `glab api user` would leave ME empty and `--assignee "+"`
-  # would claim nothing while still looking like a successful claim. Chaining with `&&`
-  # (plus `jq -e` and the emptiness guard) fails closed into the abort handler below,
-  # which retracts the remote claim instead of proceeding without a marker. The
-  # `[ -n "$ME" ]` is NOT redundant with `jq -e`: -e only fails on null/false, so an
-  # empty-string username exits 0 and would assign `+` — nobody — while looking like
-  # a successful claim.
-  #
-  # `+` ADDS one assignee without touching whatever's already on the issue. A bare
-  # `--assignee "$ME"` REPLACES the whole assignee list, which would silently
-  # overwrite a sibling who claimed first and defeat the read-back check below.
+  # GitLab — lib/next-gitlab.md § Phase 2 — claim explains why this resolves the
+  # login in two steps (not one `| jq` pipeline) and guards it non-empty before
+  # using `+` to ADD one assignee without touching whatever's already on the issue
+  # (a bare `--assignee "$ME"` would REPLACE the list and defeat the read-back below).
   ME_JSON="$(glab api user)" && ME="$(printf '%s' "$ME_JSON" | jq -er .username)" && [ -n "$ME" ] && glab issue update "$ISSUE_NUM" --assignee "+$ME"
 fi || {
   echo "Could not claim issue #$ISSUE_NUM (missing write access?) — aborting."
@@ -589,12 +505,11 @@ MERGE_METHOD="<resolved method>"
 git push && \
   gh pr checks <num> --required --watch --fail-fast && \
   gh pr merge <num> --"$MERGE_METHOD"
-# GitLab — wait for the pipeline HERE rather than handing the MR to `--auto-merge`:
-# that flag sets merge-when-pipeline-succeeds server-side and returns while the MR is
-# still `opened`, so Phase 7's state read-back below would never see `merged` and the
-# worktree, claim branch, issue, and in-progress label would be stranded on every run.
-git push && glab ci status --wait && glab mr merge <num> --yes --remove-source-branch
 ```
+
+**GitLab — see [lib/next-gitlab.md](../../lib/next-gitlab.md) "Phase 6 — merge"** (read at the top of Phase 1 issues mode, or now if this is a PLAN.md-mode GitLab run — `!read lib/next-gitlab.md` below is the same file, read again for a run that never entered issues mode): `git push && glab ci status --wait && glab mr merge <num> --yes --remove-source-branch`, and why the wait replaces `--auto-merge`.
+
+!read lib/next-gitlab.md
 
 **If `gh pr checks` prints `no required checks reported`**, it still exits non-zero. The gate is vacuously satisfied, so run the merge alone with the resolved method written in literally (e.g. `gh pr merge <num> --squash`); a bare `--"$MERGE_METHOD"` in a fresh Bash call expands to `--` and `gh` refuses it. Checks for a just-pushed SHA can take a few seconds to register, so re-run the watch once before treating "no checks" as vacuous.
 
