@@ -23,6 +23,26 @@ describe('better progressive context', () => {
     }
   });
 
+  it('keeps better-swift a thin caller over the shared pipeline', () => {
+    const entry = read('commands/do/better-swift.md');
+    assert.ok(Buffer.byteLength(entry) <= 10000);
+    assert.doesNotMatch(entry, /!`cat /);
+    assert.doesNotMatch(entry, /^## Phase (?:0|1|2|3|4c)\b/m);
+    for (const phase of ['options', 'discovery', 'audit', 'plan', 'remediation', 'verification', 'test-enhancement', 'pr-and-ci', 'review-loop', 'cleanup']) {
+      assert.match(entry, new RegExp(`!read lib/better-${phase}\\.md`), `missing ${phase} phase route`);
+    }
+    assert.match(entry, /!read lib\/swift-pipeline-inputs\.md/);
+    assert.match(entry, /unsupported by this Swift caller/);
+    const inputs = read('lib/swift-pipeline-inputs.md');
+    assert.match(inputs, /PLATFORMS/);
+    assert.match(inputs, /DEPLOYMENT_TARGETS/);
+    assert.match(inputs, /SWIFT-SPECIFIC GUARDRAILS/);
+    assert.match(inputs, /platform-swiftui/);
+    assert.match(inputs, /!read lib\/swift-gotchas\.md/);
+    const remediation = read('lib/better-remediation.md');
+    assert.match(remediation, /WORKTREE_DIR=\.\.\/\{BRANCH_PREFIX\}-\{DATE\}/);
+    assert.match(read('lib/remediation-agent-template.md'), /\{BRANCH_PREFIX\} audit/);
+  });
   it('ships a compact skill with phase resources and native command read paths', () => {
     const source = read('commands/do/better.md');
     for (const key of ['claude', 'opencode', 'codex', 'antigravity']) {

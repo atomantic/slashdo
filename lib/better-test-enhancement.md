@@ -2,7 +2,7 @@
 
 **GATE: If `SIMPLIFY_ONLY=true`, SKIP this entire phase** (including 4c.3's `FILE_OWNER_MAP` update — the Phase 2 map is final). Report all four test-enhancement stats as `— (skipped: --simplify-only)` in the Phase 7 summary and proceed to Phase 5.
 
-After Phase 4b, act on Agent 8's findings and cover the Phase 3 remediation with tests.
+After Phase 4b, act on the test-audit findings and cover the Phase 3 remediation with tests.
 
 ### 4c.0: Record Start SHA
 
@@ -10,7 +10,7 @@ Before any test commit: `PHASE_4C_START_SHA="$(git -C {WORKTREE_DIR} rev-parse H
 
 ### 4c.1: Test Audit Triage
 
-**In issue mode Agent 8's findings are on disk, not in this context.** The index
+**In issue mode the test-audit findings are on disk, not in this context.** The index
 (`<id> | <SEVERITY> | <category> | <file:line> | <title>`) carries no
 `[VACUOUS]`/`[WEAK]`/`[MISSING]` tag at all — triaging off it is not merely lossy, it
 is impossible. Read `$SPOOL_DIR/tests.md` (the literal path from run state) and triage
@@ -18,7 +18,7 @@ off each finding's full body, populating `{VACUOUS_AND_WEAK_FINDINGS}` /
 `{MISSING_FINDINGS}` from those bodies, never from the index titles. See
 [lib/better-issue-mode.md](./better-issue-mode.md) for the full contract.
 
-Sort Agent 8 (Test Quality & Coverage) findings by tag, in priority order: `[VACUOUS]` (tests that assert nothing real), `[WEAK]` (missing important cases), `[MISSING]` (critical paths with no tests). Then list every file Phase 3 remediated whose changed behavior no existing test covers as `{REMEDIATED_FILES_WITHOUT_TESTS}`.
+Sort the test-audit findings by tag, in priority order: `[VACUOUS]` (tests that assert nothing real), `[WEAK]` (missing important cases), `[MISSING]` (critical paths with no tests). Then list every file Phase 3 remediated whose changed behavior no existing test covers as `{REMEDIATED_FILES_WITHOUT_TESTS}`.
 
 ### 4c.2: Test Enhancement Execution
 
