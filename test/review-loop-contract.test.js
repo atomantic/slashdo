@@ -24,6 +24,19 @@ const LOOPS_WITH_OPTIONAL_ARRAYS = [
   'enhance-loop.md',
 ];
 
+// Per-harness recipes the local-agent core loads with a gated `!read` (#347).
+const LOCAL_AGENT_RECIPES = {
+  claude: 'local-agent-claude.md',
+  agy: 'local-agent-agy.md',
+  cursor: 'local-agent-cursor.md',
+  opencode: 'local-agent-opencode.md',
+  cmd: 'local-agent-cmd.md',
+};
+// The core plus every recipe, for assertions that pin a rule without caring
+// which of the files carries it.
+const readLocalAgent = () => ['local-agent-review-loop.md', ...Object.values(LOCAL_AGENT_RECIPES)]
+  .map(readLib).join('\n\n');
+
 describe('review-loop parse contracts', () => {
   it('keeps current-head protection in the shared GitHub and Copilot path', () => {
     const core = readLib('github-reviewer-loop.md');
@@ -83,9 +96,8 @@ describe('review-loop parse contracts', () => {
   });
 
   it('never grants blanket permissions to feedback or applying reviewers', () => {
-    for (const name of ['local-agent-review-loop.md', 'enhance-loop.md']) {
-      const body = readLib(name);
-      assert.doesNotMatch(body, /--dangerously-skip-permissions|danger-full-access|bypassPermissions|--yolo|--force\b|--sandbox disabled/);
+    for (const [name, body] of [['local-agent loop', readLocalAgent()], ['enhance-loop.md', readLib('enhance-loop.md')]]) {
+      assert.doesNotMatch(body, /--dangerously-skip-permissions|danger-full-access|bypassPermissions|--yolo|--force\b|--sandbox disabled/, name);
       assert.match(body, /--tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep"/);
       assert.match(body, /--strict-mcp-config/);
       assert.match(body, /disableAllHooks/);
@@ -93,11 +105,11 @@ describe('review-loop parse contracts', () => {
     const body = readLib('local-agent-review-loop.md');
     assert.match(body, /sandbox_workspace_write.network_access=false -c features.shell_tool=false/);
     assert.match(body, /Inlining a\s+diff alone is not tool isolation/);
-    assert.match(body, /no per-invocation settings-file selector/);
-    assert.match(body, /"write_file\(\*\)"/);
-    assert.match(body, /"command\(\*\)"/);
-    assert.match(body, /"mcp\(\*\)"/);
     assert.match(body, /required reviewers remain\s+unsatisfied/);
+    // agy has never exposed an isolated-settings selector: no hypothetical JSON
+    // profile or "if a future version…" text for a CLI that does not exist (#347).
+    assert.match(readLib(LOCAL_AGENT_RECIPES.agy), /no per-invocation settings-file selector/);
+    assert.doesNotMatch(readLocalAgent(), /toolPermission|"write_file\(\*\)"|future version/i);
   });
 
   it('lets the host orchestrator select focused review lenses from the diff', () => {
@@ -228,22 +240,25 @@ describe('review-loop parse contracts', () => {
     // agent nobody wrote an arm for must degrade to prompt-advisory effort, not
     // inherit `--effort`. That inheritance is what broke codex and agy.
     const loop = readLib('local-agent-review-loop.md');
-    const preflight = loop.slice(
-      loop.indexOf('# Reasoning effort carrier.'),
-      loop.indexOf('# agy only: pin the review model'),
-    );
-    assert.ok(preflight, 'the effort-carrier pre-flight block must exist');
+    const start = loop.indexOf('# Reasoning effort carrier.');
+    const end = loop.indexOf("Then run the recipe's pre-flight block");
+    assert.ok(start >= 0 && end > start, 'the effort-carrier pre-flight block must exist');
+    const preflight = loop.slice(start, end);
 
     // Per-agent carrier, asserted as a table so a new reviewer adds a row.
     const CARRIERS = [
       ['claude|grok', /claude\|grok\) EFFORT_FLAG=\(--effort "\$REVIEW_EFFORT"\)/],
       ['codex', /codex\)\s+EFFORT_FLAG=\(-c "model_reasoning_effort=\$REVIEW_EFFORT"\)/],
-      ['cursor', /CURSOR_MODEL="\$\{REVIEW_MODEL\}\[effort=\$\{REVIEW_EFFORT\}\]"/],
-      ['agy', /agy\) : ;;/],
+      ['pi', /pi\)\s+EFFORT_FLAG=\(--thinking "\$REVIEW_EFFORT"\)/],
+      ['opencode', /opencode\)\s+EFFORT_FLAG=\(--variant "\$REVIEW_EFFORT"\)/],
     ];
     for (const [agent, re] of CARRIERS) {
       assert.match(preflight, re, `${agent} must get the carrier its CLI accepts`);
     }
+    // agy and cursor fold effort into the model inside their recipes; neither
+    // may inherit an EFFORT_FLAG arm.
+    assert.doesNotMatch(preflight, /^\s*(?:agy|cursor)\)/m);
+    assert.match(readLib(LOCAL_AGENT_RECIPES.cursor), /CURSOR_MODEL="\$\{REVIEW_MODEL\}\[effort=\$\{REVIEW_EFFORT\}\]"/);
 
     // Fail closed: the default is no flag, and the unknown-agent arm guesses nothing.
     assert.match(preflight, /^EFFORT_FLAG=\(\)$/m);
@@ -254,21 +269,17 @@ describe('review-loop parse contracts', () => {
     );
 
     // No invocation may pass a carrier its CLI rejects.
-    for (const agent of ['codex', 'agy', 'cursor']) {
-      const row = loop.split('\n').find((l) => l.startsWith(`| \`${agent}\` |`));
-      assert.ok(row, `${agent} invocation row must exist`);
-      assert.ok(
-        agent === 'codex' || !row.includes('EFFORT_FLAG'),
-        `the ${agent} invocation must not pass EFFORT_FLAG`,
-      );
+    for (const agent of ['agy', 'cursor']) {
+      assert.doesNotMatch(readLib(LOCAL_AGENT_RECIPES[agent]), /EFFORT_FLAG/, `the ${agent} invocation must not pass EFFORT_FLAG`);
     }
 
     // The carrier table is the documented rule, and agy's variant is discovered
     // at run time rather than baked into a level table that would go stale.
-    assert.match(loop, /\*\*Effort carriers\.\*\*/);
-    assert.match(loop, /\| `agy` \| a model \*\*variant\*\* picked from `agy models`/);
-    assert.match(loop, /not from a remembered table/);
-    assert.match(loop, /AGY_MODEL_RESOLVED/, 'the agy choice must persist across loop iterations');
+    assert.match(loop, /Never assume `--effort` is universal/);
+    assert.match(loop, /\| `agy` \| `agy` \| a model \*\*variant\*\* picked from `agy models`/);
+    const agy = readLib(LOCAL_AGENT_RECIPES.agy);
+    assert.match(agy, /not from a remembered table/);
+    assert.match(agy, /AGY_MODEL_RESOLVED/, 'the agy choice must persist across loop iterations');
   });
 
   it("resolves the agy review model against the live roster, not a hardcoded name", () => {
@@ -278,8 +289,7 @@ describe('review-loop parse contracts', () => {
     // ~effort asked for a level -- and the selection step must fall back when the
     // requested name (stale env var, stale saved review-models.agy, typo'd bracket)
     // is absent, rather than handing that reviewer's merge-gate slot a launch failure.
-    const loop = readLib('local-agent-review-loop.md');
-    const block = loop.slice(loop.indexOf('# agy only: pin the review model'), loop.indexOf('### Enforced reviewer permissions'));
+    const block = readLib(LOCAL_AGENT_RECIPES.agy);
     assert.match(block, /if \[ "\$REVIEW_AGENT" = agy \] && \[ -z "\$AGY_MODEL_RESOLVED" \]; then/, 'the roster must be fetched for every agy review, not only when an effort level was requested');
     assert.match(block, /\bagy models\b/);
     assert.match(block, /Validate the requested model first/);
@@ -316,7 +326,7 @@ describe('review-loop parse contracts', () => {
       /\[ "\$AGENT" = agy \] && agy models\b/,
       'the roster probe must only fire for an agy entry, not every agent',
     );
-    assert.match(block, /agy block in `lib\/local-agent-review-loop\.md`/);
+    assert.match(block, /agy recipe in `lib\/local-agent-agy\.md`/);
     assert.match(block, /never a bare base/, 'the pinned default must be a leveled model name');
     assert.match(block, /validate AGY_ENH_MODEL against this; fall back to the newest Flash \(High\)/);
   });
@@ -328,8 +338,8 @@ describe('review-loop parse contracts', () => {
     // skill for $LOCAL_PROMPT, which fans out on its own and reports in its own
     // format, so the loop's FINDING/NO FINDINGS parse had nothing to read and the
     // reviewer's merge-gate slot was filled by a verdict nobody verified.
-    const localAgent = readLib('local-agent-review-loop.md');
-    const inProcess = localAgent.slice(localAgent.indexOf('When `REVIEW_AGENT=claude`: dispatch an in-process sub-agent'));
+    const inProcess = readLib(LOCAL_AGENT_RECIPES.claude);
+    assert.match(inProcess, /<!-- if:teams -->\n### Step 2 under Claude Code: in-process sub-agent/);
     assert.match(inProcess, /\*\*Effort\*\*: there is no in-process analog of `--effort`/);
     assert.match(inProcess, /no reasoning-effort parameter/);
     assert.match(inProcess, /Target reasoning effort level/);
@@ -339,9 +349,9 @@ describe('review-loop parse contracts', () => {
   });
 
   it('keeps Claude Code on the in-process reviewer path with snapshot enforcement', () => {
-    const localAgent = readLib('local-agent-review-loop.md');
+    const localAgent = readLocalAgent();
     const enhance = readLib('enhance-loop.md');
-    const dispatch = localAgent.slice(localAgent.indexOf('When `REVIEW_AGENT=claude`: dispatch an in-process sub-agent'));
+    const dispatch = readLib(LOCAL_AGENT_RECIPES.claude);
 
     assert.match(dispatch, /Step 1 snapshot and Step 3 restore/);
     assert.match(dispatch, /REVIEWER_APPLIES=false/);
@@ -659,7 +669,7 @@ describe('review-loop parse contracts', () => {
     // ${ARR[@]+"${ARR[@]}"} form is safe on bash 3.2, bash 4/5, and zsh alike.
     // Scan by PATTERN, not by a hardcoded array-name list, so a newly introduced
     // optional-argument array is covered the day it lands.
-    for (const name of LOOPS_WITH_OPTIONAL_ARRAYS) {
+    for (const name of [...LOOPS_WITH_OPTIONAL_ARRAYS, ...Object.values(LOCAL_AGENT_RECIPES)]) {
       const body = readLib(name);
       // A bare "${ARR[@]}" — the lookbehind lets through the guarded ${ARR[@]+"${ARR[@]}"},
       // and the negative lookahead exempts the literal name `ARR`, which is the prose
@@ -685,7 +695,7 @@ describe('review-loop parse contracts', () => {
     // (alias `cursor-agent`). The binary is NOT `cursor` and is NOT a bare
     // `agent` without an identity check: Grok Build also installs `agent` on
     // PATH, so treating that as Cursor would silently review with the wrong CLI.
-    const loop = readLib('local-agent-review-loop.md');
+    const loop = readLocalAgent();
     const wrapper = readLib('multi-reviewer-loop.md');
 
     assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode\|cmd\[<invocation>\]`/);
@@ -694,7 +704,7 @@ describe('review-loop parse contracts', () => {
     assert.match(loop, /command -v cursor-agent/);
     assert.match(loop, /Grok Build also installs an `agent` binary/);
     assert.match(loop, /plan\/ask by itself does not enforce/);
-    assert.match(loop, /\| `cursor` \| folded into `--model` as `\[effort=<level>\]`/);
+    assert.match(loop, /\| `cursor` \|[^\n]*\| folded into `--model` as `\[effort=<level>\]`/);
     // ~effort must actually change Cursor inference: fold into --model as
     // [effort=<level>], matching cursor[gpt-5]~effort=max and a saved
     // review-models cursor=gpt-5 plus cursor~effort=max. Never pass --effort.
@@ -741,16 +751,15 @@ describe('review-loop parse contracts', () => {
     // OpenCode has no slashdo-bundled model default because headless admission
     // for the former free-tier default is not verified. Explicit/configured
     // models still normalize friendly aliases, and effort maps to --variant.
-    const loop = readLib('local-agent-review-loop.md');
+    const loop = readLocalAgent();
     const wrapper = readLib('multi-reviewer-loop.md');
 
     assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode\|cmd\[<invocation>\]`/);
     assert.match(loop, /`zen` and `opencode-zen` normalize to `opencode`/);
-    assert.match(loop, /`opencode` → bin `opencode`/);
+    assert.match(loop, /\| `opencode` \| `opencode` \| `--variant <level>` \|/);
     assert.match(loop, /no\s+slashdo override/);
     assert.match(loop, /headless provider admission is not verified/);
     assert.match(loop, /opencode\/muse-spark-1\.3-contributor-free/);
-    assert.match(loop, /\| `opencode` \| `--variant <level>`/);
     assert.match(loop, /opencode\)\s+EFFORT_FLAG=\(--variant "\$REVIEW_EFFORT"\) ;;/);
     assert.match(loop, /opencode run --pure/);
     assert.match(loop, /< \/dev\/null/);
@@ -779,7 +788,7 @@ describe('review-loop parse contracts', () => {
   });
 
   it('maps OpenCode provider admission denial to sanitized no-verdict and preserves reviewer aggregation', () => {
-    const loop = readLib('local-agent-review-loop.md');
+    const loop = readLocalAgent();
     const wrapper = readLib('multi-reviewer-loop.md');
     const swarm = readLib('next-swarm.md');
 
@@ -817,10 +826,10 @@ describe('review-loop parse contracts', () => {
     // carries no model/effort bracket of its own — the invocation IS the
     // identity — and always runs review-only, since an opaque command's
     // isolation can never be verified the way codex's sandbox can.
-    const loop = readLib('local-agent-review-loop.md');
+    const loop = readLocalAgent();
     const wrapper = readLib('multi-reviewer-loop.md');
 
-    assert.match(loop, /### The `cmd` reviewer/);
+    assert.match(loop, /#+ The `cmd` reviewer/);
     assert.match(loop, /The contract is stdin in, stdout out/);
     assert.match(loop, /printf '%s' "\$LOCAL_PROMPT"/);
     assert.match(loop, /always forces review-only/);
@@ -855,13 +864,12 @@ describe('review-loop parse contracts', () => {
     // cmd row must not fold the `printf ... |` into the cell — Step 2 wraps
     // {INVOCATION} in TIMEOUT_CMD, and a pipe inside it leaves the timeout wrapping
     // only the printf while the reviewer command itself runs unbounded.
-    const cmdRow = loop.split('\n').find((line) => /^\| `cmd` \|/.test(line));
-    assert.ok(cmdRow, 'local-agent-review-loop.md must carry a `cmd` invocation-table row');
+    const cmdRecipe = readLib(LOCAL_AGENT_RECIPES.cmd);
     assert.ok(
-      !/printf[^|]*\\\|\s*bash -c/.test(cmdRow),
-      'the cmd invocation row must not fold `printf ... |` into {INVOCATION} — TIMEOUT_CMD would then bound only the printf',
+      !/printf[^\n]*\|\s*bash -c/.test(cmdRecipe),
+      'the cmd recipe must not fold `printf ... |` into {INVOCATION} — TIMEOUT_CMD would then bound only the printf',
     );
-    assert.match(cmdRow, /`bash -c "\$REVIEWER_CMD"` and nothing else/);
+    assert.match(cmdRecipe, /\*\*`\{INVOCATION\}` is `bash -c "\$REVIEWER_CMD"` and nothing else\.\*\*/);
 
     // ...and the RUNNABLE templates must carry the pipe themselves. The prose rule
     // alone is not enough: both blocks say "capture the command exactly as shown",
@@ -939,7 +947,7 @@ describe('review-loop parse contracts', () => {
     // reaches agy/grok/cursor/opencode/cmd sends a user to grant an unsandboxed CLI
     // write access, and the run then trips the "modified the working tree during a
     // review-only pass — reverted" path instead of behaving as documented.
-    assert.match(loop, /so `agy`\/`grok`\/`pi`\/`cursor`\/`opencode`\/`cmd` always run review-only/);
+    assert.match(loop, /so every prompt-driven reviewer always runs review-only/);
     for (const name of ['pr.md', 'release.md', 'review.md', 'rpr.md', 'depfree.md', 'better-swift.md']) {
       assert.match(
         readCommandDocs(name, { eager: true }),
@@ -984,9 +992,8 @@ describe('review-loop parse contracts', () => {
     const loop = readLib('local-agent-review-loop.md');
     const wrapper = readLib('multi-reviewer-loop.md');
 
-    assert.match(loop, /`pi` → bin `pi`/);
+    assert.match(loop, /\| `pi` \| `pi` \| `--thinking <level>` \|/);
     assert.match(loop, /pi\)\s+EFFORT_FLAG=\(--thinking "\$REVIEW_EFFORT"\) ;;/);
-    assert.match(loop, /\| `pi` \| `--thinking <level>`/);
     assert.match(loop, /pi --print --no-approve --no-tools/);
     assert.match(loop, /never enable reviewer-applies for Pi/);
 
@@ -1158,5 +1165,43 @@ describe('shared review-flag parse partial (#311)', () => {
 
   it('review.md forwards {REVIEW_MODELS} to the multi-reviewer wrapper (#332)', () => {
     assert.match(raw('review.md'), /`\{REVIEW_MODELS\}` — the saved per-agent default models/);
+  });
+});
+
+describe('local-agent loop loads only the launched harness recipe (#347)', () => {
+  const core = readLib('local-agent-review-loop.md');
+
+  it('gates each per-harness recipe behind its own agent', () => {
+    for (const [agent, file] of Object.entries(LOCAL_AGENT_RECIPES)) {
+      assert.match(
+        core,
+        new RegExp(`^Only when \`\\{REVIEW_AGENT\\}\` is \`${agent}\`:\\n!read lib/${file.replace('.', '\\.')}$`, 'm'),
+        `${file} must be a column-0 !read gated on ${agent} alone`,
+      );
+      assert.equal(core.split(`!read lib/${file}`).length, 2, `${file} must be read exactly once`);
+    }
+    // The curl installer ships every recipe.
+    for (const script of ['install.sh', 'uninstall.sh']) {
+      for (const file of Object.values(LOCAL_AGENT_RECIPES)) {
+        assert.match(_read(script), new RegExp(`\\b${file.replace('.md', '')}\\b`), `${script} must list ${file}`);
+      }
+    }
+  });
+
+  it('keeps harness-specific recipes out of the core every run pays for', () => {
+    assert.ok(Buffer.byteLength(core, 'utf8') <= 40000, 'the core must stay well under the old 75 KB');
+    for (const marker of [/agy models 2>/, /CURSOR_MODEL/, /OPENCODE_ADMISSION_DENIED=/, /prepare_claude_review_input/, /Why stdin/]) {
+      assert.doesNotMatch(core, marker, `${marker} belongs in its harness recipe`);
+    }
+    // Two named classes replace the per-slug enumerations; the usage line is the one list.
+    const lists = core.match(/`?\b(?:claude|codex|agy|grok|pi|cursor|opencode|cmd)\b`?(?:\s*[/,|]\s*`?\b(?:claude|codex|agy|grok|pi|cursor|opencode|cmd)\b`?){3,}/g) || [];
+    assert.equal(lists.length, 1, `the core re-enumerates the reviewer slugs: ${lists.join(' | ')}`);
+    assert.match(core, /\*\*Prompt-driven\*\* — every other reviewer/);
+  });
+
+  it('drops maintainer notes and citations that bundle libraries the loop never runs', () => {
+    const all = readLocalAgent();
+    assert.doesNotMatch(all, /keep the two in sync|Same split as/);
+    assert.doesNotMatch(all, /`lib\/(?:enhance-loop|ollama-review-loop|multi-reviewer-loop|review-config-defaults)\.md`|\]\(\.\/(?:enhance-loop|ollama-review-loop|multi-reviewer-loop)\.md\)/);
   });
 });
