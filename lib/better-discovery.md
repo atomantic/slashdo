@@ -18,48 +18,29 @@ Resolve `VCS_HOST` and `CLI_TOOL` here, before any phase reaches for a forge CLI
 !read lib/gh-host.md
 
 ### 0b: Project Type Detection
-Check for project manifests to determine the tech stack:
-- `package.json` → Node.js (check for `next`, `react`, `vue`, `express`, etc.)
-- `Cargo.toml` → Rust
-- `pyproject.toml` / `requirements.txt` → Python
-- `go.mod` → Go
-- `pom.xml` / `build.gradle` → Java/Kotlin
-- `Gemfile` → Ruby
-- `*.csproj` / `*.sln` → .NET
+Detect the project's primary manifest and record its ecosystem as
+`PROJECT_TYPE`.
 
-Record the detected stack as `PROJECT_TYPE` for agent context.
+From that same manifest, resolve **version ownership** for Phase 5b's version
+bump (`lib/better-pr-and-ci.md`): if the manifest declares a version field,
+record `HAS_VERSION_BUMP=true` and `VERSION_BUMP_CMD` as the ecosystem
+(`npm`/`cargo`/`python`/`java`/`ruby`/`dotnet`). Record `HAS_VERSION_BUMP=false`
+for Go (which versions by VCS tag, not an in-repo file), for any manifest with
+no discoverable version field, or when no manifest exists — a project with no
+version convention of its own must not be handed an invented one. Phase 5b
+skips its version-bump step entirely when `HAS_VERSION_BUMP=false`, and
+otherwise dispatches on `VERSION_BUMP_CMD` through the calling command's
+`Version Bump Procedure` section.
 
-Additionally, resolve **version ownership** for Phase 5b's version bump
-(`lib/better-pr-and-ci.md`) — whether this run may bump the project's version
-at all, and how:
-- `package.json` with a `version` field → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=npm`
-- `Cargo.toml` with a `[package] version` → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=cargo`
-- `pyproject.toml` with a `[project] version` or `[tool.poetry] version` → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=python`
-- `pom.xml` with a `<version>`, or `build.gradle`/`build.gradle.kts` with a `version =` → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=java`
-- A gemspec (a `VERSION` constant in `lib/**/version.rb` it reads, or an inline `spec.version = "..."`) → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=ruby`
-- `*.csproj` with a `<Version>` element → `HAS_VERSION_BUMP=true`, `VERSION_BUMP_CMD=dotnet`
-- Go (`go.mod`), or any manifest above detected with no discoverable version field, or no manifest at all → `HAS_VERSION_BUMP=false`. Go modules version by VCS tag rather than an in-repo file, and a project with no version convention of its own must not be handed an invented one.
-
-Record both. Phase 5b skips its version-bump step entirely when
-`HAS_VERSION_BUMP=false`, and otherwise dispatches on `VERSION_BUMP_CMD`
-through the calling command's `Version Bump Procedure` section.
-
-Additionally, detect whether the project ships a user-facing UI:
-- Web frontend dependencies (`react`, `vue`, `svelte`, `next`, `nuxt`, `astro`, `angular`, `solid-js`) or UI source files (`*.html`, `*.css`/`*.scss`, JSX/TSX, `*.vue`, `*.svelte`)
-- Desktop shells (Electron, Tauri) or mobile UI code (React Native, Flutter)
-- Server-rendered templates (ERB, Jinja, Blade, Razor, Go templates) that emit HTML
-
-Record `HAS_UI=true`/`false` — this gates the `ux` audit scope (Phase 1) and its category downstream.
+Also record `HAS_UI=true`/`false` — whether the project ships a user-facing UI
+(web, desktop, or mobile frontend code, or server-rendered HTML templates).
+This gates the `ux` audit scope (Phase 1) and its category downstream.
 
 ### 0c: Build & Test Command Detection
-Derive build and test commands from the project type:
-- Node.js: check `package.json` scripts for `build`, `test`, `typecheck`, `lint`
-- Rust: `cargo build`, `cargo test`
-- Python: `pytest`, `python -m pytest`
-- Go: `go build ./...`, `go test ./...`
-- If ambiguous, check project conventions already in context for documented commands
-
-Record as `BUILD_CMD` and `TEST_CMD`.
+Prefer commands the project already documents (manifest scripts, CI config,
+README/CONTRIBUTING.md); fall back to the ecosystem's conventional build/test
+invocation only when none are documented. Record as `BUILD_CMD` and
+`TEST_CMD`.
 
 ### 0d: State Snapshot
 - Record `REPO_DIR` via `git rev-parse --show-toplevel`

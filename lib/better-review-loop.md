@@ -5,14 +5,10 @@ The shared per-PR review-and-merge loop for every `better-*` audit pipeline.
 
 ### Inputs
 
-In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines and
-`~/.claude/lib/better-verification.md` documents:
-
-- `{REVIEW_LOOP_EXTRA_INSTRUCTION}` — an extra paragraph handed to every review
-  sub-agent, or empty. A multi-platform pipeline uses it to require that each
-  fix still compiles everywhere.
-- `{REVIEW_STATUS_EXTRA}` — extra line(s) for the interactive review-status
-  prompt, or empty (e.g. "\n\nAll PRs verified on: {PLATFORMS}").
+In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines:
+`{REVIEW_LOOP_EXTRA_INSTRUCTION}` and `{REVIEW_STATUS_EXTRA}`. What each one
+means and where its value comes from is documented once, in CONTRIBUTING.md's
+"Shared `better-*` pipeline placeholders".
 ## Phase 6: Review Loop (GitHub only)
 
 **GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this entire phase AND the Phase 6.4 merge.** There is no default reviewer. Leave every PR open for manual review, print the PR URLs and summary (mark the Review column `none — left open`), then proceed to Phase 7 cleanup. PRs are merged only after a clean review loop, which requires an explicit `--review-with`.
