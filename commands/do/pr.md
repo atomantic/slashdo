@@ -47,8 +47,10 @@ Print: `PR flow: {current_branch} → {default_branch}`
 
 ## Commit and Push
 
-- Commit all changes to the current branch
-- Keep commit message concise and follow `lib/commit-conventions.md`
+- Commit all changes to the current branch, following these conventions:
+
+!`cat ~/.claude/lib/commit-conventions.md`
+
 - **Sync the branch onto the latest `origin/{default_branch}` first.** Reviewers diff the branch against `{REVIEW_BASE}` (`git diff {REVIEW_BASE}...HEAD`) anchored on the merge-base; an un-rebased branch makes them flag unrelated changes that landed on the default branch since it was cut:
   - `git fetch origin {default_branch}:{default_branch}` to fast-forward the **local** `{default_branch}` ref (a plain `git fetch origin {default_branch}` only moves the remote-tracking ref, which the reviewers don't diff against). **In a linked worktree it can still fail** — `fatal: refusing to fetch into branch 'refs/heads/{default_branch}' checked out at …` means the *parent* repo holds it, the normal state when `/do:next` or a claim flow invoked `/do:pr`. That is not a divergence: fall back to `git fetch origin {default_branch}` and `git rebase origin/{default_branch}`, and have the reviewers diff `origin/{default_branch}...HEAD`. **Record the resolved base as `{REVIEW_BASE}`** — `{default_branch}` normally, `origin/{default_branch}` on this fallback — and pass it to the review loops as their `{BASE_BRANCH}` input; that is the only name they read. If your local `{default_branch}` has diverged from origin and cannot fast-forward (unusual), surface that and stop rather than forcing it.
   - `git rebase {default_branch}` to replay this branch's commits on top.

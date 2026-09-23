@@ -75,7 +75,7 @@ Before committing, ensure the fork is up to date with upstream:
 
 1. **If on the fork's default branch, create a feature branch first:**
    - Check if `{CURRENT_BRANCH}` equals `{FORK_DEFAULT_BRANCH}`
-   - If so, create a new feature branch: `git checkout -b fork/fix-upstream` or similar
+   - If so, create a feature branch named for the change (e.g. `git checkout -b fix/<short-description>`) so the PR doesn't tie up the fork's default branch
    - Update `{CURRENT_BRANCH}` to the new branch name and print the new flow
 
 2. **Identify changes to commit**:
@@ -83,11 +83,9 @@ Before committing, ensure the fork is up to date with upstream:
    - If there are no changes, inform the user and stop
    - Do NOT use `git add -A` or `git add .` — add specific files by name
 
-3. **Commit**:
-   - Write a clear, concise commit message describing the changes
-   - Use conventional commit prefixes per `lib/commit-conventions.md`
-   - Do NOT include Co-Authored-By or generated-by annotations
-   - Do NOT bump version or update changelog — upstream controls those
+3. **Commit** following these conventions (and write no changelog entry — upstream controls that):
+
+!`cat ~/.claude/lib/commit-conventions.md`
 
 4. **Push to fork**:
    ```bash
@@ -110,7 +108,7 @@ Fork PRs go to upstream maintainers who can't easily ask for changes — getting
    b. Check it against the tiered checklist below (always check Tiers 1+4; check Tiers 2-3 when relevance filters match)
    c. For each finding, quote the specific code line and explain why it's a problem
 4. After reviewing all files, verify: does the code actually deliver what the commits claim?
-5. Print a review summary table (see lib/code-review-checklist.md for guidance)
+5. Print a review summary table: | finding | file | line | severity | fixable |
 6. **Worthiness check**: Classify all findings before acting on them:
    - **Fix and recommit** any finding that touches correctness, security, logic, data integrity, or API contracts
    - **Note but don't block** on pure style nitpicks, naming preferences, or "consider..." suggestions — if ALL findings are this type, proceed without fixing and mention them briefly in the PR description

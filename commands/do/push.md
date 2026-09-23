@@ -34,21 +34,21 @@ Commit and push all work from this session, updating documentation as needed.
 3. **Update project documentation and task tracking per this project's own conventions**:
    - Check the target repo's `CLAUDE.md` / `AGENT.md` (or `AGENTS.md`), if present, for documentation conventions it states (e.g. "keep the README command table in sync," "update docs/ARCHITECTURE.md when adding a module") and follow them.
    - If the project tracks tasks somewhere — a `PLAN.md`, a `TODO.md`, a roadmap doc, an issue tracker — and the work you just did completes an item there, mark it done **the way that tracker already marks things done**: flip the checkbox, strike it, delete the line, close the issue. Copy the surrounding entries' convention; don't impose one.
-   - Where the project uses slashdo's `[plan-id]` slug convention, **preserve the slug** on any line you touch — referencing a finished item's slug in the commit message (e.g. `feat([slug]): …`) keeps the work grep-able across the changelog, branches, and PR titles.
+   - Where the project uses slashdo's `[plan-id]` slug convention, preserve the `[slug]` on any line you touch.
    - Do not assume PLAN.md or any other specific tracking file must exist — most projects and sessions won't have one. Base what needs updating on the target repo's own AGENT/CLAUDE context and existing files, not on a fixed file-existence check.
 
 4. **Commit and push**:
-   - Stage all changed files, including any changelog or tracking file step 2 or 3 touched
-   - Do NOT use `git add -A` or `git add .` - add specific files by name
-   - Write a clear, concise commit message following `lib/commit-conventions.md`
-   - Do NOT include Co-Authored-By or generated-by annotations
-   - Do NOT bump the version — version bumps only happen during `/do:release`
+   - Stage all changed files by name, including any changelog or tracking file step 2 or 3 touched, and commit following these conventions:
 
-5. **Push the changes**:
-   - Determine if the branch has a configured upstream remote:
-     ```bash
-     BR="$(git branch --show-current)"
-     PUSH_REMOTE="$(git config --get "branch.$BR.remote")"
-     ```
-   - If the branch has no upstream (`PUSH_REMOTE` is empty or `.`): `git push -u origin HEAD`
-   - If the branch has an upstream remote: `git pull --rebase --autostash && git push`
+!`cat ~/.claude/lib/commit-conventions.md`
+
+5. **Push the changes** to the branch's own upstream — never a bare `git push`, which under `push.default=matching` fans out to every same-named branch:
+   ```bash
+   BR="$(git branch --show-current)"
+   PUSH_REMOTE="$(git config --get "branch.$BR.remote")"
+   if [ -z "$PUSH_REMOTE" ] || [ "$PUSH_REMOTE" = "." ]; then
+     git push -u origin HEAD
+   else
+     git pull --rebase --autostash && git push "$PUSH_REMOTE" "HEAD:$(git config --get "branch.$BR.merge")"
+   fi
+   ```
