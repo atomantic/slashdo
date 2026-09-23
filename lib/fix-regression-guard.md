@@ -1,8 +1,6 @@
 # Fix Regression Guard
 
-A review loop catches bugs in the *original* diff. This guard catches bugs in the **fixes you just applied** — *before* you re-review or push them. The recurring failure it prevents: a fix for one finding silently breaks something adjacent, the next review round catches *that*, its fix breaks something else, and the loop spirals into five, six, seven rounds. The fix is the new diff; review it like one.
-
-Run this guard once per iteration, **after applying a round's fixes and before re-review / push** (the inner loops' verify step is the natural home — see `local-agent-review-loop.md` step 4 and `ollama-review-loop.md`). It is cheap: it reads only the fix diff, not the whole change.
+Run this guard once per iteration, after applying a round's fixes and before re-review / push (the inner loops' verify step is the natural home). It reads only the fix diff, not the whole change.
 
 ## Inputs
 
@@ -22,9 +20,6 @@ If either answer is "yes — and it isn't scoped," the fix is itself a finding. 
 
 ## Pin it with a test
 
-When a fix touches state-clearing/scoping logic or a timestamp/side-effect path (the two classes above), add **one focused regression test** that pins the scope: it must *fail* against the unscoped version of the fix and pass against the scoped one — e.g. "restoring check A's severity leaves check B's pin intact," or "a heartbeat with no content change does not bump `updatedAt`." This is the same disposition as a `Missing test` root cause in `per-finding-root-cause.md`, applied to the fix rather than the original bug. Skip only when the area has no test culture or the fix is a pure typo/string change with no behavioral surface.
+When a fix touches state-clearing/scoping logic or a timestamp/side-effect path (the two classes above), add **one focused regression test** that pins the scope: it must *fail* against the unscoped version of the fix and pass against the scoped one — e.g. "restoring check A's severity leaves check B's pin intact," or "a heartbeat with no content change does not bump `updatedAt`." This is the same disposition as a `Missing test` root cause in `review-fix-conventions.md`, applied to the fix rather than the original bug. Skip only when the area has no test culture or the fix is a pure typo/string change with no behavioral surface.
 
-## What this is NOT
-
-- **Not a full re-review of the PR.** The inner loop's own re-review iteration already does that. This guard is scoped to the *fix diff* and to the two high-frequency regression classes above — keep it fast so it runs every round.
-- **Not license to expand scope.** If the guard reveals the fix needs to grow large to be correct, that is a real finding to disposition per `finding-disposition.md` (fix-now if it fits, defer with a rationale if it genuinely can't), not a reason to push the unscoped version.
+This guard is scoped to the fix diff and the two regression classes above — not a full re-review of the PR (the inner loop's own re-review iteration already does that), and not license to expand scope: if it reveals the fix needs to grow large to be correct, that's a real finding to disposition per `finding-disposition.md` (fix-now if it fits, defer with a rationale if it genuinely can't), not a reason to push the unscoped version.

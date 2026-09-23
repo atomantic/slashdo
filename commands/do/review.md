@@ -236,7 +236,7 @@ For each verified finding (local branch mode):
 3. Fix IMPROVEMENT issues too. Per Finding Disposition, defer to PLAN.md only when the fix is genuinely large/architectural or too risky to land in this branch
 4. **Identify the root cause** of why the issue existed (missing lint rule, missing comment at the canonical site, misleading name, API that invites the mistake, etc.) and apply the smallest matching action **in the same change**. Defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
 
-!read lib/per-finding-root-cause.md
+!read lib/review-fix-conventions.md
 
 5. After fixes, run the project's test suite and build command
 6. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
@@ -276,7 +276,7 @@ In `PR_MODE`, follow "Report additions" in `lib/review-pr-mode.md` (already load
 
 After the report is printed and fixes are committed (local branch mode), for each finding pattern likely to recur (fixed or accepted-as-is), apply the **smallest** code-level action that makes the convention self-evident (in-tree comment at the canonical site, a clarifying rename, or a surgical refactor that removes the footgun). CLAUDE.md / AGENTS.md additions are a **fallback** for conventions that can't be expressed locally. Encoded actions land in the same branch as the review fixes. (Root-cause identification already happened per finding, at Fix Issues step 4 above.)
 
-!read lib/post-review-doc-recommendations.md
+!read lib/review-fix-conventions.md
 
 ## PR Comment Policy
 
