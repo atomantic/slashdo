@@ -186,12 +186,12 @@ LIBS=(
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
   gh-host github-reviewer-loop
-  local-agent-review-loop local-agent-agy local-agent-claude local-agent-cmd local-agent-cursor local-agent-opencode
+  local-agent-review-loop local-agent-agy local-agent-claude local-agent-cmd local-agent-cursor local-agent-opencode local-cli-runner
   merge-gate model-tiers multi-reviewer-loop multi-reviewer-parallel next-gitlab next-swarm ollama-review-loop
   plan-issue-setup plan-issue-filing pr-write-access
   rebase-conflict-resolution remediation-agent-template
   release-documented review-agent-selection review-config-defaults review-convergence-gate review-flags
-  review-fix-conventions
+  review-fix-conventions review-fix-tail
   review-pr-mode
   review-preferences
   swift-review-checklist swift-gotchas swift-pipeline-inputs
