@@ -9,37 +9,13 @@ construction.
 ### Inputs
 
 The calling command must have resolved these before reaching Phase 4:
-
-- `{BRANCH_PREFIX}` — the pipeline's branch namespace, without a trailing slash
-  (`better` for `/do:better`, `better-swift` for `/do:better-swift`). The staging
-  branch is `{BRANCH_PREFIX}/{DATE}`.
-- `{PIPELINE_LABEL}` — human name of the run used in commit subjects
-  (`better audit`, `better-swift audit`).
-- `{VERIFY_SCOPE_SUFFIX}` — a prose phrase appended to every build/test
-  instruction to widen its scope, or **empty** for a single-target project. A
-  multi-platform pipeline sets it to ` on ALL supported platforms` (leading
-  space included). The PR/CI partial reads it too, so define it once for the
-  whole run.
-- `{VERIFY_SCOPE_NOTE}` — one extra sentence spelling out that scope
-  requirement, or empty. A multi-platform pipeline names its platform set here
-  (e.g. "This must succeed for every platform in `PLATFORMS`. A fix that works
-  on iOS but breaks macOS is not acceptable.").
-- `{VERIFY_FAILURE_SCOPE}` — how a failure is scoped in the "if the build
-  fails" branch, or **empty** for a single target (e.g. ` on any platform`).
-- `{VERIFY_FAILURE_COMMIT_SLOT}` — the leading slot in the build-failure commit
-  subject, or **empty** (a multi-platform pipeline sets it to `{platform} ` so
-  the failing platform is a required field, not an afterthought).
-- `{VERIFY_STATUS_CLAUSE}` — an extra sentence (trailing space included)
-  appended to the interactive review summary, or empty (e.g. "All {PLATFORMS}
-  platforms build and test successfully. ").
-- `{REVIEW_CHECKLIST}` — the name of the code-review checklist section the
-  calling command defines inline; each pipeline includes a different checklist
-  lib. Step 2 of Phase 4b reviews the diff against that section.
-- `{SIMPLIFY_ONLY}` — `true` only in a refactor-only run that promised identical
-  behavior. Pipelines with no such mode leave it `false`, which makes every
-  clause below gated on it inert.
-- Plus the pipeline's own `{WORKTREE_DIR}`, `{REPO_DIR}`, `{CURRENT_BRANCH}`,
-  `{DEFAULT_BRANCH}`, `{DATE}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
+`{BRANCH_PREFIX}`, `{PIPELINE_LABEL}`, `{VERIFY_SCOPE_SUFFIX}`,
+`{VERIFY_SCOPE_NOTE}`, `{VERIFY_FAILURE_SCOPE}`, `{VERIFY_FAILURE_COMMIT_SLOT}`,
+`{VERIFY_STATUS_CLAUSE}`, `{REVIEW_CHECKLIST}`, `{SIMPLIFY_ONLY}`, plus the
+pipeline's own `{WORKTREE_DIR}`, `{REPO_DIR}`, `{CURRENT_BRANCH}`,
+`{DEFAULT_BRANCH}`, `{DATE}`, `{BUILD_CMD}`, and `{TEST_CMD}`. What each one
+means and where its value comes from is documented once, in CONTRIBUTING.md's
+"Shared `better-*` pipeline placeholders" — not re-explained per partial.
 
 **Substitution rules for every input above, and for the other `better-*`
 partials.**

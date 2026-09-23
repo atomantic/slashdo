@@ -8,36 +8,13 @@ extras, stack-specific CI causes) arrive through the inputs below.
 ### Inputs
 
 In addition to `{BRANCH_PREFIX}`, `{VERIFY_SCOPE_SUFFIX}`, and `{SIMPLIFY_ONLY}`,
-which every `better-*` command defines and `~/.claude/lib/better-verification.md`
-documents:
-
-- `{PIPELINE_TITLE}` — the PR body's heading prefix (`Better Audit`,
-  `Better Swift Audit`).
-- `{CATEGORY_SLUGS}` — the pipeline's branch-slug set, as the prose line step 2
-  prints (e.g. `` `security`, `code-quality`, … ``).
-- `{CATEGORY_SLUG_RULE}` — a mode-dependent narrowing of that slug set, or
-  **empty**. It sits under the slug list in 5a step 2, where branch names are
-  actually chosen.
-- `{COMMIT_PREFIX_RULE}` — a mode-dependent rule about the conventional prefix
-  the per-category commit and its PR title take, or **empty**. It is repeated at
-  5a step 4 and 5c because it governs both.
-- `{MULTI_CATEGORY_FILE_EXAMPLE}` — a representative file from this stack that
-  could pick up changes from two categories, used in the file-isolation rule
-  (e.g. "`server/index.js` with both security and stack-specific changes").
-- `{COMPAT_SHIM}` — the stack's backward-compatible shim for a symbol that moved
-  between branches (`re-export` for JS/TS, `typealias` for Swift).
-- `{COMPAT_HOST}` — what that shim is added to (`module`, `file`).
-- `{VERSION_BUMP_SECTION}` — the name of the section the calling command defines
-  inline that performs the actual bump; the mechanics are stack-specific
-  (`npm version` vs `agvtool`), the surrounding policy is not.
-- `{PR_BODY_SUMMARY_EXTRA}` — extra line(s) for the PR body's Summary section,
-  or empty (e.g. "Platforms verified: {PLATFORMS}").
-- `{PR_BODY_EXTRA_SECTIONS}` — extra `###` section(s) for the PR body, or empty
-  (e.g. a "Platform Impact" section).
-- `{CI_FAILURE_CAUSES_EXTRA}` — extra bullet(s) for the CI failure-cause list, or
-  empty (e.g. a JS-only "missing exports" cause, platform-conditional build
-  failures, code-signing noise). Its placeholder sits six spaces deep inside the
-  lettered sub-list, so every line of the value must carry that indent.
+which every `better-*` command defines: `{PIPELINE_TITLE}`, `{CATEGORY_SLUGS}`,
+`{CATEGORY_SLUG_RULE}`, `{COMMIT_PREFIX_RULE}`, `{MULTI_CATEGORY_FILE_EXAMPLE}`,
+`{COMPAT_SHIM}`, `{COMPAT_HOST}`, `{VERSION_BUMP_SECTION}`,
+`{PR_BODY_SUMMARY_EXTRA}`, `{PR_BODY_EXTRA_SECTIONS}`, and
+`{CI_FAILURE_CAUSES_EXTRA}` (indented six spaces to match the lettered sub-list
+it lands in). What each one means and where its value comes from is documented
+once, in CONTRIBUTING.md's "Shared `better-*` pipeline placeholders".
 
 The substitution rules in `~/.claude/lib/better-verification.md` — empty values
 drop their line, indented values keep their indent — apply to all of these.
