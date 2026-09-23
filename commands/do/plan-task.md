@@ -131,11 +131,14 @@ number,title,labels,body --jq '.'` (glab: `glab issue list --state opened --sear
 "<key terms>" --output json`), per
 [lib/plan-issue-filing.md](../../lib/plan-issue-filing.md) "Fetch existing open
 issues" (a command filing at most one item may dedup with a targeted search instead
-of the full open-issue dump). Match on the **same file path / symbol / feature or a
-clearly equivalent intent**, not just an exact title string. If an open issue already
-covers this work, **do not create a duplicate**: report the existing `#<number>` and
-its title, note what (if anything) your planning adds, and stop — offer to add a
-clarifying comment to that issue instead.
+of the full open-issue dump). **Run it once per distinct anchor** Phase 1 surfaced
+(the affected file/symbol, the feature name, and any alternate wording an existing
+issue might use) and union the results — a single narrow query can miss an issue
+that only mentions one of them. Match on the **same file path / symbol / feature or
+a clearly equivalent intent**, not just an exact title string. If an open issue
+already covers this work, **do not create a duplicate**: report the existing
+`#<number>` and its title, note what (if anything) your planning adds, and stop —
+offer to add a clarifying comment to that issue instead.
 
 ## Phase 3 — Draft the issue
 
