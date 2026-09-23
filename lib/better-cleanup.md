@@ -15,7 +15,7 @@ In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines:
    git branch -D {BRANCH_PREFIX}/{DATE}
    ```
    Only the intentionally unmerged staging branch may use `-D`. For each category in `CREATED_CATEGORY_SLUGS`, delete local/remote branches **only after** its PR is confirmed merged and the fetched target contains its tip. Use `git branch -d` locally and `git push origin --delete` remotely; skip a refused deletion. If the host used squash/rebase and ancestry cannot prove safety, retain the branch and report it. Do not change the user's current branch merely to make cleanup succeed.
-3. **Issue mode — remove the spool.** Per [lib/better-issue-mode.md](./better-issue-mode.md), remove it using the literal path from run state:
+3. **Remove the spool.** Per [lib/better-issue-mode.md](./better-issue-mode.md), remove it using the literal path from run state:
    ```bash
    rm -rf "$SPOOL_DIR"
    ```
@@ -24,10 +24,10 @@ In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines:
    ```bash
    git -C {REPO_DIR} stash pop
    ```
-5. Update PLAN.md only outside issue mode (issue mode updates/reports tracker records):
-   - Mark completed findings by flipping `- [ ]` → `- [x]` — **preserve the `[<slug>]` ID** on each line (only the box character changes, the slug stays). See [plan-id-format.md](./plan-id-format.md).
-   - Add PR links to each category section header
-   - Note any skipped findings with reasons
+5. Report tracker records alongside the summary:
+   - The created and reused issue numbers for deferred findings, and each category's PR link
+   - Any skipped findings with reasons
+   - When `TRACKER_AVAILABLE=false`: every deferred finding (title, one-line rationale, `file:line`) under **Deferred (not filed — no issue tracker available)**
 6. Print the final summary table. {SUMMARY_TABLE_ROW_RULES}
 
 ```

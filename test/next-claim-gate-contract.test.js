@@ -202,3 +202,22 @@ describe('README documents the gates', () => {
     assert.match(readme, /`--no-collaborators`/);
   });
 });
+
+describe('/do:next is tracker-only (PLAN.md mode retired)', () => {
+  const own = ['commands/do/next.md', 'lib/next-swarm.md', 'lib/next-gitlab.md', 'lib/epic-children.md']
+    .map((rel) => [rel, fs.readFileSync(path.join(root, rel), 'utf8')]);
+
+  it('carries no PLAN.md mode, slug target, or ISSUE_MODE text', () => {
+    for (const [rel, body] of own) {
+      assert.doesNotMatch(body, /ISSUE_MODE|PLAN\.md[- ]mode(?! was removed)|issues? mode|<slug>|next\/<slug>|plan-id-format/i, rel);
+    }
+  });
+
+  it('keeps --issues as a no-op note and aborts --no-issues and non-issue targets', () => {
+    const [, body] = own[0];
+    assert.match(body, /`--issues is now the default \(PLAN\.md mode was removed\); the flag can be dropped\.`/);
+    assert.match(body, /`--no-issues is no longer supported: PLAN\.md mode was removed\. slashdo records work only in the project's issue tracker\.`/);
+    assert.match(body, /is not an issue number — \/do:next claims tracker issues only \(e\.g\. `#123`\)/);
+    assert.doesNotMatch(body.split('\n---\n')[0], /--issues\||--no-issues/, 'argument-hint drops --issues/--no-issues');
+  });
+});

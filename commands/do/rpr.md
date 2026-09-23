@@ -1,6 +1,6 @@
 ---
 description: Resolve PR review feedback with parallel agents
-argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--reviewer-applies] [--issues|--no-issues] [--issues-label <name>]"
+argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--reviewer-applies] [--issues-label <name>]"
 ---
 
 **Default mode: fully autonomous.** Fetches review feedback, fixes issues, pushes, resolves threads, and loops reviews without prompting. Auto-skips on timeout/errors after retries.
@@ -19,11 +19,11 @@ rpr-only consequences of the grammar above:
 - `{ENTRY_MAX}` is forwarded as `{MAX_ITERATIONS}` and `{ENTRY_EFFORT}` as `{REVIEW_EFFORT}` / `{OLLAMA_EFFORT}` to the **local-agent** and **Ollama** loops it dispatches (the same loops `/do:pr` uses); neither reaches rpr's `copilot` entry, which runs rpr's own bespoke request/monitor flow, not the shared multi-reviewer loop. rpr does not support `--review-iterations`; use the per-entry `~max=<n>` suffix instead. `--review-mode` and the `--review-stop-on-*` flags likewise have no effect — rpr dispatches each listed reviewer directly rather than through the shared wrapper.
 - **`@<login>` entries are accepted by the parser but never requested** — rpr's only GitHub-side request path is its bespoke Copilot flow (arbitrary-reviewer dispatch is a tracked follow-up). Drop any `@<login>` entry from `REVIEW_AGENTS` after parsing/dedup, whether typed or inherited from a saved `review-with` default, and print `Note: @<login> is not yet supported by /do:rpr — dropped from --review-with.` If that leaves an explicitly typed `--review-with` empty, set `REVIEW_AGENTS=[]` and run the no-reviewer path — do **not** fall through to the saved default. If `--review-with` is omitted and `REVIEW_AGENTS` is still unset after the saved-defaults step, rpr requests no new review and just resolves the PR's existing unresolved threads.
 
-After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to `review-with` / `reviewer-applies` / `issues` / `issues-label` the user did not pass. Precedence: explicit flag (or `--review-with none`) > saved `review-with` default > `REVIEW_AGENTS=[]` (see step 2 and step 8). rpr ignores saved `review-iterations` / `review-stop-mode` (it does not support those flags):
+After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to `review-with` / `reviewer-applies` / `issues-label` the user did not pass. Precedence: explicit flag (or `--review-with none`) > saved `review-with` default > `REVIEW_AGENTS=[]` (see step 2 and step 8). rpr ignores saved `review-iterations` / `review-stop-mode` (it does not support those flags):
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
-Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: when a finding is **deferred** to the plan (see Finding Disposition), file it as a GitHub/GitLab issue instead of a PLAN.md line. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`. If the user passes **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`.
+Parse `$ARGUMENTS` for `--issues-label <name>`: a **deferred** finding (see Finding Disposition) is filed as a GitHub/GitLab issue. Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan` (a saved `issues` key is ignored). `--issues` is a deprecated no-op: print once `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.` `--no-issues` aborts with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only in the project's issue tracker.`
 
 !`cat ~/.claude/lib/gh-host.md`
 
@@ -100,13 +100,13 @@ Parse `$ARGUMENTS` for `--issues` / `--no-issues` / `--issues-label <name>`: whe
 
    **Repeated-comment dedup**: after a new Copilot round, compare each new unresolved thread's body and file/line against the previous round's intentionally-unresolved threads (replied to as non-issues or disagreements). If every new unresolved thread is a repeat of dismissed feedback, treat the review as clean and exit the loop.
 
-9. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input).
+9. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input). List deferred findings with their issue numbers, or as unfiled per `plan-issue-setup.md`'s no-tracker rule.
 
 10. **Convention encoding**: after the summary, run the end-of-cycle phase from `~/.claude/lib/review-fix-conventions.md` against the issues addressed this session. Encoded actions land in the same branch as the rpr fixes.
 
 !`cat ~/.claude/lib/finding-disposition.md`
 
-Only when `ISSUE_MODE=true` and a finding is being deferred:
+Only when a finding is being deferred:
 
 !read lib/vcs-host.md
 !read lib/plan-issue-setup.md
@@ -240,4 +240,4 @@ The persistent monitor emits one event per CI check bucket transition — `ci: l
 
 - If feedback is unclear or incorrect, leave a reply comment instead of resolving
 - **Never dismiss findings as "out of scope" or "not modified in this PR."** If a review identifies a real issue, fix it — regardless of whether the current PR touched that code.
-- **Default to fixing findings in this PR; defer to PLAN.md only when a fix is genuinely large/architectural or too risky to land here.** See the "Finding Disposition" guidance loaded above for the fix-now / reply / defer decision.
+- **Default to fixing findings in this PR; defer to a tracker issue only when a fix is genuinely large/architectural or too risky to land here.** See the "Finding Disposition" guidance loaded above for the fix-now / reply / defer decision.

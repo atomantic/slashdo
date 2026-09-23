@@ -19,7 +19,7 @@ List all available `/do:*` commands with their descriptions.
 | `/do:fpr` | Commit, push to fork, and open a PR against the upstream repo |
 | `/do:goals` | Scan codebase to infer project goals and generate GOALS.md — `--prd` generates a detailed PRD.md instead (autonomous by default; `--interactive` to review with you) |
 | `/do:help` | List all available slashdo commands |
-| `/do:next` | Claim the next unclaimed PLAN.md item (or tracker issue with `--issues`), implement it in an isolated worktree, ship a reviewed PR, and clean up — `--swarm[=N]` ships several independent issues in parallel, auto-picked or named (`--swarm #12 #14`) |
+| `/do:next` | Claim the next unclaimed tracker issue, implement it in an isolated worktree, ship a reviewed PR, and clean up — `--swarm[=N]` ships several independent issues in parallel, auto-picked or named (`--swarm #12 #14`) |
 | `/do:omd` | Audit and optimize markdown files (CLAUDE.md, README.md, etc.) against best practices |
 | `/do:plan-task` | Plan a task by investigating the codebase, then file a robust, decision-complete issue in the repo's tracker (GitHub `gh` / GitLab `glab`, auto-detected) — with an approval gate you can skip with `--yes` |
 | `/do:pr` | Commit, push, and open a PR (GitHub) or merge request (GitLab) against the repo's default branch — `--merge` auto-merges once reviews and CI pass |
@@ -27,7 +27,7 @@ List all available `/do:*` commands with their descriptions.
 | `/do:prd` | Scan codebase to infer product requirements and generate a detailed PRD.md (`/do:goals --prd`) |
 | `/do:push` | Commit and push all work, logging it per the project's own changelog convention |
 | `/do:release` | Create a release PR using the project's documented release workflow |
-| `/do:replan` | Automated audit/triage of PLAN.md (or the issue tracker with `--issues`) — prune completed items, suggest new work, keep the plan lean |
+| `/do:replan` | Automated audit/triage of the issue tracker — close completed issues, suggest new work, keep the backlog lean (migrates a legacy PLAN.md once) |
 | `/do:review` | Deep code review of changed files against best practices |
 | `/do:rpr` | Resolve PR review feedback with parallel agents |
 | `/do:scan` | Read-only safety audit of an unfamiliar directory — flags malware patterns, network calls, and vulnerable deps without executing code |
@@ -38,5 +38,6 @@ List all available `/do:*` commands with their descriptions.
 
 ## Notes
 
+- Work is tracked in the project's issue tracker. The default when nothing else is configured is the repo's GitHub/GitLab issues, which is the only tracker automated today; support for other trackers is tracked in https://github.com/atomantic/slashdo/issues/372. `--issues-label`, `--self`, `--collaborators`, and `--trusted-authors` still apply. Have a legacy PLAN.md? Run `/do:replan` once to migrate it.
 - Commands are installed via `npx slash-do@latest`
 - For more info, see https://github.com/atomantic/slashdo

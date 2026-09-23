@@ -109,11 +109,11 @@ When a trigger applies, read the catalogue now:
 
 ## Phase 1 Caller Inputs
 
-Use the shared audit procedure in `lib/better-audit.md` for evidence, deduplication, scope selection mechanics, and issue-mode handling. This caller supplies the Swift roster and keeps the eight workers below distinct; it intentionally does not add the generic dependency-freedom or structural scopes.
+Use the shared audit procedure in `lib/better-audit.md` for evidence, deduplication, scope selection mechanics, and issue spooling. This caller supplies the Swift roster and keeps the eight workers below distinct; it intentionally does not add the generic dependency-freedom or structural scopes.
 
 Set `PROJECT_TYPE=SwiftUI` and `HAS_UI=true`. Pass project conventions and the in-scope gotcha entries to each worker, but pass only the entries routed to that worker rather than the whole catalogue. Resolve `AUDIT_MODEL_TIER` through `lib/model-tiers.md`; use the host's strongest alias for `heavy` and the configured host alias for other tiers.
 
-When `ISSUE_MODE=true`, follow `lib/better-issue-mode.md`: create `SPOOL_DIR` with `mktemp -d`, preserve its printed literal path, have each worker write its category file, use `>` only for the first write and `>>` thereafter, and return only an index line of `<id> | <SEVERITY> | <category> | <file:line> | <one-line title>`. The body remains on disk for consolidation, filing, remediation, and test triage. A Swift worker's category slug is one of `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `platform-swiftui`, `tests`, or `ux`; never substitute the generic `stack-specific` or `deps` slug. In a normal run, use the shared evidence bar and require 30 surrounding lines, quoted evidence, an actual effect, and a concrete fix; these common Swift false positives are not findings: a force unwrap protected by a real invariant, an `@ObservedObject` correctly owned by a parent `@StateObject`, an intentional best-effort `try?`, a platform conditional that correctly omits an inapplicable platform, or a `Task` inside `.task` that already has cancellation semantics. Keep unresolved hypotheses marked `[UNCERTAIN]`.
+Follow `lib/better-issue-mode.md`: create `SPOOL_DIR` with `mktemp -d`, preserve its printed literal path, have each worker write its category file, use `>` only for the first write and `>>` thereafter, and return only an index line of `<id> | <SEVERITY> | <category> | <file:line> | <one-line title>`. The body remains on disk for consolidation, filing, remediation, and test triage. A Swift worker's category slug is one of `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `platform-swiftui`, `tests`, or `ux`; never substitute the generic `stack-specific` or `deps` slug. In a normal run, use the shared evidence bar and require 30 surrounding lines, quoted evidence, an actual effect, and a concrete fix; these common Swift false positives are not findings: a force unwrap protected by a real invariant, an `@ObservedObject` correctly owned by a parent `@StateObject`, an intentional best-effort `try?`, a platform conditional that correctly omits an inapplicable platform, or a `Task` inside `.task` that already has cancellation semantics. Keep unresolved hypotheses marked `[UNCERTAIN]`.
 
 Launch five workers in the first parallel batch:
 
@@ -144,7 +144,7 @@ Use `lib/better-plan.md` and `lib/better-issue-mode.md` for the shared planning 
 - Tests → Test Quality & Coverage → `tests`
 - UX → UX Consistency & Responsive Layout → `ux`
 
-The PLAN.md section is `## Better Swift Audit - {YYYY-MM-DD}` and includes `Platforms: {PLATFORMS} | Deployment targets: {DEPLOYMENT_TARGETS}`. Use the eight mappings above instead of the generic `Stack-Specific` or `Dependency Freedom` rows. Group repeated patterns duplicated at least three times as Foundation work, including design tokens, platform typealiases, view modifiers, networking clients, and environment keys. Build the complete `FILE_OWNER_MAP` before remediation; assign each file to one category by highest severity, and when extraction moves a Swift type add a backward-compatible `typealias` or import forwarding at its original path. In issue mode, keep the in-run plan in context, dedup against `EXISTING_ISSUES`, file every surviving scan-only finding, and use the shared spool/filer rules. Never open a worktree or write code for `--scan-only`.
+The in-run plan's summary includes `Platforms: {PLATFORMS} | Deployment targets: {DEPLOYMENT_TARGETS}`. Use the eight mappings above instead of the generic `Stack-Specific` or `Dependency Freedom` rows. Group repeated patterns duplicated at least three times as Foundation work, including design tokens, platform typealiases, view modifiers, networking clients, and environment keys. Build the complete `FILE_OWNER_MAP` before remediation; assign each file to one category by highest severity, and when extraction moves a Swift type add a backward-compatible `typealias` or import forwarding at its original path. Keep the in-run plan in context, dedup against `EXISTING_ISSUES`, file every surviving scan-only finding, and use the shared spool/filer rules. Never open a worktree or write code for `--scan-only`.
 
 ## Phase 3 Caller Inputs
 
@@ -172,7 +172,7 @@ When categories overlap, keep one owner per file. Security takes priority on Key
 
 ## Phase 4c Caller Inputs
 
-Use the shared test-enhancement procedure in `lib/better-test-enhancement.md` for start-SHA capture, issue-mode test triage, the broken-test check, test counts, and `FILE_OWNER_MAP` updates. Agent 7's Swift findings are the test-audit input. The test enhancement agent receives `Project type: SwiftUI ({PLATFORMS})` and `{TEST_CMD}` and must:
+Use the shared test-enhancement procedure in `lib/better-test-enhancement.md` for start-SHA capture, spooled test triage, the broken-test check, test counts, and `FILE_OWNER_MAP` updates. Agent 7's Swift findings are the test-audit input. The test enhancement agent receives `Project type: SwiftUI ({PLATFORMS})` and `{TEST_CMD}` and must:
 
 - Match the project's existing XCTest or Swift Testing framework.
 - Assert observable behavior, concrete values, state transitions, and Codable round trips rather than private implementation details or mere non-nil checks.

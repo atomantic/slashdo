@@ -236,7 +236,7 @@ Initialize `ITERATION=0`, `STATUS=""`, `REVIEW_DIAGNOSTIC=""`, `REVIEW_REMEDY=""
      EXIT_CODE=$?
      ```
 
-   - After capturing `EXIT_CODE`, run any recipe post-launch cleanup (claude: its stdin file), then any recipe exit classifier (opencode: provider admission) **before** the generic branch below.
+   - After capturing `EXIT_CODE`, run any recipe post-launch cleanup (claude: its stdin file), then any recipe exit classifier (opencode: provider admission; cursor: workspace trust) **before** the generic branch below.
    - If `EXIT_CODE != 0`, no recipe classifier claimed it, and the CLI produced no commits, set `STATUS=cli-error`, print the last 80 lines of **`$ERR_FILE`** (fall back to `$LOG_FILE` if it is empty), surface both paths, and exit the loop. A `124` exit (from `timeout`/`gtimeout`) or an empty log after the poll loop gave up means the review ran past 30 minutes — report `cli-error` with the log paths, never `clean`.
 
 3. **Detect changes and apply fixes** (logic depends on `{REVIEWER_APPLIES}`):
@@ -280,7 +280,7 @@ Initialize `ITERATION=0`, `STATUS=""`, `REVIEW_DIAGNOSTIC=""`, `REVIEW_REMEDY=""
      Re-run the five comparisons; if the tree is not back at baseline, **stop the loop** with `STATUS=cli-error` and a loud warning naming the log — never continue reviewing on top of a tree you failed to restore.
 
      Then print `{REVIEW_AGENT} modified the working tree during a review-only pass — reverted; findings kept` and **continue with the findings**: a reviewer's product is its findings list, which stays useful even if it also (wrongly) tried to apply them, and the orchestrator re-derives every fix in this session regardless. Gitignored files stay outside this guarantee (hashing `node_modules/` is unbounded).
-   - Apply any recipe Step-3 rule now (opencode: a flagged provider-admission denial returns `no-verdict` here).
+   - Apply any recipe Step-3 rule now (opencode: a flagged provider-admission denial returns `no-verdict` here; cursor: a flagged workspace-trust refusal returns `skipped`).
    - Read `$LOG_FILE` and extract the findings. **For a prompt-driven reviewer, parse a verdict before considering the findings:** after stripping blank lines, the result must be either exactly `NO FINDINGS`, or only one or more complete `FINDING <N>:` blocks. Every block must contain non-empty `file`, numeric `line`, `severity` (`CRITICAL`, `IMPROVEMENT`, or `NIT`), `description`, and `fix` fields. Treat a missing, malformed, or contradictory result (for example, a prose response, an incomplete block, or both `NO FINDINGS` and a finding) as `STATUS=no-verdict`, print the log path, and exit the loop. **Never infer a clean result from prose or an empty log.**
 
      `no-verdict` is **inconclusive, not a hard error** — the reviewer ran and the tree is fine; it either didn't answer in the contract's format or was denied provider admission. It must not be `cli-error`: a hard error fires the wrapper's short-circuit (skipping every remaining reviewer over one chatty CLI), and `~opt` promises to excuse `no-verdict` from the merge gate while never excusing a hard error. A required reviewer's `no-verdict` still blocks the merge as inconclusive; an `~opt` one doesn't.

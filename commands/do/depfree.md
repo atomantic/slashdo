@@ -1,6 +1,6 @@
 ---
 description: Audit third-party dependencies and remove unnecessary ones by writing replacement code
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [--heavy] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues|--no-issues] [--issues-label <name>] [specific packages to evaluate]"
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [--heavy] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues-label <name>] [specific packages to evaluate]"
 ---
 
 # Depfree — Dependency Freedom Audit
@@ -13,7 +13,7 @@ Every small library is an attack surface. In default mode, large, widely-audited
 
 Parse `$ARGUMENTS` for:
 - **`--interactive`**: pause at each decision point for user approval
-- **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation — no worktree, no code changes, no PRs. **When `ISSUE_MODE` is also true**, every surviving finding is filed as a labelled tracker issue before the run exits, not just the deferred subset (see the Phase 2 gate). `--scan-only` stops the pipeline; `--issues` only chooses where findings are recorded
+- **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation — no worktree, no code changes, no PRs. Every surviving finding is filed as a labelled tracker issue before the run exits, not just the deferred subset (see the Phase 2 gate)
 - **`--no-merge`**: run through PR creation, skip the review loop and merge
 - **`--heavy`**: aggressive mode — only keep foundational frameworks and language runtimes; replace everything else that is feasibly replaceable (see Heavy Mode)
 
@@ -21,13 +21,15 @@ The `--review-with`, `--review-stop-on-findings`/`--review-stop-on-clean`, `--re
 
 !`cat ~/.claude/lib/review-flags.md`
 
-After parsing the review flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the review flags **and** `--issues` / `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
+After parsing the review flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the review flags **and** `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
 !`cat ~/.claude/lib/config-defaults-issues-merge.md`
 
-- **`--issues`** / **`--no-issues`** / **`--issues-label <name>`**: selects **where deferred removals are recorded** — GitHub/GitLab issues instead of PLAN.md lines (see Phase 2). **It does NOT change what the run does** (remediation, PRs, CI, review loop, and merge all proceed); to audit and file work *without* remediating, combine it with **`--scan-only`**. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`; if **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`.
+- **`--issues-label <name>`**: the label on the GitHub/GitLab issues deferred removals are filed as (see Phase 2). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`. A saved `issues` key is ignored.
+- **`--issues`**: deprecated no-op; print once: `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.`
+- **`--no-issues`**: abort with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only in the project's issue tracker.`
 - **Specific packages**: limit audit scope to named packages (e.g., "chalk dotenv")
 
 Set `HEAVY_MODE` to `true` if `--heavy` was passed, `false` otherwise.
@@ -82,7 +84,7 @@ When compacting during this workflow, always preserve:
 - The current phase number and what phases remain
 - All PR numbers and URLs created so far
 - `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR`, `REPO_DIR` values
-- `VCS_HOST`, `CLI_TOOL`, `GH_HOST`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
+- `VCS_HOST`, `CLI_TOOL`, `GH_HOST`, `TRACKER_AVAILABLE`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
 - `HEAVY_MODE` flag
 
 
@@ -94,6 +96,7 @@ Resolve `VCS_HOST` and `CLI_TOOL` here, before any phase reaches for a forge CLI
 !read lib/vcs-host.md
 
 - **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state, following the shared derivation (and its per-host auth precheck) included below. The Phase 6 GitHub-side reviewer loops use `gh api`, which ignores the repo remote and defaults to github.com — on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out.
+- **Record `TRACKER_AVAILABLE` once.** `true` when the confirmed `CLI_TOOL` reaches this repo and its issues feature is enabled; otherwise `false`. Deferred removals are filed as issues only when it is `true`; when `false` the run continues, files nothing, and lists every deferred removal (title, one-line rationale, `file:line`) in the final report under "Deferred (not filed — no issue tracker available)". Never write PLAN.md as a fallback.
 
 **GitHub only — skip the snippet below entirely on GitLab**, whose `glab` calls resolve the host from the remote themselves and where its `gh auth` precheck would abort the run.
 
@@ -316,14 +319,18 @@ Update `DEPENDENCY_MAP` with transitive check results before proceeding to Phase
 
 ## Phase 2: Replacement Plan
 
-> **Issue mode (`--issues`):** Keep the replacement plan (steps 2–5 below) as your
-> **in-run working plan in context** — do **not** write the `## Depfree Audit`
-> section to `PLAN.md`, and skip step 1. For any removal you **defer**, file a
-> labeled tracker issue instead of a PLAN.md line — see the disposition partial
-> below. Report the created issue numbers (`#<n>`) in the Phase 2 summary where
-> you'd report slugs. Reuse `CLI_TOOL` from Phase 0.
+> Keep the replacement plan (steps 2–5 below) as your **in-run working plan in
+> context** — the plan is never written to a file. For any removal you **defer**,
+> file a labeled tracker issue — see the disposition partial below. Report the
+> created and reused issue numbers (`#<n>`) in the Phase 2 summary. Reuse
+> `CLI_TOOL` from Phase 0.
 
-1. Read the existing `PLAN.md` (create if it doesn't exist)
+Unless `TRACKER_AVAILABLE=false`, read the tracker setup and filing partials now:
+
+!read lib/plan-issue-setup.md
+!read lib/plan-issue-filing.md
+
+1. Fetch `EXISTING_ISSUES` per those partials (skip when `TRACKER_AVAILABLE=false`).
 2. Filter to only REMOVE recommendations from Phase 1c/1d (exclude any downgraded to KEEP (transitive) in Phase 1d)
 3. For EVALUATE recommendations: **Default mode** — treat as KEEP (conservative). **Heavy mode** — treat as REMOVE (see Heavy Mode). **Interactive mode** — present to user via `AskUserQuestion` for each. If both `--interactive` and `--heavy` are set, still prompt for each EVALUATE item (interactive takes precedence), but present REMOVE as the default suggestion
 4. Group removable dependencies by replacement strategy:
@@ -331,47 +338,7 @@ Update `DEPENDENCY_MAP` with transitive check results before proceeding to Phase
    - **Inline replacement**: write a small utility function (e.g., ANSI color wrapper)
    - **Consolidation**: multiple small deps replaced by one owned utility module
 5. Estimate total lines of replacement code needed
-6. Add a new section to PLAN.md:
-
-```markdown
-## Depfree Audit - {YYYY-MM-DD}
-
-Summary: {N} total dependencies. {A} acceptable (Tier 1), {B} audited and kept (Tier 2), {C} to remove (Tier 3).
-Estimated replacement code: ~{lines} lines across {files} new/modified files.
-
-### Dependencies to Remove
-| Package | Tier | Used Functions | Call Sites | Replacement | Complexity | Risk |
-|---------|------|---------------|------------|-------------|------------|------|
-| ...     | ...  | ...           | ...        | ...         | ...        | ...  |
-
-### Dependencies to Remove — Consolidation (transitive dep of kept package, but redundant with another kept dep)
-| Package | Tier | Consolidation Target | Transitive Via |
-|---------|------|---------------------|----------------|
-| ...     | ...  | ...                 | ...            |
-
-### Dependencies Kept — Transitive (would remain in lock file, no consolidation value)
-| Package | Tier | Kept Via (dependency chain) |
-|---------|------|-----------------------------|
-| ...     | ...  | ...                         |
-
-### Dependencies Kept (with rationale)
-| Package | Tier | Reason Kept |
-|---------|------|-------------|
-| ...     | ...  | ...         |
-
-### Replacement Tasks
-For each dependency to remove:
-- [ ] [drop-{package-slug}] **{package}** — {strategy}. Replace {N} call sites in {M} files. Write {utility name} ({est. lines} lines). Complexity: {level}.
-```
-
-**Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents can claim distinct removals via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case, ≤50 chars, unique against every `[slug]` already in PLAN.md. Pattern: `drop-<package-name-kebabed>` (e.g. `[drop-uuid]`, `[drop-chalk]`); collide-suffix with `-2`/`-3` if the same package was removed in a prior audit and re-added. _(Issue mode skips slugs — the issue number is the ID.)_
-
-Only when `ISSUE_MODE=true`:
-
-!read lib/plan-issue-setup.md
-!read lib/plan-issue-filing.md
-
-**Scoped npm packages** (e.g. `@types/node`, `@scope/pkg`) lose their leading `@` to the kebab-case rule and collapse `/` to `-`, so a naïve slug would produce `drop-types-node` for both `@types/node` and any hypothetical `@othertypes/node`. Preserve the scope explicitly: `drop-<scope>-<pkg>` (so `@types/node` → `[drop-types-node]`, `@scope/pkg` → `[drop-scope-pkg]`). If a non-scoped package already owns that slug, fall through to the standard `-2`/`-3` collision suffix.
+6. **Disposition.** A planned removal not carried out this run is **deferred** (under `--scan-only`, the gate below files everything instead): file each as a labeled issue, deduped against `EXISTING_ISSUES`, per the partials above — or, when `TRACKER_AVAILABLE=false`, hold them for the final report's "Deferred (not filed — no issue tracker available)" list.
 
 7. Print summary table:
 ```
@@ -383,7 +350,7 @@ Only when `ISSUE_MODE=true`:
 | Total      | ...   |                                   |
 ```
 
-**GATE: If `--scan-only` was passed, STOP HERE** — but not before doing the one thing a scan-only run in issue mode exists to do: **when `ISSUE_MODE` is also true, file every surviving finding as an issue first**, then print the summary and exit. (When `ISSUE_MODE` is false, just print the summary and exit.)
+**GATE: If `--scan-only` was passed, STOP HERE** — but not before doing the one thing a scan-only run exists to do: **file every surviving finding as an issue first**, then print the summary and exit. (When `TRACKER_AVAILABLE=false`, list them under "Deferred (not filed — no issue tracker available)" instead.)
 
 **Filing every surviving finding** means all of them, not just the ones the disposition rules would defer — the filed issues ARE the run's output. Apply the disposition partial's labels, dedup-against-`EXISTING_ISSUES`, and title/body rules, and report the created and reused `#<number>`s in the summary. Do not open a worktree or write any code.
 
@@ -396,7 +363,7 @@ AskUserQuestion([{
   options: [
     { label: "Proceed", description: "Remove all listed dependencies and write replacement code" },
     { label: "Review individually", description: "Let me approve/reject each removal" },
-    { label: "Abort", description: "Stop here — I'll review the plan manually" }
+    { label: "Abort", description: "Stop here without making changes" }
   ]
 }])
 ```
@@ -640,11 +607,6 @@ if [ "$HEAVY_MODE" = "true" ]; then
   HEAVY_HEADING=" (Heavy Mode)"
 fi
 
-KEPT_DETAILS_REF="PLAN.md"
-if [ "$ISSUE_MODE" = "true" ]; then
-  KEPT_DETAILS_REF="the tracker issues filed for this audit"
-fi
-
 PR_TITLE="refactor: remove {N} unnecessary dependencies${HEAVY_SUFFIX}"
 PR_BODY="## Depfree Audit — Dependency Removal${HEAVY_HEADING}
 
@@ -658,7 +620,7 @@ Estimated supply chain attack surface reduction: {N} packages ({transitive count
 {table of removed packages}
 
 ### Dependencies Kept (audited)
-{count} dependencies audited and kept with rationale. See $KEPT_DETAILS_REF for details.
+{count} dependencies audited and kept with rationale (recorded in `docs/DEPS.md`).
 
 ### Replacement Code
 {bulleted list of new utility files or inline changes}
@@ -768,11 +730,8 @@ Reached from every path through Phase 5: after 5d's merge gate (any `MERGE_OUTCO
    git -C {REPO_DIR} stash pop
    ```
    Run this on **every** path through this phase — including `--no-merge`, GitLab, and every "PR left open" branch above — not only after a successful merge, so a run never strands the pre-audit stash. `{REPO_DIR}` remains on `{CURRENT_BRANCH}` throughout the entire command; nothing in this command checks it out elsewhere.
-3. Update PLAN.md — outside issue mode only (`ISSUE_MODE=true` already recorded deferred/removed work on the tracker in Phase 2, not PLAN.md):
-   - Mark completed removals by flipping `- [ ]` → `- [x]` — **preserve the `[<slug>]` ID** on each line. See [lib/plan-id-format.md](../../lib/plan-id-format.md).
-   - Add PR link (when `MERGE_OUTCOME` is unset, note the PR/MR is still open rather than merged)
-   - Note any packages that were reverted
-4. Print the final summary:
+3. File each removal that was reverted or skipped after Phase 2 as a deferred issue (deduped against `EXISTING_ISSUES`, per the Phase 2 partials); when `TRACKER_AVAILABLE=false`, add it to the "Deferred (not filed — no issue tracker available)" list instead.
+4. Print the final summary, with the PR link (noting when `MERGE_OUTCOME` is unset that the PR/MR is still open rather than merged), the created and reused issue numbers for deferred removals, and (when `TRACKER_AVAILABLE=false`) the "Deferred (not filed — no issue tracker available)" list:
 
 ```
 | Package          | Status   | Replacement              | Lines |
@@ -802,7 +761,7 @@ Transitive deps eliminated: ~{count} (estimated)
 ## Notes
 
 - This command complements `/do:better` — `depfree` for dependency hygiene, `better` for code quality
-- All remediation happens in an isolated worktree. Phase 2 may write a PLAN.md section (or a stash, if the tree was dirty) directly in `{REPO_DIR}` before the worktree exists, but Phase 6 always restores that stash on `{CURRENT_BRANCH}` without ever checking out another branch there — so by the time the command finishes, the user's branch and working tree are exactly as they were when it started, on every exit path (`--no-merge`, GitLab, no reviewer, merged, or left open)
+- All remediation happens in an isolated worktree. Phase 3a may stash a dirty tree directly in `{REPO_DIR}` before the worktree exists, but Phase 6 always restores that stash on `{CURRENT_BRANCH}` without ever checking out another branch there — so by the time the command finishes, the user's branch and working tree are exactly as they were when it started, on every exit path (`--no-merge`, GitLab, no reviewer, merged, or left open)
 - `docs/DEPS.md` is the persistent decision log (read in Phase 0e, rewritten in Phase 4c). Major version bumps and heavy-mode escalations bypass it; manually delete an entry to force re-audit
 - **Default vs. heavy mode aggressiveness**: see Heavy Mode above
 - Replacement code should be minimal — don't over-engineer utilities that replace single-purpose packages

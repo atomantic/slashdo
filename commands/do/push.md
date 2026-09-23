@@ -33,9 +33,8 @@ Commit and push all work from this session, updating documentation as needed.
 
 3. **Update project documentation and task tracking per this project's own conventions**:
    - Check the target repo's `CLAUDE.md` / `AGENT.md` (or `AGENTS.md`), if present, for documentation conventions it states (e.g. "keep the README command table in sync," "update docs/ARCHITECTURE.md when adding a module") and follow them.
-   - If the project tracks tasks somewhere — a `PLAN.md`, a `TODO.md`, a roadmap doc, an issue tracker — and the work you just did completes an item there, mark it done **the way that tracker already marks things done**: flip the checkbox, strike it, delete the line, close the issue. Copy the surrounding entries' convention; don't impose one.
-   - Where the project uses slashdo's `[plan-id]` slug convention, preserve the `[slug]` on any line you touch.
-   - Do not assume PLAN.md or any other specific tracking file must exist — most projects and sessions won't have one. Base what needs updating on the target repo's own AGENT/CLAUDE context and existing files, not on a fixed file-existence check.
+   - If the project tracks tasks somewhere — a `TODO.md`, a roadmap doc, an issue tracker — and the work you just did completes an item there, mark it done **the way that tracker already marks things done**: flip the checkbox, strike it, delete the line, close the issue. Copy the surrounding entries' convention; don't impose one.
+   - Do not assume any specific tracking file must exist — most projects and sessions won't have one. Base what needs updating on the target repo's own AGENT/CLAUDE context and existing files, not on a fixed file-existence check.
 
 4. **Commit and push**:
    - Stage all changed files by name, including any changelog or tracking file step 2 or 3 touched, and commit following these conventions:

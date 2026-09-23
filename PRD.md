@@ -18,7 +18,7 @@ Aligned with [GOALS.md](./GOALS.md)'s Core Goals:
 2. **Automate DevSecOps workflows** — one-command security auditing, code-quality analysis, and automated remediation via isolated worktrees and per-category PRs.
 3. **Standardize development rituals** — consistent commit practices, SemVer versioning, and changelog management across projects.
 4. **Orchestrate AI-powered code review** — multi-reviewer review loops with automated thread resolution folded into the PR workflow.
-5. **Maintain project governance documentation** — keep GOALS.md, PRD.md, and PLAN.md current and well-structured via dedicated commands.
+5. **Maintain project governance documentation** — keep GOALS.md, PRD.md, and the issue-tracker backlog current and well-structured via dedicated commands.
 6. **Be project-agnostic** — auto-detect tech stacks and adapt build/test/versioning/audit strategies without manual configuration.
 7. **Frictionless distribution** — npm-based install with semver versioning and self-update notifications; no git cloning required.
 
@@ -32,7 +32,7 @@ Aligned with [GOALS.md](./GOALS.md)'s Core Goals:
 
 ### Engineering lead standardizing practices across a team
 - **Needs:** wants every repo and every contributor to follow the same commit, review, and release rituals regardless of which AI assistant an individual prefers.
-- **Context:** cares about `/do:config` saved defaults, consistent SemVer/changelog discipline, and governance docs (GOALS.md/PRD.md/PLAN.md) staying current without manual upkeep.
+- **Context:** cares about `/do:config` saved defaults, consistent SemVer/changelog discipline, and governance docs (GOALS.md/PRD.md) and the issue-tracker backlog staying current without manual upkeep.
 
 ### Multi-assistant / tool-agnostic user
 - **Needs:** switches between Claude Code, OpenCode, Antigravity CLI, Codex, and Grok Build across projects or teammates, and needs commands to behave identically everywhere.
@@ -80,8 +80,8 @@ Aligned with [GOALS.md](./GOALS.md)'s Core Goals:
 | FR-17 | The system MUST provide `/do:pr`, which commits, pushes, and opens a PR/MR against the repo's default branch, deriving the push destination from the branch's configured upstream (`branch.<name>.remote`/`.merge`) rather than assuming `origin`/`HEAD`. | Must | On a branch tracking a fork remote, `/do:pr` pushes to that fork, not `origin`. |
 | FR-18 | The system MUST provide a multi-reviewer review loop (`--review-with`) that classifies each reviewer's output into a fixed status vocabulary (clean/capped/no-verdict/guardrail/cli-error/push-failed/...) and blocks merge on any non-clean status not explicitly exempted. | Must | A reviewer returning an unparseable verdict blocks merge rather than being treated as clean. |
 | FR-19 | The system MUST provide `/do:better` (and the structurally narrowed `/do:simplify`) for multi-agent DevSecOps/refactor auditing, remediation in an isolated worktree, and per-category PR creation. | Must | `/do:simplify` produces refactor-only PRs with the existing test suite passing unmodified. |
-| FR-20 | The system MUST provide `/do:next` (including `--swarm`) to claim and ship PLAN.md items or tracker issues via isolated worktrees. | Must | `/do:next --swarm` ships more than one independent issue in a single run without branch collisions. |
-| FR-21 | The system MUST provide `/do:replan` and `/do:plan-task` to keep the tactical backlog (PLAN.md or the issue tracker) current. | Should | `/do:replan --issues` prunes closed items from the tracked `plan`-labeled issue set. |
+| FR-20 | The system MUST provide `/do:next` (including `--swarm`) to claim and ship tracker issues via isolated worktrees. | Must | `/do:next --swarm` ships more than one independent issue in a single run without branch collisions. |
+| FR-21 | The system MUST provide `/do:replan` and `/do:plan-task` to keep the tactical backlog (the GitHub/GitLab issue tracker) current. | Should | `/do:replan` prunes closed items from the tracked `plan`-labeled issue set. |
 | FR-22 | The system MUST provide `/do:help`, listing every installed command with a one-line description and a check for available updates. | Must | `/do:help` output includes every file present in `commands/do/`. |
 
 ### CLI Interface
@@ -159,4 +159,4 @@ None open as of this writing — every item discovery raised was resolved during
 
 ---
 
-For strategic context (mission, tenets, long-term vision), see [GOALS.md](./GOALS.md). For the tactical backlog, see [PLAN.md](./PLAN.md).
+For strategic context (mission, tenets, long-term vision), see [GOALS.md](./GOALS.md). For the tactical backlog, see the [GitHub issue tracker](https://github.com/atomantic/slashdo/issues).
