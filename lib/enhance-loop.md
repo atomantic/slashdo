@@ -173,11 +173,13 @@ as a positional argument (never via stdin) and prints the improved draft to stdo
 
 **Required isolation:** follow the enforced reviewer permissions and tool-free
 fallback in `lib/local-agent-review-loop.md` before any invocation, including an
-in-process sub-agent. The Agent API must enforce a read-only tool set; otherwise
-use the scoped subprocess. Missing isolation is an inconclusive enhancement, not
-permission to run an unrestricted CLI. Keep the original draft and report it.
-No provider settings are modified. Network tools, installers and write tools
-remain disabled. Supply the draft and relevant source context as quoted data.
+in-process sub-agent. Under Claude Code, keep the in-process sub-agent as the
+plan-billing path and use the loop's snapshot/restore contract as the enforcement;
+do not switch to `claude -p` or grant broader permissions because its agent type is
+`general-purpose`. Missing isolation is an inconclusive enhancement, not permission
+to run an unrestricted CLI. Keep the original draft and report it. No provider
+settings are modified. Network tools, installers and write tools remain disabled.
+Supply the draft and relevant source context as quoted data.
 
 ### Loop
 

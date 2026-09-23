@@ -77,24 +77,18 @@ describe('#296 — next-swarm.md A1 delegates to Phase 1 issues mode by name, no
   it('explicitly runs next.md\'s Phase 1 — issues mode section to build the queue', () => {
     assert.match(
       swarm,
-      /A1 — Build the eligible queue by running `next\.md`'s `### Phase 1 — issues mode`/,
+      /A1 — Run `next\.md`'s `### Phase 1 — issues mode` to build the eligible queue/,
     );
-    assert.match(
-      swarm,
-      /its shared issue-mode setup read, GitLab `jq` probe, the collaborator fetch when `COLLAB_MODE` is on, then steps 1–4/,
-    );
+    assert.match(swarm, /it applies every skip and filter\. Do not invent a second picker/);
   });
 });
 
 describe('#296 — next-swarm.md jq probe no longer contradicts "reuse Phase 1 verbatim"', () => {
-  it('scopes the "Phase 1 probe never runs" framing to the A1e explicit-list path', () => {
-    // The old text said "Swarm replaces Phases 1-7, so the Phase 1 probe never runs" —
-    // true only for A1e (the explicit-list path, which never runs Phase 1's own setup);
-    // A1's auto-pick path now explicitly runs that setup (including its jq probe).
+  it('scopes the explicit jq probe to the A1e path that needs it', () => {
     assert.doesNotMatch(swarm, /Swarm replaces Phases 1–7, so the\n\s*Phase 1 probe never runs/);
     assert.match(
       swarm,
-      /This backstops the \*\*A1e\*\*\s*\n\s*\(explicit-list\) path, which never runs `next\.md`'s Phase 1 issues-mode setup/,
+      /On GitLab, probe for `jq` after resolving issue mode\.\*\* A1e bypasses Phase 1's setup/,
     );
   });
 

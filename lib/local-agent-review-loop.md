@@ -68,7 +68,7 @@ The orchestrator runs the chosen CLI via Bash and captures output to a log file.
 
 For `claude`, `agy`, `grok`, `pi`, `cursor`, `opencode`, and `cmd`, the CLI is driven with the **self-contained review prompt** `$LOCAL_PROMPT` (built below), not slashdo's `/do-review` (`/do:review`) skill: that skill fans out to 5–6 parallel sub-agents, and a headless print-mode CLI (or an in-process Claude sub-agent) cannot wait on them — agy's `-p` mode returns the interim "I dispatched the sub-agents" message and then times out with zero findings (`Print mode: timed out after 498 polls`). The prompt therefore asks for an inline single-session review and carries the `git diff` instruction and the mode-specific output contract itself. For `codex`, use the built-in `codex review` subcommand in review-only mode and `codex exec` only when `REVIEWER_APPLIES=true` (`codex review` doesn't apply fixes).
 
-The invocations run **non-interactively** — the flags below disable each CLI's approval gates so an unattended run never stops to ask.<!-- if:teams --> (The Claude-Code sub-agent path needs no such flag: a spawned `Agent` inherits the host session's tool-approval settings.)<!-- /if:teams -->
+The invocations run **non-interactively** through each CLI's documented unattended profile. The flags below select the narrowest supported permissions and never grant blanket approval, write access, or bypass controls; where a CLI requires a non-interactive approval setting, combine it with the enforced sandbox/tool restrictions below.<!-- if:teams --> (The Claude-Code sub-agent path inherits the host session's tool-approval settings, while the loop's snapshot-and-restore check remains the enforcement for the tracked tree.)<!-- /if:teams -->
 
 Compute the shared inputs once, before invoking any local agent:
 
@@ -310,7 +310,7 @@ Pick the invocation after the isolation preflight above resolves — either a ve
 
 | Agent | Review-only (`REVIEWER_APPLIES=false`, default) | Reviewer-applies (`REVIEWER_APPLIES=true`) |
 |-------|-------------------------------------------------|---------------------------------------------|
-| `claude` | `claude -p --input-format text ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"} --permission-mode plan --tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --settings '{"disableAllHooks":true}' --no-chrome --no-session-persistence < "$CLAUDE_REVIEW_INPUT"` | Use the same read-only invocation; orchestrator applies findings until an isolated write-only tool profile is verified |
+| `claude` | `claude -p --input-format text ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"} --permission-mode plan --tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --settings '{"disableAllHooks":true}' --no-chrome --no-session-persistence < "$CLAUDE_REVIEW_INPUT"` | Never selected; pre-flight forces review-only and the orchestrator applies findings |
 | `codex` | `codex ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"} --sandbox read-only review --base "$BASE_BRANCH" --title "$REVIEW_TITLE"` | `codex ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"} --sandbox workspace-write -c sandbox_workspace_write.network_access=false -c features.shell_tool=false -a never exec "$CODEX_APPLY_PROMPT"` after isolated-config verification; edit only, orchestrator verifies and commits |
 | `agy` | Verified scoped profile above, else tool-free fallback: `agy -p "$LOCAL_PROMPT" --model "$AGY_REVIEW_MODEL" --print-timeout 30m --disable-slash-commands` (`--print-timeout 30m` is required — agy's own default is `5m0s` and a review routinely runs longer; omitting it produces an empty log and a false `no-verdict`, not a capability failure) | Same read-only fallback; orchestrator applies |
 | `grok` | Tool-free fallback: `grok -p "$LOCAL_PROMPT" ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"}` (unverified against a live install — check `grok --help` for the current print-mode flag and timeout default before relying on this; a wrong flag fails fast as `cli-error`, which is safe, just not silent) | Same read-only fallback; orchestrator applies |
@@ -318,8 +318,6 @@ Pick the invocation after the isolation preflight above resolves — either a ve
 | `cursor` | Tool-free fallback: `"$REVIEW_BIN" -p "$LOCAL_PROMPT" ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"}` (unverified — confirm `"$REVIEW_BIN" --help` still exposes `-p`/`--print` before relying on this) | Same read-only fallback; orchestrator applies |
 | `opencode` | Tool-free fallback (`opencode run --pure ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"} "$LOCAL_PROMPT" < /dev/null`) with an explicit model or the operator's configured OpenCode provider/model; slashdo supplies no model override when neither is set | Same read-only fallback; orchestrator applies |
 | `cmd` | Tool-free fallback, always. `{INVOCATION}` is **`bash -c "$REVIEWER_CMD"` and nothing else** — the prompt is piped in from *outside* the timed line (`printf '%s' "$LOCAL_PROMPT" \| ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION}`, per Step 2). Folding the `printf ... \|` into this cell instead leaves `TIMEOUT_CMD` wrapping only the `printf`, so the reviewer runs unbounded. See "The `cmd` reviewer" above for the stdin/stdout contract and trust boundary | Never selected — `cmd` always forces review-only; orchestrator applies |
-
-Claude hosts may keep the in-process billing path ONLY when their Agent API enforces the same read-only tool set. A general-purpose sub-agent with an instruction to avoid writes is insufficient; use the scoped subprocess otherwise. This rule overrides every in-process dispatch example below.
 
 Append the orchestrator-computed diff to `LOCAL_PROMPT` for Claude and all tool-free paths (`agy`/`grok`/`cursor`/`pi`/`opencode`/`cmd`) before launch. Use `git --no-pager diff --no-ext-diff --no-textconv "$BASE_BRANCH"...HEAD` and include relevant working-tree changes if reviewing a dirty tree. Include the resolved base/head commit IDs and the complete changed-file scope (including renames and deletions) as data before the patch. Read changed files as data, refusing symlinks escaping the selected source root and private instance data. Rebuild this payload from the current review target on every iteration; never reuse a patch from before the latest fixes. Do not export `LOCAL_PROMPT` — environment strings have exec size limits too.
 
@@ -399,12 +397,12 @@ Initialize `ITERATION=0`, `STATUS=""`, `REVIEW_DIAGNOSTIC=""`, `REVIEW_REMEDY=""
 2. **Invoke the chosen reviewer** (capture output to a log so context stays clean):
 
 <!-- if:teams -->
-   **When `REVIEW_AGENT=claude`: dispatch an in-process sub-agent — do NOT run the Bash invocation below.** A headless `claude -p` bills against the Anthropic API; an in-process sub-agent runs under this session's plan. Dispatch via the `Agent` tool, then resume the loop:
+   **When `REVIEW_AGENT=claude`: dispatch an in-process sub-agent — do NOT run the Bash invocation below.** A headless `claude -p` bills against the Anthropic API; an in-process sub-agent runs under this session's plan. Dispatch via the `Agent` tool, then resume the loop. This is the Claude Code path: use the in-process sub-agent for plan billing, with the loop's Step 1 snapshot and Step 3 restore as the enforcement for the general-purpose agent; do not switch to `claude -p` or broaden permissions because of its agent type:
    - **Agent type**: `subagent_type: "general-purpose"` (the catch-all type — on some hosts named `claude`). Do **not** look for a specialized `code-reviewer` / `code-review` / `reviewer` type — none exists, and probing for one wastes a turn on an "agent type not found" error. The review behavior comes entirely from `$LOCAL_PROMPT`.
    - **Model**: when `{REVIEW_MODEL}` is set, pass it as the `Agent` tool's `model` parameter; when empty, omit `model` and the sub-agent inherits the host session's model.
    - **Effort**: there is no in-process analog of `--effort`. The `Agent` tool exposes a `model` parameter but **no reasoning-effort parameter**, so `{REVIEW_EFFORT}` reaches this path **only** as the advisory `Target reasoning effort level: <level>.` sentence `$LOCAL_PROMPT` already carries, and that is sufficient. Do not invent an `effort`/`reasoning_effort` argument for the `Agent` tool, do not shell out to `claude -p --effort <level>` (the API-billed path this branch exists to avoid), and do not reach for a host command that takes an effort argument — see the next bullet. A pinned effort is never a reason to leave this dispatch.
    - **Never substitute the host's own review command for `$LOCAL_PROMPT`** — Claude Code's built-in `/code-review` skill (in any form: `/code-review xhigh`, `/code-review --effort xhigh <PR>`) is NOT this pass: it runs its own multi-agent fan-out and reports in its own format, so Step 3 has no `FINDING <N>:` / `NO FINDINGS` block to parse and the reviewer's merge-gate slot is filled by a verdict this loop never read.
-   - **Sub-agent prompt**: pass `$LOCAL_PROMPT` (computed above) as the prompt; it carries the `git diff` instruction and the mode-specific output contract and does **not** invoke the `/do:review` skill. The sub-agent behaves like the `claude -p` path: in a verified `REVIEWER_APPLIES=true` mode it edits source only and the orchestrator tests and commits; in review-only mode it returns the structured `FINDING <N>:` blocks (or `NO FINDINGS`) as its final message.
+   - **Sub-agent prompt**: pass `$LOCAL_PROMPT` (computed above) as the prompt; it carries the `git diff` instruction and the mode-specific output contract and does **not** invoke the `/do:review` skill. Under Claude Code, pre-flight step 9 forces `REVIEWER_APPLIES=false`; the sub-agent returns the structured `FINDING <N>:` blocks (or `NO FINDINGS`) as its final message, and the orchestrator applies and verifies any fixes.
    - **Capture the result into the log** so Step 3 and the final report's `Log:` line work unchanged: `LOG_FILE="$(mktemp -t local-review-claude.XXXXXX.log)"`, write the sub-agent's returned message to `$LOG_FILE`, and set `EXIT_CODE=0` (non-zero only if the sub-agent reports it could not complete the review).
    - Skip the Bash invocation below and proceed to Step 3.
 
@@ -544,14 +542,15 @@ Initialize `ITERATION=0`, `STATUS=""`, `REVIEW_DIAGNOSTIC=""`, `REVIEW_REMEDY=""
      NEW_COMMITS=$(git rev-list "$LOOP_START_SHA..HEAD" --count)
      UNCOMMITTED=$(git status --porcelain | wc -l)
      ```
-   - If recomputed `NEW_COMMITS == 0` (e.g. every finding was rejected as wrong/out-of-scope), set `STATUS=clean` and exit.
-   - If recomputed `UNCOMMITTED > 0`, you have a bug — the orchestrator always commits what it stages. Print the uncommitted diff, stage and commit explicitly listed files as `address review ($REVIEW_AGENT): orchestrator-applied — remaining changes`, and proceed.
+   - If recomputed `UNCOMMITTED > 0`, print the uncommitted diff, stage the explicitly listed files, and commit them as `address review ($REVIEW_AGENT): orchestrator-applied — remaining changes`; then recompute both `NEW_COMMITS` and `UNCOMMITTED`. This must happen before the zero-commit check, or a dirty tree could exit `clean` without verification or a push.
+   - If recomputed `NEW_COMMITS == 0` **and** `UNCOMMITTED == 0` (every finding was rejected and the tree is clean), set `STATUS=clean` and exit.
 
    **When `REVIEWER_APPLIES=true` (reviewer applies)**:
-   - The CLI was expected to apply fixes in the working tree and commit them as `address review ($REVIEW_AGENT): <summary>`.
-   - If `NEW_COMMITS == 0` and `UNCOMMITTED == 0`: the CLI found nothing to fix. Set `STATUS=clean` and exit the loop.
-   - If `UNCOMMITTED > 0` (changes left uncommitted despite the instruction): print the uncommitted diff. **Default mode**: stage all changed files explicitly (not `git add -A` — list them) and commit with `chore: local review changes (uncommitted by {REVIEW_AGENT})`, then continue to verification. **Interactive mode**: ask whether to commit, discard, or abort.
-   - Otherwise (`NEW_COMMITS > 0`, clean tree): proceed to verification.
+   - The reviewer is expected to edit the working tree but leave its changes uncommitted; the prompt above forbids it from committing or pushing. The orchestrator owns the commit.
+   - If `NEW_COMMITS > 0`, the reviewer committed despite that contract. This is an anomaly: run `git reset --soft "$LOOP_START_SHA"` so the changes remain available without the reviewer's commit, then recompute both counts.
+   - If `UNCOMMITTED > 0`, print the diff, stage the explicitly listed files (not `git add -A`), and commit them as `address review ($REVIEW_AGENT): <summary>`. Then recompute both counts and continue to verification. This is the normal reviewer-applies path; do not ask the user to approve the expected commit.
+   - If `NEW_COMMITS == 0` and `UNCOMMITTED == 0`, the reviewer found nothing to fix. Set `STATUS=clean` and exit the loop.
+   - After the orchestrator commit, continue to verification; a reviewer-created commit has been replaced by the orchestrator's attributed commit.
 
 4. **Verify in the main thread** (never delegate this step to a sub-agent):
    - Read `git diff "$LOOP_START_SHA..HEAD"` and inspect each new commit's message + changes for: changes beyond the stated review scope (out-of-bounds refactors, unrelated files); commits that revert legitimate behavior to make a flaky test pass; disabled tests, skipped assertions, or `// TODO` placeholders; secrets, hardcoded credentials, or other content that must not land.
@@ -561,10 +560,17 @@ Initialize `ITERATION=0`, `STATUS=""`, `REVIEW_DIAGNOSTIC=""`, `REVIEW_REMEDY=""
    - If any inspection red flag triggered: revert with `git reset --hard $LOOP_START_SHA`, set `STATUS=rejected`, and exit the loop.
 
 5. **Push verified changes**:
-   ```bash
-   git push origin {BRANCH_NAME}
-   ```
-   If the push fails (e.g. non-fast-forward), run `git pull --rebase --autostash` and retry the push once. If the pull stops on conflicts, do not abort or report failure merely because the conflict exists: read and follow [rebase-conflict-resolution.md](./rebase-conflict-resolution.md), resolve and continue the rebase, rerun the build/tests affected by the resolution, then push. Report failure only after the completed resolution and retry still cannot publish the branch.
+    ```bash
+    BR="$(git branch --show-current)"
+    PUSH_REMOTE="$(git config --get "branch.$BR.remote")"
+    PUSH_BRANCH="$(git config --get "branch.$BR.merge")"
+    if [ -z "$PUSH_REMOTE" ] || [ "$PUSH_REMOTE" = "." ] || [ -z "$PUSH_BRANCH" ]; then
+      echo "No remote upstream is configured; leaving this review pass local." >&2
+    else
+      git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"
+    fi
+    ```
+    If a remote upstream is configured and the push fails (e.g. non-fast-forward), run `git pull --rebase --autostash` and retry the same `git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"` once in the same shell. If the pull stops on conflicts, do not abort or report failure merely because the conflict exists: read and follow [rebase-conflict-resolution.md](./rebase-conflict-resolution.md), resolve and continue the rebase, rerun the build/tests affected by the resolution, then retry the same upstream-derived push. Report failure only after the completed resolution and retry still cannot publish the branch. Never guess `origin` or the local branch name when no upstream is configured.
 
 6. **Re-loop or stop**:
    - `ITERATION=$((ITERATION + 1))`
