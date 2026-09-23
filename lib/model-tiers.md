@@ -118,7 +118,7 @@ against that host's lineup and its dispatch API's actual parameters.
 
 ## Related
 
-- [plan-issue-mode.md](./plan-issue-mode.md) — the `model:` / `effort:` tracker
+- [plan-issue-setup.md](./plan-issue-setup.md) — the `model:` / `effort:` tracker
   labels use this same vocabulary, so an issue's dispatch hint resolves through this
   file when a consumer acts on it.
 - `/do:config --review-models` is **unrelated**: it pins the model each external

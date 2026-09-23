@@ -8,7 +8,7 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const { readCommandDocs } = require('./helpers/command-docs');
 const readCommand = (name) => readCommandDocs(name, { eager: true });
-const partial = fs.readFileSync(path.join(root, 'lib', 'plan-issue-mode.md'), 'utf8');
+const partial = fs.readFileSync(path.join(root, 'lib', 'plan-issue-filing.md'), 'utf8');
 
 // `--issues` at audit scale spools each finding's ready-to-file body to disk and
 // returns only an index line, so the orchestrator never re-emits a body it would

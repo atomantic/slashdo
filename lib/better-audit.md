@@ -53,7 +53,8 @@ Each agent must report findings in this format:
 **Issue mode (`--issues`) changes where this format goes, not what it contains.**
 Only when `ISSUE_MODE=true`, read the issue/spool contract before dispatching any agent:
 
-!read lib/plan-issue-mode.md
+!read lib/plan-issue-setup.md
+!read lib/plan-issue-filing.md
 
 Then create the spool directory:
 
@@ -67,7 +68,7 @@ re-deriving it later would hand the filer agents an empty directory.
 
 Pass `SPOOL_DIR` to every audit agent along with the **"Bulk filing — spool the
 bodies, dedup on an index"** contract from
-[lib/plan-issue-mode.md](./plan-issue-mode.md) (the partial Phase 2 reads
+[lib/plan-issue-filing.md](./plan-issue-filing.md) (the partial Phase 2 reads
 in). Under that contract each agent writes one ready-to-file issue body per finding
 to `$SPOOL_DIR/<category-slug>.md` — using its own category slug from Phase 2's
 summary table (`security`, `code-quality`, `dry`, `architecture`, `bugs-perf`,

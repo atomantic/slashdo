@@ -205,7 +205,7 @@ Feed this graph to Phase 2: `blocked` and `clearable` issues are both kept `stil
 > advisory, never a triage signal.** They only steer `/do:next`; don't add, remove, or
 > read them as evidence here. Replan MAY set `Depends on #N` (hard predecessor),
 > `priority:<N>` (soft sequencing), or a dispatch hint (per
-> [lib/plan-issue-mode.md](../../lib/plan-issue-mode.md) "The dispatch hint") on
+> [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) "The dispatch hint") on
 > **new** work it investigated well enough to justify, but must **not** stamp hints
 > onto migrated PLAN.md items or existing issues in bulk. A `Depends on #N` issue is
 > **deferred, not un-actionable** — see the invariant note above.

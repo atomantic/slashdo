@@ -372,10 +372,10 @@ describe('inlineLibReferences', () => {
   });
 
   // The real repo pair, guarding the shipped citation cycle rather than a synthetic one.
-  it('terminates on the real plan-issue-mode <-> model-tiers citation cycle', () => {
+  it('terminates on the real plan-issue-setup <-> model-tiers citation cycle', () => {
     const repoLibs = path.join(__dirname, '..', 'lib');
-    const result = inlineLibReferences('See [plan-issue-mode.md](../../lib/plan-issue-mode.md).', repoLibs);
-    assert.equal(result.match(/### plan-issue-mode/g).length, 1, 'plan-issue-mode appended once');
+    const result = inlineLibReferences('See [plan-issue-setup.md](../../lib/plan-issue-setup.md).', repoLibs);
+    assert.equal(result.match(/### plan-issue-setup/g).length, 1, 'plan-issue-setup appended once');
     assert.equal(result.match(/### model-tiers/g).length, 1, 'model-tiers appended once');
     assert.ok(!DANGLING_SIBLING_LINK.test(result), 'no dangling sibling link in either lib');
   });

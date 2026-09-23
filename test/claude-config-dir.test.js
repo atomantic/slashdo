@@ -86,7 +86,8 @@ describe('curl installer CLAUDE_CONFIG_DIR support', () => {
       assert.equal(installed.status, 0, installed.stderr || installed.stdout);
 
       assert.ok(fs.existsSync(path.join(configDir, 'commands', 'do', 'next.md')));
-      assert.ok(fs.existsSync(path.join(configDir, 'lib', 'plan-issue-mode.md')));
+      assert.ok(fs.existsSync(path.join(configDir, 'lib', 'plan-issue-setup.md')));
+      assert.ok(fs.existsSync(path.join(configDir, 'lib', 'plan-issue-filing.md')));
       assert.ok(fs.existsSync(path.join(configDir, 'hooks', 'slashdo-check-update.js')));
       assert.ok(fs.existsSync(path.join(configDir, '.slashdo-config.json')));
       const settings = JSON.parse(fs.readFileSync(path.join(configDir, 'settings.json'), 'utf8'));
