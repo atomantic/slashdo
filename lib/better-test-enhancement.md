@@ -5,7 +5,7 @@
 After Phase 4b, act on the test-audit findings and cover the Phase 3 remediation with tests.
 
 1. Before any test commit, record `PHASE_4C_START_SHA` (`git -C {WORKTREE_DIR} rev-parse HEAD`).
-2. Triage the test-audit findings by tag, in priority order `[VACUOUS]`, `[WEAK]`, `[MISSING]` (issue mode triages from the spooled bodies per [lib/better-issue-mode.md](./better-issue-mode.md) — the index carries no tag). List every Phase 3 remediated file whose changed behavior no existing test covers as `{REMEDIATED_FILES_WITHOUT_TESTS}`.
+2. Triage the test-audit findings by tag, in priority order `[VACUOUS]`, `[WEAK]`, `[MISSING]` from the spooled bodies per [lib/better-issue-mode.md](./better-issue-mode.md) — the index carries no tag. List every Phase 3 remediated file whose changed behavior no existing test covers as `{REMEDIATED_FILES_WITHOUT_TESTS}`.
 3. Spawn one general-purpose agent (using `REMEDIATION_MODEL_TIER`) in the worktree:
 
 ```

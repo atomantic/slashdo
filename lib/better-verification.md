@@ -22,4 +22,4 @@ By default, print a brief summary of findings and fixes and proceed to PR creati
 **Commit directly** replaces Phases 5–7 entirely. On exit:
 - Nothing is left uncommitted on `{BRANCH_PREFIX}/{DATE}` (remaining changes go in as `fix: {PIPELINE_LABEL} remediation — remaining changes`, specific files staged).
 - `{BRANCH_PREFIX}/{DATE}` is merged into `{CURRENT_BRANCH}` in `{REPO_DIR}`. Only after a clean merge are `{WORKTREE_DIR}` and the staging branch removed; on a conflict both are kept and the user gets the resolve-then-remove commands.
-- The stash is restored, PLAN.md is updated, and the final summary is printed. Stop there.
+- The stash is restored and the final summary (with filed or deferred issues) is printed. Stop there.

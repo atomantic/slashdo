@@ -1,6 +1,6 @@
 ## Phase 3: Worktree Remediation
 
-Only CRITICAL, HIGH, and MEDIUM findings are remediated. LOW findings stay tracked in PLAN.md (or the tracker). Test Quality & Coverage findings belong to Phase 4c.
+Only CRITICAL, HIGH, and MEDIUM findings are remediated. LOW findings are filed as issues, not auto-remediated. Test Quality & Coverage findings belong to Phase 4c.
 
 ### 3a: Setup
 
@@ -24,7 +24,7 @@ Category rules (a caller with a narrower roster supplies its own):
 - Structural Ambition — apply the specific reframing each finding names; a "cleaner version of the same idea" does not count. An infeasible reframing is left as-is with the reason in the commit message, never replaced by a cosmetic change.
 - Cognitive Load — apply the named transformation and nothing else; a rename covers every call site in the same commit.
 
-**Ownership:** every file has exactly one worker. When two categories touch the same file, one worker gets both sets of findings — Security takes validation logic, DRY takes import consolidation, and Dependency Freedom takes files that are solely import/usage sites of a removed package. In issue mode, build `{FINDINGS}` per [lib/better-issue-mode.md](./better-issue-mode.md)'s Phase 3 rule.
+**Ownership:** every file has exactly one worker. When two categories touch the same file, one worker gets both sets of findings — Security takes validation logic, DRY takes import consolidation, and Dependency Freedom takes files that are solely import/usage sites of a removed package. Build `{FINDINGS}` from the spool per [lib/better-issue-mode.md](./better-issue-mode.md)'s Phase 3 rule.
 
 Instantiate each worker from this template:
 

@@ -1,6 +1,6 @@
 ## Simplify-Only Mode (`--simplify-only`)
 
-When `SIMPLIFY_ONLY=true`, the pipeline runs end to end exactly as documented (discovery → audit → plan → worktree remediation → verification → per-category PRs → CI → review loop → merge). What narrows is *what the run looks for and touches*: *refactoring, architecture, DRY, simplification, and cognitive load*, and nothing else. Security, runtime bugs, performance, stack-specific gotchas, dependency removal, test authoring, and UX are **out of scope for this run** — do not proactively audit or remediate those areas. A concrete bug encountered incidentally is recorded as deferred work in PLAN.md or the tracker under `--issues`, never fixed in this run. Keep incidental follow-ups separate from the five-category refactor results.
+When `SIMPLIFY_ONLY=true`, the pipeline runs end to end exactly as documented (discovery → audit → plan → worktree remediation → verification → per-category PRs → CI → review loop → merge). What narrows is *what the run looks for and touches*: *refactoring, architecture, DRY, simplification, and cognitive load*, and nothing else. Security, runtime bugs, performance, stack-specific gotchas, dependency removal, test authoring, and UX are **out of scope for this run** — do not proactively audit or remediate those areas. A concrete bug encountered incidentally is recorded as deferred work (a tracker issue), never fixed in this run. Keep incidental follow-ups separate from the five-category refactor results.
 
 ### Audit roster (Phase 1)
 
@@ -28,13 +28,11 @@ Gates **1, 2, and 4** go in every audit agent's instructions, and Phase 2 re-app
 
 **2. Depth, not just size.** A deep module puts a lot of behavior behind a small, stable interface; a shallow one leaks its implementation, so its interface costs about as much to learn as the body costs to read. Judge a module by that ratio, not by line count alone — a 400-line module behind three obvious functions is fine, and a 40-line one requiring six parameters and knowledge of call ordering is not. Prefer findings that make an interface smaller over findings that only make a file shorter.
 
-**3. Churn bias — refactor what people actually touch** _(Phase 2 only)_. Rank findings against `HOT_FILES` (Phase 0e): a finding in a hot file keeps its assessed severity, and a finding in a file with no commits in the churn window drops **one tier** (which pushes marginal ones to LOW, i.e. tracked but not auto-remediated). Never promote on churn alone — a hot file does not make a weak finding strong. Exception: a finding that spans many files (a canonical-helper duplication, a boundary leak) is ranked by its hottest file.
+**3. Churn bias — refactor what people actually touch** _(Phase 2 only)_. Rank findings against `HOT_FILES` (Phase 0e): a finding in a hot file keeps its assessed severity, and a finding in a file with no commits in the churn window drops **one tier** (which pushes marginal ones to LOW, i.e. filed as an issue but not auto-remediated). Never promote on churn alone — a hot file does not make a weak finding strong. Exception: a finding that spans many files (a canonical-helper duplication, a boundary leak) is ranked by its hottest file.
 
 **4. Don't re-litigate settled rejections.** Before filing, check `PRIOR_REJECTIONS` (Phase 0e) and do not re-propose a reframing that has already been tried and rejected.
 
-When any phase rejects a reframing (infeasible after investigation, or reverted in 4b for changing behavior), record it so the next run inherits the decision:
-- **Default**: append to the `### Rejected reframings` subsection of the run's PLAN.md audit section — `- ~~{description}~~ — rejected {YYYY-MM-DD}: {one-line reason}`
-- **Under `--issues`** (where PLAN.md is not written at all): file an issue titled with the reframing, labeled `{PLAN_LABEL}` **and `rejected-reframing`**, then immediately close it with the reason as a closing comment — even when the finding was remediated rather than deferred and has no issue of its own.
+When any phase rejects a reframing (infeasible after investigation, or reverted in 4b for changing behavior), record it so the next run inherits the decision: file an issue titled with the reframing, labeled `{PLAN_LABEL}` **and `rejected-reframing`**, then immediately close it with the reason as a closing comment — even when the finding was remediated rather than deferred and has no issue of its own. The extra label is what keeps Phase 0e's read bounded. When `TRACKER_AVAILABLE=false`, list the rejection in the Phase 7 deferred report instead.
 
 Findings also inherit the standard evidence bar from the Structural Ambition agent: quoted code, and a named concrete transformation. "This could be cleaner" without a named transformation is not a finding.
 
@@ -46,7 +44,7 @@ Every fix in this mode must be **observably behavior-preserving**. Give each rem
 >
 > The existing test suite is the safety net, so it must keep passing **unmodified**. Mechanical updates are allowed (an import path, a renamed symbol, a moved fixture); anything beyond that — changing an assertion, relaxing an expectation, deleting a case — means your refactor changed behavior. Revert it rather than editing the test to match.
 
-A finding whose only available fix would change behavior is **deferred**, not remediated: it goes to PLAN.md (or a tracker issue under `--issues`) per the normal disposition rules, with a one-line note that it was out of scope for a simplify-only run.
+A finding whose only available fix would change behavior is **deferred**, not remediated: it is filed as a tracker issue per the normal disposition rules, with a one-line note that it was out of scope for a simplify-only run.
 
 ### The category set
 
@@ -72,11 +70,11 @@ Other deviations, by phase (the shared phase partials defer to this list):
        | sort | uniq -c | sort -rn | head -40
      ```
      Record the paths with their commit counts. If the repo is younger than the window or the list is near-empty, re-run the same pipeline without `--since` rather than treating every file as cold. Never run a bare `git log --name-only` without the aggregation.
-  2. **`PRIOR_REJECTIONS`** (gate 4) — the `### Rejected reframings` subsections of PLAN.md; under `--issues`, only the closed issues carrying **both** `{PLAN_LABEL}` and `rejected-reframing` (`{CLI_TOOL} issue list --state closed --label "{PLAN_LABEL}" --label rejected-reframing --limit 200 --json number,title,body`).
+  2. **`PRIOR_REJECTIONS`** (gate 4) — only the closed issues carrying **both** `{PLAN_LABEL}` and `rejected-reframing` (empty when `TRACKER_AVAILABLE=false`): `{CLI_TOOL} issue list --state closed --label "{PLAN_LABEL}" --label rejected-reframing --limit 200 --json number,title,body`.
   3. **`DOMAIN_DOCS`** — whichever of `CONTEXT.md`, `GOALS.md`, `docs/adr/`, and `docs/decisions/` exist (the index or most recent ADRs, not the whole directory), distilled **once** into a short glossary plus the reframings the ADRs already ruled out. Pass the glossary to audit agents, never the documents, so proposed names use the project's own vocabulary.
-- **Phase 2.** Apply gate 3 here, and open a `### Rejected reframings` subsection for gate-4 rejections in PLAN.md mode.
+- **Phase 2.** Apply gate 3 here, and only here.
 - **Phase 3c.** Only the five in-scope workers spawn, each with the behavior-preservation rule above verbatim.
 - **Phase 4.** A failing test is a regression by definition: fix the refactor or revert it; never edit the test to match.
 - **Phase 4b.** Carry one extra question through the internal review: *does any hunk change what this program does?* — a different return value, side effect, error type or message, validation, output format, or public API without a re-export. Revert every such hunk rather than fixing it, then **defer** the finding behind it (it needs behavior review) or, when the transformation cannot be done without changing behavior, record a gate-4 rejection.
 - **Phase 4c** is skipped entirely: the Phase 2 `FILE_OWNER_MAP` is final, and every test-enhancement stat reports `— (skipped: --simplify-only)`.
-- **Phase 5.** Each PR body also carries: `Behavior-preserving refactor: no observable change to return values, side effects, errors, or public API. Verified by {TEST_CMD} passing unmodified.` `--simplify-only` composes with every other flag: `--scan-only` stops after the narrowed plan, `--interactive` still prompts at each gate, `--issues` still files deferred findings as issues, and the review flags drive Phase 6 as usual.
+- **Phase 5.** Each PR body also carries: `Behavior-preserving refactor: no observable change to return values, side effects, errors, or public API. Verified by {TEST_CMD} passing unmodified.` `--simplify-only` composes with every other flag: `--scan-only` stops after the narrowed plan, `--interactive` still prompts at each gate, deferred findings are still filed as issues, and the review flags drive Phase 6 as usual.

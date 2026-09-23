@@ -23,12 +23,17 @@ describe('better progressive context', () => {
     }
   });
 
-  it('keeps a default run\'s orchestrator path within 60 KB (#325)', () => {
+  it('keeps a default run\'s orchestrator path within its byte budget (#325)', () => {
     // The entrypoint budget above let the progressive-disclosure split move text
     // into phase partials without shrinking it. This sums what a default run
-    // (no --simplify-only, --strict, --issues, or reviewers) actually reads:
-    // better.md plus every `!read` it reaches, recursively, except those whose
-    // gate prose directly above opens with "Only when/with/for/on …".
+    // (no --simplify-only, --strict, or reviewers) actually reads: better.md plus
+    // every `!read` it reaches, recursively, except those whose gate prose
+    // directly above opens with "Only when/with/for/on …".
+    //
+    // #325's target is 60 KB. Since tracker filing became unconditional (#375),
+    // the shared tracker partials (plan-issue-filing/-setup) sit on this path, so
+    // the budget holds today's size until those shrink — lower it, never raise it.
+    const BUDGET = 84000;
     const GATE = /^(?:\d+[a-z]?\.\s+)?Only (?:when|with|for|on)\b/;
     const reached = new Map();
     const gated = new Set();
@@ -50,7 +55,6 @@ describe('better progressive context', () => {
 
     // Pin the gated set so a new gate can't silently drop a partial from the budget.
     assert.deepEqual([...gated].filter((f) => !reached.has(f)).sort(), [
-      'lib/better-issue-mode.md',
       'lib/better-review-loop.md',
       'lib/better-simplify.md',
       'lib/review-flags.md',
@@ -58,9 +62,9 @@ describe('better progressive context', () => {
     ]);
     const total = [...reached.values()].reduce((a, b) => a + b, 0);
     const breakdown = [...reached].sort((a, b) => b[1] - a[1]).map(([f, n]) => `${n} ${f}`).join('\n');
-    assert.ok(total <= 60000, `default /do:better path is ${total} bytes (budget 60000):\n${breakdown}`);
+    assert.ok(total <= BUDGET, `default /do:better path is ${total} bytes (budget ${BUDGET}):\n${breakdown}`);
 
-    // Contracts, not how-to: no placeholder-docs block and no generic checklist include.
+    // Contracts, not how-to: no placeholder-docs block and no checklist include.
     for (const file of reached.keys()) {
       const body = read(file);
       assert.doesNotMatch(body, /^### Inputs\b/m, `${file} carries an ### Inputs placeholder-docs block`);
@@ -130,17 +134,14 @@ describe('better progressive context', () => {
     }
   });
 
-  it('loads the issue-mode spool/filer contract only once, gated on ISSUE_MODE', () => {
-    // Regression for #321: better-plan.md used to `!read` plan-issue-setup.md /
-    // plan-issue-filing.md unconditionally, so a default PLAN.md-mode run paid for
-    // ~20KB of tracker machinery it never used. The contract now lives in one
-    // partial that better.md reads once, gated, before Phase 1 touches it.
+  it('loads the spool/filer contract exactly once, from better.md', () => {
+    // PLAN.md mode was removed, so tracker filing is the only behavior: better.md
+    // reads the contract once, unconditionally, before Phase 1 touches it, and the
+    // phase partials never re-read the general tracker mechanics themselves.
     const entry = read('commands/do/better.md');
     const gateLine = entry.split('\n').find((l) => l.includes('!read lib/better-issue-mode.md'));
     assert.ok(gateLine, 'better.md must route to lib/better-issue-mode.md');
-    const lines = entry.split('\n');
-    const gateIndex = lines.indexOf(gateLine);
-    assert.match(lines.slice(0, gateIndex).reverse().find((l) => l.trim()), /ISSUE_MODE=true/);
+    assert.doesNotMatch(entry, /ISSUE_MODE/);
 
     for (const file of ['lib/better-audit.md', 'lib/better-plan.md']) {
       assert.doesNotMatch(read(file), /^!read lib\/plan-issue-(?:setup|filing)\.md$/m, file);
@@ -192,6 +193,32 @@ describe('better progressive context', () => {
       assert.match(contract, /never delete the remote branch for an open or unmerged PR/);
       assert.match(contract, /Prior approval of a different HEAD is insufficient/);
       assert.match(contract, /expected checks never attach/);
+    }
+  });
+
+  it('has no PLAN.md mode left in the better/depfree pipelines', () => {
+    // PLAN.md mode was removed: deferred findings are filed as tracker issues, and
+    // --issues / --no-issues survive only as a deprecated no-op / an abort.
+    const files = [
+      ...['better', 'better-swift', 'depfree', 'simplify', 'pr-better'].map((n) => `commands/do/${n}.md`),
+      ...fs.readdirSync(path.join(root, 'lib')).filter((n) => /^better-.*\.md$/.test(n)).map((n) => `lib/${n}`),
+      'lib/remediation-agent-template.md',
+    ];
+    for (const file of files) {
+      const body = read(file);
+      assert.doesNotMatch(body, /ISSUE_MODE|plan-id-format|Rejected reframings|- \[x\]|\[<slug>\]/, file);
+      assert.doesNotMatch(body, /\bissue mode\b/i, file);
+      // PLAN.md may only appear in the removal/deprecation messages themselves.
+      for (const line of body.split('\n').filter((l) => l.includes('PLAN.md'))) {
+        assert.match(line, /PLAN\.md mode was removed|Never write PLAN\.md as a fallback/, `${file}: ${line}`);
+      }
+      const hint = body.match(/^argument-hint: .*$/m);
+      if (hint) assert.doesNotMatch(hint[0], /--issues\b(?!-label)|--no-issues/, file);
+    }
+    for (const file of ['lib/better-options.md', 'commands/do/depfree.md']) {
+      const body = read(file);
+      assert.ok(body.includes('`--issues is now the default (PLAN.md mode was removed); the flag can be dropped.`'), file);
+      assert.ok(body.includes("`--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only in the project's issue tracker.`"), file);
     }
   });
 });

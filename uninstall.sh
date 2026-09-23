@@ -104,6 +104,7 @@ OLD_LIBS=(
   better-audit-structural better-audit-tests better-audit-ux
   code-review-checklist graphql-escaping
   per-finding-root-cause post-review-doc-recommendations
+  plan-id-format replan-issues
 )
 
 # NOTE: keep in sync with install.sh LIBS — see comment there.
@@ -119,9 +120,9 @@ LIBS=(
   gh-host github-reviewer-loop
   local-agent-review-loop local-agent-agy local-agent-claude local-agent-cmd local-agent-cursor local-agent-opencode
   merge-gate model-tiers multi-reviewer-loop multi-reviewer-parallel next-gitlab next-swarm ollama-review-loop
-  plan-id-format plan-issue-setup plan-issue-filing pr-write-access
+  plan-issue-setup plan-issue-filing pr-write-access
   rebase-conflict-resolution remediation-agent-template
-  release-documented replan-issues review-agent-selection review-config-defaults review-convergence-gate review-flags
+  release-documented review-agent-selection review-config-defaults review-convergence-gate review-flags
   review-fix-conventions
   review-pr-mode
   review-preferences

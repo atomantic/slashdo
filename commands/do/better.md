@@ -1,6 +1,6 @@
 ---
 description: Audit and remediate repository code in isolated worktrees, with per-category PRs, CI checks, and optional reviewer loops
-argument-hint: "[--interactive] [--scan-only] [--simplify-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--strict|--nuclear] [--issues|--no-issues] [--issues-label <name>] [path filter or focus areas]"
+argument-hint: "[--interactive] [--scan-only] [--simplify-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--strict|--nuclear] [--issues-label <name>] [path filter or focus areas]"
 ---
 
 # Better — Audit and remediate
@@ -25,15 +25,15 @@ Execute applicable steps in order. Reading this list does not request loading ev
 
 !read lib/better-discovery.md
 
-Only when `ISSUE_MODE=true` (resolved by `--issues` in step 0's options), read the shared spool/filer contract once, before any phase below touches it:
+Read the shared spool/filer contract once, before any phase below touches it:
 
 !read lib/better-issue-mode.md
 
-1. Audit only applicable scopes; workers receive only their own scope and task context.
+1. Audit only applicable scopes; workers receive only their own scope and task context, and spool their findings.
 
 !read lib/better-audit.md
 
-2. Consolidate, deduplicate, assign one owner per file, and record disposition. `--issues` chooses the tracker instead of PLAN.md; it does not stop remediation. Scan-only stops here and never creates a worktree or edits code. If no actionable findings remain, report deferred work and stop.
+2. Consolidate, deduplicate, assign one owner per file, and record disposition; deferred findings become tracker issues. Scan-only files every surviving finding, stops here, and never creates a worktree or edits code. If no actionable findings remain, report deferred work and stop.
 
 !read lib/better-plan.md
 

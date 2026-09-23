@@ -1,6 +1,6 @@
 ---
 description: SwiftUI DevSecOps audit, remediation, test enhancement, per-category PRs, CI verification, and an optional multi-reviewer review loop with worktree isolation — optimized for multi-platform Swift/SwiftUI apps (iOS, macOS, watchOS, tvOS, visionOS)
-argument-hint: "[--interactive] [--scan-only] [--simplify-only] [--strict] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues|--no-issues] [--issues-label <name>] [path filter or focus areas]"
+argument-hint: "[--interactive] [--scan-only] [--simplify-only] [--strict] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues-label <name>] [path filter or focus areas]"
 ---
 
 # Better Swift — Unified DevSecOps Pipeline for SwiftUI Apps
@@ -21,7 +21,7 @@ Read the Swift caller inputs before entering the workflow. Their phase-labelled 
 
 !read lib/swift-pipeline-inputs.md
 
-Only when `ISSUE_MODE=true`, read the shared issue-mode contract once before Phase 1 touches the spool or tracker:
+Read the shared spool/filer contract once, before Phase 1 touches the spool or tracker:
 
 !read lib/better-issue-mode.md
 

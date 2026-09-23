@@ -11,7 +11,10 @@ Resolve `VCS_HOST` and `CLI_TOOL` here, before any phase reaches for a forge CLI
 
 !read lib/vcs-host.md
 
-When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote and carry it in state: the Phase 6 reviewer loops call `gh api`, which otherwise defaults to github.com on a GitHub Enterprise repo. **GitHub only — skip the snippet below entirely on GitLab**, where its `gh auth` precheck would abort the run.
+- When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote and carry it in state: the Phase 6 reviewer loops call `gh api`, which otherwise defaults to github.com on a GitHub Enterprise repo.
+- **Record `TRACKER_AVAILABLE` once.** `true` when the confirmed `CLI_TOOL` reaches this repo and its issues feature is enabled; otherwise `false`. Deferred findings are filed as issues only when it is `true`; when `false` the run continues, files nothing, and lists every deferred finding (title, one-line rationale, `file:line`) in the Phase 7 report under "Deferred (not filed — no issue tracker available)". Never write PLAN.md as a fallback.
+
+**GitHub only — skip the snippet below entirely on GitLab**, where its `gh auth` precheck would abort the run.
 
 !read lib/gh-host.md
 

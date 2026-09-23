@@ -346,7 +346,7 @@ describe('VCS host selection stays in one partial', () => {
     for (const command of ['rpr.md', 'review.md']) {
       const body = read('commands', 'do', command);
       const branch = body.slice(
-        body.indexOf('Only when `ISSUE_MODE=true` and a finding is being deferred'),
+        body.indexOf('Only when a finding is being deferred'),
         body.indexOf('!read lib/plan-issue-filing.md'),
       );
       assert.match(branch, /!read lib\/vcs-host\.md/);

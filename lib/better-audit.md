@@ -4,7 +4,7 @@ Choose scopes from the path/focus filter and the detected project, not a worker 
 
 A normal audit covers every scope in the table below except the three mode-gated rows (`deps` only when third-party packages exist). A caller-specific scope roster, when supplied, is authoritative; do not add generic scopes it intentionally omits. Run `tests` after the other selected scopes so it receives their compact finding index, not their full reports. Under `SIMPLIFY_ONLY=true` the roster and gates come from the simplify contract instead.
 
-**Worker context:** its assigned paths, its row below (scope and ownership, not a bug checklist), relevant repository conventions (which supersede the table), project/build/test facts, the evidence format, and the applicable mode/spool contract, at `AUDIT_MODEL_TIER`. Do not pass the complete command, other rows, whole ADRs, future phases, or reviewer libraries. Ask for confirmed findings and explicit coverage gaps, not a target finding count.
+**Worker context:** its assigned paths, its row below (scope and ownership, not a bug checklist), relevant repository conventions (which supersede the table), project/build/test facts, the evidence format, and the spool contract, at `AUDIT_MODEL_TIER`. Do not pass the complete command, other rows, whole ADRs, future phases, or reviewer libraries. Ask for confirmed findings and explicit coverage gaps, not a target finding count.
 
 | Scope | Remit | Ownership boundary |
 |-------|-------|---------------------|
@@ -29,7 +29,7 @@ Per-scope output rules:
 - **`ux`:** bump severity one tier when a finding affects initial-viewport content at common viewports.
 - **`structural`:** file pushed past 1000 lines, spaghetti growth, thin wrappers, boundary leaks, and canonical-helper duplication are always `[CRITICAL]`.
 
-Finding format (issue mode spools it and returns only an index instead):
+Finding format — each worker spools it per [lib/better-issue-mode.md](./better-issue-mode.md) and returns only the index:
 ```
 - **[CRITICAL/HIGH/MEDIUM/LOW]** `file:line` - Description. Suggested fix: ... Complexity: Simple/Medium/Complex
 ```
