@@ -13,7 +13,7 @@ In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines:
 
 Launch one general-purpose sub-agent per PR, in parallel, and wait for all. Each runs the **multi-reviewer wrapper** over `REVIEW_AGENTS` against its PR's branch and returns only the wrapper's `{OVERALL_STATUS}`. Pass reference paths, not reviewer bodies; each worker reads the wrapper and only the inner loops its entries need. A missing required reference makes that review inconclusive.
 
-Pass each sub-agent: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (`series` default, or `parallel`), `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (the copilot/`@<login>` cap; default 1), `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so GitHub-side `gh api` calls hit the right host on GitHub Enterprise), `{BRANCH_PREFIX}/{CATEGORY_SLUG}`, and `{BUILD_CMD}`. When a loop reaches its guardrail, default mode stops; `--interactive` asks the user whether to continue.
+Pass each sub-agent: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (`series` default, or `parallel`), `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (the copilot/`@<login>` cap; default 1), `{REVIEW_MODELS}` (the saved per-agent default models — without it a saved default model is silently ignored), `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so GitHub-side `gh api` calls hit the right host on GitHub Enterprise), `{BRANCH_PREFIX}/{CATEGORY_SLUG}`, and `{BUILD_CMD}`. When a loop reaches its guardrail, default mode stops; `--interactive` asks the user whether to continue.
 
 {REVIEW_LOOP_EXTRA_INSTRUCTION}
 
@@ -63,4 +63,9 @@ The selection alone decides which PRs are approved for 6.3; every PR it does not
 
 ### 6.3: Merge
 
-Merge each approved PR (`gh pr merge {PR_NUMBER} --merge`, in dependency order) only when its current local HEAD is pushed, the Phase 5d CI gate holds on that HEAD, and 6.2 approved it (the review aggregate, or the interactive selection); then confirm it reports merged. A merge conflict means rebasing the branch onto `{DEFAULT_BRANCH}` and force-pushing with lease; the new HEAD then needs build/tests, the configured review loop, and CI again before merging. Prior approval of a different HEAD is insufficient. A branch-protection refusal is reported for manual merge.
+Merge each approved PR, in dependency order, only when its current local HEAD is pushed, the Phase 5d CI gate holds on that HEAD, and 6.2 approved it (the review aggregate, or the interactive selection); then confirm it reports merged. **Never hardcode `--merge`** — a repo that allows only squash or rebase rejects `gh pr merge --merge` every time. Resolve the method once per run, preferring `squash`, then `merge`, then `rebase` from the repo's allowed methods:
+```bash
+MERGE_METHOD="$(gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed \
+  -q '[(select(.squashMergeAllowed) | "squash"), (select(.mergeCommitAllowed) | "merge"), (select(.rebaseMergeAllowed) | "rebase")] | first // empty')"
+```
+If no method resolves, leave that PR open and report why instead of merging. Otherwise `gh pr merge {PR_NUMBER} --{MERGE_METHOD}`. A merge conflict means rebasing the branch onto `{DEFAULT_BRANCH}` and force-pushing with lease; the new HEAD then needs build/tests, the configured review loop, and CI again before merging. Prior approval of a different HEAD is insufficient. A branch-protection refusal is reported for manual merge.
