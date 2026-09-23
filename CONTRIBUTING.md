@@ -66,7 +66,7 @@ doesn't re-teach them on every run:
   "Platform Impact" section).
 - `{CI_FAILURE_CAUSES_EXTRA}` — extra bullet(s) for the CI failure-cause list,
   or empty (e.g. a JS-only "missing exports" cause, code-signing noise).
-  Indented six spaces to match the lettered sub-list it lands in.
+  Lands at column 0, in the bullet list under Phase 5d's CI-fix rule.
 - `{REVIEW_LOOP_EXTRA_INSTRUCTION}` — extra paragraph handed to every Phase 6
   review sub-agent, or empty (a multi-platform pipeline requires each fix still
   compiles everywhere).
