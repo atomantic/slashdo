@@ -15,6 +15,13 @@ Launch one general-purpose sub-agent per PR, in parallel, and wait for all. Each
 
 Pass each sub-agent: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (`series` default, or `parallel`), `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (the copilot/`@<login>` cap; default 1), `{REVIEW_MODELS}` (the saved per-agent default models — without it a saved default model is silently ignored), `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so GitHub-side `gh api` calls hit the right host on GitHub Enterprise), `{BRANCH_PREFIX}/{CATEGORY_SLUG}`, and `{BUILD_CMD}`. When a loop reaches its guardrail, default mode stops; `--interactive` asks the user whether to continue.
 
+For each GitHub-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
+
+- `copilot` — max wait 3 minutes in iteration 1, 2 minutes in iteration 2, 90 seconds in iteration 3, 60 seconds in iteration 4, then 45 seconds; poll every 15 seconds.
+- `@<login>` — expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s.
+
+Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass both schedules.
+
 {REVIEW_LOOP_EXTRA_INSTRUCTION}
 
 ### Required review references (PR worker only)
@@ -23,13 +30,13 @@ Always read the wrapper when this phase applies:
 
 !read lib/multi-reviewer-loop.md
 
-Only for `copilot` entries:
-
-!read lib/copilot-review-loop.md
-
-Only for `@<login>` entries:
+For every `copilot` or `@<login>` entry, read the shared GitHub-reviewer template:
 
 !read lib/github-reviewer-loop.md
+
+Only for `copilot` entries, also read the Copilot delta:
+
+!read lib/copilot-review-loop.md
 
 Only for an entry that is none of `copilot`, `ollama`, or `@<login>` (every other slug — the fixed CLIs and `cmd[<invocation>]` alike — dispatches through this one loop; a future addition needs no new gate here):
 
@@ -38,12 +45,6 @@ Only for an entry that is none of `copilot`, `ollama`, or `@<login>` (every othe
 Only for `ollama` entries:
 
 !read lib/ollama-review-loop.md
-
-The copilot and `@<login>` loops resolve review threads via raw `gh api graphql`
-mutations — read the shell-escaping rules once up front so a worker doesn't
-reach for `$variableName` GraphQL syntax the shell will mangle:
-
-!`cat ~/.claude/lib/graphql-escaping.md`
 
 ### 6.2: Merge Gate (MANDATORY)
 

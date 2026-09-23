@@ -25,6 +25,63 @@ const LOOPS_WITH_OPTIONAL_ARRAYS = [
 ];
 
 describe('review-loop parse contracts', () => {
+  it('keeps current-head protection in the shared GitHub and Copilot path', () => {
+    const core = readLib('github-reviewer-loop.md');
+    const copilot = readLib('copilot-review-loop.md');
+    const currentHeadQueries = core.match(/pullRequest\(number: \{PR_NUMBER\}\) \{ headRefOid reviews\(last: 20\) \{[^\n]+commit \{ oid \}/g) || [];
+
+    assert.ok(currentHeadQueries.length >= 2);
+    assert.match(core, /reuse a review from \{REVIEWER_LOGIN\} only when its\s+`commit\.oid` equals the current `headRefOid`/);
+    assert.match(core, /submittedAt[\s\S]{0,240}AND\*\* its `commit\.oid` equals this poll's\s+`headRefOid`/);
+    assert.match(copilot, /github-reviewer-loop\.md/);
+    assert.match(copilot, /current-`headRefOid` review gate/);
+    assert.match(copilot, /do not reuse that error\s+review[\s\S]+wait only\s+for a later current-head review/);
+    assert.doesNotMatch(copilot, /### Sub-agent prompt template|Run the following loop|FIX all unresolved|When done, report back/);
+    assert.ok(Buffer.byteLength(copilot, 'utf8') <= 2048, 'the Copilot file must remain a small delta');
+  });
+
+  it('loads the Copilot delta with the core and keeps wait schedules with callers', () => {
+    const callers = ['pr.md', 'review.md', 'release.md', 'depfree.md'].map(readCommand);
+    callers.push(readLib('better-review-loop.md'));
+
+    for (const caller of callers) {
+      const coreAt = caller.indexOf('!read lib/github-reviewer-loop.md');
+      const deltaAt = caller.indexOf('!read lib/copilot-review-loop.md');
+      assert.ok(coreAt >= 0, 'each GitHub-side caller must load the shared core');
+      assert.ok(deltaAt > coreAt, 'the Copilot delta must load after the shared core');
+      assert.match(caller, /caller-owned `\{WAIT_SCHEDULE\}`/);
+      assert.match(caller, /`copilot` —/);
+      assert.match(caller, /`@<login>` —/);
+      assert.match(caller, /never give one pass both schedules/);
+    }
+
+    const core = readLib('github-reviewer-loop.md');
+    const wrapper = readLib('multi-reviewer-loop.md');
+    const { ON_DEMAND_LIBS } = require('../src/transformer');
+    assert.match(ON_DEMAND_LIBS.get('copilot-review-loop.md').what, /delta/);
+    assert.match(ON_DEMAND_LIBS.get('github-reviewer-loop.md').when, /`copilot` or an `@<login>`/);
+    assert.match(core, /WAIT SCHEDULE:\n\{WAIT_SCHEDULE\}/);
+    assert.doesNotMatch(core, /TIMEOUT SCHEDULE|WAIT BUDGET|Iteration 1: max wait/);
+    assert.match(wrapper, /caller-selected `\{WAIT_SCHEDULE\}`/);
+    assert.match(wrapper, /shared GitHub-reviewer template's steps 1–3 plus the Copilot delta[\s\S]+accept only a current-head review/);
+  });
+
+  it('removes the redundant GraphQL escaping partial and include', () => {
+    const core = readLib('github-reviewer-loop.md');
+    assert.match(core, /inline literal values in JSON on stdin[\s\S]+never\s+put shell-expandable `\$variables` in a query string/);
+    assert.equal(fs.existsSync(path.join(__dirname, '..', 'lib', 'graphql-escaping.md')), false);
+
+    for (const source of [
+      readLib('better-review-loop.md'),
+      readCommand('depfree.md'),
+      readCommand('rpr.md'),
+      _read('install.sh'),
+    ]) {
+      assert.doesNotMatch(source, /graphql-escaping/);
+    }
+    assert.match(_read('uninstall.sh'), /OLD_LIBS=\([\s\S]*graphql-escaping[\s\S]*\)/);
+  });
+
   it('never grants blanket permissions to feedback or applying reviewers', () => {
     for (const name of ['local-agent-review-loop.md', 'enhance-loop.md']) {
       const body = readLib(name);

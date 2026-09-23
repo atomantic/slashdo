@@ -159,11 +159,19 @@ When no cross-phase skip applies, hand off to the **multi-reviewer wrapper** (un
 - `{PR_SIDE_AGENTS}` — `copilot` and/or `@<login>` entries, in order
 - `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (the copilot / `@<login>` cycle cap)
 - `{GH_HOST}` — from "Detect VCS Host", so the loops target the right GitHub host
+- `{WAIT_SCHEDULE}` — the single schedule selected below for the current GitHub-side entry
 
-The stop-mode flags still apply *within* this wrapper invocation (e.g. stopping after the first of several `@<login>` entries that comes back clean); the cross-phase check only handles the boundary. Reviewer types:
+For each GitHub-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
 
-- `copilot` → Copilot cloud review loop (`lib/copilot-review-loop.md`)
-- `@<login>` → GitHub-reviewer loop (`lib/github-reviewer-loop.md`), forwarding `{REVIEWER_LOGIN}`
+- `copilot` — use the previous Copilot review duration on this PR (default 60 seconds if none); max wait 3x that duration, minimum 90 seconds, maximum 5 minutes; poll every 5s, 5s, 10s, 10s, then 15s.
+- `@<login>` — expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s.
+
+Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass both schedules.
+
+The stop-mode flags still apply **within** this wrapper invocation (e.g. stopping after the first of several `@<login>` entries that comes back clean); the cross-phase check only handles the boundary. Reviewer types:
+
+- `copilot` → shared GitHub-reviewer template plus the Copilot delta (`lib/github-reviewer-loop.md`, `lib/copilot-review-loop.md`)
+- `@<login>` → shared GitHub-reviewer template (`lib/github-reviewer-loop.md`), forwarding `{REVIEWER_LOGIN}`
 
 **GitHub only** — both drive `gh`/GraphQL against a GitHub PR. When `VCS_HOST=gitlab` and `PR_SIDE_AGENTS` is non-empty, print a warning (`copilot and @<login> reviewers are GitHub-only and were skipped on this GitLab MR; use a local-agent reviewer (codex/agy/claude/grok/pi/cursor/opencode, or cmd[<invocation>] for anything else) instead`) and set `PR_SIDE_OVERALL_STATUS=inconclusive`.
 
@@ -227,13 +235,13 @@ Read when either agent list is non-empty:
 
 Read only the bodies for reviewer kinds present in the agent list.
 
-Only for `copilot` entries:
-
-!read lib/copilot-review-loop.md
-
-Only for `@<login>` entries:
+For every `copilot` or `@<login>` entry, read the shared GitHub-reviewer template:
 
 !read lib/github-reviewer-loop.md
+
+Only for `copilot` entries, also read the Copilot delta:
+
+!read lib/copilot-review-loop.md
 
 Only for an entry that is none of `copilot`, `ollama`, or `@<login>` (every other slug — the fixed CLIs and `cmd[<invocation>]` alike — dispatches through this one loop; a future addition needs no new gate here):
 

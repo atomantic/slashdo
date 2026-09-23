@@ -1,15 +1,9 @@
-## GitHub Reviewer Loop (arbitrary `@<login>`)
+## GitHub Reviewer Loop
 
-After the PR is created, run the review-and-fix loop for an **arbitrary GitHub
-reviewer** — any user or App/bot login passed as `@<login>` in `--review-with`
-(e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`). slashdo requests that
-login's review, waits for it to be submitted, and fixes whatever it surfaces.
-
-This generalizes the Copilot loop: the `copilot` slug is effectively the special
-case `@copilot-pull-request-reviewer[bot]`, kept separate for its bot-specific
-error handling (`too-large`, error-retry). This loop is parameterized by
-`{REVIEWER_LOGIN}` — the exact GitHub login (for an App, including its `[bot]`
-suffix).
+This is the single sub-agent template for a GitHub user, App, or bot login. The
+`copilot` slug uses the same template with `REVIEWER_LOGIN` set to
+`copilot-pull-request-reviewer[bot]` and the Copilot-specific delta in
+`copilot-review-loop.md`.
 
 **`--reviewer-applies` is a no-op here**: GitHub reviews are read-only
 cloud-side, so there is no reviewer-side edit path. Fixes are always applied by
@@ -27,16 +21,16 @@ re-request) autonomously and returns only the final status.
 ### Sub-agent prompt template:
 
 ```
-You are a GitHub-reviewer review loop agent.
+You are a GitHub-reviewer loop agent.
 
 PR: {PR_NUMBER} in {OWNER}/{REPO}
 Branch: {BRANCH_NAME}
-Reviewer login: {REVIEWER_LOGIN}   (a GitHub user or App; an App login ends in [bot])
+Reviewer login: {REVIEWER_LOGIN}   (exact GitHub login; App logins include [bot])
 Build command: {BUILD_CMD}
-GitHub API host: {GH_HOST}   (pass `--hostname {GH_HOST}` on EVERY `gh api` call
-  below — `gh api` defaults to github.com and does NOT read the repo remote, so on
-  GitHub Enterprise an unqualified call polls the wrong host and times out. See
-  `~/.claude/lib/gh-host.md`. If {GH_HOST} is empty/unset, omit the flag.)
+GitHub API host: {GH_HOST}   (pass `--hostname {GH_HOST}` on EVERY `gh api` call.
+  If {GH_HOST} is empty/unset, omit the flag. See `~/.claude/lib/gh-host.md`.)
+GraphQL calls: inline literal values in JSON on stdin and pass `--input -`; never
+  put shell-expandable `$variables` in a query string.
 Max iterations: {REVIEW_ITERATIONS} (default 1). Run at most this many
   review-and-fix cycles, exiting early the moment a review comes back with zero
   unresolved comments. The default of 1 means: request one review, fix
@@ -52,186 +46,115 @@ Safety guardrail: in unlimited mode ({REVIEW_ITERATIONS}=0), after 10 iterations
   indefinitely. When {REVIEW_ITERATIONS} is positive, that count IS the cap: the
   loop stops there with status "capped" (clean-equivalent for merge purposes).
 
-WAIT BUDGET:
-A human reviewer is far slower than an automated one, and you cannot reliably
-tell a human login from an App login up front, so wait generously:
-- Default expected duration: 5 minutes (vs the Copilot loop's 60s).
-- Max wait: 3x the expected duration, min 3 minutes, max 15 minutes.
-- Poll on progressive intervals: 10s, 10s, 20s, 20s, then 30s thereafter.
-A reviewer that does not submit within the max wait is NOT a failure of the
-change — report status "timeout" and let the caller leave the PR open. Do not
-merge on an un-submitted review.
+WAIT SCHEDULE:
+{WAIT_SCHEDULE}
 
 Run the loop for at most {REVIEW_ITERATIONS} cycles (default 1), exiting early
 the moment a review returns zero unresolved comments:
 
-1. CAPTURE the latest review submittedAt for {REVIEWER_LOGIN} (to detect when a
-   NEW review arrives), then REQUEST a review from that login:
+1. CAPTURE the latest review data for {REVIEWER_LOGIN}, then REQUEST a review
+   from that login when no current-head review already exists:
    echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { headRefOid reviews(last: 20) { nodes { author { login } submittedAt commit { oid } } } } } }"}' | gh api --hostname {GH_HOST} graphql --input -
    Record the most recent submittedAt whose author login equals {REVIEWER_LOGIN}
-   (compare case-insensitively — GitHub logins are case-insensitive), and record
-   `headRefOid` (the PR's current head commit) alongside each candidate review's
-   own `commit.oid`.
-   - **On every pass through step 1** (including a re-loop after applying
-     fixes): if a review from {REVIEWER_LOGIN} already exists **AND its
-     `commit.oid` equals the current `headRefOid`**, set
-     `EXISTING_REVIEW_FOUND=true`, run step 2's detail query **once, without
-     polling/waiting** (the query above lacks the `state`, `body`, and
-     `reviewThreads` step 3 needs), and proceed straight to step 3 with that
-     data — do NOT request a new review and do NOT enter step 2's wait loop.
-     This covers a review App that auto-posted against the exact commit the PR
-     is on now (including one posted right after a prior iteration's fix push)
-     and a rerun of this command with no new push since the prior review. Step
-     2 waits for a submittedAt strictly *after* the baseline captured here, so
-     an already-existing review can never satisfy "after itself" — waiting for
-     it would time out (or report `not-requestable`) despite it being valid.
-     **The `commit.oid` check is load-bearing** and is what makes this safe on
-     every pass: a review whose `commit.oid` does NOT match `headRefOid`
-     reviewed a stale commit (new commits landed after a self-fix pass or a
-     manual push) — treat it exactly like "no existing review" and request a
-     fresh one, so {REVIEWER_LOGIN} reviews current HEAD rather than letting
-     `--merge` proceed on stale approval. Because `headRefOid` advances between
-     iterations (step 6 only re-loops after step 4 pushed a new commit), a
-     review left over from a prior iteration is excluded by this same check;
-     do NOT add a separate "only the first time" restriction — a prior revision
-     did, and it wrongly ignored a fresh current-head review posted between a
-     fix push and the next iteration's step 1.
-   - Otherwise (no existing review at current HEAD), request one:
+   (compare case-insensitively), plus each review's `commit.oid` and the PR's
+   current `headRefOid`.
+   - On every pass, reuse a review from {REVIEWER_LOGIN} only when its
+     `commit.oid` equals the current `headRefOid`. Fetch its full detail once with
+     step 2's query, skip the request
+     and wait, and proceed to step 3. Otherwise request a fresh review. A newer
+     `submittedAt` never makes a review of an older commit current.
    gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/requested_reviewers \
      -f 'reviewers[]={REVIEWER_LOGIN}'
-   - REQUEST FAILURE IS NON-FATAL. The endpoint returns 422 when the login is an
-     App that can't be requested via REST, lacks repo access, or is the PR author.
-     LOG the error body for the report and CONTINUE TO STEP 2 ANYWAY — many review
-     Apps post a review on their own without being requested. Record that the
-     request failed so you can distinguish "timeout" from "not-requestable" at
-     the end.
+   - REQUEST FAILURE IS NON-FATAL. Record the error body and continue polling;
+     some review Apps post without a successful request.
 
 2. WAIT for a NEW review from {REVIEWER_LOGIN} to complete (BLOCKING — only
-   reached when `EXISTING_REVIEW_FOUND` was not set in step 1):
-   - Poll using stdin JSON piping to avoid shell-escaping issues. This query
-     includes `headRefOid` and each review's `commit.oid` because the PR's head
-     can move *during* the wait:
+   reached when no current-head review was reused in step 1):
+   - Poll using stdin JSON piping. This query includes `headRefOid` and each
+     review's `commit.oid` because the PR head can move during the wait:
      echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { headRefOid reviews(last: 20) { totalCount nodes { state body author { login } submittedAt commit { oid } } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api --hostname {GH_HOST} graphql --input -
-   - The review is complete when a review node from {REVIEWER_LOGIN} (login
-     match, case-insensitive) appears with a submittedAt after the timestamp
-     from step 1 **AND** its `commit.oid` equals this poll's `headRefOid`. A
-     review submitted for an older commit (queued/delayed, or reviewing a head
-     since superseded by a new push) can land with a later `submittedAt` and
-     must NOT be accepted as covering current HEAD — a review matching on
-     `submittedAt` but NOT on `commit.oid` does not satisfy this step; keep
+   - The review is complete only when a login-matching review has a submittedAt
+     after step 1's baseline **AND** its `commit.oid` equals this poll's
+     `headRefOid`. A later submission for an older commit does not qualify; keep
      polling.
-   - Use the WAIT BUDGET above (expected 5 min, max wait 3x / min 3 min / max 15
-     min; poll intervals 10s,10s,20s,20s,30s…).
-   - If no qualifying review from {REVIEWER_LOGIN} appears within the max
-     wait, report the timeout (see status list) — do NOT keep the parent
-     blocked indefinitely.
+   - Use the caller-supplied WAIT SCHEDULE for this entry and iteration.
+   - If no qualifying review appears within the max wait, report
+     `not-requestable` when the request failed, otherwise `timeout`, and leave
+     the PR open.
 
 3. CHECK for unresolved comments from this review:
    - The review's `state` is one of APPROVED, COMMENTED, CHANGES_REQUESTED,
      DISMISSED.
    - Filter review threads to those whose comments are authored by
-     {REVIEWER_LOGIN} and isResolved:false (don't act on other reviewers' threads).
-   - **The review's top-level `body` is feedback too, not just its inline
-     threads.** A reviewer can leave the only actionable feedback in the review
-     body with zero inline threads — do NOT report "clean" just because the
-     inline-thread count is zero.
-   - **Unresolved threads always route to step 4, regardless of review
-     state** — including DISMISSED. Dismissing a review does not auto-resolve
-     its inline threads, so a DISMISSED review can still have unresolved
-     threads that need fixing.
-   - If there are unresolved threads from {REVIEWER_LOGIN}, OR the review is
-     CHANGES_REQUESTED, OR the review is non-DISMISSED (APPROVED/COMMENTED/
-     CHANGES_REQUESTED) AND its body contains actionable feedback: proceed to
-     step 4. When the body is what triggered this, treat the body text itself
-     as an additional finding to evaluate and address, exactly like an inline
-     thread (skip this for a DISMISSED review's body — see below).
-   - If the review is DISMISSED: ignore its body (a dismissed review's opinion
-     isn't the reviewer's final word) but still fix its unresolved threads per
-     the bullet above. If it has NO unresolved threads, report status "error"
-     and exit rather than re-requesting (re-requesting a dismissed review risks
-     looping if {REVIEWER_LOGIN} doesn't respond to re-requests the same way).
-   - Otherwise (APPROVED or COMMENTED, no unresolved threads, and the body is
-     empty or purely complimentary/boilerplate — read it and use judgment, as
-     for any other finding): the reviewer is satisfied — report "clean" and
-     exit.
+     {REVIEWER_LOGIN} and isResolved:false; do not act on other reviewers' threads.
+   - The review's top-level `body` is feedback too. Treat actionable body text
+     as a finding even when there are no inline threads.
+   - Unresolved threads always route to step 4, regardless of review state,
+     including DISMISSED.
+   - If there are unresolved threads, OR the review is CHANGES_REQUESTED, OR a
+     non-DISMISSED review's body contains actionable feedback, proceed to step 4.
+   - If the review is DISMISSED, ignore its body but still fix unresolved
+     threads. If it has none, report status `error` and exit rather than
+     re-requesting.
+   - Otherwise, if the review is APPROVED or COMMENTED with no unresolved threads
+     and no actionable body feedback, report `clean` and exit.
 
-4. FIX all unresolved comments from {REVIEWER_LOGIN}, plus the review body if step 3
-   flagged it as actionable:
-   - **The review body has no `threadId`** — there is nothing to resolve via the
-     GraphQL mutation below. Address it like any other finding (read, evaluate,
-     fix, commit) but skip the "resolve the thread" sub-step for it; the only way
-     to silence the same body content on the next poll is for the next review you
-     request to come back without it (e.g. a fix commit followed by a fresh review).
+4. FIX all unresolved comments from {REVIEWER_LOGIN}, plus any actionable review
+   body from step 3:
+   - A body-only finding has no `threadId`; address and commit it like any other
+     finding, but do not run the thread-resolution mutation for it.
    For each unresolved thread:
    - Read the referenced file and understand the feedback.
    - Evaluate if the finding is a real issue — if it is, fix it regardless of
      whether the current PR modified that code. Never dismiss findings as "out of
      scope" or "pre-existing."
    - A real issue is a logic/behavior bug, security hole, broken contract, or
-     missing-coverage gap — something the project's linter/type-checker/formatter/
-     build does NOT already catch. If a comment is a pure style/formatting/lint nit
-     (already covered by tooling) or a bare rename/extract-a-helper preference with
-     no behavior consequence, resolve the thread without a code change rather than
-     churning the diff.
+     missing-coverage gap that the project's linter/type-checker/formatter/build
+     does not catch. Resolve a tooling-covered style nit or a bare
+     rename/extract-a-helper preference without churning the diff.
    - Make the code fix.
-   - IDENTIFY THE ROOT CAUSE of why the issue landed and apply the smallest
-     matching action in the same change, per `~/.claude/lib/review-fix-conventions.md`.
-     Defer big refactors to the end-of-loop Convention Encoding phase.
+   - IDENTIFY THE ROOT CAUSE and apply the smallest matching action in the same
+     change, per `~/.claude/lib/review-fix-conventions.md`. Defer big refactors
+     to the end-of-loop Convention Encoding phase.
    - Run the build command.
    - If build passes, commit: address review (@{REVIEWER_LOGIN}): <summary>
-     (the parenthesized reviewer login records which reviewer surfaced the finding)
    - Resolve the thread via GraphQL mutation using stdin JSON piping:
      echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api --hostname {GH_HOST} graphql --input -
-   - After all threads resolved, push all commits to remote.
-   - Increment iteration counter.
-   - If {REVIEW_ITERATIONS} > 0 and the counter reaches {REVIEW_ITERATIONS}: stop
-     and report status "capped" — the configured cap was reached after applying
-     every fix the review surfaced (the default 1-iteration path). Treated as
-     clean-equivalent for merge purposes.
-   - If {REVIEW_ITERATIONS} is 0 (unlimited) and the counter reaches 10: stop and
-     report status "guardrail".
-     Default mode: auto-stop, mark best-effort. Interactive mode: ask whether to
-     continue or stop.
-   - CONVERGENCE GATE (unlimited mode, {REVIEW_ITERATIONS}=0, before the
-     10-iteration guardrail): apply ~/.claude/lib/review-convergence-gate.md.
-     If the round just completed resolved only *marginal* feedback (edge-case
-     guards, refinements of already-correct behavior, hypotheticals with no
-     concrete wrong outcome), converge — stop and report "clean", noting the
-     diminishing-returns convergence, rather than re-requesting to mine more.
-     Only a round with at least one *substantive* fix earns another request.
-   - Otherwise, go back to step 1 (re-request to confirm the fixes are accepted).
+   - After all threads are resolved, push all commits to remote.
+   - Increment the iteration counter.
+   - If {REVIEW_ITERATIONS} > 0 and the counter reaches {REVIEW_ITERATIONS}, stop
+     and report `capped` after applying every fix. This is clean-equivalent for
+     the caller's merge gate.
+   - If {REVIEW_ITERATIONS}=0 and the counter reaches 10, report `guardrail`.
+     Default mode auto-stops; interactive mode asks whether to continue.
+   - CONVERGENCE GATE (unlimited mode, before the guardrail): apply
+     `~/.claude/lib/review-convergence-gate.md`. If the round resolved only
+     marginal feedback, report `clean`; only a round with at least one substantive
+     fix earns another request.
+   - Otherwise, go back to step 1.
 
 When done, report back:
 - Final status: clean / capped / timeout / not-requestable / error / guardrail
-  - `clean` — a review came back APPROVED or COMMENTED with no unresolved
-    threads and no actionable body feedback (or all surfaced inline
-    comments and body feedback were fixed)
-  - `capped` — reached the configured {REVIEW_ITERATIONS} cap after applying every
-    fix (the default 1-iteration path); clean-equivalent for merge purposes
-  - `timeout` — the review was requested but {REVIEWER_LOGIN} did not submit one
-    within the max wait. NOT eligible to merge (the caller leaves the PR open)
-  - `not-requestable` — the review request failed (422 — App not requestable,
-    login lacks repo access, or is the PR author) AND no review from that login
-    appeared within the wait. NOT eligible to merge. Report the request error body
-    so the user can fix access (e.g. add the user as a collaborator) and re-run
-  - `guardrail` — only in unlimited mode ({REVIEW_ITERATIONS}=0): hit the
-    10-iteration safety cap with comments still outstanding
+  - `clean` — a current-head review had no unresolved threads or actionable body
+    feedback
+  - `capped` — the configured iteration cap was reached after applying every fix
+  - `timeout` — no qualifying current-head review arrived within the wait budget
+  - `not-requestable` — the request failed and no qualifying review arrived
+  - `guardrail` — unlimited mode reached 10 iterations with work outstanding
   - `error` — an unexpected gh/GraphQL failure prevented a verdict
 - Total iterations completed
-- List of commits made (if any)
+- List of commits made, if any
 - Any unresolved threads remaining
 - **Convention encoding**: run the end-of-cycle phase from
-  `~/.claude/lib/review-fix-conventions.md` against the issues fixed across all
-  iterations, even when every finding was a nitpick (or none landed) — always
-  print the "Conventions Encoded" section, using its explicit no-conventions
-  message when nothing qualifies.
+  `~/.claude/lib/review-fix-conventions.md` against all issues fixed across the
+  iterations and always print `Conventions Encoded`, using its explicit
+  no-conventions message when nothing qualifies.
 ```
 
 Launch the sub-agent and wait for its result.
 
-**Default mode**: If the sub-agent reports `timeout` or `not-requestable`, skip and
-continue autonomously — the caller's aggregate becomes `inconclusive`, so a
-`--merge` run leaves the PR open rather than merging on an absent review.
+**Default mode**: If the sub-agent reports `timeout` or `not-requestable`, skip
+and continue autonomously; the caller's aggregate becomes `inconclusive`.
 
 **Interactive mode (`--interactive`)**: If the sub-agent reports `timeout` or
-`not-requestable`, ask the user whether to keep waiting, re-request, or skip.
+`not-requestable`, ask whether to keep waiting, re-request, or skip.
