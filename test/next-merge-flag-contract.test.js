@@ -76,7 +76,11 @@ describe('/do:next never forwards its own merge flags to /do:pr (#288)', () => {
     assert.doesNotMatch(next, /with the flags this command received/);
     assert.match(
       next,
-      /forwarding \*\*only the review flags listed in Parse Arguments\*\* \(`--review-with` \/ `--review-iterations` \/ `--review-mode` \/ `--review-stop-on-findings` \/ `--review-stop-on-clean` \/ `--reviewer-applies` \/ `--no-review`\)/,
+      /forwarding \*\*only the review flags listed in Parse Arguments\*\* \(`--review-with` \/ `--review-iterations` \/ `--review-mode` \/ `--review-stop-on-findings` \/ `--review-stop-on-clean` \/ `--reviewer-applies`\)/,
+    );
+    assert.match(
+      next,
+      /translating `--no-review` to `--review-with none` rather than forwarding it verbatim/,
     );
     assert.match(
       next,
