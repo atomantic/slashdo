@@ -96,7 +96,11 @@ Resolve `VCS_HOST` and `CLI_TOOL` here, before any phase reaches for a forge CLI
 !read lib/vcs-host.md
 
 - **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state, following the shared derivation (and its per-host auth precheck) included below. The Phase 6 host-side reviewer loops' GitHub verbs use `gh api`, which ignores the repo remote and defaults to github.com — on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out.
-- **Record `TRACKER_AVAILABLE` once.** `true` when the tracker gate's `TRACKER_CLI` is set and reaches this repo with its issues feature enabled; otherwise `false`. Deferred removals are filed as issues only when it is `true`; when `false` the run continues, files nothing, and lists every deferred removal (title, one-line rationale, `file:line`) in the final report under "Deferred (not filed — no issue tracker available)". Never write PLAN.md as a fallback.
+- **Record `TRACKER_AVAILABLE` once.** `true` when the tracker gate's `TRACKER_CLI` is set and reaches this repo with its issues feature enabled; otherwise `false`. Deferred removals are filed as issues only when it is `true`; when `false` the run continues, files nothing, and lists every deferred removal (title, one-line rationale, `file:line`) in the final report under "Deferred (not filed — no issue tracker available)". Never write PLAN.md as a fallback. On a Jira tracker it is `true` only when the Jira Pre-flight below passes (`{COMMAND}` = `/do:depfree`); a failed one prints its message and records `false`. Filed removals are then referenced by key (`PROJ-123`), not `#<n>`.
+
+Only on a Jira tracker (`TRACKER=jira`), read the Jira backend and run its Pre-flight in place of the tracker gate:
+
+!read lib/tracker-jira.md
 
 **GitHub only — skip the snippet below entirely on GitLab**, whose `glab` calls resolve the host from the remote themselves and where its `gh auth` precheck would abort the run.
 

@@ -32,7 +32,7 @@ Gates **1, 2, and 4** go in every audit agent's instructions, and Phase 2 re-app
 
 **4. Don't re-litigate settled rejections.** Before filing, check `PRIOR_REJECTIONS` (Phase 0e) and do not re-propose a reframing that has already been tried and rejected.
 
-When any phase rejects a reframing (infeasible after investigation, or reverted in 4b for changing behavior), record it so the next run inherits the decision: file an issue titled with the reframing, labeled `{PLAN_LABEL}` **and `rejected-reframing`**, then immediately close it with the reason as a closing comment — even when the finding was remediated rather than deferred and has no issue of its own. The extra label is what keeps Phase 0e's read bounded. When `TRACKER_AVAILABLE=false`, list the rejection in the Phase 7 deferred report instead.
+When any phase rejects a reframing (infeasible after investigation, or reverted in 4b for changing behavior), record it so the next run inherits the decision: file an issue titled with the reframing, labeled `{PLAN_LABEL}` **and `rejected-reframing`**, then immediately close it with the reason as a closing comment — even when the finding was remediated rather than deferred and has no issue of its own. The extra label is what keeps Phase 0e's read bounded. On a Jira tracker, record it with [tracker-jira.md](./tracker-jira.md) "Rejected-reframing records". When `TRACKER_AVAILABLE=false`, list the rejection in the Phase 7 deferred report instead.
 
 Findings also inherit the standard evidence bar from the Structural Ambition agent: quoted code, and a named concrete transformation. "This could be cleaner" without a named transformation is not a finding.
 
@@ -70,7 +70,7 @@ Other deviations, by phase (the shared phase partials defer to this list):
        | sort | uniq -c | sort -rn | head -40
      ```
      Record the paths with their commit counts. If the repo is younger than the window or the list is near-empty, re-run the same pipeline without `--since` rather than treating every file as cold. Never run a bare `git log --name-only` without the aggregation.
-  2. **`PRIOR_REJECTIONS`** (gate 4) — only the closed issues carrying **both** `{PLAN_LABEL}` and `rejected-reframing` (empty when `TRACKER_AVAILABLE=false`): `{CLI_TOOL} issue list --state closed --label "{PLAN_LABEL}" --label rejected-reframing --limit 200 --json number,title,body`.
+  2. **`PRIOR_REJECTIONS`** (gate 4) — only the closed issues carrying **both** `{PLAN_LABEL}` and `rejected-reframing` (empty when `TRACKER_AVAILABLE=false`): `{CLI_TOOL} issue list --state closed --label "{PLAN_LABEL}" --label rejected-reframing --limit 200 --json number,title,body` (Jira: [tracker-jira.md](./tracker-jira.md) "Rejected-reframing records").
   3. **`DOMAIN_DOCS`** — whichever of `CONTEXT.md`, `GOALS.md`, `docs/adr/`, and `docs/decisions/` exist (the index or most recent ADRs, not the whole directory), distilled **once** into a short glossary plus the reframings the ADRs already ruled out. Pass the glossary to audit agents, never the documents, so proposed names use the project's own vocabulary.
 - **Phase 2.** Apply gate 3 here, and only here.
 - **Phase 3c.** Only the five in-scope workers spawn, each with the behavior-preservation rule above verbatim.

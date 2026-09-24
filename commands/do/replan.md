@@ -1,11 +1,11 @@
 ---
-description: Automated audit/triage of your GitHub/GitLab issue tracker — close completed issues, suggest new work, keep the backlog lean (migrates a legacy PLAN.md once)
+description: Automated audit/triage of your GitHub/GitLab issue tracker or Jira project — close completed issues, suggest new work, keep the backlog lean (migrates a legacy PLAN.md once)
 argument-hint: "[--interactive] [--issues-label <name>]"
 ---
 
 # Replan Command
 
-Audit the backlog against the codebase, close completed/stale issues, suggest new work, and leave the backlog lean. The backlog lives in your **GitHub/GitLab issue tracker** — only issues carrying `PLAN_LABEL` are plan items.
+Audit the backlog against the codebase, close completed/stale issues, suggest new work, and leave the backlog lean. The backlog lives in your **GitHub/GitLab issue tracker**, or in a **Jira project** (`/do:config --tracker jira`) — only issues carrying `PLAN_LABEL` are plan items.
 
 **Default mode: fully autonomous** — scan, close, file, no prompts. **`--interactive`** pauses after evidence gathering for approval.
 
@@ -25,7 +25,7 @@ Parse `$ARGUMENTS` for:
 
 **A `Depends on #N` does NOT violate this invariant.** "Actionable" means "no unresolved question/decision," not "pickable this very second." A blocked-but-well-formed issue is merely *sequenced* (`/do:next` claims it once #N closes); only an *undecided* item is barred.
 
-**Item IDs.** The **issue number** is the ID; `/do:next` claims it on a `next/issue-<n>` branch.
+**Item IDs.** The **issue number** is the ID; `/do:next` claims it on a `next/issue-<n>` branch. On a Jira tracker the **key** (`PROJ-123`) is the ID everywhere this command says `#<n>` — summaries, comments, dependency lines, commit messages.
 
 ## Boundary Rule: Issue Tracker vs GOALS.md
 
@@ -45,9 +45,22 @@ Parse `$ARGUMENTS` for:
 
 !read lib/vcs-host.md
 
-   **Surface its abort message.** Never fall back to the other CLI. Stop, naming the
-   tracker, if its tracker gate leaves `TRACKER_CLI` empty.
-2. **Ensure the scoping label exists.** `gh label create <PLAN_LABEL> --description "Tracked by /do:replan" 2>/dev/null || true` (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" 2>/dev/null || true` — glab requires a color).
+   **Surface its abort message.** Never fall back to the other CLI.
+
+   **Jira tracker (`TRACKER=jira`) only — read the Jira backend now** and run its
+   Pre-flight (`{COMMAND}` = `/do:replan`) in place of the tracker gate; a failed
+   Pre-flight stops the run with its message. It alone sets `TRACKER_CLI` to `jira`,
+   plus `JIRA_PROJECT` and `LABEL_SEP=:`; its "Serving the backlog and filing
+   commands" section (with "`/do:replan` on Jira") then supplies every issue
+   operation below — the backlog list, dedup, create, close, comment, labels, epics,
+   and dependencies. `PLAN_LABEL` must be a single word there (no spaces or quotes).
+   Any other tracker skips this read.
+
+!read lib/tracker-jira.md
+
+   Otherwise, stop, naming the tracker, if its tracker gate leaves `TRACKER_CLI`
+   empty.
+2. **Ensure the scoping label exists** (skip on Jira, whose labels need no creation). `gh label create <PLAN_LABEL> --description "Tracked by /do:replan" 2>/dev/null || true` (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" 2>/dev/null || true` — glab requires a color).
 3. **Legacy PLAN.md.** If a `PLAN.md` exists, this run migrates it once (Phases 1, 3, 4): its open items become issues and the plan content is removed.
 
 ## Phase 1: Automated Evidence Gathering
@@ -56,7 +69,9 @@ Source the item list once, up front:
 `gh issue list --label <PLAN_LABEL> --state open --limit 1000 --json number,title,body,labels,createdAt,updatedAt`
 (glab: `glab issue list --label <PLAN_LABEL> --output json --per-page 100` —
 GitLab's `--per-page` maxes out at 100 with no "give me everything" pagination for
-a plain issue list; `--issues-label` keeps a busy GitLab tracker under it). Only
+a plain issue list; `--issues-label` keeps a busy GitLab tracker under it; Jira:
+"List issues" with `"$PLAN_LABEL"`, whose `created`/`updated` fields stand in
+below). Only
 **open** labeled issues are triaged. For Agent 5's drift dating, use each issue's `createdAt` as the
 `<item-date>`; use `updatedAt` for the Phase 2 staleness window.
 
@@ -117,7 +132,7 @@ For every `drift-conflict` / `drift-unclear`, record: the item, the conflicting 
 **Agent 6: Dependency & Priority Graph**
 For every open issue under consideration:
 - Parse the body for `Depends on #<N>` / `Blocked by #<N>` lines (case-insensitive; a line may list several `#<N>`) — the portable, cross-host convention. Also read GitHub's **native** blocked-by relationship where the API exposes it (GitHub-only; on GitLab the body lines are the only source). Record each issue's blocker set.
-- Resolve each referenced #N's state with the **detected `CLI_TOOL`** (`gh issue view <N> --json state -q .state`; glab: `glab issue view <N> --output json` then read `.state`), and **normalize the value** before comparing: GitHub reports `OPEN`/`CLOSED`, GitLab `opened`/`closed`. Mark the issue **blocked** if any blocker is still open, **clearable** if a referenced blocker is now closed (a stale marker to strip), **broken** if a referenced number doesn't exist, and detect **cycles** across the collected edges.
+- Resolve each referenced #N's state with the **detected `CLI_TOOL`** (`gh issue view <N> --json state -q .state`; glab: `glab issue view <N> --output json` then read `.state`), and **normalize the value** before comparing: GitHub reports `OPEN`/`CLOSED`, GitLab `opened`/`closed`. On Jira, the lines name keys (`Depends on PROJ-12`) and the native source is the "is blocked by" link, per [lib/tracker-jira.md](../../lib/tracker-jira.md) "`/do:replan` on Jira". Mark the issue **blocked** if any blocker is still open, **clearable** if a referenced blocker is now closed (a stale marker to strip), **broken** if a referenced number doesn't exist, and detect **cycles** across the collected edges.
 - Note each issue's `priority:<N>` label if present (summary only — not triage evidence).
 
 Feed this graph to Phase 2: `blocked` and `clearable` issues are both kept `still-pending` (never `stale` — a parked issue's old `updatedAt` is expected, and the run that unblocks it must not close it); `clearable`/`broken`/`cycle` findings drive the dependency-marker hygiene fixes in the Phase 2 callout.
@@ -226,7 +241,9 @@ label. Only file when nothing existing covers it.
 
 ### Default Mode (autonomous)
 
-Apply the triage decisions as issue operations (GitHub `gh`; glab in parens) —
+Apply the triage decisions as issue operations (GitHub `gh`; glab in parens; Jira
+per [lib/tracker-jira.md](../../lib/tracker-jira.md) "`/do:replan` on Jira", which
+files through its "File one issue" block and closes by transition) —
 **except for `drifted` items, which are never auto-closed**:
 
 - `confirmed-done` / `likely-done` → **close** with an evidence comment:
@@ -332,7 +349,8 @@ as in Phase 3), then strip the tactical content from GOALS.md.
 
 The tracker is the audit trail, not a commit. Commit **only** on-disk changes this
 run made (the Phase 4 PLAN.md removal, Phase 5 GOALS.md or `docs/` edits) — e.g.
-`for p in PLAN.md GOALS.md docs; do git add -A -- "$p" 2>/dev/null; done; git commit -m "docs: replan — migrated PLAN.md to issues #c, #d"`.
+`for p in PLAN.md GOALS.md docs; do git add -A -- "$p" 2>/dev/null; done; git commit -m "docs: replan — migrated PLAN.md to issues #c, #d"`
+(Jira: the keys, `PROJ-3, PROJ-4`).
 If nothing on disk changed, there is no commit. Do NOT push unless explicitly asked.
 
 ## Notes

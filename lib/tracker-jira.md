@@ -319,3 +319,123 @@ fi
 ```
 
 Then re-evaluate its parent with `epic-children.md` "Jira", as Phase 7 does.
+
+## Serving the backlog and filing commands
+
+`/do:replan`, `/do:plan-task`, `/do:goals`, and every command that files deferred
+findings through `plan-issue-setup.md` (`/do:better`, `/do:better-swift`,
+`/do:simplify`, `/do:pr-better`, `/do:depfree`, `/do:review`, `/do:rpr`) read this file
+when `TRACKER=jira` and run the Pre-flight above (`{COMMAND}` = the invoking command) in
+place of the tracker gate. **A failed Pre-flight is "no tracker"**, with its message
+printed: a backlog command (`/do:replan`, `/do:plan-task`) stops; a command that only
+files deferrals records `TRACKER_AVAILABLE=false` and lists them unfiled, per
+`plan-issue-setup.md`. The code host, PRs/MRs, and every non-tracker step are unchanged.
+
+| The filing partials say | On Jira |
+|---|---|
+| `#<number>` (ID, reports, replies, PR bodies, commits) | the key, `PROJ-123` — never `#123`, which names an unrelated code-host issue |
+| `EXISTING_ISSUES` (all open issues) | "List issues" below with `STATE_JQL="statusCategory != Done"` and no labels; dedup on `summary` + `labels`, reading a close candidate with `issue_body` |
+| search dedup (`--search "<keywords>"`) | `issue_search <keywords>` |
+| `gh`/`glab label create` (lazy) | nothing: `label_ensure` is a no-op; labels are applied on create |
+| create + `${URL##*/}` capture | "File one issue" below; the key comes from `--raw`, never the banner |
+| add `PLAN_LABEL` to a reused match | `label_add <KEY> "$PLAN_LABEL"` |
+| comment on an issue | `issue_comment <KEY> <text>` |
+| close with a comment | `issue_close_note <KEY> <text>` (a transition, not a state flag) |
+| bulk filer map `<id> -> #<number>` | `<id> -> PROJ-123`: give each filer `JIRA_PROJECT` and "File one issue" (it re-runs the Pre-flight, which only reads) in place of `CLI_TOOL` and the `${URL##*/}` capture, with the spooled body as `BODY_FILE`; the `429` retry rule is unchanged |
+
+### List issues
+
+Every open (or, with `STATE_JQL="statusCategory = Done"`, closed) issue carrying all of
+the given labels, oldest first, 100 per page, capped at 1000. A label that would break
+out of the JQL string never reaches `jira`:
+
+```bash
+STATE_JQL="<statusCategory != Done | statusCategory = Done>"
+set -- <label>...   # zero or more labels every row must carry, e.g. "$PLAN_LABEL"
+JQL="$STATE_JQL"
+for L in "$@"; do
+  case "$L" in ''|*[[:space:]\"\\]*) echo "Jira labels cannot contain spaces or quotes (got: $L)"; exit 1 ;; esac
+  JQL="$JQL AND labels = \"$L\""
+done
+ALL="[]"; FROM=0; JIRA_ERR_FILE="$(mktemp)"
+while [ "$FROM" -lt 1000 ]; do
+  if PAGE="$(jira issue list -p "$JIRA_PROJECT" -q "$JQL" --order-by created --reverse --paginate "$FROM:100" --raw 2>"$JIRA_ERR_FILE")"; then :
+  elif grep -q 'No result found' "$JIRA_ERR_FILE"; then PAGE="[]"
+  else cat "$JIRA_ERR_FILE"; echo "Could not list $JIRA_PROJECT issues — aborting."; exit 1; fi
+  ALL="$(printf '%s\n%s\n' "$ALL" "$PAGE" | jq -cs 'add')" || { echo "Could not parse jira --raw output — aborting."; exit 1; }
+  [ "$(printf '%s' "$PAGE" | jq length)" -eq 100 ] || break
+  FROM=$((FROM + 100))
+done
+printf '%s' "$ALL" | jq -c '.[] | {key, summary: .fields.summary, labels: .fields.labels, type: .fields.issuetype.name, status: .fields.status.name, created: .fields.created, updated: .fields.updated}'
+```
+
+A full page at the cap means more exist: say so rather than treating the list as whole.
+
+### File one issue
+
+Write the body to a file first (it may hold backticks and `$(…)`). Labels are the
+filing partial's set — `PLAN_LABEL`, the category, `severity:<level>`, and any dispatch
+hint, built with `LABEL_SEP` (`:`) — one argument each; a label with whitespace aborts
+the filing rather than being rewritten. `PARENT` files an epic child or sub-task:
+
+```bash
+TITLE=<title>; BODY_FILE=<body-file>; PARENT="<parent-KEY, or empty>"
+set -- <label>...
+case "$PARENT" in ''|"<"*) PARENT="" ;; *)
+  printf '%s\n' "$PARENT" | grep -Eq '^[A-Z][A-Z0-9_]+-[1-9][0-9]*$' || { echo "\"$PARENT\" is not a Jira issue key."; exit 1; } ;; esac
+N=$#
+while [ "$N" -gt 0 ]; do
+  L="$1"; shift; N=$((N - 1))
+  case "$L" in ''|*[[:space:]]*) echo "Jira labels cannot contain spaces (got: $L)"; exit 1 ;; esac
+  set -- "$@" -l "$L"
+done
+[ -z "$PARENT" ] || set -- "$@" -P "$PARENT"
+J="$(jira issue create -p "$JIRA_PROJECT" -t "$JIRA_ISSUE_TYPE" -s "$TITLE" --template "$BODY_FILE" "$@" --no-input --raw)" \
+  && KEY="$(printf '%s' "$J" | jq -er .key)" && [ -n "$KEY" ] \
+  || { echo "Could not file \"$TITLE\" in $JIRA_PROJECT."; exit 1; }
+echo "FILED=$KEY"
+```
+
+Report the printed key. `jira open <KEY> --no-browser` prints its URL when a report
+wants one.
+
+### `/do:replan` on Jira
+
+- **Backlog** — "List issues" with `STATE_JQL="statusCategory != Done"` and
+  `"$PLAN_LABEL"`; `created` dates drift, `updated` measures staleness.
+  `EXISTING_ISSUES` is the same call with no labels.
+- **Close** (`confirmed-done`, `likely-done`, `stale`, `epic-done`) —
+  `issue_close_note <KEY> "Closed by /do:replan — <evidence>"`. A failed transition is
+  reported with the key and left open, never retried under another status name.
+- **Drift** — `issue_comment <KEY> "⚠️ DRIFT: …"`, then `label_add <KEY> drift`; a
+  migrated item's open question adds `needs-decision` the same way.
+- **Epics** — `epic-children.md` "Jira" (native `parent` links; sub-tasks count).
+  Link a new child with `PARENT` in "File one issue", never a task-list line.
+- **Dependencies** — body lines `Depends on PROJ-12` / `Blocked by PROJ-12` (a key
+  where the hosts write `#N`), OR'd with native "is blocked by" links read with the
+  "Queue walk" `issuelinks` filter; a blocker's state is `issue_state`, and a key that
+  does not resolve is **broken**. Strip a closed blocker by rewriting the body with
+  `issue_body --set` from `issue_body`'s text. A new dependency always gets the body
+  line; add the native link best-effort with `jira issue link <KEY> <BLOCKER> Blocks`,
+  then read `<KEY>` back with that filter — if `<BLOCKER>` is not listed as its
+  blocker, `jira issue unlink <KEY> <BLOCKER>` and keep the body line alone.
+- **Rewrite** (interactive drift "Replan") — `issue_body --set <KEY> <text>`.
+- **Post-replan backlog** — `jira issue list -p "$JIRA_PROJECT" -q 'statusCategory != Done AND labels = "<PLAN_LABEL>"' --plain --columns key,summary,status`
+  under the empty-result rule.
+
+### `/do:plan-task` and `/do:goals` on Jira
+
+- **Label taxonomy** (`EXISTING_LABELS`) — Jira has no per-project label list, so
+  sample the labels already in use: `jira issue list -p "$JIRA_PROJECT" -q 'labels is not EMPTY' --paginate 0:100 --raw`
+  under the empty-result rule, then `jq -r '[.[].fields.labels[]] | unique | .[]'`.
+- **Dedup** — `issue_search <keywords>` once per anchor; report a match by key.
+- **File** — "File one issue". `/do:goals` labels each tactical item with
+  `PLAN_LABEL`; `/do:plan-task` applies its inferred and `--label` labels.
+- **Next step** — suggest `/do:next <KEY>`.
+
+### Rejected-reframing records (`/do:better --simplify-only`)
+
+Record one with "File one issue" (labels `"$PLAN_LABEL" rejected-reframing`), then
+`issue_close_note <KEY> "<reason>"`. `PRIOR_REJECTIONS` is "List issues" with
+`STATE_JQL="statusCategory = Done"` and those two labels, reading each body with
+`issue_body`.

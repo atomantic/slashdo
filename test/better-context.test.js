@@ -59,6 +59,7 @@ describe('better progressive context', () => {
       'lib/better-simplify.md',
       'lib/review-flags.md',
       'lib/review-structural-ambition.md',
+      'lib/tracker-jira.md',
     ]);
     const total = [...reached.values()].reduce((a, b) => a + b, 0);
     const breakdown = [...reached].sort((a, b) => b[1] - a[1]).map(([f, n]) => `${n} ${f}`).join('\n');

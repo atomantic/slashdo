@@ -1,5 +1,5 @@
 ---
-description: Plan a task by investigating the codebase, then file a robust, decision-complete issue in the repo's tracker — GitHub (gh) or GitLab (glab), auto-detected from the git remote (custom/Enterprise hosts included). Drafts the issue and shows it for approval before creating; pass --yes to skip the gate.
+description: Plan a task by investigating the codebase, then file a robust, decision-complete issue in the repo's tracker — GitHub (gh) or GitLab (glab), auto-detected from the git remote (custom/Enterprise hosts included), or a Jira project (jira). Drafts the issue and shows it for approval before creating; pass --yes to skip the gate.
 argument-hint: "[<task description>] [--yes|-y] [--label <name>] [--model <tier>] [--effort <level>] [--enhance-with <list>] [--no-dedup] [--dry-run]"
 ---
 
@@ -10,7 +10,8 @@ codebase to ground the task in reality (affected files, current behavior,
 constraints), draft an issue with a clean title and a structured body (problem,
 context, approach, acceptance criteria), show it for approval, then create it in the
 repo's tracker — **GitHub via `gh` or GitLab via `glab`**, auto-detected from the
-`origin` remote the same way `/do:pr` detects its host. A custom GitHub Enterprise or
+`origin` remote the same way `/do:pr` detects its host, or a **Jira project via
+`jira`** when `/do:config --tracker jira` selects one. A custom GitHub Enterprise or
 self-managed GitLab host needs no configuration: this command only uses `gh issue` /
 `glab issue` subcommands, which resolve the host from the remote (see
 [lib/gh-host.md](../../lib/gh-host.md) — only raw `gh api` calls need an explicit
@@ -94,8 +95,18 @@ accept either `--flag=value` or `--flag value`. Order is free.
 
    !read lib/vcs-host.md
 
-   Stop with the partial's tracker-gate message if `TRACKER_CLI` is empty. Print:
-   `Tracker: {TRACKER} (via {CLI_TOOL})`. Every prefixed label this command
+   **Jira tracker (`TRACKER=jira`) only — read the Jira backend now** and run its
+   Pre-flight (`{COMMAND}` = `/do:plan-task`) in place of the tracker gate; a failed
+   Pre-flight stops the run with its message. It alone sets `TRACKER_CLI` to `jira`,
+   plus `JIRA_PROJECT` and `LABEL_SEP=:`; its "Serving the backlog and filing
+   commands" section (with "`/do:plan-task` and `/do:goals` on Jira") then supplies
+   the label sample, the dedup search, the create, and the report below, and the
+   key (`PROJ-123`) replaces `#<number>`. Any other tracker skips this read.
+
+   !read lib/tracker-jira.md
+
+   Otherwise, stop with the partial's tracker-gate message if `TRACKER_CLI` is empty. Print:
+   `Tracker: {TRACKER} (via {TRACKER_CLI})`. Every prefixed label this command
    *builds* (`model`, `effort`, `severity`, …) is `<key>${LABEL_SEP}<value>`, per
    [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) "Setup". A label taxonomy
    the repo already **has** — `area`, most often — is the exception: match the
@@ -103,7 +114,7 @@ accept either `--flag=value` or `--flag value`. Order is free.
    unfilterable label.
 2. **Fetch the repo's label taxonomy** — `gh label list --limit 200 --json name --jq
    '.[].name'` (glab: `glab label list --output json --per-page 100 --jq
-   '.[].name'`) — and record it as `EXISTING_LABELS` for Phase 4's label inference
+   '.[].name'`; Jira: the label sample in [lib/tracker-jira.md](../../lib/tracker-jira.md)) — and record it as `EXISTING_LABELS` for Phase 4's label inference
    and dispatch hint.
    This command files at most one issue per run, so per
    [lib/plan-issue-filing.md](../../lib/plan-issue-filing.md) "Fetch existing open
@@ -129,7 +140,7 @@ Unless `--no-dedup` is set, search for issues that might already cover this work
 once Phase 1 has grounded the task, so the search terms are real file/symbol names,
 not the raw request: `gh issue list --state open --search "<key terms>" --json
 number,title,labels,body --jq '.'` (glab: `glab issue list --state opened --search
-"<key terms>" --output json`), per
+"<key terms>" --output json`; Jira: `issue_search <key terms>`), per
 [lib/plan-issue-filing.md](../../lib/plan-issue-filing.md) "Fetch existing open
 issues" (a command filing at most one item may dedup with a targeted search instead
 of the full open-issue dump). **Run it once per distinct anchor** Phase 1 surfaced
@@ -262,18 +273,22 @@ glab issue create --title "<Title>" --description "<structured body>" --label <a
 ```
 
 Write the body to a temp file and pass `--body-file` (gh) / `--description` from a
-file when it's long or would fight shell quoting.
+file when it's long or would fight shell quoting. **Jira:** always write the body to
+a file and run [lib/tracker-jira.md](../../lib/tracker-jira.md) "File one issue"
+(labels are applied on create, one word each — a label with a space aborts the
+filing; there is nothing to create first).
 
 ## Phase 6 — Report
 
 Print the outcome plainly:
-- **Created:** the new issue's `#<number>` and URL (`gh`/`glab` print it on create),
+- **Created:** the new issue's `#<number>` and URL (`gh`/`glab` print it on create;
+  on Jira, the key and `jira open <KEY> --no-browser`'s URL),
   its title, and the labels applied.
 - **Deduped:** the existing `#<number>` you pointed at instead (Phase 2).
 - **Dry run:** a note that nothing was filed, plus the draft that *would* have been.
 
-Then, when it fits, suggest `/do:next #<number>` to claim and ship it
-immediately (GitHub or GitLab — `/do:next` detects the host the same way). Leaving it
+Then, when it fits, suggest `/do:next #<number>` (on Jira, `/do:next <KEY>`) to claim
+and ship it immediately (`/do:next` detects the host and tracker the same way). Leaving it
 in the backlog is always a valid stopping point.
 
 ## Notes

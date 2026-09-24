@@ -270,7 +270,7 @@ Omit all focused-lens rows when none were selected.
 - file:line — description and why it's acceptable
 
 ### Deferred
-- #<issue> — title (or, with no tracker: "Deferred (not filed — no issue tracker available)" with title, rationale, file:line)
+- #<issue> (the key, `PROJ-123`, on a Jira tracker) — title (or, with no tracker: "Deferred (not filed — no issue tracker available)" with title, rationale, file:line)
 ```
 
 If no issues were found, confirm the code is clean and ready for PR.

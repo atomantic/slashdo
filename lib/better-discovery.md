@@ -14,6 +14,10 @@ Resolve the host here, before any phase reaches for a forge CLI:
 - On GitHub, carry the `GH_HOST` seed in state; Phase 6 finishes deriving it for the reviewer loops' `gh api` calls.
 - **Record `TRACKER_AVAILABLE` once.** `true` when `TRACKER_CLI` is set and reaches this repo's enabled issues; otherwise `false`, and deferred findings follow the setup partial's "No tracker" rule (Phase 7 report).
 
+Only on a Jira tracker (`TRACKER=jira`), whose Pre-flight is the gate (pass = available):
+
+!read lib/tracker-jira.md
+
 ### 0b: Project Type Detection
 Record the primary manifest's ecosystem as `PROJECT_TYPE`, and `HAS_UI=true`/`false` (whether the project ships web, desktop, mobile, or server-rendered UI; it gates the `ux` scope).
 
