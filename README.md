@@ -126,7 +126,7 @@ All commands live under the `do:` namespace:
 | `/do:pr` | Commit, push, and open a PR/MR with self-review. External reviewers only when listed ([Review loop](#review-loop)); `--merge` auto-merges once green ([Auto-merge](#auto-merge-dopr---merge)) |
 | `/do:pr-better` | Run a full do:better audit on the current branch, commit fixes directly, then open a single PR |
 | `/do:fpr` | Fork PR — push to fork, PR against upstream |
-| `/do:rpr` | Resolve PR review feedback with parallel agents |
+| `/do:rpr` | Resolve PR/MR review feedback with parallel agents |
 | `/do:release` | Create a release PR with version bump and changelog |
 | `/do:review` | Deep code review of changed files, a local branch, a PR, or a GitLab MR (`--strict`/`--nuclear` raise the bar) |
 | `/do:better` | Full DevSecOps audit with multi-agent scan, remediation, and per-category PRs |
