@@ -15,7 +15,7 @@ and pass `--input -`; never put shell-expandable `$variables` in a query string.
 ### `cr-state` — head, reviews, and threads
 
 ```bash
-echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { headRefOid reviews(last: 20) { totalCount nodes { state body author { login } submittedAt commit { oid } } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 3) { nodes { body path line author { login } } } } } } } }"}' | gh api --hostname {GH_HOST} graphql --input -
+echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { headRefOid reviews(last: 20) { totalCount nodes { state body author { login } submittedAt commit { oid } } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }"}' | gh api --hostname {GH_HOST} graphql --input -
 ```
 
 - Head SHA: `headRefOid`.
@@ -23,6 +23,8 @@ echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest
   `state` is already one of APPROVED, COMMENTED, CHANGES_REQUESTED, DISMISSED.
 - Threads: `reviewThreads.nodes`. The thread ID is `id`, the resolved flag is
   `isResolved`, and the author is the first comment's `author.login`.
+  `comments.nodes` is the thread's conversation in order (`body`, `path`,
+  `line`, `author.login`).
 
 ### `request-review` — ask `{REVIEWER_LOGIN}` to review
 

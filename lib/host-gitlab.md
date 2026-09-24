@@ -56,7 +56,9 @@ $mr[0] as $m | $v[0] as $vs | ($d | add // []) as $ds
       | { id, author: .notes[0].author.username,
           resolved: ([.notes[] | select(.resolvable) | .resolved] | all),
           path: .notes[0].position.new_path, line: .notes[0].position.new_line,
-          body: .notes[0].body } ]
+          body: .notes[0].body,
+          comments: [.notes[] | select(.system != true) | { body, author: .author.username }] } ],
+    pipeline: ($m.head_pipeline | if . == null then null else { id, sha, status } end)
   }'
 CR_STATE="$(jq -n --arg login "$(printf '%s' '{REVIEWER_LOGIN}' | tr A-Z a-z)" \
   --slurpfile mr "$CR_DIR/mr.json" --slurpfile v "$CR_DIR/versions.json" \
@@ -70,7 +72,13 @@ CR_STATE="$(jq -n --arg login "$(printf '%s' '{REVIEWER_LOGIN}' | tr A-Z a-z)" \
   of APPROVED, COMMENTED, CHANGES_REQUESTED. GitLab has no DISMISSED state. A
   later unapproval drops an approval-only review.
 - Threads: `.threads[]`, from resolvable discussions. The thread ID is the
-  discussion `id`.
+  discussion `id`. `.comments[]` is the whole discussion in order (each
+  non-system note's `body` and `author`), so a caller also sees the replies.
+- Head pipeline: `.pipeline` (`id`, `sha`, `status`), or `null` before the MR
+  has one.
+- A caller that reads only threads (e.g. `/do:rpr`) passes an empty
+  `{REVIEWER_LOGIN}`. `.reviews` is then empty, and `.threads` still lists
+  every author's discussions.
 - **Settle rule:** GitLab publishes an unbatched comment as soon as it is
   written. A review counts as submitted only after two consecutive polls return
   the same `submittedAt` for it. Until then, keep polling.
@@ -124,9 +132,10 @@ or the head moved. Re-read `cr-state` and retry.
 ### `ci-status` — the head pipeline
 
 `glab ci status --wait --branch {BRANCH_NAME}` blocks until the pipeline
-finishes. For a single read, use `.head_pipeline.status` from the `cr-state` MR
-read (`success`, `failed`, `running`, `pending`, `canceled`, `skipped`, or
-`manual`). GitLab has no separate list of required checks.
+finishes. For a single read, use `.pipeline.status` from `cr-state` (`success`,
+`failed`, `running`, `pending`, `canceled`, `skipped`, or `manual`), and trust
+it only when `.pipeline.sha` is the head you pushed. GitLab has no separate list
+of required checks.
 
 ### `merge`
 
