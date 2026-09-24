@@ -47,11 +47,20 @@ skips straight to **Detect Release Workflow** and never needs this content.
 
 ## Detect Release Workflow
 
+**Detect the code host first.** The shared preflight selects the forge from the
+`origin` remote, confirms the selected CLI can read this checkout, rejects
+unsupported forges, and derives `{CR_NOUN}` (`PR` on GitHub, `MR` on GitLab)
+for every message below:
+
+!read lib/vcs-host.md
+
 Discover the project's source and target branches for releases; do NOT hardcode branch names:
 
-1. **Source branch** — `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` (typically `main`). While here, **derive the GitHub API host `{GH_HOST}` from the `origin` remote** with the shared snippet at the end of this section and forward it to the review loop — `gh api` (used by the GitHub-side reviewer loops) defaults to github.com rather than reading the remote, so on GitHub Enterprise those loops would silently poll the wrong host and time out. If `gh auth token --hostname "$GH_HOST"` fails, stop and tell the user to run `gh auth login --hostname $GH_HOST`.
+1. **Source branch**:
+   - GitHub: `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` (typically `main`). While here, **derive the GitHub API host `{GH_HOST}` from the `origin` remote** with the shared snippet at the end of this section and forward it to the review loop — `gh api` (used by the GitHub-side reviewer loops) defaults to github.com rather than reading the remote, so on GitHub Enterprise those loops would silently poll the wrong host and time out. If `gh auth token --hostname "$GH_HOST"` fails, stop and tell the user to run `gh auth login --hostname $GH_HOST`.
+   - GitLab: `glab api "projects/:id" --jq .default_branch` (typically `main`). GitLab needs no separate API-host derivation for `glab` calls — it already resolves the host from `origin`, and the GitLab-side reviewer loop (`host-gitlab.md`) never needs `{GH_HOST}`. A plain host string is still needed for URLs this file builds itself (e.g. the changelog's compare link): use `{ORIGIN_HOST}`, already resolved by `lib/vcs-host.md` above — never re-derive it with a second copy of that parse.
 2. **Target branch** — determine by reading (in priority order):
-   - **GitHub Actions workflows** — check `.github/workflows/release.yml` (or similar) for `on: push: branches:` to find the branch that triggers the release pipeline
+   - **Release pipeline config** — GitHub: check `.github/workflows/release.yml` (or similar) for `on: push: branches:` to find the branch that triggers the release pipeline. GitLab: check `.gitlab-ci.yml` (and any included files) for a release/publish job's `rules`/`only: refs:` to find the equivalent trigger branch.
    - **Project conventions** (already in context) — git workflow sections, branch descriptions, or release instructions
    - **Versioning docs** — `docs/VERSIONING.md`, `CONTRIBUTING.md`, or `RELEASING.md`
    - **Branch convention** — if a `release` branch exists, the target is `release`; otherwise create it from the last release tag (step 3). In `--interactive` mode, ask the user to confirm
@@ -65,15 +74,15 @@ Discover the project's source and target branches for releases; do NOT hardcode 
      git push -u origin {target}
    fi
    ```
-4. **Detect GitHub Release publication** — set `{publishes_github_release}` to true only when the documented workflow or release instructions publish a GitHub Release (e.g. `gh release`, `softprops/action-gh-release`, or an equivalent action). Projects that publish only packages or tags have no GitHub Release checkpoint; their successful completion ends after the version-tag checkpoint.
+4. **Detect release publication** — set `{publishes_github_release}` to true only when the documented workflow or release instructions publish a host release object (GitHub Release: `gh release`, `softprops/action-gh-release`, or an equivalent action; GitLab Release: `glab release create`, `release-cli`, or the CI/CD `release:` keyword — checked with `glab release view` below). The flag name is unchanged from the GitHub-only history of this file, but it now gates either host's release-publication checkpoint. Projects that publish only packages or tags have no release-object checkpoint; their successful completion ends after the version-tag checkpoint.
 
 Print the detected workflow: `Detected release flow: {source} → {target}`
 
 **Default mode**: If ambiguous, use the most likely branch (prefer `release` if it exists). If detection still yields `target == source`, abort with an error — a release PR cannot merge a branch into itself. **Interactive mode (`--interactive`)**: Ask the user to confirm before proceeding.
 
-The PR direction is `{source}` → `{target}` (e.g., `main` → `release`), so reviewers and the human approver see the full diff since the last release. Do NOT create a branch from source and PR back into it — that only shows the version bump commit.
+The {CR_NOUN} direction is `{source}` → `{target}` (e.g., `main` → `release`), so reviewers and the human approver see the full diff since the last release. Do NOT create a branch from source and {CR_NOUN} back into it — that only shows the version bump commit.
 
-**GitHub only** — the shared `{GH_HOST}` derivation step 1 refers to:
+**GitHub only** — the shared `{GH_HOST}` derivation in step 1 refers to:
 
 !`cat ~/.claude/lib/gh-host.md`
 
@@ -118,16 +127,37 @@ if [ -z "$PREPARED_RELEASE" ] && [ -n "$TARGET_PREPARED_RELEASE" ]; then
   if ! printf '%s\n' "$TARGET_TAG" | grep -Eq '^[0-9a-f]{40}$'; then
     TARGET_TAG="$(git ls-remote origin "refs/tags/v${TARGET_VERSION}" | awk 'NF { print $1; exit }')"
   fi
-  TARGET_RELEASE_STATUS="$(gh api --include --hostname "{GH_HOST}" "repos/{owner}/{repo}/releases/tags/v${TARGET_VERSION}" 2>/dev/null | awk '$1 ~ /^HTTP\// { print $2; exit }' || true)"
-  case "$TARGET_RELEASE_STATUS" in
-    200)
-      TARGET_RELEASE_JSON="$(gh release view "v${TARGET_VERSION}" --json isDraft,isPrerelease,publishedAt 2>/dev/null)" || incomplete "Prepared release state" "GitHub Release metadata could not be read."
-      ;;
-    404) TARGET_RELEASE_JSON="" ;;
-    *)
-      incomplete "Prepared release state" "GitHub Release lookup returned ${TARGET_RELEASE_STATUS:-empty}."
-      ;;
-  esac
+  if [ "$CLI_TOOL" = gh ]; then
+    TARGET_RELEASE_STATUS="$(gh api --include --hostname "{GH_HOST}" "repos/{owner}/{repo}/releases/tags/v${TARGET_VERSION}" 2>/dev/null | awk '$1 ~ /^HTTP\// { print $2; exit }' || true)"
+    case "$TARGET_RELEASE_STATUS" in
+      200)
+        TARGET_RELEASE_JSON="$(gh release view "v${TARGET_VERSION}" --json isDraft,isPrerelease,publishedAt 2>/dev/null)" || incomplete "Prepared release state" "GitHub Release metadata could not be read."
+        ;;
+      404) TARGET_RELEASE_JSON="" ;;
+      *)
+        incomplete "Prepared release state" "GitHub Release lookup returned ${TARGET_RELEASE_STATUS:-empty}."
+        ;;
+    esac
+  else
+    # GitLab: `glab release view` (per #414/#415's spec) has no separate HTTP-status
+    # probe; fold "not found" into an empty $TARGET_RELEASE_JSON and let the jq
+    # gate below fail closed on any other unreadable/malformed response.
+    TARGET_RELEASE_ERR="$(mktemp)"
+    if TARGET_RELEASE_JSON="$(glab release view "v${TARGET_VERSION}" -F json 2>"$TARGET_RELEASE_ERR")"; then
+      :
+    elif grep -qi '404\|not found' "$TARGET_RELEASE_ERR"; then
+      TARGET_RELEASE_JSON=""
+    else
+      incomplete "Prepared release state" "GitLab Release lookup failed: $(cat "$TARGET_RELEASE_ERR")."
+    fi
+    rm -f "$TARGET_RELEASE_ERR"
+    # GitLab releases have no draft state; map its fields onto the same shape
+    # the jq gate below expects (isDraft always false, isPrerelease from
+    # `upcoming_release`, publishedAt from `released_at`).
+    if [ -n "$TARGET_RELEASE_JSON" ]; then
+      TARGET_RELEASE_JSON="$(printf '%s' "$TARGET_RELEASE_JSON" | jq '{isDraft: false, isPrerelease: (.upcoming_release // false), publishedAt: .released_at}')"
+    fi
+  fi
   if [ -z "$TARGET_TAG" ] || { [ "{publishes_github_release}" = "true" ] && ! printf '%s\n' "$TARGET_RELEASE_JSON" | jq -e 'type == "object" and .isDraft == false and .isPrerelease == false and (.publishedAt | type == "string") and (.publishedAt | length > 0)' >/dev/null 2>&1; }; then
     PREPARED_RELEASE="$TARGET_PREPARED_RELEASE"
     RECOVERED_TARGET_RELEASE=true
@@ -138,14 +168,27 @@ if [ -n "$PREPARED_RELEASE" ]; then
   VERSION="$(printf '%s\n' "$PREPARED_RELEASE" | sed -E 's/.*release v//')"
   echo "Resuming prepared release v${VERSION} at ${PREPARED_RELEASE_SHA}; skipping version bump and changelog generation."
   if [ "$RECOVERED_TARGET_RELEASE" = "true" ]; then
-    TARGET_RELEASE_PRS_JSON="$(gh pr list --state merged --base "{target}" --limit 100 --json number,state,headRefOid,baseRefName,headRefName,url,mergedAt,mergeCommit)" || incomplete "Merged release PR" "the forge query failed."
-    if ! printf '%s\n' "$TARGET_RELEASE_PRS_JSON" | jq -e 'type == "array"' >/dev/null; then
-      incomplete "Merged release PR" "the forge returned empty or malformed data."
+    if [ "$CLI_TOOL" = gh ]; then
+      TARGET_RELEASE_PRS_JSON="$(gh pr list --state merged --base "{target}" --limit 100 --json number,state,headRefOid,baseRefName,headRefName,url,mergedAt,mergeCommit)" || incomplete "Merged release PR" "the forge query failed."
+      if ! printf '%s\n' "$TARGET_RELEASE_PRS_JSON" | jq -e 'type == "array"' >/dev/null; then
+        incomplete "Merged release PR" "the forge returned empty or malformed data."
+      fi
+      MATCHING_TARGET_RELEASE_PRS="$(printf '%s\n' "$TARGET_RELEASE_PRS_JSON" | jq -c --arg sha "$PREPARED_RELEASE_SHA" --arg source "{source}" '[.[] | select(.headRefOid == $sha and .baseRefName == "{target}" and .headRefName == $source)]')"
+    else
+      # GitLab: `glab mr list` has no --head/--base filter pair as precise as gh's,
+      # so pull merged MRs into `{target}` and filter on source/target/SHA in jq,
+      # same shape as the GitHub branch above.
+      TARGET_RELEASE_PRS_JSON="$(glab api --paginate "projects/:id/merge_requests?state=merged&target_branch={target}&per_page=100" | jq -s 'add // []' \
+        | jq '[.[] | {number: .iid, state: (.state | ascii_upcase), headRefOid: .sha, baseRefName: .target_branch, headRefName: .source_branch, url: .web_url, mergedAt: .merged_at, mergeCommit: {oid: .merge_commit_sha}}]')" \
+        || incomplete "Merged release MR" "the forge query failed."
+      if ! printf '%s\n' "$TARGET_RELEASE_PRS_JSON" | jq -e 'type == "array"' >/dev/null; then
+        incomplete "Merged release MR" "the forge returned empty or malformed data."
+      fi
+      MATCHING_TARGET_RELEASE_PRS="$(printf '%s\n' "$TARGET_RELEASE_PRS_JSON" | jq -c --arg sha "$PREPARED_RELEASE_SHA" --arg source "{source}" '[.[] | select(.headRefOid == $sha and .baseRefName == "{target}" and .headRefName == $source)]')"
     fi
-    MATCHING_TARGET_RELEASE_PRS="$(printf '%s\n' "$TARGET_RELEASE_PRS_JSON" | jq -c --arg sha "$PREPARED_RELEASE_SHA" --arg source "{source}" '[.[] | select(.headRefOid == $sha and .baseRefName == "{target}" and .headRefName == $source)]')"
     MATCHING_TARGET_RELEASE_COUNT="$(printf '%s\n' "$MATCHING_TARGET_RELEASE_PRS" | jq 'length')"
     if [ "$MATCHING_TARGET_RELEASE_COUNT" -ne 1 ]; then
-      incomplete "Merged release PR" "expected exactly one merged PR for prepared SHA $PREPARED_RELEASE_SHA, found $MATCHING_TARGET_RELEASE_COUNT."
+      incomplete "Merged release {CR_NOUN}" "expected exactly one merged {CR_NOUN} for prepared SHA $PREPARED_RELEASE_SHA, found $MATCHING_TARGET_RELEASE_COUNT."
     fi
     PR_NUMBER="$(printf '%s\n' "$MATCHING_TARGET_RELEASE_PRS" | jq -r '.[0].number')"
     PR_URL="$(printf '%s\n' "$MATCHING_TARGET_RELEASE_PRS" | jq -r '.[0].url')"
@@ -198,7 +241,9 @@ release with no prepared release commit.
      - Replace the unreleased header with `# Release v{new_version}` (or the project's equivalent)
      - Add `Released: YYYY-MM-DD` with today's date
      - **Lead with a feature-grouped `## Highlights` summary** directly under the header/date, *above* the detailed `Added`/`Changed`/`Fixed` sections: **5–15 plain-language bullets grouped by theme/feature area** (e.g. "Editorial pipeline", "Local LLM", "Infra & deps"), each one sentence on *what changed and why it matters to a user*, with **no file paths and no inline `(#1234)` issue spam** (that detail stays in the sections below). For a tiny release that is already a clean feature list, Highlights is optional — don't pad it. The detailed entries below remain the authoritative record.
-     - Add a `## Full Changelog` section with: `**Full Diff**: https://{GH_HOST}/{owner}/{repo}/compare/v{prev}...v{new}` — from the derived `{GH_HOST}`, never a literal `github.com` (404s on GitHub Enterprise)
+     - Add a `## Full Changelog` section with the diff link built from the resolved host, never a literal `github.com` (404s on GitHub Enterprise) or `gitlab.com` (404s on self-managed GitLab):
+       - GitHub: `**Full Diff**: https://{GH_HOST}/{owner}/{repo}/compare/v{prev}...v{new}`
+       - GitLab: `**Full Diff**: https://{ORIGIN_HOST}/{owner}/{repo}/-/compare/v{prev}...v{new}` (GitLab's compare path has a `/-/` segment before `compare`; `{ORIGIN_HOST}` is the same value `lib/vcs-host.md` resolved in "Detect Release Workflow")
 
    **If there is no staged unreleased content — or no file-based changelog at all — derive the notes from the commits since the last release** (the normal path for a repo whose history *is* its changelog):
      - Take the range since the last release tag (`git log {last_tag}..HEAD`, or the full history for a first release). Prefer merge-commit/PR titles over intermediate "address review" commits.
@@ -272,25 +317,38 @@ Continue with Checkpoint 3 and the post-merge verification blocks below.
   if ! printf '%s\n' "$REMOTE_SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$' || [ "$REMOTE_SOURCE_SHA" != "$SOURCE_SHA" ]; then
     incomplete "Source push" "expected $SOURCE_SHA, got ${REMOTE_SOURCE_SHA:-empty}."
   fi
-  RELEASE_PRS_JSON="$(gh pr list --state all --base "{target}" --head "{source}" --limit 100 \
-    --json number,state,headRefOid,baseRefName,headRefName,url,createdAt)" || incomplete "Release PR" "the forge query failed."
+  if [ "$CLI_TOOL" = gh ]; then
+    RELEASE_PRS_JSON="$(gh pr list --state all --base "{target}" --head "{source}" --limit 100 \
+      --json number,state,headRefOid,baseRefName,headRefName,url,createdAt)" || incomplete "Release PR" "the forge query failed."
+  else
+    # GitLab: `glab mr list` has no combined source+target filter as precise as
+    # gh's, so query the REST endpoint directly and reshape onto the same field
+    # names the jq below already expects.
+    RELEASE_PRS_JSON="$(glab api --paginate "projects/:id/merge_requests?source_branch={source}&target_branch={target}&state=all&per_page=100" | jq -s 'add // []' \
+      | jq '[.[] | {number: .iid, state: (.state | ascii_upcase), headRefOid: .sha, baseRefName: .target_branch, headRefName: .source_branch, url: .web_url, createdAt: .created_at}]')" \
+      || incomplete "Release MR" "the forge query failed."
+  fi
   if ! printf '%s\n' "$RELEASE_PRS_JSON" | jq -e 'type == "array"' >/dev/null; then
-    incomplete "Release PR" "the forge returned empty or malformed data."
+    incomplete "Release {CR_NOUN}" "the forge returned empty or malformed data."
   fi
   MATCHING_RELEASE_PRS="$(printf '%s\n' "$RELEASE_PRS_JSON" | jq -c --arg sha "$SOURCE_SHA" \
     '[.[] | select(.headRefOid == $sha and (.state == "OPEN" or .state == "MERGED"))]')"
   MATCHING_COUNT="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq 'length')"
   if [ "$MATCHING_COUNT" -gt 1 ]; then
-    incomplete "Release PR" "more than one open or merged PR matches $SOURCE_SHA; investigate the ambiguity."
+    incomplete "Release {CR_NOUN}" "more than one open or merged {CR_NOUN} matches $SOURCE_SHA; investigate the ambiguity."
   elif [ "$MATCHING_COUNT" -eq 1 ]; then
     PR_NUMBER="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq -r '.[0].number')"
     PR_URL="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq -r '.[0].url')"
     PR_STATE="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq -r '.[0].state')"
   else
-    PR_URL="$(gh pr create --title "Release v{version}" --base "{target}" --head "{source}" --body "...")" || incomplete "Release PR" "creation failed; retry without creating another PR."
+    if [ "$CLI_TOOL" = gh ]; then
+      PR_URL="$(gh pr create --title "Release v{version}" --base "{target}" --head "{source}" --body "...")" || incomplete "Release PR" "creation failed; retry without creating another PR."
+    else
+      PR_URL="$(glab mr create --source-branch "{source}" --target-branch "{target}" --title "Release v{version}" --description "..." --yes)" || incomplete "Release MR" "creation failed; retry without creating another MR."
+    fi
     PR_NUMBER="${PR_URL##*/}"
     if ! printf '%s\n' "$PR_NUMBER" | grep -Eq '^[0-9]+$'; then
-      incomplete "Release PR" "creation returned empty or malformed data."
+      incomplete "Release {CR_NOUN}" "creation returned empty or malformed data."
     fi
     PR_STATE="OPEN"
   fi
@@ -365,20 +423,35 @@ If `PR_STATE=MERGED`, skip the CI gate and merge command below and continue
 directly to **Checkpoint 3**, so an interrupted rerun can recover from a merge
 that already succeeded remotely. Otherwise:
 
-- **Gate on required CI first, following the same rule as step 6 above.** Check once, without watching: `gh pr checks <number> --required`. If the output matches `no (required )?checks reported`, that is not automatically green: when a workflow is configured to run on PRs into `{target}`, poll for up to five minutes for a required check to attach (re-running the same command), then report INCOMPLETE if none does; when no such workflow exists for `{target}`, the gate is vacuously satisfied — merge directly. Once at least one required check is reported, watch it in-session: `gh pr checks <number> --required --watch --fail-fast`.
-  - On a required-check **failure**, apply the **CI flake handling** routine — one conservative re-run on the same commit (see **CI flake handling** above). If the same SHA passes on the re-run, treat it as a flake and proceed (logging which check flaked); if it fails again, **abort the release merge** and report which check failed.
-- Once confirmed clean, merge:
+- **Gate on required CI first, following the same rule as step 6 above.**
+  - **GitHub** (`ci-status` verb, `host-github.md`) — check once, without watching: `gh pr checks <number> --required`. If the output matches `no (required )?checks reported`, that is not automatically green: when a workflow is configured to run on PRs into `{target}`, poll for up to five minutes for a required check to attach (re-running the same command), then report INCOMPLETE if none does; when no such workflow exists for `{target}`, the gate is vacuously satisfied — merge directly. Once at least one required check is reported, watch it in-session: `gh pr checks <number> --required --watch --fail-fast`.
+  - **GitLab** (`ci-status` verb, `host-gitlab.md`) — GitLab has no separate list of required checks; the project's pipeline-must-succeed setting applies instead. Watch the head pipeline in-session: `glab ci status --wait --branch {source}`. If it reports no pipeline at all for `{source}`, poll for up to five minutes for one to attach, then report INCOMPLETE if none does.
+  - On a required-check/pipeline **failure**, apply the **CI flake handling** routine — one conservative re-run on the same commit (see **CI flake handling** above). If the same SHA passes on the re-run, treat it as a flake and proceed (logging which check flaked); if it fails again, **abort the release merge** and report which check failed.
+- Once confirmed clean, merge (the `merge` verb — GitHub reads the PR state and merges directly since a release PR is never squashed/rebased away from its exact head; GitLab has no separate list-required-checks step, so the pipeline wait above is its whole gate):
   ```bash
   PR_NUMBER="<number>"
-  CURRENT_PR_STATE="$(gh pr view "$PR_NUMBER" --json state -q .state)" || {
-    echo "INCOMPLETE — Merged release PR is unverified; the forge state query failed. Preserve the prepared release state and retry."
-    exit 1
-  }
-  if [ "$CURRENT_PR_STATE" = "OPEN" ]; then
-    gh pr merge "$PR_NUMBER" --merge
-  elif [ "$CURRENT_PR_STATE" != "MERGED" ]; then
-    echo "INCOMPLETE — Merged release PR is unverified; expected OPEN or MERGED, got ${CURRENT_PR_STATE:-empty}. Preserve the prepared release state and retry."
-    exit 1
+  if [ "$CLI_TOOL" = gh ]; then
+    CURRENT_PR_STATE="$(gh pr view "$PR_NUMBER" --json state -q .state)" || {
+      echo "INCOMPLETE — Merged release PR is unverified; the forge state query failed. Preserve the prepared release state and retry."
+      exit 1
+    }
+    if [ "$CURRENT_PR_STATE" = "OPEN" ]; then
+      gh pr merge "$PR_NUMBER" --merge
+    elif [ "$CURRENT_PR_STATE" != "MERGED" ]; then
+      echo "INCOMPLETE — Merged release PR is unverified; expected OPEN or MERGED, got ${CURRENT_PR_STATE:-empty}. Preserve the prepared release state and retry."
+      exit 1
+    fi
+  else
+    CURRENT_PR_STATE="$(glab mr view "$PR_NUMBER" --output json --jq .state)" || {
+      echo "INCOMPLETE — Merged release MR is unverified; the forge state query failed. Preserve the prepared release state and retry."
+      exit 1
+    }
+    if [ "$CURRENT_PR_STATE" = "opened" ]; then
+      glab mr merge "$PR_NUMBER" --yes
+    elif [ "$CURRENT_PR_STATE" != "merged" ]; then
+      echo "INCOMPLETE — Merged release MR is unverified; expected opened or merged, got ${CURRENT_PR_STATE:-empty}. Preserve the prepared release state and retry."
+      exit 1
+    fi
   fi
   ```
 - **Checkpoint 3 — merged release PR.** Do not infer completion from the merge
@@ -416,7 +489,17 @@ that already succeeded remotely. Otherwise:
      printf '%s\n' "$sha"
    }
    release_published_json() {
-     gh release view "v{version}" --json tagName,isDraft,isPrerelease,publishedAt 2>/dev/null
+     if [ "$CLI_TOOL" = gh ]; then
+       gh release view "v{version}" --json tagName,isDraft,isPrerelease,publishedAt 2>/dev/null
+     else
+       # `glab release view` (per #414/#415's spec) has no draft state, so map
+       # onto the same {tagName,isDraft,isPrerelease,publishedAt} shape the
+       # shared release_is_published gate below expects: isDraft is always
+       # false, isPrerelease comes from `upcoming_release`, publishedAt from
+       # `released_at`.
+       glab release view "v{version}" -F json 2>/dev/null \
+         | jq '{tagName: .tag_name, isDraft: false, isPrerelease: (.upcoming_release // false), publishedAt: .released_at}'
+     fi
    }
    release_is_published() {
      printf '%s\n' "$1" | jq -e \
@@ -431,14 +514,27 @@ that already succeeded remotely. Otherwise:
      SOURCE_SHA="$(git rev-parse HEAD)"
    fi
 
-   # Checkpoint 3 — merged release PR.
-   MERGE_JSON="$(gh pr view "$PR_NUMBER" --json state,mergedAt,mergeCommit)" || incomplete "Merged release PR" "the forge query failed."
+   # Checkpoint 3 — merged release PR/MR.
+   if [ "$CLI_TOOL" = gh ]; then
+     MERGE_JSON="$(gh pr view "$PR_NUMBER" --json state,mergedAt,mergeCommit)" || incomplete "Merged release PR" "the forge query failed."
+   else
+     # GitLab has no separate mergedAt field distinct from the merge commit's
+     # presence; reshape onto the same {state,mergedAt,mergeCommit.oid} the
+     # shared jq gate below expects.
+     MERGE_JSON="$(glab api "projects/:id/merge_requests/$PR_NUMBER" \
+       | jq '{state: (if .state == "merged" then "MERGED" else (.state | ascii_upcase) end), mergedAt: .merged_at, mergeCommit: {oid: .merge_commit_sha}}')" \
+       || incomplete "Merged release MR" "the forge query failed."
+   fi
    if ! printf '%s\n' "$MERGE_JSON" | jq -e \
     'type == "object" and .state == "MERGED" and (.mergedAt | type == "string") and (.mergedAt | length > 0) and (.mergeCommit.oid | type == "string") and (.mergeCommit.oid | length > 0)' >/dev/null; then
-     incomplete "Merged release PR" "state, mergedAt, or mergeCommit is missing or not MERGED."
+     incomplete "Merged release {CR_NOUN}" "state, mergedAt, or mergeCommit is missing or not MERGED."
    fi
    MERGE_COMMIT="$(printf '%s\n' "$MERGE_JSON" | jq -r '.mergeCommit.oid')"
-   PR_URL="$(gh pr view "$PR_NUMBER" --json url -q .url)" || incomplete "Merged release PR" "the PR URL could not be read."
+   if [ "$CLI_TOOL" = gh ]; then
+     PR_URL="$(gh pr view "$PR_NUMBER" --json url -q .url)" || incomplete "Merged release PR" "the PR URL could not be read."
+   else
+     PR_URL="$(glab api "projects/:id/merge_requests/$PR_NUMBER" --jq .web_url)" || incomplete "Merged release MR" "the MR URL could not be read."
+   fi
    printf 'RELEASE_PR_HANDOFF\tPR_NUMBER=%s\tPR_URL=%s\tPR_STATE=MERGED\tMERGE_COMMIT=%s\n' "$PR_NUMBER" "$PR_URL" "$MERGE_COMMIT"
 
    # Checkpoint 4 — target-branch tree. FETCH_HEAD pins the exact target ref

@@ -6,10 +6,13 @@ second release workflow that reloads saved reviewer defaults.
 1. **Resolve the release contract without mutations.** Record the integration
    branch, PR head (if any), previous published version, version/notes owner,
    required test/build commands, publication trigger, and expected artifacts
-   (tag, GitHub Release, package, deployment, or the documented subset). Derive
-   `{GH_HOST}` and authenticate using the shared host snippet below before forge
-   operations. A PR head must differ from its base; the integration branch may
-   legitimately be both the development branch and publication trigger.
+   (tag, GitHub/GitLab Release, package, deployment, or the documented subset).
+   Detect the code host first (`lib/vcs-host.md`, `{CODE_HOST}`/`{CLI_TOOL}`/`{CR_NOUN}`);
+   on GitHub, additionally derive `{GH_HOST}` and authenticate using the shared
+   host snippet below before forge operations — GitLab needs no equivalent, since
+   `glab` resolves its host from `origin` directly. A PR/MR head must differ
+   from its base; the integration branch may legitimately be both the
+   development branch and publication trigger.
 2. **Recover before preparing.** Fetch the relevant remote branches and inspect
    remote tags, published releases, and open/merged release PRs. Resume an existing
    prepared version or interrupted publication rather than bumping again or
@@ -68,8 +71,10 @@ second release workflow that reloads saved reviewer defaults.
    publication. Bound the wait (five minutes unless project docs specify another
    bound); a queued, failed, missing, or inconclusive pipeline is INCOMPLETE.
    Read back each required artifact: resolve the remote tag to a commit on the
-   verified release lineage, check the GitHub Release's tag and published/non-draft
-   status (and prerelease status appropriate to this release), and verify package
+   verified release lineage, check the GitHub/GitLab Release's tag and
+   published/non-draft status (`gh release view` / `glab release view` —
+   GitLab Releases have no draft state, so treat a readable release as
+   non-draft) and prerelease status appropriate to this release, and verify package
    version or deployment identity when documented. Recover a missing artifact
    only by the documented recovery procedure; never overwrite an existing tag or
    claim publication merely because the PR merged.
