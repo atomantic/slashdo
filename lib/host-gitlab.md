@@ -142,6 +142,20 @@ of required checks.
 Merge only through `merge-gate.md` (its GitLab section). It owns the
 merge-when-pipeline-succeeds path and the merged read-back.
 
+### Targeting an MR outside the checkout
+
+A caller that names an MR by URL (`/do:review <MR URL>`) may run outside that
+project's checkout, where `:id` and the default host point at the wrong
+project. That caller supplies `{GL_HOST}`, `{GL_PROJECT_ENC}` (the URL-encoded
+project path, e.g. `group%2Fsub%2Fproject`), and `{GL_REPO_URL}` (the project's
+web URL). Run each verb above with two substitutions:
+
+- every `glab api` call gains `--hostname {GL_HOST}`, and `projects/:id`
+  becomes `projects/{GL_PROJECT_ENC}`;
+- every `glab mr` / `glab ci` call gains `-R "{GL_REPO_URL}"`.
+
+Nothing else changes: the capture rule and the outputs stay the same.
+
 ### Login grammar
 
 `^[A-Za-z0-9_]([A-Za-z0-9_.-]*[A-Za-z0-9_-])?$`: letters, digits, `_`, `-`, and
