@@ -57,7 +57,7 @@ for every message below:
 Discover the project's source and target branches for releases; do NOT hardcode branch names:
 
 1. **Source branch**:
-   - GitHub: `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` (typically `main`). While here, **derive the GitHub API host `{GH_HOST}` from the `origin` remote** with the shared snippet at the end of this section and forward it to the review loop — `gh api` (used by the GitHub-side reviewer loops) defaults to github.com rather than reading the remote, so on GitHub Enterprise those loops would silently poll the wrong host and time out. If `gh auth token --hostname "$GH_HOST"` fails, stop and tell the user to run `gh auth login --hostname $GH_HOST`.
+   - GitHub: `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` (typically `main`). While here, **derive the GitHub API host `{GH_HOST}` from the `origin` remote** with the shared snippet at the end of this section and forward it to the review loop — `gh api` (used by the host-side reviewer loops' GitHub verbs) defaults to github.com rather than reading the remote, so on GitHub Enterprise those loops would silently poll the wrong host and time out. If `gh auth token --hostname "$GH_HOST"` fails, stop and tell the user to run `gh auth login --hostname $GH_HOST`.
    - GitLab: `glab api "projects/:id" --jq .default_branch` (typically `main`). GitLab needs no separate API-host derivation for `glab` calls — it already resolves the host from `origin`, and the GitLab-side reviewer loop (`host-gitlab.md`) never needs `{GH_HOST}`. A plain host string is still needed for URLs this file builds itself (e.g. the changelog's compare link): use `{ORIGIN_HOST}`, already resolved by `lib/vcs-host.md` above — never re-derive it with a second copy of that parse.
 2. **Target branch** — determine by reading (in priority order):
    - **Release pipeline config** — GitHub: check `.github/workflows/release.yml` (or similar) for `on: push: branches:` to find the branch that triggers the release pipeline. GitLab: check `.gitlab-ci.yml` (and any included files) for a release/publish job's `rules`/`only: refs:` to find the equivalent trigger branch.
@@ -74,7 +74,7 @@ Discover the project's source and target branches for releases; do NOT hardcode 
      git push -u origin {target}
    fi
    ```
-4. **Detect release publication** — set `{publishes_github_release}` to true only when the documented workflow or release instructions publish a host release object (GitHub Release: `gh release`, `softprops/action-gh-release`, or an equivalent action; GitLab Release: `glab release create`, `release-cli`, or the CI/CD `release:` keyword — checked with `glab release view` below). The flag name is unchanged from the GitHub-only history of this file, but it now gates either host's release-publication checkpoint. Projects that publish only packages or tags have no release-object checkpoint; their successful completion ends after the version-tag checkpoint.
+4. **Detect release publication** — set `{publishes_github_release}` to true only when the documented workflow or release instructions publish a host release object (GitHub Release: `gh release`, `softprops/action-gh-release`, or an equivalent action; GitLab Release: `glab release create`, `release-cli`, or the CI/CD `release:` keyword — checked with `glab release view` below). The flag name predates GitLab support; it gates either host's release-publication checkpoint. Projects that publish only packages or tags have no release-object checkpoint; their successful completion ends after the version-tag checkpoint.
 
 Print the detected workflow: `Detected release flow: {source} → {target}`
 
@@ -368,7 +368,7 @@ candidate; set `OVERALL_STATUS=clean` for the post-merge verification path.
 
 **If `REVIEW_AGENTS` is empty**, skip this entire section — the Local Code Review gate plus the passing build/tests are the merge gate; set `OVERALL_STATUS=clean` (no-review path) and proceed to the merge section.
 
-Otherwise, hand off to the **multi-reviewer loop** with the inputs resolved in "Parse Arguments" (`{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`, `{REVIEW_MODELS}`) plus `{GH_HOST}` from "Detect Release Workflow" and the per-entry `{WAIT_SCHEDULE}` selected below. The GitHub-side loops use `{GH_HOST}` on every `gh api` call, and the wrapper dispatches each entry to the single-reviewer loop read below.
+Otherwise, hand off to the **multi-reviewer loop** with the inputs resolved in "Parse Arguments" (`{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`, `{REVIEW_MODELS}`) plus `{GH_HOST}` from "Detect Release Workflow" and the per-entry `{WAIT_SCHEDULE}` selected below. On GitHub, the host-side loops use `{GH_HOST}` on every `gh api` call, and the wrapper dispatches each entry to the single-reviewer loop read below.
 
 For each host-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
 
