@@ -214,7 +214,7 @@ After the host self-review and any selected agents return:
 
 For each finding, ground it in evidence before classifying:
 1. **Quote the specific code line(s)** that demonstrate the issue
-2. **Explain why it's a problem** in one sentence given the surrounding context
+2. **Explain why it's a problem** given the surrounding context
 3. If the fix involves async/state changes, **trace the execution path** to confirm the issue is real
 4. If you cannot quote specific code for a finding, downgrade it to **[UNCERTAIN]**
 

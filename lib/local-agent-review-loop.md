@@ -73,7 +73,7 @@ The invocations run **non-interactively** through each CLI's documented unattend
 The shared local-CLI runner owns the timeout wrapper, the Step 1 snapshot, the Step 2 launch and wait, and the Step 3 verify-and-restore. Read it now and run its timeout wrapper block:
 !read lib/local-cli-runner.md
 
-Then, in the same shell, compute the shared inputs once before invoking any local agent. Run the block verbatim without narrating it:
+Then, in the same shell, compute the shared inputs once before invoking any local agent. Run the block verbatim:
 
 ```bash
 REVIEW_TITLE=$(git log -1 --format=%s HEAD)

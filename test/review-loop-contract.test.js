@@ -874,7 +874,7 @@ describe('review-loop parse contracts', () => {
 
     // Config and docs must advertise the same model + effort grammar as the
     // other reviewers — a saved review-models entry and a ~effort suffix.
-    assert.match(readCommand('config.md'), /--review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5/);
+    assert.match(readCommand('config.md'), /--review-models codex=o3,claude=opus,cursor=gpt-5/);
     assert.match(readCommand('config.md'), /cursor\[gpt-5\]~effort=max/);
     assert.match(_read('README.md'), /cursor\[gpt-5\]~effort=max/);
     assert.match(_read("README.md"), /--review-models cursor=/);
