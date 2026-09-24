@@ -57,7 +57,7 @@ Requirement statements use RFC-2119-style keywords — **MUST/SHALL** (mandatory
 Gather signals about the project's purpose and intent. Launch these as parallel Explore agents:
 
 ### Agent 1: Identity & Purpose
-Scan README, package manifest (`package.json`/`Cargo.toml`/`pyproject.toml`/`go.mod`), `CLAUDE.md`, `LICENSE`, and community files (`CONTRIBUTING.md`, `.github/FUNDING.yml`, `CODE_OF_CONDUCT.md`) for stated purpose, audience, and licensing/community intent — a capable model already knows to check these; nothing here changes what to extract.
+Scan README, package manifest (`package.json`/`Cargo.toml`/`pyproject.toml`/`go.mod`), `CLAUDE.md`, `LICENSE`, and community files (`CONTRIBUTING.md`, `.github/FUNDING.yml`, `CODE_OF_CONDUCT.md`) for stated purpose, audience, and licensing/community intent.
 
 Extract: project name, stated purpose, target audience, licensing model, community intent.
 
@@ -95,7 +95,7 @@ In `--prd` mode, keep the evidence ledger until the document is written: every r
 
 ### Default Mode (autonomous)
 
-Skip user clarification — every `3a`-`3j` subsection below is interactive-only and does not run. Include all HIGH and MEDIUM confidence items directly; include LOW confidence items marked `(inferred)`. In `--prd` mode, still run 3k's edge-case check silently (its own text covers the autonomous behavior: record each case as a risk/open question rather than asking). Proceed directly to Phase 4.
+Skip user clarification — every `3a`-`3j` subsection below is interactive-only and does not run. Include all HIGH and MEDIUM confidence items directly; include LOW confidence items marked `(inferred)`. In `--prd` mode, still run 3k's edge-case check without asking (its own text covers the autonomous behavior: record each case as a risk/open question rather than asking). Proceed directly to Phase 4.
 
 ### Interactive Mode (`--interactive`)
 

@@ -194,7 +194,7 @@ describe('/do:release GitLab paths', () => {
     assert.match(body, /glab mr merge "\$PR_NUMBER" --yes/);
 
     // Post-Merge: merged-MR read-back and release detection (glab release view,
-    // per #414/#415's spec for tag/release detection).
+    // for tag/release detection).
     assert.match(body, /glab api "projects\/:id\/merge_requests\/\$PR_NUMBER"/);
     assert.match(body, /glab release view "v\{version\}" -F json/);
   });

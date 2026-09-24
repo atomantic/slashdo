@@ -14,7 +14,7 @@ Exactly five scopes are eligible, subject to the user's path/focus filter; combi
 | `structural` | Always on (`--simplify-only` implies `--strict`), blocker-tier findings promoted to CRITICAL as usual |
 | `cognitive-load` | Runs only in this mode |
 
-`security`, `bugs-perf`, `stack-specific`, `deps`, `tests`, and `ux` do **not** run. Phase 0b still records `HAS_UI` (it costs nothing and stays in the state snapshot), but it no longer gates anything in this mode.
+`security`, `bugs-perf`, `stack-specific`, `deps`, `tests`, and `ux` do **not** run. Phase 0b still records `HAS_UI` (it costs nothing and stays in the state snapshot), but it gates nothing in this mode.
 
 Pass each worker gates 1, 2, and 4 below plus `PRIOR_REJECTIONS` and the distilled `DOMAIN_DOCS` glossary (Phase 0e). Only `cognitive-load` gets `HOT_FILES` as a search priority; agents never apply the churn adjustment.
 

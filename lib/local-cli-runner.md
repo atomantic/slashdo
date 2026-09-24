@@ -4,7 +4,7 @@ The shared mechanics for driving a headless local CLI against this working tree.
 
 ### Timeout wrapper
 
-Run once, verbatim, without narrating the probe:
+Run once, verbatim:
 
 ```bash
 # An ARRAY, expanded only as ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} — see ~/.claude/lib/empty-array-expansion.md.
