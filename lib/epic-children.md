@@ -14,7 +14,8 @@ belongs to a *group*, not the project an issue lives in), so this file doesn't
 attempt to map it. On GitLab the **convention fallback** below (body
 task-lists + back-references) is therefore the *primary* path, not a
 last resort — and it's host-agnostic by construction, so every command in it
-is given both a `gh` and a `glab` form.
+is given both a `gh` and a `glab` form. A Jira tracker skips all of that and uses
+the last section, **Jira**.
 
 On GitHub, set `OWNER`/`REPO` once per run:
 `OWNER_REPO="$(gh repo view --json owner,name -q '.owner.login + "/" + .name')"`
@@ -150,3 +151,23 @@ If a parent epic `#P` is found, run the completeness check on `#P`: close it whe
 `epic-done`; when `epic-wrapup`, comment that the children are complete and the
 wrap-up tasks remain (so a later `/do:next` surfaces it). Leave it untouched when
 `epic-open`.
+
+## Jira
+
+When the caller ran [tracker-jira.md](./tracker-jira.md)'s Pre-flight (`TRACKER=jira`),
+none of the `gh`/`glab` calls above apply: Jira links children natively with
+`parent`, for epics and sub-tasks alike, so that link is the only source — the body
+task-list and back-reference scans are skipped (`issue_body` renders rich text as
+plain text, which is lossy). Keys stand in for `#N` throughout.
+
+- **Epic?** Its `issuetype.name` is `Epic`, it carries the `epic` label, or its
+  `subtasks` array is non-empty (all in `jira issue view <KEY> --raw`).
+- **Children** — `issue_children <KEY>` rows are already `OPEN`/`CLOSED` by status
+  category; the states above apply unchanged, and no rows is `epic-empty`.
+- **Wrap-up tasks** — unchecked `- [ ]` lines in `issue_body <KEY>` that name no key;
+  none is an empty `WRAPUP_TASKS`.
+- **Closing** — `issue_close_note <KEY> "All children closed (PROJ-a, PROJ-b, …) and wrap-up complete — closing epic. (slashdo)"`;
+  a failed transition leaves the epic open and is reported, never retried under
+  another status name.
+- **A child's parent** — `J="$(jira issue view <CHILD> --raw)" && printf '%s' "$J" | jq -r '.fields.parent.key // empty'`;
+  empty means no parent. An `epic-wrapup` parent gets `issue_comment` as above.
