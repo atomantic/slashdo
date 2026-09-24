@@ -1,6 +1,6 @@
 ---
 description: Audit third-party dependencies and remove unnecessary ones by writing replacement code
-argument-hint: "[--interactive] [--scan-only] [--no-merge] [--heavy] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues|--no-issues] [--issues-label <name>] [specific packages to evaluate]"
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [--heavy] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues-label <name>] [specific packages to evaluate]"
 ---
 
 # Depfree — Dependency Freedom Audit
@@ -13,20 +13,23 @@ Every small library is an attack surface. In default mode, large, widely-audited
 
 Parse `$ARGUMENTS` for:
 - **`--interactive`**: pause at each decision point for user approval
-- **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation — no worktree, no code changes, no PRs. **When `ISSUE_MODE` is also true**, every surviving finding is filed as a labelled tracker issue before the run exits, not just the deferred subset (see the Phase 2 gate). `--scan-only` stops the pipeline; `--issues` only chooses where findings are recorded
+- **`--scan-only`**: run Phase 0 + 1 + 2 only (audit and plan), skip remediation — no worktree, no code changes, no PRs. Every surviving finding is filed as a labelled tracker issue before the run exits, not just the deferred subset (see the Phase 2 gate)
 - **`--no-merge`**: run through PR creation, skip the review loop and merge
 - **`--heavy`**: aggressive mode — only keep foundational frameworks and language runtimes; replace everything else that is feasibly replaceable (see Heavy Mode)
-- **`--review-with <agent[,agent,...]>`**: which reviewer(s) run the Phase 5c review loop on the PR. Accepted slugs: `codex`, `agy` (aliases `gemini` / `antigravity` — the Antigravity CLI's `agy` binary), `claude`, `grok`, `pi`, `cursor` (alias `cursor-agent`), `opencode` (aliases `zen` / `opencode-zen`), `ollama` (bare `ollama` auto-selects the most capable installed coding model; `ollama[<model>]` pins one, e.g. `ollama[qwen2.5-coder:32b]` — strip the bracket into a per-entry `OLLAMA_MODEL`), `copilot` (**legacy** — GitHub's cloud Copilot review; supported when named, never selected implicitly), `cmd[<invocation>]` — an escape hatch for any harness not in this list (operator-authored shell command, read prompt on stdin, print the same verdict contract; always review-only; see `lib/local-agent-review-loop.md` "The `cmd` reviewer"), or an arbitrary GitHub login `@<login>` — any GitHub user or App/bot (e.g. `@octocat`, `@org-review-bot`, `@some-app[bot]`); slashdo requests its review on the PR and waits for it (GitHub only, never posts an approval itself). `codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode` likewise accept a `<agent>[<model>]` bracket — e.g. `codex[o3]`, `claude[claude-opus-4-8]`, `grok[grok-code-fast-1]`, `opencode[provider/model]` — stripped into a per-entry `REVIEW_MODEL` (empty uses each other CLI's default; OpenCode receives no slashdo model override, so select an explicit or configured supported provider/model); `copilot` and `@<login>` take no model bracket. Comma-separated, ordered list: split on `,` **outside the outermost brackets** (a `,` inside a `cmd[<invocation>]` or a nested `[<model>]` is part of the value; "outermost" is the first `[` to the last `]` of the token), trim whitespace, normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, `zen`/`opencode-zen` → `opencode`, dedupe preserving first-occurrence order, with the `[<model>]` bracket (or, for `cmd`, the verbatim `[<invocation>]`) part of the dedup identity. Record as `REVIEW_AGENTS`. **There is no built-in default** — if omitted, leave `REVIEW_AGENTS` **unset for now**; the saved-defaults step below fills it from `/do:config` if a default exists, and **only if it is still unset after that** is `REVIEW_AGENTS=[]` (Phase 5c skipped, PR left open without merging). `copilot` is never added implicitly. Suffixes, strippable off the right of each token in any order before slug parsing: `~opt` (e.g. `ollama~opt`, `ollama[qwen2.5-coder:32b]~opt`) marks the reviewer **optional/non-blocking** — still requested and its findings still fixed, but an inconclusive result (timeout/skipped/incomplete/no-verdict) never blocks the merge (a hard-error still does); record as a per-entry `{OPTIONAL}` flag. `~max=<n>` (e.g. `claude~max=2`, `ollama~max=1`) caps how many review → fix → re-review cycles **that one reviewer** runs. `~effort=<level>` (e.g. `codex[gpt-5.6-luna]~effort=max~opt`, `claude~effort=high~max=2`) sets its reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`). Deduplication excludes `~` suffixes (`ollama~opt` == `ollama`; survivor takes `~opt` if any had it, and cap/effort from the first that carried them). Reject a malformed suffix with `Invalid --review-with suffix on {entry}: ~max must be a non-negative integer and ~effort must be one of low, medium, high, xhigh, max, each appearing at most once; the only suffixes are ~opt, ~max=<n>, and ~effort=<level>.` Abort on an unknown slug with `Unknown --review-with value: {value}. Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot, cmd[<invocation>], @<login> (each optionally suffixed ~opt, ~max=<n>, and/or ~effort=<level>).` The reserved token `none` (case-insensitive) is **not** validated as a slug — `--review-with none` means no reviewer (set `REVIEW_AGENTS=[]`) and overrides any saved `review-with` default.
-- **`--review-stop-on-findings`** / **`--review-stop-on-clean`** (mutually exclusive): forwarded to the multi-reviewer loop; control when the reviewer list stops early. Set `REVIEW_STOP_MODE` (`all` default, `on-findings`, or `on-clean`). If both are present, abort with `--review-stop-on-findings and --review-stop-on-clean cannot be combined`.
-- **`--review-mode <series|parallel>`**: forwarded to the multi-reviewer loop. `series` (default) runs the reviewers one-at-a-time so each sees the prior's committed fixes; `parallel` runs their reviews concurrently against one baseline and applies the deduped union once (`--reviewer-applies` and the stop-modes are ignored in parallel). Set `REVIEW_MODE`; if omitted, leave it **unset for now** (saved-defaults fills it from `review-mode`; built-in default `series`). Abort with `--review-mode must be one of series, parallel (got: {value}).` on any other value.
-- **`--reviewer-applies`**: forwarded to the review loop — the reviewing CLI applies fixes directly instead of the orchestrator — **only on the `codex` pass**, the one reviewer with a verified write-isolated profile; the loop forces every other local reviewer (`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`cmd`) back to review-only (and it has no effect on copilot or `@<login>` passes, which are read-only cloud-side reviews). Record `REVIEWER_APPLIES=true`/`false`.
-- **`--review-iterations <n>`**: cap how many review-and-fix cycles a **copilot** or **`@<login>`** pass runs (Phase 5c); no effect on `codex`/`agy`/`claude`/`grok`/`pi`/`cursor`/`opencode`/`cmd`/`ollama` passes (their own fixed iteration caps). Set `REVIEW_ITERATIONS` from this value; default `1` (one review pass, exiting early on 0 comments). `0` = loop until that reviewer returns 0 comments (legacy behavior, bounded by the 10-iteration guardrail). Must be a non-negative integer; otherwise abort with `--review-iterations must be a non-negative integer (got: {value}).` To move the local-agent / `ollama` caps — or give each reviewer a different budget — use the per-entry `--review-with <agent>~max=<n>` suffix, which overrides this flag for the entry that carries it.
 
-After parsing the review flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the review flags **and** `--issues` / `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
+The `--review-with`, `--review-stop-on-findings`/`--review-stop-on-clean`, `--review-mode`, `--reviewer-applies`, and `--review-iterations` grammar governing the Phase 5c review loop on the PR — entry syntax, per-reviewer `~opt`/`~max=`/`~effort=` suffixes, dedupe rules, and model-bracket forwarding — is owned by the shared partial below; do not restate it here:
+
+!`cat ~/.claude/lib/review-flags.md`
+
+After parsing the review flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the review flags **and** `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
-- **`--issues`** / **`--no-issues`** / **`--issues-label <name>`**: selects **where deferred removals are recorded** — GitHub/GitLab issues instead of PLAN.md lines (see Phase 2). **It does NOT change what the run does** (remediation, PRs, CI, review loop, and merge all proceed); to audit and file work *without* remediating, combine it with **`--scan-only`**. `--issues` sets `ISSUE_MODE=true`; `--no-issues` forces `ISSUE_MODE=false`; if **neither**, take `ISSUE_MODE` from the saved `issues` default resolved above (built-in default `false`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`.
+!`cat ~/.claude/lib/config-defaults-issues-merge.md`
+
+- **`--issues-label <name>`**: the label on the GitHub/GitLab issues deferred removals are filed as (see Phase 2). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`. A saved `issues` key is ignored.
+- **`--issues`**: deprecated no-op; print once: `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.`
+- **`--no-issues`**: abort with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only in the project's issue tracker.`
 - **Specific packages**: limit audit scope to named packages (e.g., "chalk dotenv")
 
 Set `HEAVY_MODE` to `true` if `--heavy` was passed, `false` otherwise.
@@ -81,7 +84,7 @@ When compacting during this workflow, always preserve:
 - The current phase number and what phases remain
 - All PR numbers and URLs created so far
 - `BUILD_CMD`, `TEST_CMD`, `PROJECT_TYPE`, `WORKTREE_DIR`, `REPO_DIR` values
-- `VCS_HOST`, `CLI_TOOL`, `GH_HOST`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
+- `VCS_HOST`, `CLI_TOOL`, `GH_HOST`, `TRACKER_AVAILABLE`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
 - `HEAVY_MODE` flag
 
 
@@ -92,7 +95,12 @@ Resolve `VCS_HOST` and `CLI_TOOL` here, before any phase reaches for a forge CLI
 
 !read lib/vcs-host.md
 
-- **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state, following the shared derivation (and its per-host auth precheck) included below. The Phase 6 GitHub-side reviewer loops use `gh api`, which ignores the repo remote and defaults to github.com — on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out.
+- **When `VCS_HOST=github`, also derive `GH_HOST` from the `origin` remote** and carry it in state, following the shared derivation (and its per-host auth precheck) included below. The Phase 6 host-side reviewer loops' GitHub verbs use `gh api`, which ignores the repo remote and defaults to github.com — on a GitHub Enterprise repo `GH_HOST` must be forwarded to them or they poll the wrong host and time out.
+- **Record `TRACKER_AVAILABLE` once.** `true` when the tracker gate's `TRACKER_CLI` is set and reaches this repo with its issues feature enabled; otherwise `false`. Deferred removals are filed as issues only when it is `true`; when `false` the run continues, files nothing, and lists every deferred removal (title, one-line rationale, `file:line`) in the final report under "Deferred (not filed — no issue tracker available)". Never write PLAN.md as a fallback. On a Jira tracker it is `true` only when the Jira Pre-flight below passes (`{COMMAND}` = `/do:depfree`); a failed one prints its message and records `false`. Filed removals are then referenced by key (`PROJ-123`), not `#<n>`.
+
+Only on a Jira tracker (`TRACKER=jira`), read the Jira backend and run its Pre-flight in place of the tracker gate:
+
+!read lib/tracker-jira.md
 
 **GitHub only — skip the snippet below entirely on GitLab**, whose `glab` calls resolve the host from the remote themselves and where its `gh auth` precheck would abort the run.
 
@@ -171,6 +179,8 @@ Based on `PROJECT_TYPE`, extract the full dependency list:
 **Ruby:**
 - Read `Gemfile`
 
+Then run the whole-tree vulnerability audit **once** (`npm audit --json`, `cargo audit --json`, `pip-audit -f json`, etc., per `PROJECT_TYPE`) and index the results as `VULN_MAP`, keyed by **package name + installed version** (not name alone — a monorepo or lock file can carry multiple versions of the same package, and a finding against one version must not be attributed to another). Phase 1c's per-package usage analysis reads from `VULN_MAP` instead of re-running the audit for every Tier 2/3 dependency.
+
 ### 1b: Classify Dependencies
 
 For each dependency, first check `PRIOR_DECISIONS` (from Phase 0e). If a valid prior decision exists for the package + major version + mode, carry it forward:
@@ -203,7 +213,7 @@ Large, widely-audited, foundational libraries. Examples by ecosystem:
 - Download count is NOT a factor — popularity does not exempt a library from replacement
 - Libraries that are wrappers, utilities, CLIs, or single-purpose tools are Tier 2 or 3 regardless of popularity
 - Linting/formatting tools (eslint, prettier) in heavy mode: remain Tier 1 when required by CI or organization-wide standards (do not attempt replacement); otherwise treat as Tier 2 (audit usage, but do not rewrite their behavior)
-- Examples of libraries that DROP from Tier 1 in heavy mode: lodash, chalk, commander, yargs, dotenv, uuid, axios, node-fetch, glob, minimatch, semver, debug, winston, morgan, cors, helmet, body-parser, cookie-parser, compression, color, ora, inquirer, boxen, marked, highlight.js, moment, dayjs, date-fns, underscore, ramda, rxjs (if only basic operators used), jest (if vitest is also present — deduplicate), mocha, d3 (unless the visualization requires it), three (unless 3D rendering is core), rspec, sidekiq, devise, requests, httpx, pytest, clap, reqwest, tracing
+- Examples of libraries that DROP from Tier 1 in heavy mode: lodash, chalk, commander, dotenv, uuid, axios, moment, requests, clap, tracing — any single-purpose wrapper or utility collection, regardless of ecosystem or popularity, moves to Tier 2/3 for evaluation
 
 **Tier 2 — SUSPECT (audit usage):**
 Smaller libraries that may be doing something we can write ourselves.
@@ -271,7 +281,7 @@ Each agent should:
    - **Moderate** (20-100 lines): multi-function utility, needs tests, edge cases to handle
    - **Complex** (100-300 lines): significant logic, crypto, parsing, protocol implementation
    - **Infeasible** (300+ lines or requires deep domain expertise): keep the dependency
-5. Check if the package has known vulnerabilities: `npm audit`, `cargo audit`, `pip-audit`, etc.
+5. Look up known vulnerabilities for the package's installed version in the whole-tree `VULN_MAP` from Phase 1a (do not re-run the audit per package)
 6. Check last publish date and maintenance status
 7. Check for **consolidation opportunities**: does this package overlap in purpose with another dependency (two state managers, two HTTP clients, two date libraries, two test runners)? If so, flag which kept dependency could absorb this one's usage
 
@@ -313,62 +323,26 @@ Update `DEPENDENCY_MAP` with transitive check results before proceeding to Phase
 
 ## Phase 2: Replacement Plan
 
-> **Issue mode (`--issues`):** Keep the replacement plan (steps 2–5 below) as your
-> **in-run working plan in context** — do **not** write the `## Depfree Audit`
-> section to `PLAN.md`, and skip step 1. For any removal you **defer**, file a
-> labeled tracker issue instead of a PLAN.md line — see the disposition partial
-> below. Report the created issue numbers (`#<n>`) in the Phase 2 summary where
-> you'd report slugs. Reuse `CLI_TOOL` from Phase 0.
+> Keep the replacement plan (steps 2–5 below) as your **in-run working plan in
+> context** — the plan is never written to a file. For any removal you **defer**,
+> file a labeled tracker issue — see the disposition partial below. Report the
+> created and reused issue numbers (`#<n>`) in the Phase 2 summary. Reuse
+> `CLI_TOOL` from Phase 0.
 
-1. Read the existing `PLAN.md` (create if it doesn't exist)
+Unless `TRACKER_AVAILABLE=false`, read the tracker setup and filing partials now:
+
+!read lib/plan-issue-setup.md
+!read lib/plan-issue-filing.md
+
+1. Fetch `EXISTING_ISSUES` per those partials (skip when `TRACKER_AVAILABLE=false`).
 2. Filter to only REMOVE recommendations from Phase 1c/1d (exclude any downgraded to KEEP (transitive) in Phase 1d)
-3. For EVALUATE recommendations: **Default mode** — treat as KEEP (conservative). **Heavy mode** — treat as REMOVE (aggressive). **Interactive mode** — present to user via `AskUserQuestion` for each. If both `--interactive` and `--heavy` are set, still prompt for each EVALUATE item (interactive takes precedence), but present REMOVE as the default suggestion
+3. For EVALUATE recommendations: **Default mode** — treat as KEEP (conservative). **Heavy mode** — treat as REMOVE (see Heavy Mode). **Interactive mode** — present to user via `AskUserQuestion` for each. If both `--interactive` and `--heavy` are set, still prompt for each EVALUATE item (interactive takes precedence), but present REMOVE as the default suggestion
 4. Group removable dependencies by replacement strategy:
    - **Native replacement**: built-in API replaces the library (e.g., `crypto.randomUUID()`)
    - **Inline replacement**: write a small utility function (e.g., ANSI color wrapper)
    - **Consolidation**: multiple small deps replaced by one owned utility module
 5. Estimate total lines of replacement code needed
-6. Add a new section to PLAN.md:
-
-```markdown
-## Depfree Audit - {YYYY-MM-DD}
-
-Summary: {N} total dependencies. {A} acceptable (Tier 1), {B} audited and kept (Tier 2), {C} to remove (Tier 3).
-Estimated replacement code: ~{lines} lines across {files} new/modified files.
-
-### Dependencies to Remove
-| Package | Tier | Used Functions | Call Sites | Replacement | Complexity | Risk |
-|---------|------|---------------|------------|-------------|------------|------|
-| ...     | ...  | ...           | ...        | ...         | ...        | ...  |
-
-### Dependencies to Remove — Consolidation (transitive dep of kept package, but redundant with another kept dep)
-| Package | Tier | Consolidation Target | Transitive Via |
-|---------|------|---------------------|----------------|
-| ...     | ...  | ...                 | ...            |
-
-### Dependencies Kept — Transitive (would remain in lock file, no consolidation value)
-| Package | Tier | Kept Via (dependency chain) |
-|---------|------|-----------------------------|
-| ...     | ...  | ...                         |
-
-### Dependencies Kept (with rationale)
-| Package | Tier | Reason Kept |
-|---------|------|-------------|
-| ...     | ...  | ...         |
-
-### Replacement Tasks
-For each dependency to remove:
-- [ ] [drop-{package-slug}] **{package}** — {strategy}. Replace {N} call sites in {M} files. Write {utility name} ({est. lines} lines). Complexity: {level}.
-```
-
-**Every appended `- [ ]` line MUST include a unique `[<slug>]` ID** so concurrent agents can claim distinct removals via worktree branch names. Slug rules per [lib/plan-id-format.md](../../lib/plan-id-format.md): lowercase kebab-case, ≤50 chars, unique against every `[slug]` already in PLAN.md. Pattern: `drop-<package-name-kebabed>` (e.g. `[drop-uuid]`, `[drop-chalk]`); collide-suffix with `-2`/`-3` if the same package was removed in a prior audit and re-added. _(Issue mode skips slugs — the issue number is the ID.)_
-
-Only when `ISSUE_MODE=true`:
-
-!read lib/plan-issue-setup.md
-!read lib/plan-issue-filing.md
-
-**Scoped npm packages** (e.g. `@types/node`, `@scope/pkg`) lose their leading `@` to the kebab-case rule and collapse `/` to `-`, so a naïve slug would produce `drop-types-node` for both `@types/node` and any hypothetical `@othertypes/node`. Preserve the scope explicitly: `drop-<scope>-<pkg>` (so `@types/node` → `[drop-types-node]`, `@scope/pkg` → `[drop-scope-pkg]`). If a non-scoped package already owns that slug, fall through to the standard `-2`/`-3` collision suffix.
+6. **Disposition.** A planned removal not carried out this run is **deferred** (under `--scan-only`, the gate below files everything instead): file each as a labeled issue, deduped against `EXISTING_ISSUES`, per the partials above — or, when `TRACKER_AVAILABLE=false`, hold them for the final report's "Deferred (not filed — no issue tracker available)" list.
 
 7. Print summary table:
 ```
@@ -380,7 +354,7 @@ Only when `ISSUE_MODE=true`:
 | Total      | ...   |                                   |
 ```
 
-**GATE: If `--scan-only` was passed, STOP HERE** — but not before doing the one thing a scan-only run in issue mode exists to do: **when `ISSUE_MODE` is also true, file every surviving finding as an issue first**, then print the summary and exit. (When `ISSUE_MODE` is false, just print the summary and exit.)
+**GATE: If `--scan-only` was passed, STOP HERE** — but not before doing the one thing a scan-only run exists to do: **file every surviving finding as an issue first**, then print the summary and exit. (When `TRACKER_AVAILABLE=false`, list them under "Deferred (not filed — no issue tracker available)" instead.)
 
 **Filing every surviving finding** means all of them, not just the ones the disposition rules would defer — the filed issues ARE the run's output. Apply the disposition partial's labels, dedup-against-`EXISTING_ISSUES`, and title/body rules, and report the created and reused `#<number>`s in the summary. Do not open a worktree or write any code.
 
@@ -393,7 +367,7 @@ AskUserQuestion([{
   options: [
     { label: "Proceed", description: "Remove all listed dependencies and write replacement code" },
     { label: "Review individually", description: "Let me approve/reject each removal" },
-    { label: "Abort", description: "Stop here — I'll review the plan manually" }
+    { label: "Abort", description: "Stop here without making changes" }
   ]
 }])
 ```
@@ -436,10 +410,10 @@ Replacement strategy: {STRATEGY from Phase 2}
 Steps:
 1. Write the replacement code (utility function, inline replacement, or native API call)
 2. Update ALL import/require statements across the codebase to use the new code
-3. Remove the package from the manifest ({package.json, Cargo.toml, etc.})
-4. Run `{BUILD_CMD}` to verify compilation
-5. Run `{TEST_CMD}` to verify tests pass
-6. If tests reference the removed package directly (mocking it, importing test helpers from it), update those tests too
+3. Run `{BUILD_CMD}` to verify compilation — the manifest still lists `{PACKAGE_NAME}` at this point, so the module resolves normally; that's expected
+4. Run `{TEST_CMD}` to verify tests pass
+5. If tests reference the removed package directly (mocking it, importing test helpers from it), update those tests too
+6. Commit your code changes. **Do NOT touch the manifest** ({package.json, Cargo.toml, pyproject.toml, go.mod, Gemfile, etc.) or any lock file — every agent in this batch runs in the same `{WORKTREE_DIR}` in parallel, so a shared manifest edited by more than one agent races (partial writes, lost edits, index.lock contention). The orchestrator removes all replaced packages from the manifest in one pass, in Phase 3c, after every agent here has finished
 </task>
 
 <guardrails>
@@ -447,32 +421,45 @@ Steps:
 - You may omit handling for input shapes or edge cases that are provably unreachable based on {USAGE_DETAILS}, but do not narrow behavior for any actual call site
 - Do NOT introduce new dependencies to replace old ones
 - Do NOT use `git add -A` or `git add .` — stage specific files only
+- Do NOT edit the manifest or lock file — see step 6 above
 - Keep replacement code minimal
-- If replacement is more complex than estimated (>2x the estimated lines), report back and skip — do not force a bad replacement. In `HEAVY_MODE`, the ceiling is 300 lines per replacement — only skip if replacement requires deep domain expertise (crypto primitives, binary protocol parsers, codec implementations) or exceeds 300 lines
+- If replacement is more complex than estimated (>2x the estimated lines), report back and skip — do not force a bad replacement. In `HEAVY_MODE`, use the raised ceiling from Heavy Mode above (300 lines) instead of the 2x estimate — only skip if replacement requires deep domain expertise (crypto primitives, binary protocol parsers, codec implementations) or exceeds that ceiling
 - Place shared utility replacements in a sensible location (e.g., `src/utils/`, `lib/`, `internal/`) following existing project conventions
-- Commit each replacement independently: `refactor: replace {package} with owned {utility/code}`
+- Commit each replacement independently: `refactor: replace {package} with owned {utility/code}`. If `git commit` fails on a transient `index.lock` (another agent committing at the same instant), wait briefly and retry once before reporting failure
 </guardrails>
 ```
 
-**Parallelization**: Launch up to 5 agents in parallel; batch if >5 dependencies. Assign each agent a non-overlapping set of dependencies (if two would modify the same files, group them into one agent).
+**Parallelization**: Launch up to 5 agents in parallel; batch if >5 dependencies. Assign each agent a non-overlapping set of dependencies (if two would modify the same files, group them into one agent). Agents never edit the manifest or lock file (step 6 above), so manifest contention cannot occur regardless of grouping; grouping still avoids two agents editing the same source files.
 
 ### 3c: Lock File Update
 
-After all replacement agents complete:
-1. Remove all replaced packages from the lock file:
+After all replacement agents complete, run these steps once, in the orchestrator — never inside a parallel agent:
+
+1. Remove all replaced packages from the manifest, in one pass:
    ```bash
    cd {WORKTREE_DIR}
-   # Node.js: refresh lockfile only, without running lifecycle scripts
+   # Edit package.json / Cargo.toml / pyproject.toml / go.mod / Gemfile / etc.
+   # to drop every dependency in {REMOVED_PACKAGES}
+   ```
+   Commit the manifest change on its own: `git -C {WORKTREE_DIR} commit -m "chore: remove replaced dependencies from manifest"`.
+2. Refresh the lock file to match the new manifest:
+   ```bash
+   cd {WORKTREE_DIR}
+   # Node.js (npm): refresh lockfile only, without running lifecycle scripts
    npm install --package-lock-only --ignore-scripts
-   # Or: yarn install --mode=update-lockfile --ignore-scripts
-   # Or: pnpm install --lockfile-only --ignore-scripts
-   # Rust: let a check refresh Cargo.lock to reflect manifest changes only
-   cargo check
-   # Python: use the project's lock tool to refresh
-   # poetry lock --no-update
+   # Node.js (yarn Berry, 2.x+): refresh lockfile only
+   # yarn install --mode=update-lockfile
+   # Node.js (pnpm):
+   # pnpm install --lockfile-only --ignore-scripts
+   # Rust: refresh Cargo.lock for the removed entries only, without upgrading anything else
+   # cargo update --workspace
+   # Python (Poetry 2.x — `poetry lock --no-update` was removed; plain `poetry lock` only
+   # touches entries affected by the pyproject.toml change):
+   # poetry lock
+   # Python (pip-tools):
    # pip-compile requirements.in
    ```
-2. Commit the lock file update:
+3. Commit the lock file update:
    ```bash
    git -C {WORKTREE_DIR} add {lock file}
    git -C {WORKTREE_DIR} commit -m "chore: update lock file after dependency removal"
@@ -506,12 +493,7 @@ After all replacement agents complete:
    ```bash
    cd {WORKTREE_DIR} && git diff {DEFAULT_BRANCH}...HEAD
    ```
-2. Review all replacement code for:
-   - Functional equivalence (does the replacement handle the same inputs/outputs?)
-   - Missing edge cases that the original library handled
-   - Security regressions (e.g., replacing a sanitization library with a naive regex)
-   - Performance regressions (e.g., replacing an optimized parser with O(n^2) code)
-   - Correct error handling at system boundaries
+2. Review the diff for behavior parity with the removed library — same inputs/outputs, edge cases the original handled, no new security or performance regressions (e.g. a naive regex replacing a sanitization library, or O(n^2) code replacing an optimized parser), and correct error handling at system boundaries
 3. Fix any issues found, commit each fix separately
 
 ### 4c: Update DEPS.md
@@ -584,23 +566,29 @@ fi
 
 ### 4d: Verify No Phantom Dependencies
 
-Confirm no source file still references a removed package:
+Confirm no source file still imports/requires/uses a removed package. A bare word match (`grep -r "$pkg"`) is too noisy for a package name that also reads as an English word or a common identifier (`uuid`, `debug`, `color`) — it flags legitimate hits inside the very replacement files this run just wrote (a comment, a variable named after the concept, a string literal) as well as unrelated code. Anchor the match to actual import syntax instead, per ecosystem, and exclude the removed package's own manifest/lock entries (already handled in 3c) and generated/vendor directories:
 ```bash
 cd {WORKTREE_DIR}
 for pkg in {REMOVED_PACKAGES}; do
-  grep -r "$pkg" \
-    --include='*.ts' \
-    --include='*.js' \
-    --include='*.tsx' \
-    --include='*.jsx' \
-    --include='*.py' \
-    --include='*.rs' \
-    --include='*.go' \
-    --include='*.rb' \
-    . && echo "WARN: $pkg still referenced"
+  grep -rnE "(^|[^.$_[:alnum:]])(import .*['\"]${pkg}(/|['\"])|require\(['\"]${pkg}(/|['\"])|from ['\"]${pkg}(/|['\"]))" \
+    --include='*.ts' --include='*.js' --include='*.tsx' --include='*.jsx' \
+    --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build . \
+    && echo "WARN: $pkg still imported (JS/TS)"
+  grep -rnE "^[[:space:]]*(from|import) ${pkg}([. ]|$)" \
+    --include='*.py' --exclude-dir=.venv --exclude-dir=venv . \
+    && echo "WARN: $pkg still imported (Python)"
+  grep -rnE "^[[:space:]]*use ${pkg//-/_}(::| |;)" \
+    --include='*.rs' --exclude-dir=target . \
+    && echo "WARN: $pkg still used (Rust)"
+  grep -rnE "\"[^\"]*/${pkg}\"" \
+    --include='*.go' --exclude-dir=vendor . \
+    && echo "WARN: $pkg still imported (Go)"
+  grep -rnE "require ['\"]${pkg}['\"]" \
+    --include='*.rb' --exclude-dir=vendor . \
+    && echo "WARN: $pkg still required (Ruby)"
 done
 ```
-Fix any remaining references.
+Run only the ecosystem block(s) matching `{PROJECT_TYPE}`. Fix any remaining references; a hit inside a comment or a string literal that isn't an actual import is not a phantom dependency — confirm by reading the flagged line before treating it as one.
 
 
 ## Phase 5: PR Creation
@@ -636,7 +624,7 @@ Estimated supply chain attack surface reduction: {N} packages ({transitive count
 {table of removed packages}
 
 ### Dependencies Kept (audited)
-{count} dependencies audited and kept with rationale. See PLAN.md for details.
+{count} dependencies audited and kept with rationale (recorded in `docs/DEPS.md`).
 
 ### Replacement Code
 {bulleted list of new utility files or inline changes}
@@ -662,25 +650,38 @@ glab mr create --source-branch depfree/{DATE} --target-branch {DEFAULT_BRANCH} \
 
 Record `PR_NUMBER` and `PR_URL`.
 
-**GATE: If `--no-merge` was passed, STOP HERE.** Print the PR URL and summary.
+**GATE: If `--no-merge` was passed, skip straight to Phase 6 cleanup** (skip 5b, 5c, 5d). Print the PR/MR URL and summary first. Phase 6 still runs — in particular its stash restore — so a `--no-merge` run never strands the pre-audit stash; only the merge and its cleanup-owned remote-branch deletion are skipped (the PR/MR itself, and its branch, are left exactly as opened).
 
 ### 5b: CI Verification
 
-1. Wait 30 seconds for CI to start
-2. Poll CI status:
-   ```bash
-   gh pr checks {PR_NUMBER}
-   ```
-   Poll every 30 seconds, max 10 minutes.
-3. If CI fails:
+1. Wait 30 seconds for CI/the pipeline to start.
+2. Poll status:
+   - **GitHub:**
+     ```bash
+     gh pr checks {PR_NUMBER}
+     ```
+     Poll every 30 seconds, max 10 minutes.
+   - **GitLab:**
+     ```bash
+     glab ci status --wait --branch depfree/{DATE}
+     ```
+     This blocks until the head pipeline finishes (`success`/`failed`/`canceled`/etc). GitLab has no separate list of required checks.
+3. If CI/the pipeline fails:
    - Fetch failure logs, diagnose, fix, commit, push
    - Max 3 fix attempts before informing the user
 
-### 5c: Review Loop (GitHub only)
+### 5c: Review Loop
 
 **GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this phase AND the Phase 5d merge.** There is no default reviewer. Leave the PR open for manual review, print its URL and summary, then proceed to Phase 6 cleanup.
 
-Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (series default — reviewers run one-at-a-time so each sees the prior's fixes; `parallel` collects reviews concurrently then applies the union once), `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot and `@<login>` passes only; local-agent and ollama passes use their own fixed iteration caps). Read the wrapper, then only the inner loop bodies it dispatches to for the reviewer kinds in `REVIEW_AGENTS`:
+Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (series default — reviewers run one-at-a-time so each sees the prior's fixes; `parallel` collects reviews concurrently then applies the union once), `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot and `@<login>` passes only; local-agent and ollama passes use their own fixed iteration caps). Read the wrapper, then only the inner loop bodies it dispatches to for the reviewer kinds in `REVIEW_AGENTS`.
+
+For each host-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
+
+- `copilot` — use the previous Copilot review duration on this PR (default 60 seconds if none); max wait 3x that duration, minimum 90 seconds, maximum 5 minutes; poll every 5s, 5s, 10s, 10s, then 15s.
+- `@<login>` — expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s.
+
+Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass both schedules.
 
 !read lib/multi-reviewer-loop.md
 
@@ -688,13 +689,13 @@ Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with 
 
 Read only the bodies for reviewer kinds present in the agent list.
 
-Only for `copilot` entries:
+For every `copilot` or `@<login>` entry, read the shared host-reviewer template (its sub-agent runs the `{CODE_HOST}` verb file):
+
+!read lib/host-reviewer-loop.md
+
+Only for `copilot` entries on GitHub, also read the Copilot delta:
 
 !read lib/copilot-review-loop.md
-
-Only for `@<login>` entries:
-
-!read lib/github-reviewer-loop.md
 
 Only for an entry that is none of `copilot`, `ollama`, or `@<login>` (every other slug — the fixed CLIs and `cmd[<invocation>]` alike — dispatches through this one loop; a future addition needs no new gate here):
 
@@ -704,45 +705,41 @@ Only for `ollama` entries:
 
 !read lib/ollama-review-loop.md
 
-Pass: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the GitHub-side loops' `gh api` calls hit the right host on GitHub Enterprise), `depfree/{DATE}` (the branch the local-agent loop checks out), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (default 1 — one pass, returning `capped`, which counts as clean for the merge gate below; 0 = run until 0 comments, bounded by the 10-iteration guardrail).
+Pass: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_MODELS}` (the saved per-agent default models resolved in Parse Arguments — every local reviewer but `cmd` reads it; without it a saved `review-models` default is silently ignored), `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the host-side loops' `gh api` calls hit the right host on GitHub Enterprise), the per-entry `{WAIT_SCHEDULE}` selected above, `depfree/{DATE}` (the branch the local-agent loop checks out), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (default 1 — one pass, returning `capped`, which counts as clean for the merge gate below; 0 = run until 0 comments, bounded by the 10-iteration guardrail).
 
 ### 5d: Merge
 
-Reached only when a review loop ran (`REVIEW_AGENTS` non-empty). Consume the multi-reviewer wrapper's `{OVERALL_STATUS}`:
+Reached only when a review loop ran (`REVIEW_AGENTS` non-empty) — Phase 5c's own "no reviewer requested" gate covers the no-reviewer case on both hosts. Consume the multi-reviewer wrapper's `{OVERALL_STATUS}`:
 
-**Default mode**: Auto-merge when `{OVERALL_STATUS}` is `clean` (or `partial` under an explicit stop-mode). On `inconclusive` (a requested reviewer timed out, errored, hit its guardrail, or was skipped — including a missing CLI binary) or `dirty` (broken build / failed tests / reject), leave the PR open and report the status.
-**Interactive mode**: Ask the user for merge approval, showing `{OVERALL_STATUS}`.
+**Default mode**: proceed to the merge gate below when `{OVERALL_STATUS}` is `clean` (or `partial` under an explicit stop-mode). On `inconclusive` (a requested reviewer timed out, errored, hit its guardrail, or was skipped — including a missing CLI binary) or `dirty` (broken build / failed tests / reject), leave the PR open, set `MERGE_OUTCOME=left open`, report the status, and skip the merge gate.
+**Interactive mode**: Ask the user for merge approval, showing `{OVERALL_STATUS}`, before running the gate.
 
-```bash
-gh pr merge {PR_NUMBER} --merge
-```
+Merge through the **shared merge gate** — it resolves the repo's actual allowed merge method (never hardcodes `--merge`, which a squash-only or rebase-only repo rejects), waits on required CI, merges, and reads the result back instead of trusting the merge command's exit status. Run it from inside `{WORKTREE_DIR}` with `{PR}` = `{PR_NUMBER}`, `{GIT}` = `git` (already running in the worktree), `{MODE}` = `wait` (Phase 6 needs the confirmed read-back to decide whether deleting the branch is safe), `{LINKED_WORKTREE}` = `1`, and `{MERGE_METHOD}` unset (depfree has no `--merge-method` flag, so the gate falls back to the repo's allowed method):
+
+!read lib/merge-gate.md
+
+Record the gate's outcome as `MERGE_OUTCOME` (`merged`, `queued`, or `left open`). The gate itself deletes the remote head once — and only once — it reads back `MERGED` (its step 5); Phase 6 never deletes it again.
 
 
 ## Phase 6: Cleanup
 
-1. Remove the worktree:
+Reached from every path through Phase 5: after 5d's merge gate (any `MERGE_OUTCOME`), from the `--no-merge` gate, or from 5c's "no reviewer requested" gate. `MERGE_OUTCOME` is `merged` only when 5d's gate confirmed it there; every other path leaves it unset, which this phase treats as **the PR/MR is still open** — closing an open PR by deleting its head branch is the exact bug this phase exists to avoid.
+
+1. **If `MERGE_OUTCOME=merged`:** the merge gate already deleted the remote head (its step 5). Remove the worktree and delete the local branch:
    ```bash
    git worktree remove {WORKTREE_DIR}
+   git branch -d depfree/{DATE}
    ```
-2. Delete the local branch:
+   Use `-d`, not `-D` — a refusal here means the local branch carries commits the gate's merge doesn't account for (e.g. a squash merge rewrote the SHA); investigate before forcing.
+
+   **Otherwise** (`MERGE_OUTCOME` unset, `queued`, or `left open` — covers `--no-merge`, no reviewer requested, and `inconclusive`/`dirty` review results, on either host): the PR/MR is still open. **Do not** remove the worktree, and do not delete the local or remote branch — deleting the head branch of an open PR/MR closes it. Report `{WORKTREE_DIR}` and the branch name as retained for later review/merge.
+2. **Restore stashed changes, on the branch that made them, in `{REPO_DIR}` — never in `{WORKTREE_DIR}`, and never after checking out a different branch there.** All remediation happened in the worktree; this phase never runs `git checkout` in `{REPO_DIR}`, because doing so would move the user off whatever branch (`{CURRENT_BRANCH}`) they were on when the run started, and popping the stash after such a checkout would apply it to the wrong branch. If Phase 3a stashed (`IS_DIRTY` was true):
    ```bash
-   git checkout {DEFAULT_BRANCH}
-   git branch -D depfree/{DATE}
-   if git ls-remote --exit-code --heads origin "depfree/{DATE}" >/dev/null 2>&1; then
-       git push origin --delete "depfree/{DATE}"
-   else
-       echo "warning: remote branch depfree/{DATE} not found or already deleted"
-   fi
+   git -C {REPO_DIR} stash pop
    ```
-3. Restore stashed changes if applicable:
-   ```bash
-   git stash pop
-   ```
-4. Update PLAN.md:
-   - Mark completed removals by flipping `- [ ]` → `- [x]` — **preserve the `[<slug>]` ID** on each line. See [lib/plan-id-format.md](../../lib/plan-id-format.md).
-   - Add PR link
-   - Note any packages that were reverted
-5. Print the final summary:
+   Run this on **every** path through this phase — including `--no-merge` and every "PR left open" branch above — not only after a successful merge, so a run never strands the pre-audit stash. `{REPO_DIR}` remains on `{CURRENT_BRANCH}` throughout the entire command; nothing in this command checks it out elsewhere.
+3. File each removal that was reverted or skipped after Phase 2 as a deferred issue (deduped against `EXISTING_ISSUES`, per the Phase 2 partials); when `TRACKER_AVAILABLE=false`, add it to the "Deferred (not filed — no issue tracker available)" list instead.
+4. Print the final summary, with the PR link (noting when `MERGE_OUTCOME` is unset that the PR/MR is still open rather than merged), the created and reused issue numbers for deferred removals, and (when `TRACKER_AVAILABLE=false`) the "Deferred (not filed — no issue tracker available)" list:
 
 ```
 | Package          | Status   | Replacement              | Lines |
@@ -769,13 +766,11 @@ Transitive deps eliminated: ~{count} (estimated)
 - **Test failure from replacement**: if tests fail and the fix isn't obvious, revert the replacement — a working dependency is better than broken owned code
 - **Existing worktree found at startup**: ask user — resume or clean up
 
-!`cat ~/.claude/lib/graphql-escaping.md`
-
 ## Notes
 
 - This command complements `/do:better` — `depfree` for dependency hygiene, `better` for code quality
-- All remediation happens in an isolated worktree — the user's working directory is never modified
+- All remediation happens in an isolated worktree. Phase 3a may stash a dirty tree directly in `{REPO_DIR}` before the worktree exists, but Phase 6 always restores that stash on `{CURRENT_BRANCH}` without ever checking out another branch there — so by the time the command finishes, the user's branch and working tree are exactly as they were when it started, on every exit path (`--no-merge`, no reviewer, merged, or left open, on either host)
 - `docs/DEPS.md` is the persistent decision log (read in Phase 0e, rewritten in Phase 4c). Major version bumps and heavy-mode escalations bypass it; manually delete an entry to force re-audit
-- **Default mode**: when in doubt, keep the dependency. **Heavy mode**: when in doubt, replace it, unless the replacement needs crypto primitives, binary protocol parsing, or deep domain expertise
+- **Default vs. heavy mode aggressiveness**: see Heavy Mode above
 - Replacement code should be minimal — don't over-engineer utilities that replace single-purpose packages
 - For monorepos, audit the root manifest and each workspace package manifest

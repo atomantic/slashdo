@@ -803,8 +803,13 @@ describe('bundled lib docs', () => {
       const bundleDir = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR);
       assert.ok(fs.existsSync(bundleDir), 'do-pr must get a bundle dir');
       const written = fs.readdirSync(bundleDir);
-      for (const name of ['copilot-review-loop.md', 'github-reviewer-loop.md',
+      for (const name of ['copilot-review-loop.md', 'host-reviewer-loop.md',
+        // The loop's gated per-host verb files ride along with it (#412).
+        'host-github.md', 'host-gitlab.md',
         'local-agent-review-loop.md', 'ollama-review-loop.md',
+        // The core's gated per-harness recipes ride along with it (#347).
+        'local-agent-claude.md', 'local-agent-agy.md', 'local-agent-cursor.md',
+        'local-agent-opencode.md', 'local-agent-cmd.md',
         'rebase-conflict-resolution.md']) {
         assert.ok(written.includes(name), `${name} must be bundled with /do:pr`);
       }

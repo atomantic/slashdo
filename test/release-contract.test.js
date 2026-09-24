@@ -4,8 +4,13 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const { readCommandDocs } = require('./helpers/command-docs');
 
 const body = fs.readFileSync(path.join(__dirname, '..', 'commands', 'do', 'release.md'), 'utf8');
+// The documented-delivery path lives in lib/release-documented.md, loaded on demand
+// via `!read` so recovery/generic-promotion runs don't pay for it — resolve it here
+// so the contract below still pins its text.
+const resolved = readCommandDocs('release.md', { eager: true });
 
 describe('/do:release remote promotion contracts', () => {
   it('requires ordered remote checkpoints before reporting completion', () => {
@@ -41,7 +46,7 @@ describe('/do:release remote promotion contracts', () => {
     const determineVersion = body.indexOf('## Determine Version and Finalize Changelog');
     assert.ok(recovery >= 0 && recovery < determineVersion, 'prepared recovery must precede version determination');
     assert.match(body, /Skip this entire section when `PREPARED_RELEASE` is non-empty/);
-    assert.match(body, /PREPARED_RELEASE="\$\(git log[^\n]+origin\/\{target\}\.\.HEAD/);
+    assert.match(body, /PREPARED_RELEASE="\$\(prepared_release_sha "origin\/\{target\}\.\.HEAD"\)"/);
     assert.doesNotMatch(body, /PREVIOUS_TAG=.*git describe/);
     assert.match(body, /PR_STATE="\$\(printf '[^\n]+' \"\$MATCHING_RELEASE_PRS\" \| jq -r '\.\[0\]\.state'/);
     assert.match(body, /If the selected PR already has `PR_STATE=MERGED`, skip this section entirely[\s\S]*?Do not request another review/);
@@ -72,7 +77,7 @@ describe('/do:release remote promotion contracts', () => {
     assert.match(body, /git tag "v\{version\}" "\$MERGE_COMMIT"/);
     assert.match(body, /publishes_github_release/);
     assert.match(body, /\[ "\$ATTEMPT" -lt 30 \] && sleep 10/);
-    assert.match(body, /TARGET_PREPARED_RELEASE="\$\(git log[\s\S]*?origin\/\{target\}/);
+    assert.match(body, /TARGET_PREPARED_RELEASE="\$\(prepared_release_sha "origin\/\{target\}"\)"/);
     assert.match(body, /RELEASE_PR_HANDOFF/);
     assert.match(body, /case "\{publishes_github_release\}" in[\s\S]*true\|false/);
     assert.match(body, /TARGET_RELEASE_STATUS=.*gh api --include/);
@@ -86,13 +91,33 @@ describe('/do:release remote promotion contracts', () => {
     assert.match(body, /\.tagName == "v\{version\}"/);
     assert.match(body, /\.isDraft == false/);
     assert.match(body, /\.isPrerelease == false/);
-    assert.match(body, /GitHub Release is unverified after the bounded wait/);
+    assert.match(body, /incomplete "GitHub Release" "no published release was found after the bounded wait\."/);
+    assert.match(body, /incomplete\(\) \{\n {2}echo "INCOMPLETE — \$1 is unverified; \$2 Preserve the prepared release state and retry\."/);
+  });
+
+  it('deduplicates repeated checkpoint logic into shared shell helpers', () => {
+    assert.match(body, /prepared_release_sha\(\) \{/);
+    assert.match(body, /remote_tag_commit\(\) \{/);
+    assert.match(body, /release_published_json\(\) \{/);
+    assert.match(body, /release_is_published\(\) \{/);
+    assert.match(body, /incomplete\(\) \{/);
+
+    const publishesFlagGuards = (body.match(/case "\{publishes_github_release\}" in/g) || []).length;
+    assert.equal(publishesFlagGuards, 1, 'the publishes_github_release guard must not be duplicated as a case statement');
+
+    const extendedRegexpUses = (body.match(/--extended-regexp/g) || []).length;
+    assert.equal(extendedRegexpUses, 0, 'the no-op --extended-regexp flag must be removed');
+
+    // Checkpoint 3's merge read-back must not be a standalone fenced block anymore —
+    // it runs inside the merged Checkpoints 3-6 invocation alongside Checkpoint 4.
+    const mergedPrHandoffPrintfs = (body.match(/printf 'RELEASE_PR_HANDOFF\\tPR_NUMBER=%s\\tPR_URL=%s\\tPR_STATE=MERGED\\tMERGE_COMMIT=%s\\n'/g) || []).length;
+    assert.equal(mergedPrHandoffPrintfs, 1, 'the merged-PR handoff print must appear exactly once, not once per duplicated checkpoint block');
   });
 });
 
 
 describe('/do:release documented project delivery', () => {
-  const selection = body.slice(body.indexOf('## Select the Project Release Procedure'), body.indexOf('## Detect Release Workflow'));
+  const selection = resolved.slice(resolved.indexOf('## Select the Project Release Procedure'), resolved.indexOf('## Detect Release Workflow'));
 
   it('selects the native procedure before any promotion branch mutation', () => {
     assert.match(selection, /docs\/RELEASING\.md/);
@@ -117,5 +142,76 @@ describe('/do:release documented project delivery', () => {
     assert.match(selection, /Squash\/rebase merges need verification/);
     assert.match(selection, /When automation creates the tag or release, wait for it; do not pre-create/);
     assert.match(selection, /first\s+unverified checkpoint as INCOMPLETE/);
+  });
+});
+
+describe('/do:release GitLab paths', () => {
+  it('classifies non-conventional commits using the selected forge or a patch fallback', () => {
+    const bump = body.slice(body.indexOf('1. **Determine version bump**'), body.indexOf('\n\n2. **Bump version**'));
+    assert.match(bump, /using the detected host/);
+    assert.match(bump, /On GitHub, use `gh pr list --state merged --search <sha>`/);
+    assert.match(bump, /on GitLab, capture `glab api --paginate "projects\/:id\/repository\/commits\/<sha>\/merge_requests"` before parsing/);
+    assert.match(bump, /Use the title only when exactly one merged PR\/MR is associated with the commit/);
+    assert.match(bump, /lookup fails, is malformed, is ambiguous, or its title has no recognized prefix, default to \*\*patch\*\* bump/);
+  });
+
+  it('captures glab api output before parsing the source branch and merged MR URL', () => {
+    assert.match(body, /PROJECT_JSON="\$\(glab api "projects\/:id"\)"/);
+    assert.match(body, /SOURCE_BRANCH="\$\(printf '%s\\n' "\$PROJECT_JSON" \| jq -er '\.default_branch/);
+    assert.doesNotMatch(body, /glab api[^|`\n]*--jq/);
+    assert.match(body, /MR_JSON="\$\(glab api "projects\/:id\/merge_requests\/\$PR_NUMBER"\)"/);
+    assert.match(body, /MERGE_JSON="\$\(printf '%s\\n' "\$MR_JSON"[\s\\]*\| jq/);
+    assert.match(body, /PR_URL="\$\(printf '%s\\n' "\$MR_JSON" \| jq -er '\.web_url \| select\(type == "string" and length > 0\)'/);
+  });
+
+  it('checks GitLab MR API calls before parsing them into release candidates', () => {
+    assert.match(body, /TARGET_RELEASE_PRS_RESPONSE="\$\(glab api --paginate[\s\S]+?\)"\s+\\\s*\n\s+\|\| incomplete "Merged release MR"/);
+    assert.match(body, /TARGET_RELEASE_PRS_JSON="\$\(printf '%s\\n' "\$TARGET_RELEASE_PRS_RESPONSE" \| jq -s 'if length == 0 then error\("expected JSON document"\) elif \(all\(\.\[\]; type == "array"\) \| not\) then error\("expected array pages"\) else add \| if type != "array"/);
+    assert.match(body, /RELEASE_PRS_RESPONSE="\$\(glab api --paginate[\s\S]+?\)"\s+\\\s*\n\s+\|\| incomplete "Release MR"/);
+    assert.match(body, /RELEASE_PRS_JSON="\$\(printf '%s\\n' "\$RELEASE_PRS_RESPONSE" \| jq -s 'if length == 0 then error\("expected JSON document"\) elif \(all\(\.\[\]; type == "array"\) \| not\) then error\("expected array pages"\) else add \| if type != "array"/);
+    assert.doesNotMatch(body, /RELEASE_PRS_JSON[\s\S]{0,300}add \/\/ \[\]/);
+    assert.doesNotMatch(body, /TARGET_RELEASE_PRS_JSON[\s\S]{0,300}add \/\/ \[\]/);
+    assert.doesNotMatch(body, /glab api --paginate[^\n]*\| *jq/);
+  });
+
+  it('detects the code host up front and derives CR_NOUN for messages', () => {
+    assert.match(body, /!read lib\/vcs-host\.md/);
+    assert.match(body, /\{CR_NOUN\}/);
+  });
+
+  it('gives every gh-only checkpoint a glab branch instead of failing on GitLab', () => {
+    // Recover Prepared Release State: target-release lookup and merged-PR lookup.
+    assert.match(body, /glab release view "v\$\{TARGET_VERSION\}"/);
+    assert.match(body, /glab api --paginate "projects\/:id\/merge_requests\?state=merged&target_branch=\{target\}/);
+
+    // Open the Release PR: query + create.
+    assert.match(body, /glab api --paginate "projects\/:id\/merge_requests\?source_branch=\{source\}&target_branch=\{target\}/);
+    assert.match(body, /glab mr create --source-branch "\{source\}" --target-branch "\{target\}"/);
+
+    // Merging: CI gate + merge command.
+    assert.match(body, /glab ci status --wait --branch \{source\}/);
+    assert.match(body, /glab mr view "\$PR_NUMBER" --output json --jq \.state/);
+    assert.match(body, /glab mr merge "\$PR_NUMBER" --yes/);
+
+    // Post-Merge: merged-MR read-back and release detection (glab release view,
+    // per #414/#415's spec for tag/release detection).
+    assert.match(body, /glab api "projects\/:id\/merge_requests\/\$PR_NUMBER"/);
+    assert.match(body, /glab release view "v\{version\}" -F json/);
+  });
+
+  it('never derives a GitLab URL host from GH_HOST, which is only populated on GitHub', () => {
+    // Reuses {ORIGIN_HOST} already resolved by lib/vcs-host.md instead of
+    // re-typing its origin-parse sed (banned by the GH_HOST-derivation contract).
+    assert.doesNotMatch(body, /GL_HOST=/);
+    assert.match(body, /https:\/\/\{ORIGIN_HOST\}\/\{owner\}\/\{repo\}\/-\/compare\//);
+  });
+
+  it('keeps the GitHub Recover/Post-Merge literals intact for the unchanged GitHub path', () => {
+    assert.match(body, /gh api --include --hostname "\{GH_HOST\}" "repos\/\{owner\}\/\{repo\}\/releases\/tags\/v\$\{TARGET_VERSION\}"/);
+    assert.match(body, /gh pr list --state merged --base "\{target\}" --limit 100/);
+    assert.match(body, /gh pr list --state all --base "\{target\}" --head "\{source\}"/);
+    assert.match(body, /gh pr create --title "Release v\{version\}" --base "\{target\}" --head "\{source\}"/);
+    assert.match(body, /gh pr view "\$PR_NUMBER" --json state -q \.state/);
+    assert.match(body, /gh pr merge "\$PR_NUMBER" --merge/);
   });
 });

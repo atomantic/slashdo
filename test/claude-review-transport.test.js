@@ -9,7 +9,10 @@ const { spawnSync } = require('node:child_process');
 const { transformLib } = require('../src/transformer');
 const { ENVIRONMENTS } = require('../src/environments');
 
-const source = fs.readFileSync(path.join(__dirname, '..', 'lib', 'local-agent-review-loop.md'), 'utf8');
+const libDir = path.join(__dirname, '..', 'lib');
+// The Claude transport lives in the claude recipe the core loads on demand (#347).
+const source = fs.readFileSync(path.join(libDir, 'local-agent-claude.md'), 'utf8');
+const core = fs.readFileSync(path.join(libDir, 'local-agent-review-loop.md'), 'utf8');
 const stdinLimit = 8 * 1024 * 1024;
 
 // Execute the shipped shell contract, so tests cannot pass against a separate
@@ -24,8 +27,8 @@ function bashBlockAfter(marker) {
 
 const preparation = bashBlockAfter('#### Claude stdin transport');
 const cleanup = bashBlockAfter('**Claude input cleanup**');
-const row = source.split('\n').find(line => line.startsWith('| `claude` |'));
-const invocation = row.match(/^\| `claude` \| `([^`]+)`/)[1];
+const invocation = bashBlockAfter('**Subprocess invocation**');
+assert.doesNotMatch(invocation, /\n/, 'the invocation must be a single command line');
 
 function runTransport(payload, { shell = 'bash', exitCode = 0, verdict = 'NO FINDINGS', flags = false, missingTmp = false, omitPrompt = false, failCount = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude transport '));
@@ -188,18 +191,19 @@ describe('Claude review stdin transport', () => {
     for (const verdict of [finding, 'I looked at it.', '', `NO FINDINGS\n${finding}`]) {
       assert.equal(runTransport(largePayload, { verdict }).verdict, `${verdict}\n`);
     }
-    assert.match(source, /after stripping blank lines, the result must be either exactly `NO FINDINGS`/);
+    assert.match(core, /after stripping blank lines, the result must be either exactly `NO FINDINGS`/);
     assert.match(source, /Required reviewers remain unsatisfied/);
-    assert.match(source, /For `claude`[^\n]+set `STATUS=clean` only for the exact `NO FINDINGS` sentinel/);
+    assert.match(core, /For a prompt-driven reviewer, set `STATUS=clean` only for the exact `NO FINDINGS` sentinel/);
   });
 
   it('retains stdin transport and payload provenance in every generated environment', () => {
     for (const env of Object.values(ENVIRONMENTS)) {
-      const rendered = transformLib(source, env, path.join(__dirname, '..', 'lib'));
+      const rendered = transformLib(source, env, libDir);
       assert.ok(rendered.includes(invocation), `${env.name} lost the stdin invocation`);
-      assert.match(rendered, /resolved base\/head commit IDs and the complete changed-file scope/);
-      assert.match(rendered, /Rebuild this payload from the current review target on every iteration/);
       assert.doesNotMatch(rendered, /claude -p "\$LOCAL_PROMPT"/);
+      const renderedCore = transformLib(core, env, libDir);
+      assert.match(renderedCore, /resolved base\/head commit IDs and the complete changed-file scope/);
+      assert.match(renderedCore, /Rebuild this payload from the current review target on every iteration/);
     }
   });
 });

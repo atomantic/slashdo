@@ -27,10 +27,10 @@ describe('glab api / jq contracts', () => {
     // leaves ME empty when glab fails — `--author ""` drops the --self filter, and
     // `--assignee "+"` claims nothing while looking like a successful claim.
     assert.doesNotMatch(next, /ME="\$\(glab api user \| jq/);
-    // Both call sites capture glab's status separately and use `jq -e`, which exits
+    // The identity-bearing call sites capture glab's status separately and use `jq -e`, which exits
     // non-zero (4) when no valid result was produced.
     const twoStep = next.match(/ME_JSON="\$\(glab api user\)"/g) || [];
-    assert.equal(twoStep.length, 2, 'both the --self list filter and the claim marker');
+    assert.equal(twoStep.length, 3, 'the --self list filter and both assignment verbs');
     assert.equal((next.match(/jq -er \.username/g) || []).length, 3, 'two snippets + the prose contract');
   });
 
@@ -48,33 +48,27 @@ describe('glab api / jq contracts', () => {
     // A pipeline reports jq's status, and jq succeeds on empty input — so a links-API
     // outage would read as "no native blockers" and the picker would claim a dependent
     // ahead of its blocker. The lookup captures glab's status first and treats a failure
-    // as UNRESOLVED (fall back to the body convention), never as unblocked.
+    // as UNRESOLVED: auto-pick must skip rather than fall back to body-only links.
     assert.doesNotMatch(next, /glab api projects\/:id\/issues\/<N>\/links \| jq/);
-    assert.match(next, /LINKS_JSON="\$\(glab api projects\/:id\/issues\/<N>\/links\)"/);
-    assert.match(next, /A failed lookup is UNRESOLVED, not unblocked/);
+    assert.match(next, /LINKS_JSON="\$\(glab api "projects\/:id\/issues\/<N>\/links"\)"/);
+    assert.match(next, /failed or malformed native lookup as \*\*UNRESOLVED\*\*, not unblocked/);
+    assert.match(next, /An unresolved native lookup skips the candidate during auto-pick/);
+    assert.match(next, /it must never fall back to body dependencies alone/);
   });
 
-  it('probes for jq on the swarm path too', () => {
-    // Swarm replaces Phases 1-7, so Phase 1's probe never runs there — but A1e/A2e's
-    // native blocked-by check calls plain `glab api ... | jq` all the same.
-    const swarm = next.slice(0, next.indexOf('## Phase 1: Pick'));
-    assert.match(swarm, /if \[ "\$CLI_TOOL" = glab \]; then\n\s*command -v jq >\/dev\/null 2>&1 \|\| \{/);
-    // Still not before ISSUE_MODE is settled — the probe is issue-mode-only.
-    assert.ok(
-      swarm.indexOf('command -v jq') > swarm.indexOf('--swarm works in issues mode only'),
-      'the swarm probe runs after the issues-mode gate'
-    );
+  it('probes for jq in the shared GitLab pre-flight, before the Phase 1 walk', () => {
+    // Every /do:next run now works the tracker (PLAN.md mode was removed), so the GitLab
+    // jq dependency is unconditional and the probe lives in the shared Pre-flight.
+    const preflight = next.slice(next.indexOf('\n## Phase 1: Pick'), next.indexOf('\n### Phase 1 — issue queue'));
+    assert.match(preflight, /## Pre-flight — jq probe[\s\S]*command -v jq >\/dev\/null 2>&1 \|\| \{/);
+    assert.match(preflight, /\/do:next on GitLab pipes 'glab api' output through jq, which is not installed/);
   });
 
-  it('probes for jq in issue mode, not the shared pre-flight', () => {
-    // jq is a dependency of the ISSUE-MODE GitLab path only — PLAN.md mode never calls
-    // plain `glab api` (its `glab issue`/`glab mr` calls carry their own --jq). Probing
-    // in the shared pre-flight would abort a GitLab + PLAN.md repo that never needed jq.
-    // Scope to the Pre-flight host-detection block itself: the swarm section above it
-    // carries its own copy of the probe, gated on its own resolved ISSUE_MODE.
-    const preflight = next.slice(next.indexOf('## Phase 1: Pick'), next.indexOf('### Phase 1 — issues mode'));
-    assert.doesNotMatch(preflight, /command -v jq/, 'no jq probe before the mode split');
-    assert.match(next, /if \[ "\$CLI_TOOL" = glab \]; then\n\s*command -v jq >\/dev\/null 2>&1 \|\| \{/);
-    assert.match(next, /GitLab issue mode pipes 'glab api' output through jq, which is not installed/);
+  it('runs the shared pre-flight (and its jq probe) on the swarm path too', () => {
+    // Swarm replaces Phases 1-7, and A1e never runs Phase 1 — but A1e/A2e's native
+    // blocked-by check calls plain `glab api ... | jq` all the same.
+    const swarm = next.slice(0, next.indexOf('\n## Phase 1: Pick'));
+    assert.match(swarm, /run `next\.md`'s shared Pre-flight first\*\* \(under `## Phase 1: Pick`: host detection, and on GitLab the \[next-gitlab\.md\]\(\.\/next-gitlab\.md\) read and its `jq` probe\)/);
+    assert.doesNotMatch(next, /ISSUE_MODE/);
   });
 });

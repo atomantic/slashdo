@@ -1,4 +1,4 @@
-# Epic Children & Lifecycle (issue mode)
+# Epic Children & Lifecycle
 
 Shared logic for resolving an **epic** (umbrella issue) to its child issues,
 deciding when the epic is complete, and closing it. Consumed by `/do:next`
@@ -14,7 +14,8 @@ belongs to a *group*, not the project an issue lives in), so this file doesn't
 attempt to map it. On GitLab the **convention fallback** below (body
 task-lists + back-references) is therefore the *primary* path, not a
 last resort — and it's host-agnostic by construction, so every command in it
-is given both a `gh` and a `glab` form.
+is given both a `gh` and a `glab` form. A Jira tracker skips all of that and uses
+the last section, **Jira**.
 
 On GitHub, set `OWNER`/`REPO` once per run:
 `OWNER_REPO="$(gh repo view --json owner,name -q '.owner.login + "/" + .name')"`
@@ -48,15 +49,17 @@ An issue that matches none of these is an ordinary issue — handle it normally.
    ```
    GraphQL equivalent when REST is unavailable:
    ```bash
-   gh api --hostname "$GH_HOST" graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){subIssues(first:100){nodes{number state}}}}}' \
-     -F o="$OWNER" -F r="$REPO" -F n="$N" --jq '.data.repository.issue.subIssues.nodes[] | "\(.number)\t\(.state|ascii_downcase)"' 2>/dev/null
+   gh api --hostname "$GH_HOST" graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){subIssues(first:100){nodes{number state} pageInfo{hasNextPage}}}}}' \
+     -F o="$OWNER" -F r="$REPO" -F n="$N" --jq '.data.repository.issue.subIssues | if (.nodes|type) != "array" or (.pageInfo.hasNextPage|type) != "boolean" then error("incomplete sub-issue response") elif .pageInfo.hasNextPage then "__INCOMPLETE_PAGINATION__" else (.nodes[] | "\(.number)\t\(.state|ascii_downcase)") end' 2>/dev/null
    ```
    If either returns rows, **those are the children** — use them and skip the
-   convention scan. An empty result / `404` / `410` means "fall back" (feature
-   not enabled, older GHES, or no sub-issues) — it does **not** mean "zero
-   children." **On GitLab (`$CLI_TOOL = glab`), skip this step entirely** and go
-   straight to the convention fallback — there is no project-scoped equivalent
-   to probe.
+   convention scan. The GraphQL query requests only 100 children: if it prints
+   `__INCOMPLETE_PAGINATION__`, or fails because the response is malformed,
+   mark child resolution **unresolved** and do not fall back or close the epic.
+   A valid empty result / `404` / `410` means "fall back" (feature not enabled,
+   older GHES, or no sub-issues) — it does **not** mean "zero children." **On
+   GitLab (`$CLI_TOOL = glab`), skip this step entirely** and go straight to the
+   convention fallback — there is no project-scoped equivalent to probe.
 
 2. **Convention fallback** (GitHub: only when native returned nothing; GitLab: always):
    - **Body task-list issue refs.** Read the epic body:
@@ -150,3 +153,23 @@ If a parent epic `#P` is found, run the completeness check on `#P`: close it whe
 `epic-done`; when `epic-wrapup`, comment that the children are complete and the
 wrap-up tasks remain (so a later `/do:next` surfaces it). Leave it untouched when
 `epic-open`.
+
+## Jira
+
+When the caller ran [tracker-jira.md](./tracker-jira.md)'s Pre-flight (`TRACKER=jira`),
+none of the `gh`/`glab` calls above apply: Jira links children natively with
+`parent`, for epics and sub-tasks alike, so that link is the only source — the body
+task-list and back-reference scans are skipped (`issue_body` renders rich text as
+plain text, which is lossy). Keys stand in for `#N` throughout.
+
+- **Epic?** Its `issuetype.name` is `Epic`, it carries the `epic` label, or its
+  `subtasks` array is non-empty (all in `jira issue view <KEY> --raw`).
+- **Children** — `issue_children <KEY>` rows are already `OPEN`/`CLOSED` by status
+  category; the states above apply unchanged, and no rows is `epic-empty`.
+- **Wrap-up tasks** — unchecked `- [ ]` lines in `issue_body <KEY>` that name no key;
+  none is an empty `WRAPUP_TASKS`.
+- **Closing** — `issue_close_note <KEY> "All children closed (PROJ-a, PROJ-b, …) and wrap-up complete — closing epic. (slashdo)"`;
+  a failed transition leaves the epic open and is reported, never retried under
+  another status name.
+- **A child's parent** — `J="$(jira issue view <CHILD> --raw)" && printf '%s' "$J" | jq -r '.fields.parent.key // empty'`;
+  empty means no parent. An `epic-wrapup` parent gets `issue_comment` as above.

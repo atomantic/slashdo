@@ -35,6 +35,10 @@ describe('/do:next --merge / --no-merge (#288)', () => {
       next,
       /--merge=<method> and --merge-method specify conflicting methods \(\{first\} vs \{second\}\)/,
     );
+    assert.match(next, /- \*\*Enable:\*\*/);
+    assert.match(next, /- \*\*Disable:\*\*/);
+    assert.match(next, /- \*\*Method:\*\*/);
+    assert.match(next, /- \*\*Swarm:\*\*/);
   });
 
   it("keeps /do:next's own --no-merge default distinct from /do:pr's", () => {
@@ -76,7 +80,11 @@ describe('/do:next never forwards its own merge flags to /do:pr (#288)', () => {
     assert.doesNotMatch(next, /with the flags this command received/);
     assert.match(
       next,
-      /forwarding \*\*only the review flags listed in Parse Arguments\*\* \(`--review-with` \/ `--review-iterations` \/ `--review-mode` \/ `--review-stop-on-findings` \/ `--review-stop-on-clean` \/ `--reviewer-applies` \/ `--no-review`\)/,
+      /forwarding \*\*only the review flags listed in Parse Arguments\*\* \(`--review-with` \/ `--review-iterations` \/ `--review-mode` \/ `--review-stop-on-findings` \/ `--review-stop-on-clean` \/ `--reviewer-applies`\)/,
+    );
+    assert.match(
+      next,
+      /translating `--no-review` to `--review-with none` rather than forwarding it verbatim/,
     );
     assert.match(
       next,
@@ -97,14 +105,14 @@ describe('/do:next --merge is ignored under --swarm except for the method (#288)
     );
     assert.match(
       next,
-      /`--merge=<method>`\/`--merge-method` still resolve `MERGE_METHOD` for that Phase C merge/,
+      /`--merge=<method>` \/ `--merge-method` still resolve `MERGE_METHOD` for that Phase C merge/,
     );
   });
 });
 
-describe('lib/review-config-defaults.md documents /do:next reading the merge key (#288)', () => {
+describe('lib/config-defaults-issues-merge.md documents /do:next reading the merge key (#288)', () => {
   const defaults = require('fs').readFileSync(
-    require('path').join(__dirname, '..', 'lib', 'review-config-defaults.md'),
+    require('path').join(__dirname, '..', 'lib', 'config-defaults-issues-merge.md'),
     'utf8',
   );
 

@@ -27,7 +27,7 @@ describe('bulk issue-filing spool contracts', () => {
   it('keeps SPOOL_DIR in both audit commands\' compaction-survival lists', () => {
     // Compaction mid-audit that drops SPOOL_DIR strands every spooled body.
     for (const name of ['better.md', 'better-swift.md']) {
-      assert.match(readCommand(name), /^- `SPOOL_DIR` \(issue mode only/m, name);
+      assert.match(readCommand(name), /^- `SPOOL_DIR` \(the literal spool path/m, name);
     }
   });
 
@@ -53,6 +53,13 @@ describe('bulk issue-filing spool contracts', () => {
     assert.match(partial, /\*\*A filer never rewrites a\nbody\*\*/);
   });
 
+  it('passes generated issue content as data, not shell source', () => {
+    assert.match(partial, /unique, single-quoted\s+heredoc delimiter/);
+    assert.match(partial, /--title "\$TITLE"/);
+    assert.match(partial, /--description "\$\(cat "\$BODY"\)"/);
+    assert.doesNotMatch(partial, /--title "<Title>"|--description "<body>"/);
+  });
+
   it('never reports an errored finding as filed', () => {
     // A filer that hit a rate limit or a malformed block filed nothing; counting
     // it as created loses the finding with no trace.
@@ -68,7 +75,7 @@ describe('bulk issue-filing spool contracts', () => {
     // Its {FINDINGS} block is built by the orchestrator, which now holds only index
     // lines — a worker handed those alone remediates from a bare one-line title.
     for (const body of [readCommand('better.md'), readCommand('better-swift.md')]) {
-      assert.match(body, /\*\*In issue mode the finding bodies are on disk, not in this context\.\*\*/);
+      assert.match(body, /\*\*The finding bodies are on disk, not in this context\.\*\*/);
       // <slug> not <category-slug>: Conflict avoidance merges two categories into one
       // worker, so it must open every spool file its ids name, not just its own.
       assert.match(body, /read the full body for each of its ids out of `\$SPOOL_DIR\/<slug>\.md`, where/);
@@ -92,7 +99,7 @@ describe('bulk issue-filing spool contracts', () => {
       // ...and something must actually remove it: the partial delegates removal to the
       // command, so with no removal step every --issues run leaks a directory holding
       // the full text of every finding.
-      assert.match(body, /\*\*Issue mode — remove the spool\.\*\*/);
+      assert.match(body, /\*\*Remove the spool\.\*\*/);
       assert.match(body, /rm -rf "\$SPOOL_DIR"/);
       assert.match(body, /\*\*Unless any filer returned `ERROR`\*\*/);
       // A scan-only run has no Phase 3c/4c, so filing is its last read.
@@ -106,7 +113,7 @@ describe('bulk issue-filing spool contracts', () => {
     // the exact truncation the spool path exists to prevent.
     assert.match(partial, /A \*\*block\*\* runs from a line matching/);
     assert.match(partial, /\*\*not a bare `\^## `\*\*/);
-    assert.match(partial, /No line inside a body may begin with `## \[` at\ncolumn 0/);
+    assert.match(partial, /No line inside a body may\nbegin with `<!-- finding ` at column 0/);
   });
 
   it('reads the DRY bodies for the Foundation grouping', () => {
@@ -117,6 +124,18 @@ describe('bulk issue-filing spool contracts', () => {
       assert.match(body, /\*\*Step 3 is the exception\*\*/);
       assert.match(body, /read `\$SPOOL_DIR\/dry\.md`/);
     }
+  });
+
+  it('keeps the spool id and any slug out of the filed issue', () => {
+    // The issue number is the tracker ID. A filer that passed the heading line through
+    // verbatim filed titles like "[security-01] …" — the slug prefix PLAN.md once needed.
+    assert.match(partial, /\*\*Never\ninvent a slug, a `\[category-NN\]` tag, or any other bracketed id\.\*\*/);
+    assert.match(partial, /never reaches the tracker/);
+    assert.match(partial, /takes the `--title` from the block's `title:` line, verbatim/);
+    assert.match(partial, /never with an id or slug/);
+    assert.doesNotMatch(partial, /agent-slug|## \[</);
+    const conventions = fs.readFileSync(path.join(root, 'lib', 'commit-conventions.md'), 'utf8');
+    assert.doesNotMatch(conventions, /\[<slug>\]/);
   });
 
   it('bounds the fan-out at one filer per category and retries rate limits', () => {

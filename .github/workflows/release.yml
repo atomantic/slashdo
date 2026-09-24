@@ -38,15 +38,6 @@ jobs:
         id: package-version
         run: echo "version=$(node -p 'require("./package.json").version')" >> $GITHUB_OUTPUT
 
-      - name: Check if tag exists
-        id: tag-check
-        run: |
-          if git rev-parse --verify "refs/tags/v${{ steps.package-version.outputs.version }}" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Check if GitHub Release exists
         id: release-check
         run: |
@@ -103,21 +94,20 @@ jobs:
         run: |
           VERSION="${{ steps.package-version.outputs.version }}"
           CHANGELOG_FILE=".changelogs/v${VERSION}.md"
+          RELEASE_BODY_FILE="$(mktemp)"
 
           if [ -f "$CHANGELOG_FILE" ]; then
-            CHANGELOG=$(cat "$CHANGELOG_FILE")
+            cp "$CHANGELOG_FILE" "$RELEASE_BODY_FILE"
           else
             echo "No ${CHANGELOG_FILE}; falling back to a raw commit list." >&2
             PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
-            COMMIT_LOG=$(git log "$PREV_TAG"..HEAD --pretty=format:"- %s" --no-merges | grep -v "\[skip ci\]" || true)
-            COMMIT_LOG=$(printf '%s\n' "$COMMIT_LOG" | head -50)
-            CHANGELOG="$(printf '# Release v%s\n\n## Changes\n\n%s' "${VERSION}" "${COMMIT_LOG}")"
+            {
+              printf '# Release v%s\n\n## Changes\n\n' "${VERSION}"
+              git log "$PREV_TAG"..HEAD --pretty=format:"- %s" --no-merges | grep -v "\[skip ci\]" | head -50 || true
+            } > "$RELEASE_BODY_FILE"
           fi
 
-          DELIM="changelog_$(date +%s)"
-          echo "changelog<<${DELIM}" >> "$GITHUB_OUTPUT"
-          printf '%s\n' "$CHANGELOG" >> "$GITHUB_OUTPUT"
-          echo "${DELIM}" >> "$GITHUB_OUTPUT"
+          echo "body-path=${RELEASE_BODY_FILE}" >> "$GITHUB_OUTPUT"
 
       - name: Create Release
         if: steps.release-check.outputs.exists == 'false'
@@ -126,7 +116,7 @@ jobs:
           tag_name: v${{ steps.package-version.outputs.version }}
           target_commitish: ${{ github.sha }}
           name: v${{ steps.package-version.outputs.version }}
-          body: ${{ steps.changelog.outputs.changelog }}
+          body_path: ${{ steps.changelog.outputs.body-path }}
           draft: false
           prerelease: false
         env:

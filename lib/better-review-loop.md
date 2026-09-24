@@ -1,35 +1,25 @@
-## Better pipeline — Review Loop (Phase 6, GitHub only)
+## Phase 6: Review Loop
 
-The shared per-PR review-and-merge loop for every `better-*` audit pipeline.
-`/do:better` and `/do:better-swift` include this file verbatim.
+**GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this entire phase AND the Phase 6.3 merge.** There is no default reviewer. Leave every PR open, print the PR URLs and summary (Review column `none — left open`), and proceed to Phase 7.
 
-### Inputs
+### 6.1: One review sub-agent per PR
 
-In addition to `{BRANCH_PREFIX}`, which every `better-*` command defines and
-`~/.claude/lib/better-verification.md` documents:
+First finish deriving `{GH_HOST}` from Phase 0a's seed:
 
-- `{REVIEW_LOOP_EXTRA_INSTRUCTION}` — an extra paragraph handed to every review
-  sub-agent, or empty. A multi-platform pipeline uses it to require that each
-  fix still compiles everywhere.
-- `{REVIEW_STATUS_EXTRA}` — extra line(s) for the interactive review-status
-  prompt, or empty (e.g. "\n\nAll PRs verified on: {PLATFORMS}").
-## Phase 6: Review Loop (GitHub only)
+!read lib/gh-host.md
 
-**GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this entire phase AND the Phase 6.4 merge.** There is no default reviewer. Leave every PR open for manual review, print the PR URLs and summary (mark the Review column `none — left open`), then proceed to Phase 7 cleanup. PRs are merged only after a clean review loop, which requires an explicit `--review-with`.
+Launch one general-purpose sub-agent per PR, in parallel, and wait for all. Each runs the **multi-reviewer wrapper** over `REVIEW_AGENTS` against its PR's branch and returns only the wrapper's `{OVERALL_STATUS}`. Pass reference paths, not reviewer bodies; each worker reads the wrapper and only the inner loops its entries need. A missing required reference makes that review inconclusive.
 
-Otherwise, run each PR through the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (series default — reviewers run one-at-a-time within a PR so each sees the prior's fixes; `parallel` collects reviews concurrently then applies the union once), `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot and `@<login>` passes only; local-agent and ollama passes use their own fixed iteration caps). A copilot or `@<login>` pass with the default `--review-iterations 1` runs a single review-and-fix cycle and returns `capped` (clean-equivalent / ready-to-merge). `0` lets that pass loop until 0 comments, bounded by its own loop's 10-iteration guardrail. **Default mode**: auto-stop at the guardrail. **Interactive mode (`--interactive`)**: prompt the parent agent to ask the user whether to continue or stop.
+Pass each sub-agent: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (`series` default, or `parallel`), `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (the copilot/`@<login>` cap; default 1), `{REVIEW_MODELS}` (the saved per-agent default models — without it a saved default model is silently ignored), `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the host-side loops' `gh api` calls hit the right host on GitHub Enterprise), `{BRANCH_PREFIX}/{CATEGORY_SLUG}`, and `{BUILD_CMD}`. When a loop reaches its guardrail, default mode stops; `--interactive` asks the user whether to continue.
 
-**Sub-agent delegation** (prevents context exhaustion): delegate each PR's review loop to a **separate general-purpose sub-agent** via the Agent tool. Launch sub-agents in parallel (one per PR). Each sub-agent runs the multi-reviewer loop (which dispatches each listed agent to the copilot loop or the local-agent loop) autonomously against its PR's branch and returns only the final aggregate status.
+For each host-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
 
-### 6.1: Launch parallel sub-agents (one per PR)
+- `copilot` — max wait 3 minutes in iteration 1, 2 minutes in iteration 2, 90 seconds in iteration 3, 60 seconds in iteration 4, then 45 seconds; poll every 15 seconds.
+- `@<login>` — expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s.
 
-For each PR, spawn a general-purpose sub-agent that runs the **multi-reviewer wrapper** over `REVIEW_AGENTS` for that PR. Each PR worker reads the wrapper and only the inner libraries for its configured entries. Pass reference paths, not all reviewer bodies, to the worker. A missing required reference makes that review inconclusive and cannot authorize merge.
-
-Pass each sub-agent the PR-specific variables: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the GitHub-side loops' `gh api` calls hit the right host on GitHub Enterprise), `{BRANCH_PREFIX}/{CATEGORY_SLUG}` (the branch the local-agent loop checks out and reviews), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (the copilot/`@<login>` iteration cap; default 1).
+Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass both schedules.
 
 {REVIEW_LOOP_EXTRA_INSTRUCTION}
-
-Launch all PR sub-agents in parallel. Wait for all to complete.
 
 ### Required review references (PR worker only)
 
@@ -37,13 +27,13 @@ Always read the wrapper when this phase applies:
 
 !read lib/multi-reviewer-loop.md
 
-Only for `copilot` entries:
+For every `copilot` or `@<login>` entry, read the shared host-reviewer template (its sub-agent runs the `{CODE_HOST}` verb file):
+
+!read lib/host-reviewer-loop.md
+
+Only for `copilot` entries on GitHub, also read the Copilot delta:
 
 !read lib/copilot-review-loop.md
-
-Only for `@<login>` entries:
-
-!read lib/github-reviewer-loop.md
 
 Only for an entry that is none of `copilot`, `ollama`, or `@<login>` (every other slug — the fixed CLIs and `cmd[<invocation>]` alike — dispatches through this one loop; a future addition needs no new gate here):
 
@@ -53,31 +43,9 @@ Only for `ollama` entries:
 
 !read lib/ollama-review-loop.md
 
-The copilot and `@<login>` loops resolve review threads via raw `gh api graphql`
-mutations — read the shell-escaping rules once up front so a worker doesn't
-reach for `$variableName` GraphQL syntax the shell will mangle:
+### 6.2: Merge Gate (MANDATORY)
 
-!`cat ~/.claude/lib/graphql-escaping.md`
-
-### 6.2: Handle sub-agent results
-
-Each sub-agent returns the multi-reviewer wrapper's `{OVERALL_STATUS}` for its PR:
-- **clean**: every executed pass returned clean (copilot `too-large`, plus `capped` from any of the four loops — an explicitly configured cap, `~max=<n>` or `--review-iterations`, reached after applying every fix — count as clean; a *built-in* cap is `guardrail`, which is inconclusive) — mark PR as ready to merge
-- **partial**: a stop-mode flag short-circuited the list and every executed pass was clean-equivalent (`clean`, copilot `too-large`, or `capped`) — mark PR as ready to merge (the user opted into the short-circuit)
-- **inconclusive**: at least one requested pass timed out, errored, hit its guardrail, or was skipped (e.g. a missing CLI binary, or copilot when no PR review could be produced). **Default mode**: leave the PR open for manual review. **Interactive mode**: inform the user and ask whether to merge anyway, re-run, or skip
-- **dirty**: a pass left the branch with a broken build / failed tests / explicit reject. **Default mode**: leave the PR open. **Interactive mode**: ask whether to fix-and-retry or skip
-
-### 6.3: Merge Gate (MANDATORY)
-
-**Do NOT merge any PR whose aggregate review status is not `clean` (or `partial` under an explicit stop-mode).** A missing or inconclusive review is NOT a clean review.
-
-#### Default Mode (autonomous)
-
-Print the review status summary, then auto-merge all PRs whose reviews completed cleanly. PRs that timed out, hit guardrails, or still have unresolved comments are left open for manual review. Print which PRs were merged and which were left open.
-
-#### Interactive Mode (`--interactive`)
-
-Present the review status summary to the user via `AskUserQuestion`:
+Only `clean`, or `partial` under an explicit stop-mode, permits merge; the wrapper defines which pass results count toward each. A missing or inconclusive review is NOT a clean review. **Default mode**: leave `inconclusive` and `dirty` PRs open and print which PRs will merge and which stay open. **Interactive mode (`--interactive`)**:
 ```
 AskUserQuestion([{
   question: "Review status ({REVIEW_AGENTS}):\n{for each PR: #number - aggregate status (clean/partial/inconclusive/dirty)}{REVIEW_STATUS_EXTRA}\n\nHow would you like to proceed?",
@@ -89,27 +57,18 @@ AskUserQuestion([{
   ]
 }])
 ```
+The selection alone decides which PRs are approved for 6.3; every PR it does not approve stays open.
 
-Only proceed with merging based on the user's selection.
+### 6.3: Merge
 
-### 6.4: Merge
+Merge each approved PR, in dependency order, only when its current local HEAD is pushed, the Phase 5d CI gate holds on that HEAD, and 6.2 approved it (the review aggregate, or the interactive selection); then confirm it reports merged.
 
-For each PR approved for merge (in dependency order if applicable), verify the current local HEAD is pushed, all expected CI checks for that HEAD passed, and its review aggregate permits merge. Missing expected CI is inconclusive; leave the PR open after the CI wait limit. Then:
-```bash
-gh pr merge {PR_NUMBER} --merge
-```
-
-Verify each merge:
-```bash
-gh pr view {PR_NUMBER} --json state,mergedAt
-```
-
-If merge fails (e.g., branch protection, merge conflicts from a prior PR):
-- If merge conflict: rebase the branch and retry
+- **GitHub:** **Never hardcode `--merge`** — a repo that allows only squash or rebase rejects `gh pr merge --merge` every time. Resolve the method once per run, preferring `squash`, then `merge`, then `rebase` from the repo's allowed methods:
   ```bash
-  git checkout {BRANCH_PREFIX}/{CATEGORY_SLUG}
-  git pull --rebase origin {DEFAULT_BRANCH}
-  git push --force-with-lease
+  MERGE_METHOD="$(gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed \
+    -q '[(select(.squashMergeAllowed) | "squash"), (select(.mergeCommitAllowed) | "merge"), (select(.rebaseMergeAllowed) | "rebase")] | first // empty')"
   ```
-  Then re-run build/tests and the configured review loop against the new HEAD, publish all fixes, and re-run CI before merging. Prior approval of a different HEAD is insufficient.
-- If branch protection: inform the user and suggest manual merge
+  If no method resolves, leave that PR open and report why instead of merging. Otherwise `gh pr merge {PR_NUMBER} --{MERGE_METHOD}`.
+- **GitLab:** `glab mr merge {PR_NUMBER} --yes`. GitLab has no separate merge-method flag; it uses the project's default merge method. Omit `--remove-source-branch` here — Phase 7 cleanup already owns deleting each category's branch once it confirms the merge, and deleting it twice is redundant, not wrong, but the confirmation in Phase 7 is what the branch-owner bookkeeping (`CREATED_CATEGORY_SLUGS`) relies on.
+
+A merge conflict means rebasing the branch onto `{DEFAULT_BRANCH}` and force-pushing with lease; the new HEAD then needs build/tests, the configured review loop, and CI again before merging. Prior approval of a different HEAD is insufficient. A branch-protection refusal is reported for manual merge.

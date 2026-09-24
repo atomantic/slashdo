@@ -28,9 +28,9 @@ const PIPELINE_LIBS = [
 const RUNTIME_TOKENS = new Set([
   'BUILD_CMD', 'TEST_CMD', 'WORKTREE_DIR', 'REPO_DIR', 'CURRENT_BRANCH',
   'DEFAULT_BRANCH', 'DATE', 'CATEGORY_SLUG', 'FIRST_CATEGORY', 'NEW_VERSION',
-  'LEVEL', 'PR_NUMBER', 'OWNER', 'REPO', 'GH_HOST', 'REVIEW_AGENTS',
+  'LEVEL', 'PR_NUMBER', 'OWNER', 'REPO', 'GH_HOST', 'CODE_HOST', 'REVIEW_AGENTS',
   'REVIEW_STOP_MODE', 'REVIEW_MODE', 'REVIEWER_APPLIES', 'REVIEW_ITERATIONS',
-  'OVERALL_STATUS', 'OPTIONAL', 'RUN_ID', 'JOB_ID', 'PLATFORMS',
+  'REVIEW_MODELS', 'WAIT_SCHEDULE', 'MERGE_METHOD', 'OVERALL_STATUS', 'OPTIONAL', 'RUN_ID', 'JOB_ID', 'PLATFORMS',
   'DEPLOYMENT_TARGETS', 'VACUOUS_TESTS_FIXED', 'WEAK_TESTS_STRENGTHENED',
   'NEW_TEST_CASES', 'NEW_TEST_FILES', 'SIMPLIFY_CATEGORIES', 'N',
 ]);
@@ -41,24 +41,20 @@ const RUNTIME_TOKENS = new Set([
 // command's own top level.
 const REVIEWER_LOOP_LIBS = [
   'multi-reviewer-loop',
+  'host-reviewer-loop',
   'copilot-review-loop',
-  'github-reviewer-loop',
   'local-agent-review-loop',
   'ollama-review-loop',
 ];
 
 const includeIndex = (body, lib) => body.indexOf('!read lib/' + lib + '.md');
 
-// A partial documents its inputs in a `### Inputs` block and then USES them in the
-// phase text below it. Only the phase text is a substitution point: a token that
-// survives as a doc bullet alone has lost the line it was meant to fill.
+// A partial carries no `### Inputs` placeholder-docs block (#325): its phase text
+// is the only substitution point, so every token it reads appears where it is used.
 const partialBody = (lib) => {
   const text = fs.readFileSync(path.join(root, 'lib', `${lib}.md`), 'utf8');
-  const parts = text.split('### Inputs');
-  assert.equal(parts.length, 2, `lib/${lib}.md must have exactly one ### Inputs block`);
-  const start = parts[1].indexOf('\n## ');
-  assert.ok(start > -1, `lib/${lib}.md has no phase section after its ### Inputs block`);
-  return parts[1].slice(start);
+  assert.doesNotMatch(text, /^### Inputs\b/m, `lib/${lib}.md must not document inputs in a ### Inputs block`);
+  return text;
 };
 
 const tokensIn = (text) => new Set([...text.matchAll(/\{([A-Z][A-Z0-9_]+)\}/g)].map((m) => m[1]));
@@ -128,6 +124,16 @@ describe('shared better-* pipeline partials', () => {
         );
       }
     }
+  });
+
+  it('keeps the Copilot gate on the shared host-reviewer core', () => {
+    const source = fs.readFileSync(path.join(root, 'lib', 'better-review-loop.md'), 'utf8');
+    const coreAt = source.indexOf('!read lib/host-reviewer-loop.md');
+    const deltaAt = source.indexOf('!read lib/copilot-review-loop.md');
+
+    assert.ok(coreAt >= 0);
+    assert.ok(deltaAt > coreAt);
+    assert.match(source.slice(source.lastIndexOf('For every', coreAt), deltaAt), /For every `copilot` or `@<login>` entry/);
   });
 
   it('is driven by the same input token set from both commands', () => {

@@ -1,41 +1,54 @@
 ### Saved defaults (set via `/do:config`)
 
-Saved defaults fill in a shared review flag the user omitted. Apply them **before** deciding a flag was "omitted". Precedence, highest first — the first source that provides a value wins:
+Saved defaults fill in a shared review flag the user omitted; apply them **before**
+deciding a flag was omitted. The first source that provides a value wins:
 
-1. **Explicit flag in `$ARGUMENTS`** — always wins. The literal `--review-with none` means "no external reviewer this run": set `REVIEW_AGENTS=[]` and ignore any saved `review-with` default.
-2. **Per-project defaults** — `.slashdo.json` at the repo root, in its `defaults` object.
-3. **Global defaults** — the host CLI's slashdo config at `~/.claude/.slashdo-config.json` (path rewritten per host CLI at install time), in its `defaults` object.
-4. **Built-in default** — this command's own documented default (e.g. no reviewer; `--review-iterations` = 1).
+1. **Explicit flag in `$ARGUMENTS`.** `--review-with none` means no external reviewer
+   this run: `REVIEW_AGENTS=[]`, ignoring any saved `review-with`.
+2. **Per-project** — `.slashdo.json` at the repo root, its `defaults` object.
+3. **Global** — `~/.claude/.slashdo-config.json`, its `defaults` object.
+4. **Built-in default** — the command's own documented default.
 
-Procedure (run once, during argument parsing):
+Procedure (once, during argument parsing):
 
-1. Load the global config:
-   ```bash
-   cat ~/.claude/.slashdo-config.json 2>/dev/null
-   ```
-   Parse it as JSON; `GLOBAL_DEFAULTS = .defaults` (missing file, parse error, or missing key → `{}`).
-2. Load the per-project config (skip silently if not in a git repo):
-   ```bash
-   ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && cat "$ROOT/.slashdo.json" 2>/dev/null
-   ```
-   Parse it as JSON; `PROJECT_DEFAULTS = .defaults` (missing/invalid → `{}`).
-3. Merge: `EFFECTIVE = { ...GLOBAL_DEFAULTS, ...PROJECT_DEFAULTS }` — a per-project value overrides the global one key-by-key.
-4. For each shared flag **this command supports** that is **not** present in `$ARGUMENTS`, take its value from `EFFECTIVE` (keys below) and feed it through this command's normal parsing and validation exactly as if typed — `<agent>[...]` model brackets on `codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`ollama`, slug validation, dedupe, integer checks, and mutual-exclusion rules all apply, so a malformed saved default gets the same error a typed one would. **"Not present in `$ARGUMENTS`" is decided purely by the flag's absence from the user's command line — NOT by whether a variable already holds a value.** A built-in default the per-flag parse bullets named eagerly (e.g. `REVIEW_STOP_MODE=all`, `REVIEWER_APPLIES=false`, `REVIEW_ITERATIONS=1`) is provisional here: a saved default still applies to every key the user did not type, and the built-in default is only the final fallback in step 5. The keys:
-   - `review-with` → the `--review-with` list (string). Entries may carry a trailing `~opt` (optional/non-blocking; e.g. `claude,ollama~opt,codex`), `~max=<n>` (caps that reviewer's review → fix → re-review cycles; e.g. `claude~max=2,ollama~opt~max=1,codex~max=3`), and/or `~effort=<level>` (`low`, `medium`, `high`, `xhigh`, `max`; e.g. `codex[gpt-5.6-luna]~effort=max~opt`, `claude~effort=high~max=2`). All three ride through the saved value verbatim and are parsed by the same rules as a typed flag (see `lib/multi-reviewer-loop.md`). A saved `~max` is per-entry and therefore **more specific than the `review-iterations` key** — it overrides a saved `review-iterations` for the entry that carries it, exactly as a typed `~max` overrides a typed `--review-iterations`. **Tombstone:** if the effective `review-with` value is the literal `none` (case-insensitive) — saved, typically with `--project`, to opt one repo out of an inherited global reviewer — set `REVIEW_AGENTS=[]` and do **not** fall back to any lower-precedence source or built-in default. It is an explicit opt-out exactly like `--review-with none` on the command line, not a reviewer slug, and is not validated as one. **`cmd[<invocation>]` is honored only from the command line or the global config.** A per-project `.slashdo.json` is repo content — committed, shared, and editable by anyone who can open a PR — so a `cmd[…]` entry read from it would let the repo choose the shell command `bash -c` runs. Before parsing `PROJECT_DEFAULTS["review-with"]`, drop every `cmd[…]` entry from it (matching `cmd[` outside any other bracket), print `Ignoring cmd[...] from .slashdo.json: project-level config is repo content and cannot supply a shell command — put it in the global config (/do:config --review-with) or type it on the command line.` once per dropped entry, and do not count the dropped entry as a requested reviewer (it is neither `skipped` nor inconclusive). The remaining project entries stand; if none remain, treat the project `review-with` key as absent so precedence falls through to the global value.
-   - `review-models` → the per-agent **default-model map** (a JSON object keyed by agent slug, e.g. `{"codex":"o3","claude":"claude-opus-4-8","agy":"Gemini 3.8 Flash (High)","ollama":"qwen2.5-coder:32b"}`). Not a `--review-with`-style flag: it supplies a reviewer's model when its `--review-with` entry carried **no** `[<model>]` bracket. Resolve it as `EFFECTIVE_REVIEW_MODELS`, a **per-agent (deep) merge** of the global and project maps — a project entry overrides the global entry for *that agent* only; agents present only in the global map are inherited (not the flat whole-object merge of step 3). Valid agent keys are `codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`ollama`; `copilot` and `@<login>` take no model. Every command that runs the multi-reviewer loop passes `EFFECTIVE_REVIEW_MODELS` to it as `{REVIEW_MODELS}`; the loop applies the per-entry precedence **explicit `<agent>[<model>]` bracket → project `review-models[slug]` → global `review-models[slug]` → the reviewer's built-in default** (the deep merge already collapses project-over-global). `review-models` never selects *which* reviewers run — that is `review-with`'s job.
-   - `review-iterations` → `--review-iterations` (integer)
-   - `reviewer-applies` → `--reviewer-applies` (boolean; `true` means the flag is set)
-   - `review-stop-mode` → the stop-mode flags: `"on-findings"` ≡ `--review-stop-on-findings`, `"on-clean"` ≡ `--review-stop-on-clean`, `"all"` (or absent) ≡ neither
-   - `review-mode` → `--review-mode <series|parallel>` (string; `series` runs the reviewers one-after-another so each sees the prior's fixes, `parallel` runs their reviews concurrently then applies the union once). Built-in default `series`. Read by every command that runs the multi-reviewer loop (`/do:pr`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:depfree`, `/do:release`); `/do:rpr` does not run the wrapper (its parallelism is review-thread resolution, not reviewer dispatch) and ignores it, as it ignores `review-iterations` / `review-stop-mode`.
-   - `issues` → the `--issues` / `--no-issues` flags (boolean; `true` ≡ `--issues` = issue mode, `false` or absent ≡ PLAN.md mode). **A saved `issues: true` does not suppress remediation** — it only routes deferred findings to the tracker instead of `PLAN.md`; `--scan-only` is what stops the pipeline, so `--issues` must never be redefined to imply `--scan-only`. A typed flag in **either** direction wins over the saved default (`--issues` forces issue mode, `--no-issues` forces PLAN.md mode), exactly like `--reviewer-applies`/`--no-reviewer-applies`. A stored `false` (typically saved with `--project`) masks an inherited global `issues=true`; `--unset issues` instead removes the key and falls back to the lower-precedence value.
-   - `issues-label` → `--issues-label <name>` (string; the label that scopes plan-tracking issues, built-in default `plan`). Only meaningful once issue mode is on (via flag or the `issues` default).
-   - `self` → the `--self` / `--no-self` flags (boolean; `true` ≡ `--self` = claim only issues filed by the running account `@me`, `false` or absent ≡ claim any open issue). Typed-flag override, stored `false` masking an inherited global `self=true`, and `--unset self` behave exactly as for `issues`. Only `/do:next` reads this key, and only in issue mode (PLAN.md items have no author).
-   - `collaborators` → the `--collaborators` / `--no-collaborators` flags (boolean; `true` ≡ `--collaborators` = claim only issues filed by a current repo collaborator from the live host-API list (union `--trusted-authors`), `false` or absent ≡ claim any open issue). Typed-flag override, stored `false`, and `--unset collaborators` behave exactly as for `self`. `--self` and `--collaborators` are not mutually exclusive: `/do:next` applies SELF_MODE first (stricter `@me` only), else COLLAB_MODE, else any author; `--no-self` does not clear `collaborators`. Only `/do:next` reads this key, and only in issue mode.
-   - `trusted-authors` → `--trusted-authors <list>` (string; comma-separated GitHub/GitLab logins, e.g. `howlingmime,Joebok`). Extra trusted *authors* unioned into `/do:next --collaborators`' live collaborator set — not a saved collaborator allowlist. A typed `--trusted-authors` (including `none` / empty to mean no extra authors this run) wins. A saved `none` (case-insensitive) is a tombstone meaning no extra authors and masks an inherited global list; `--unset trusted-authors` instead removes the key and falls back. When collaborators mode is off, this list neither restricts nor widens auto-pick. `--self` still wins over both. Only `/do:next` reads this key, and only in issue mode.
-   - `merge` → the `--merge` / `--no-merge` flags (boolean; `true` ≡ `--merge` = auto-merge the PR once reviews **and** CI are solid, `false` ≡ leave the PR open). A typed flag in either direction wins over the saved default, like `issues`. **`/do:pr` and `/do:next` both read this key, with different built-in defaults when it is absent**: `/do:pr`'s is `false` (open the PR and stop, its long-standing default); `/do:next`'s is `true` (it has always merged its own claim's PR once its gate passed — `--no-merge` is the opt-out, not a behavior change). `/do:next` never forwards `--merge`/`--no-merge` to the `/do:pr` call it makes internally (that call is always `--no-merge`, regardless of this key) — the key only governs `/do:next`'s own post-review merge step (single-issue Phase 6 / swarm Phase C).
-   - `merge-method` → `--merge-method <squash|rebase|merge>` (string; the method `--merge` uses; when unset, `/do:pr` falls back to the repo's allowed method — see `/do:pr`). For `/do:pr` it is only meaningful when merge is on; `/do:next` always uses it for its own merge (single-issue Phase 6, swarm Phase C), whatever the `merge` key says. **A method supplied through `/do:pr`'s `--merge=<method>` shorthand counts as an explicitly-typed `merge-method` for this step** — when `MERGE_METHOD` was already set from `--merge=<method>`, treat the key as present and do **not** inject the saved default (it would override the user's explicit choice or trip `/do:pr`'s `--merge=<method>` vs `--merge-method` conflict abort). The "flag absence" test for this one key is "neither `--merge=<method>` nor `--merge-method` was typed."
-5. After applying defaults, fall back to the command's built-in default for anything still unset. For `review-with` that is `REVIEW_AGENTS=[]` in **every** command, `/do:rpr` included — no reviewer is ever added implicitly, `copilot` least of all. A resolved `none` tombstone counts as *set*.
-6. If any default was applied (i.e. not overridden by an explicit flag), print one line naming the source:
+1. `GLOBAL_DEFAULTS` = `.defaults` of `cat ~/.claude/.slashdo-config.json 2>/dev/null`.
+2. `PROJECT_DEFAULTS` = `.defaults` of `ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && cat "$ROOT/.slashdo.json" 2>/dev/null`.
+   A missing file, parse error, or missing key is `{}`.
+3. `EFFECTIVE = { ...GLOBAL_DEFAULTS, ...PROJECT_DEFAULTS }` (project wins key by key).
+4. For each shared flag **this command supports** that is **not present in
+   `$ARGUMENTS`** — decided purely by the flag's absence from the command line, NOT by
+   whether a variable holds a provisional built-in value — parse and validate
+   `EFFECTIVE`'s value exactly as if typed, so a malformed saved value gets the typed
+   error. Keys:
+   - `review-with` → `--review-with` (string). Per-entry `~opt`, `~max=<n>`, and
+     `~effort=<level>` suffixes ride through verbatim; a per-entry `~max` overrides
+     `review-iterations` for that entry. **Tombstone:** an effective value of `none`
+     (case-insensitive) means `REVIEW_AGENTS=[]` with no fallback to a lower source —
+     an explicit opt-out, not a slug. **`cmd[<invocation>]` is honored only from the
+     command line or the global config** ([local-agent-cmd.md](./local-agent-cmd.md)):
+     before parsing `PROJECT_DEFAULTS["review-with"]`, drop each `cmd[…]` entry
+     (matching `cmd[` outside any other bracket) and print, once per entry,
+     `Ignoring cmd[...] from .slashdo.json: project-level config is repo content and cannot supply a shell command — put it in the global config (/do:config --review-with) or type it on the command line.`
+     A dropped entry is not a requested reviewer. If no project entries remain, treat
+     the project key as absent so the global value applies.
+   - `review-models` → `EFFECTIVE_REVIEW_MODELS`, a map of agent slug
+     (`codex`/`claude`/`agy`/`grok`/`pi`/`cursor`/`opencode`/`ollama`) to model,
+     **deep-merged per agent** (project overrides global for that agent only). It
+     fills a model only for an entry with no `[<model>]` bracket, never selects
+     reviewers, and is passed to the multi-reviewer loop as `{REVIEW_MODELS}`.
+   - `review-iterations` → `--review-iterations` (integer).
+   - `reviewer-applies` → `--reviewer-applies` (`true` = set).
+   - `review-stop-mode` → `"on-findings"` ≡ `--review-stop-on-findings`,
+     `"on-clean"` ≡ `--review-stop-on-clean`, `"all"`/absent ≡ neither.
+   - `review-mode` → `--review-mode <series|parallel>` (built-in `series`).
+5. Anything still unset takes the built-in default. For `review-with` that is
+   `REVIEW_AGENTS=[]` in **every** command: no reviewer, `copilot` least of all, is
+   ever added implicitly. A resolved `none` tombstone counts as set.
+6. If any saved default applied, print one line naming its source:
    `Using saved defaults: --review-with={value}{, --review-iterations=…}{ — project|global}`.
 
-Only the flags a given command actually documents are eligible — e.g. `/do:rpr` reads `review-with`, `reviewer-applies`, and `review-models` but ignores `review-iterations` / `review-stop-mode` / `review-mode`. `issues` / `issues-label` are read by every command that accepts `--issues`; `/do:next` and `/do:replan` don't inline this file and resolve those keys (and, for `/do:next`, `self` / `collaborators` / `trusted-authors` in Parse Arguments, plus `merge` / `merge-method` in Parse Arguments and again at merge time) inline under the same precedence. `review-models` is read by every command that dispatches reviewers (the same set that reads `review-with`), each forwarding the resolved `EFFECTIVE_REVIEW_MODELS` as `{REVIEW_MODELS}`. `/do:better`, `/do:depfree`, and `/do:release` have their own merge behavior and do not consult `merge` / `merge-method`.
+Only flags the command documents are eligible: `/do:rpr` reads `review-with`,
+`reviewer-applies`, and `review-models` and ignores `review-iterations` /
+`review-stop-mode` / `review-mode`. Non-review keys (`issues-label`, `merge`, …)
+follow this precedence via [lib/config-defaults-issues-merge.md](./config-defaults-issues-merge.md)
+or the command's own inline rules.

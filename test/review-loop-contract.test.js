@@ -22,13 +22,115 @@ const LOOPS_WITH_OPTIONAL_ARRAYS = [
   'local-agent-review-loop.md',
   'ollama-review-loop.md',
   'enhance-loop.md',
+  'local-cli-runner.md',
 ];
 
+// Per-harness recipes the local-agent core loads with a gated `!read` (#347).
+const LOCAL_AGENT_RECIPES = {
+  claude: 'local-agent-claude.md',
+  agy: 'local-agent-agy.md',
+  cursor: 'local-agent-cursor.md',
+  opencode: 'local-agent-opencode.md',
+  cmd: 'local-agent-cmd.md',
+};
+// The core plus every recipe, for assertions that pin a rule without caring
+// which of the files carries it.
+const readLocalAgent = () => ['local-agent-review-loop.md', ...Object.values(LOCAL_AGENT_RECIPES)]
+  .map(readLib).join('\n\n');
+
 describe('review-loop parse contracts', () => {
+  it('preserves spaces and newlines in paths passed to the Ollama reviewer', () => {
+    const ollama = readLib('ollama-review-loop.md');
+    assert.match(ollama, /git diff --name-only -z/);
+    assert.match(ollama, /while IFS= read -r -d '' F/);
+    assert.match(ollama, /done < "\$CHANGED_FILE"/);
+    assert.match(ollama, /FILE_MAP=.*NUL-delimited file-id\/path pairs/);
+    assert.match(ollama, /FILE_ID=\$REVIEWABLE_FILES[\s\S]*printf '%s\\0%s\\0' "\$FILE_ID" "\$F"/);
+    assert.match(ollama, /FILE_JSON="\$\(jq -Rn --arg path "\$F" '\$path'\)"/);
+    assert.match(ollama, /===== FILE_ID: %s =====/);
+    assert.match(ollama, /Split `\$LOG_FILE` on `\^===== FILE_ID: \(\[1-9\]\[0-9\]\*\) =====\$`/);
+    assert.match(ollama, /resolve each ID through the NUL-delimited `FILE_MAP`/);
+    assert.doesNotMatch(ollama, /===== FILE: %s =====|\^===== FILE: \(\.\+\) =====\$/);
+    assert.doesNotMatch(ollama, /CHANGED=\$\(git diff --name-only /);
+  });
+
+  it('keeps on-clean stop behavior aligned with the reviewer-pass decision table', () => {
+    const loop = readLib('multi-reviewer-loop.md');
+    assert.match(loop, /`on-clean` — stop after the first reviewer pass that reports clean and adds no commits/);
+    assert.match(loop, /\| `on-clean` \|[\s\S]*returned `clean` \(or copilot `too-large`\) AND made zero changes/);
+  });
+
+  it('keeps current-head protection in the shared host-reviewer and Copilot path', () => {
+    const core = readLib('host-reviewer-loop.md');
+    const github = readLib('host-github.md');
+    const copilot = readLib('copilot-review-loop.md');
+    const currentHeadQueries = github.match(/pullRequest\(number:\$number\) \{ headRefOid reviews\(first:100, after:\$reviewCursor\) \{[^\n]+commit \{ oid \}/g) || [];
+
+    assert.ok(currentHeadQueries.length >= 1);
+    assert.match(github, /reviews\(first:100, after:\$reviewCursor\)[\s\S]*pageInfo \{ hasNextPage endCursor \}/);
+    assert.match(github, /reviewThreads\(first:100, after:\$threadCursor\)/);
+    assert.match(github, /REVIEWS="\$\(jq -cn[\s\S]*REVIEW_CURSOR=/);
+    assert.match(github, /while :; do[\s\S]*THREADS="\$\(jq -cn[\s\S]*THREAD_CURSOR=/);
+    assert.doesNotMatch(github, /reviews\(last:20\)/);
+    assert.match(core, /reuse a review from \{REVIEWER_LOGIN\} only when its\s+reviewed commit equals the current head SHA/);
+    assert.match(core, /submittedAt[\s\S]{0,240}AND\*\* its reviewed commit equals this poll's\s+head SHA/);
+    assert.match(copilot, /host-reviewer-loop\.md/);
+    assert.match(copilot, /current-`headRefOid` review gate/);
+    assert.match(copilot, /do not reuse that error\s+review[\s\S]+wait only\s+for a later current-head review/);
+    assert.doesNotMatch(copilot, /### Sub-agent prompt template|Run the following loop|FIX all unresolved|When done, report back/);
+    assert.ok(Buffer.byteLength(copilot, 'utf8') <= 2048, 'the Copilot file must remain a small delta');
+  });
+
+  it('loads the Copilot delta with the core and keeps wait schedules with callers', () => {
+    const callers = ['pr.md', 'review.md', 'release.md', 'depfree.md'].map(readCommand);
+    callers.push(readLib('better-review-loop.md'));
+
+    for (const caller of callers) {
+      const coreAt = caller.indexOf('!read lib/host-reviewer-loop.md');
+      const deltaAt = caller.indexOf('!read lib/copilot-review-loop.md');
+      assert.ok(coreAt >= 0, 'each host-side caller must load the shared core');
+      assert.ok(deltaAt > coreAt, 'the Copilot delta must load after the shared core');
+      assert.match(caller, /caller-owned `\{WAIT_SCHEDULE\}`/);
+      assert.match(caller, /`copilot` —/);
+      assert.match(caller, /`@<login>` —/);
+      assert.match(caller, /never give one pass both schedules/);
+    }
+
+    const core = readLib('host-reviewer-loop.md');
+    const wrapper = readLib('multi-reviewer-loop.md');
+    const { ON_DEMAND_LIBS } = require('../src/transformer');
+    assert.match(ON_DEMAND_LIBS.get('copilot-review-loop.md').what, /delta/);
+    assert.match(ON_DEMAND_LIBS.get('host-reviewer-loop.md').when, /`copilot` or an `@<login>`/);
+    assert.match(core, /WAIT SCHEDULE:\n\{WAIT_SCHEDULE\}/);
+    assert.doesNotMatch(core, /TIMEOUT SCHEDULE|WAIT BUDGET|Iteration 1: max wait/);
+    assert.match(wrapper, /caller-selected `\{WAIT_SCHEDULE\}`/);
+    // Parallel-only content now lives in its own on-demand partial.
+    assert.match(
+      readLib('multi-reviewer-parallel.md'),
+      /shared host-reviewer template's steps 1–3 plus the Copilot delta[\s\S]+accept only a current-head review/,
+    );
+  });
+
+  it('removes the redundant GraphQL escaping partial and include', () => {
+    const core = readLib('host-github.md');
+    assert.match(core, /put free-form text into a JSON payload with `jq --arg`/);
+    assert.match(core, /Never interpolate review text into shell source or a query/);
+    assert.equal(fs.existsSync(path.join(__dirname, '..', 'lib', 'graphql-escaping.md')), false);
+
+    for (const source of [
+      readLib('better-review-loop.md'),
+      readCommand('depfree.md'),
+      readCommand('rpr.md'),
+      _read('install.sh'),
+    ]) {
+      assert.doesNotMatch(source, /graphql-escaping/);
+    }
+    assert.match(_read('uninstall.sh'), /OLD_LIBS=\([\s\S]*graphql-escaping[\s\S]*\)/);
+  });
+
   it('never grants blanket permissions to feedback or applying reviewers', () => {
-    for (const name of ['local-agent-review-loop.md', 'enhance-loop.md']) {
-      const body = readLib(name);
-      assert.doesNotMatch(body, /--dangerously-skip-permissions|danger-full-access|bypassPermissions|--yolo|--force\b|--sandbox disabled/);
+    for (const [name, body] of [['local-agent loop', readLocalAgent()], ['enhance-loop.md', readLib('enhance-loop.md')]]) {
+      assert.doesNotMatch(body, /--dangerously-skip-permissions|danger-full-access|bypassPermissions|--yolo|--force\b|--sandbox disabled/, name);
       assert.match(body, /--tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep"/);
       assert.match(body, /--strict-mcp-config/);
       assert.match(body, /disableAllHooks/);
@@ -36,11 +138,11 @@ describe('review-loop parse contracts', () => {
     const body = readLib('local-agent-review-loop.md');
     assert.match(body, /sandbox_workspace_write.network_access=false -c features.shell_tool=false/);
     assert.match(body, /Inlining a\s+diff alone is not tool isolation/);
-    assert.match(body, /no per-invocation settings-file selector/);
-    assert.match(body, /"write_file\(\*\)"/);
-    assert.match(body, /"command\(\*\)"/);
-    assert.match(body, /"mcp\(\*\)"/);
     assert.match(body, /required reviewers remain\s+unsatisfied/);
+    // agy has never exposed an isolated-settings selector: no hypothetical JSON
+    // profile or "if a future version…" text for a CLI that does not exist (#347).
+    assert.match(readLib(LOCAL_AGENT_RECIPES.agy), /no per-invocation settings-file selector/);
+    assert.doesNotMatch(readLocalAgent(), /toolPermission|"write_file\(\*\)"|future version/i);
   });
 
   it('lets the host orchestrator select focused review lenses from the diff', () => {
@@ -100,9 +202,17 @@ describe('review-loop parse contracts', () => {
     // The strict verdict contract above rejects anything that is not `NO FINDINGS`
     // or a complete FINDING block, so a merged CLI banner/progress line on stderr
     // would turn a clean review into a parse failure and block the merge.
-    const body = readLib('local-agent-review-loop.md');
+    // The launch lives in the shared runner (#349); every loop that launches through it
+    // must read it rather than carry its own copy.
+    const body = readLib('local-cli-runner.md');
     assert.match(body, /> "\$LOG_FILE" 2> "\$ERR_FILE"/);
     assert.doesNotMatch(body, /\{INVOCATION\} > "\$LOG_FILE" 2>&1/);
+    for (const name of ['local-agent-review-loop.md', 'enhance-loop.md']) {
+      const loop = readLib(name);
+      assert.match(loop, /^!read lib\/local-cli-runner\.md$/m, `${name} must read the shared runner`);
+      assert.doesNotMatch(loop, /\{INVOCATION\} > "\$LOG_FILE"/, `${name} must not restate the runner's launch`);
+      assert.doesNotMatch(loop, /seq 1 55/, `${name} must not restate the runner's poll`);
+    }
   });
 
   it('treats malformed Ollama output as a coverage gap rather than an empty review', () => {
@@ -120,8 +230,15 @@ describe('review-loop parse contracts', () => {
     // and block the merge on a diff that simply had nothing to review.
     const body = readLib('ollama-review-loop.md');
     const matches = body.match(/`REVIEWABLE > 0` and `REVIEW_ERRORS \+ PARSE_ERRORS >= REVIEWABLE`/g) || [];
-    assert.equal(matches.length, 2, 'both total-failure checks must carry the REVIEWABLE > 0 guard');
+    assert.equal(matches.length, 1, 'the total-failure check is defined once, with the REVIEWABLE > 0 guard');
     assert.match(body, /counted in at most ONE of REVIEW_ERRORS \/ PARSE_ERRORS/);
+    // #349: the coverage gap is defined ONCE and includes PARSE_ERRORS; the old
+    // `REVIEW_ERRORS + TRUNCATED > 0` definition contradicted the partial branch.
+    assert.doesNotMatch(body, /`REVIEW_ERRORS \+ TRUNCATED > 0`/);
+    const gaps = body.match(/REVIEW_ERRORS \+ PARSE_ERRORS \+ TRUNCATED > 0/g) || [];
+    assert.equal(gaps.length, 1, 'COVERAGE_GAP must be defined in exactly one place');
+    assert.match(body, /`COVERAGE_GAP=true` when `REVIEW_ERRORS \+ PARSE_ERRORS \+ TRUNCATED > 0`/);
+    assert.match(body, /\*\*Status override\.\*\* This is the loop's only coverage rule/);
   });
 
   it('threads the per-reviewer ~max cap through to the loops that honor it', () => {
@@ -171,22 +288,25 @@ describe('review-loop parse contracts', () => {
     // agent nobody wrote an arm for must degrade to prompt-advisory effort, not
     // inherit `--effort`. That inheritance is what broke codex and agy.
     const loop = readLib('local-agent-review-loop.md');
-    const preflight = loop.slice(
-      loop.indexOf('# Reasoning effort carrier.'),
-      loop.indexOf('# agy only: pin the review model'),
-    );
-    assert.ok(preflight, 'the effort-carrier pre-flight block must exist');
+    const start = loop.indexOf('# Reasoning effort carrier.');
+    const end = loop.indexOf("Then run the recipe's pre-flight block");
+    assert.ok(start >= 0 && end > start, 'the effort-carrier pre-flight block must exist');
+    const preflight = loop.slice(start, end);
 
     // Per-agent carrier, asserted as a table so a new reviewer adds a row.
     const CARRIERS = [
       ['claude|grok', /claude\|grok\) EFFORT_FLAG=\(--effort "\$REVIEW_EFFORT"\)/],
       ['codex', /codex\)\s+EFFORT_FLAG=\(-c "model_reasoning_effort=\$REVIEW_EFFORT"\)/],
-      ['cursor', /CURSOR_MODEL="\$\{REVIEW_MODEL\}\[effort=\$\{REVIEW_EFFORT\}\]"/],
-      ['agy', /agy\) : ;;/],
+      ['pi', /pi\)\s+EFFORT_FLAG=\(--thinking "\$REVIEW_EFFORT"\)/],
+      ['opencode', /opencode\)\s+EFFORT_FLAG=\(--variant "\$REVIEW_EFFORT"\)/],
     ];
     for (const [agent, re] of CARRIERS) {
       assert.match(preflight, re, `${agent} must get the carrier its CLI accepts`);
     }
+    // agy and cursor fold effort into the model inside their recipes; neither
+    // may inherit an EFFORT_FLAG arm.
+    assert.doesNotMatch(preflight, /^\s*(?:agy|cursor)\)/m);
+    assert.match(readLib(LOCAL_AGENT_RECIPES.cursor), /CURSOR_MODEL="\$\{REVIEW_MODEL\}\[effort=\$\{REVIEW_EFFORT\}\]"/);
 
     // Fail closed: the default is no flag, and the unknown-agent arm guesses nothing.
     assert.match(preflight, /^EFFORT_FLAG=\(\)$/m);
@@ -197,21 +317,17 @@ describe('review-loop parse contracts', () => {
     );
 
     // No invocation may pass a carrier its CLI rejects.
-    for (const agent of ['codex', 'agy', 'cursor']) {
-      const row = loop.split('\n').find((l) => l.startsWith(`| \`${agent}\` |`));
-      assert.ok(row, `${agent} invocation row must exist`);
-      assert.ok(
-        agent === 'codex' || !row.includes('EFFORT_FLAG'),
-        `the ${agent} invocation must not pass EFFORT_FLAG`,
-      );
+    for (const agent of ['agy', 'cursor']) {
+      assert.doesNotMatch(readLib(LOCAL_AGENT_RECIPES[agent]), /EFFORT_FLAG/, `the ${agent} invocation must not pass EFFORT_FLAG`);
     }
 
     // The carrier table is the documented rule, and agy's variant is discovered
     // at run time rather than baked into a level table that would go stale.
-    assert.match(loop, /\*\*Effort carriers\.\*\*/);
-    assert.match(loop, /\| `agy` \| a model \*\*variant\*\* picked from `agy models`/);
-    assert.match(loop, /not from a remembered table/);
-    assert.match(loop, /AGY_MODEL_RESOLVED/, 'the agy choice must persist across loop iterations');
+    assert.match(loop, /Never assume `--effort` is universal/);
+    assert.match(loop, /\| `agy` \| `agy` \| a model \*\*variant\*\* picked from `agy models`/);
+    const agy = readLib(LOCAL_AGENT_RECIPES.agy);
+    assert.match(agy, /not from a remembered table/);
+    assert.match(agy, /AGY_MODEL_RESOLVED/, 'the agy choice must persist across loop iterations');
   });
 
   it("resolves the agy review model against the live roster, not a hardcoded name", () => {
@@ -221,8 +337,7 @@ describe('review-loop parse contracts', () => {
     // ~effort asked for a level -- and the selection step must fall back when the
     // requested name (stale env var, stale saved review-models.agy, typo'd bracket)
     // is absent, rather than handing that reviewer's merge-gate slot a launch failure.
-    const loop = readLib('local-agent-review-loop.md');
-    const block = loop.slice(loop.indexOf('# agy only: pin the review model'), loop.indexOf('### Enforced reviewer permissions'));
+    const block = readLib(LOCAL_AGENT_RECIPES.agy);
     assert.match(block, /if \[ "\$REVIEW_AGENT" = agy \] && \[ -z "\$AGY_MODEL_RESOLVED" \]; then/, 'the roster must be fetched for every agy review, not only when an effort level was requested');
     assert.match(block, /\bagy models\b/);
     assert.match(block, /Validate the requested model first/);
@@ -259,9 +374,102 @@ describe('review-loop parse contracts', () => {
       /\[ "\$AGENT" = agy \] && agy models\b/,
       'the roster probe must only fire for an agy entry, not every agent',
     );
-    assert.match(block, /agy block in `lib\/local-agent-review-loop\.md`/);
+    assert.match(block, /agy recipe in `lib\/local-agent-agy\.md`/);
     assert.match(block, /never a bare base/, 'the pinned default must be a leveled model name');
     assert.match(block, /validate AGY_ENH_MODEL against this; fall back to the newest Flash \(High\)/);
+  });
+
+  it('gives every enhance-loop agent a concrete invocation and no invented ~suffix grammar', () => {
+    // #351: grok and cursor used to read "Verified tool-free fallback" with no
+    // command at all, and the Pi runner claimed "the same model brackets and
+    // per-entry suffixes as local reviewers" / "model and thinking pins" even
+    // though plan-task's --enhance-with parser (unlike --review-with) strips only
+    // a [<model>] bracket -- no ~opt/~max/~effort grammar exists to carry a
+    // --thinking flag. Every row must now either give a runnable command or point
+    // at the one per-CLI recipe file that has it, and the Pi section must not
+    // claim inputs the parser never produces.
+    const enhance = readLib('enhance-loop.md');
+
+    assert.match(enhance, /`grok` \| `grok -p "\$ENHANCE_PROMPT" \$\{MODEL_FLAG\[@\]\+"\$\{MODEL_FLAG\[@\]\}"\}`/);
+    assert.match(enhance, /`cursor` \| Binary probe \+ invocation in `lib\/local-agent-cursor\.md`/);
+
+    const piSection = enhance.slice(enhance.indexOf('### Pi enhancement runner'));
+    assert.match(piSection, /no `~opt`\/`~max`\/`~effort` suffix grammar/);
+    assert.doesNotMatch(piSection, /per-entry suffixes/);
+    assert.doesNotMatch(piSection, /thinking pins/);
+    assert.match(
+      piSection,
+      /pi --print --no-approve --no-tools --no-builtin-tools --no-extensions --no-skills --no-prompt-templates --no-themes --no-context-files --no-session \$\{MODEL_FLAG\[@\]\+"\$\{MODEL_FLAG\[@\]\}"\} -- "\$ENHANCE_PROMPT"/,
+    );
+    assert.doesNotMatch(enhance, /model and thinking pins/);
+  });
+
+  it('requires unique, collision-checked heredoc delimiters for draft data', () => {
+    const enhance = readLib('enhance-loop.md');
+    assert.match(enhance, /choose a fresh,\s+unpredictable delimiter literal for each payload/);
+    assert.match(enhance, /verify that it does not occur as\s+an exact line in that payload/);
+    assert.match(enhance, /if it does, generate another/);
+    assert.match(enhance, /Substitute that same\s+quoted literal at both ends of each heredoc/);
+    assert.match(enhance, /<<'<TITLE_DELIMITER>'[\s\S]*?<TITLE_DELIMITER>/);
+    assert.match(enhance, /<<'<BODY_DELIMITER>'[\s\S]*?<BODY_DELIMITER>/);
+    assert.match(enhance, /<<'<CONTEXT_DELIMITER>'[\s\S]*?<CONTEXT_DELIMITER>/);
+    assert.doesNotMatch(enhance, /DRAFT_EOF/);
+  });
+
+  it("guards enhance-loop's snapshot/restore against a planted git hook or .git/config edit", () => {
+    // #351: the loop already snapshotted HEAD/index/tracked/untracked state before
+    // running agy/grok/cursor/pi with real tools, but never captured .git/config or
+    // hooks -- so a reviewer that planted a hook or set core.hooksPath would survive
+    // the "restore" and get code execution on the orchestrator's next git
+    // commit/push. Mirror local-agent-review-loop.md's git-metadata guard: capture
+    // it as a fifth baseline artifact and restore it FIRST, before any other git
+    // command runs in the restore sequence.
+    // #349: the snapshot/restore now lives ONCE in lib/local-cli-runner.md, used by
+    // enhance, the local-agent loop, and the parallel barrier, so the guard can no
+    // longer drift between copies (the local-agent copy had lost the mode-bit hash).
+    const enhance = readLib('enhance-loop.md');
+    const step2 = enhance.slice(enhance.indexOf('2. **Rebuild `$ENHANCE_PROMPT`**'), enhance.indexOf('3. **Invoke** per the table above.'));
+    assert.match(step2, /take the runner's \*\*Snapshot\*\*/);
+    const step4 = enhance.slice(enhance.indexOf('4. **Verify the read-only contract'));
+    assert.match(step4, /Run the runner's\s+\*\*Verify and restore\*\*/);
+    assert.match(step4, /no-op \(modified the working tree — contract violation\)/);
+    assert.match(step4, /\*\*If the restore failed\*\*, stop the\s+pipeline/);
+    for (const [name, body] of [['enhance-loop.md', enhance], ['local-agent-review-loop.md', readLib('local-agent-review-loop.md')]]) {
+      assert.doesNotMatch(body, /git_meta_hash\(\) \{|UNTRACKED_TAR=|git stash create/, `${name} must not restate the runner's snapshot`);
+    }
+
+    const runner = readLib('local-cli-runner.md');
+    const snapshot = runner.slice(runner.indexOf('### Snapshot'), runner.indexOf('### Launch and wait'));
+    assert.match(snapshot, /GIT_COMMON="\$\(cd "\$\(git rev-parse --git-common-dir\)" && pwd -P\)"/);
+    assert.match(snapshot, /cp -p "\$GIT_COMMON\/config" "\$GIT_META_BAK\/config"/);
+    assert.match(snapshot, /tar -cf "\$GIT_META_BAK\/hooks\.tar" -C "\$GIT_COMMON" hooks/);
+    assert.match(snapshot, /git_meta_hash\(\) \{/);
+    assert.match(snapshot, /tar -cf - -C "\$GIT_COMMON" config hooks \| shasum -a 256/);
+    assert.match(snapshot, /git ls-files --others --exclude-standard -z \| tar --null -T - -cf - \| shasum -a 256/);
+    assert.doesNotMatch(snapshot, /git ls-files --others --exclude-standard \| sort/);
+    assert.match(snapshot, /GIT_META_BASELINE=\$\(git_meta_hash\)/);
+    assert.match(snapshot, /MTIME_STAMP=/);
+
+    const restore = runner.slice(runner.indexOf('### Verify and restore'));
+    const metadataStart = restore.indexOf('```bash') + '```bash'.length;
+    const metadataEnd = restore.indexOf('\n```', metadataStart);
+    const metadataCode = restore.slice(metadataStart, metadataEnd);
+    assert.doesNotMatch(metadataCode, /\bgit\s+(?:rev-parse|write-tree|diff|ls-files|hash-object|clean|restore|reset|read-tree)\b/);
+    assert.match(metadataCode, /GIT_META_CURRENT=\$\(git_meta_hash\)/);
+    assert.match(metadataCode, /cp -p "\$GIT_META_BAK\/config" "\$GIT_COMMON\/config"/);
+    assert.match(restore, /rm -rf "\$GIT_COMMON\/hooks"/);
+    assert.match(restore, /tar -xpf "\$GIT_META_BAK\/hooks\.tar" -C "\$GIT_COMMON"/);
+    assert.match(restore, /\[ ! -f "\$GIT_META_BAK\/hooks\.tar" \]/);
+    assert.doesNotMatch(restore, /GIT_COMMON="\$\{GIT_COMMON:-\$\(git rev-parse/);
+    assert.match(restore, /git ls-files --others --exclude-standard -z \| tar --null -T - -cf - \| shasum -a 256/);
+    // Metadata validation/restoration is completed before any Git comparison runs.
+    assert.ok(
+      metadataEnd < restore.indexOf('git rev-parse HEAD'),
+      'git metadata must be restored before HEAD/index/worktree/untracked',
+    );
+    assert.match(restore, /git clean -fd -- \.` to remove all non-ignored untracked content/);
+    assert.match(restore, /tar -xpf "\$UNTRACKED_TAR"/);
+    assert.match(restore, /-newer "\$MTIME_STAMP"/, 'gitignored edits must still be detected');
   });
 
   it('tells the in-process claude reviewer what to do with ~effort, and what not to reach for', () => {
@@ -271,8 +479,8 @@ describe('review-loop parse contracts', () => {
     // skill for $LOCAL_PROMPT, which fans out on its own and reports in its own
     // format, so the loop's FINDING/NO FINDINGS parse had nothing to read and the
     // reviewer's merge-gate slot was filled by a verdict nobody verified.
-    const localAgent = readLib('local-agent-review-loop.md');
-    const inProcess = localAgent.slice(localAgent.indexOf('When `REVIEW_AGENT=claude`: dispatch an in-process sub-agent'));
+    const inProcess = readLib(LOCAL_AGENT_RECIPES.claude);
+    assert.match(inProcess, /<!-- if:teams -->\n### Step 2 under Claude Code: in-process sub-agent/);
     assert.match(inProcess, /\*\*Effort\*\*: there is no in-process analog of `--effort`/);
     assert.match(inProcess, /no reasoning-effort parameter/);
     assert.match(inProcess, /Target reasoning effort level/);
@@ -281,11 +489,56 @@ describe('review-loop parse contracts', () => {
     assert.match(inProcess, /\/code-review/);
   });
 
+  it('uses Claude Code in-process only when the tool boundary is enforceable', () => {
+    const localAgent = readLocalAgent();
+    const enhance = readLib('enhance-loop.md');
+    const dispatch = readLib(LOCAL_AGENT_RECIPES.claude);
+
+    assert.match(dispatch, /Agent API can enforce the isolation profile below/);
+    assert.match(dispatch, /expose just `Read,Glob,Grep` and disable MCP, hooks, browser, shell, write, and network tools/);
+    assert.match(dispatch, /snapshot and Step 3 restore are defense in depth, not isolation/);
+    assert.match(dispatch, /REVIEWER_APPLIES=false/);
+    assert.doesNotMatch(dispatch, /verified `REVIEWER_APPLIES=true`/);
+    assert.doesNotMatch(localAgent, /This rule overrides every in-process dispatch example below/);
+    assert.doesNotMatch(localAgent, /flags below disable each CLI's approval gates/);
+    assert.match(enhance, /Under Claude Code, use an in-process sub-agent only when this invocation can enforce the read-only isolation profile/);
+    assert.match(enhance, /snapshot\/restore is defense in\s+depth, not a tool boundary/);
+    assert.match(enhance, /If isolation cannot be verified, skip\s+the pass as inconclusive and keep the original draft/);
+  });
+
+  it('commits leftover edits before clean and normalizes reviewer-applies commits', () => {
+    const loop = readLib('local-agent-review-loop.md');
+    const reviewOnly = loop.slice(
+      loop.indexOf('**When `REVIEWER_APPLIES=false` (default — orchestrator applies)**'),
+      loop.indexOf('**When `REVIEWER_APPLIES=true` (reviewer applies)**'),
+    );
+    const reviewerApplies = loop.slice(loop.indexOf('**When `REVIEWER_APPLIES=true` (reviewer applies)**'));
+
+    // The apply rules live once in the shared fix tail (#349), used by local-agent and Ollama.
+    const tail = readLib('review-fix-tail.md');
+    const apply = tail.slice(tail.indexOf('### Apply'), tail.indexOf('### 4.'));
+    assert.ok(
+      apply.indexOf('If recomputed `UNCOMMITTED > 0`') < apply.indexOf('If recomputed `NEW_COMMITS == 0`'),
+    );
+    assert.match(apply, /address review \(\{FIX_LABEL\}\): orchestrator-applied — remaining changes/);
+    assert.match(reviewOnly, /shared tail's \*\*Apply\*\* section, with `\{FIX_LABEL\}` set to `\$REVIEW_AGENT`/);
+    assert.match(readLib('ollama-review-loop.md'), /shared tail's \*\*Apply\*\* section, with `\{FIX_LABEL\}` set to `ollama`/);
+    for (const name of ['local-agent-review-loop.md', 'ollama-review-loop.md']) {
+      const body = readLib(name);
+      assert.equal(body.split('!read lib/review-fix-tail.md').length, 2, `${name} must read the shared tail exactly once`);
+      assert.doesNotMatch(body, /orchestrator-applied — remaining changes|PUSH_REMOTE=|CEILING/, `${name} must not restate the shared tail`);
+    }
+    assert.match(reviewerApplies, /leave its changes uncommitted/);
+    assert.match(reviewerApplies, /git reset --soft "\$LOOP_START_SHA"/);
+    assert.match(reviewerApplies, /address review \(\$REVIEW_AGENT\): <summary>/);
+    assert.doesNotMatch(reviewerApplies, /chore: local review changes/);
+  });
+
   it('lets ~opt excuse no-verdict and lets capped satisfy partial', () => {
     // Two ways a new status gets stranded: added to a loop's status set but not to
     // the aggregate rules that consume it. A ~opt no-verdict must reach the
     // optional-inconclusive exclusion, and a stop-mode run whose only pass returned
-    // capped must match `partial` — otherwise it matches NO rule at all (`clean`
+    // capped must match `partial` — otherwise it matches NO row at all (`clean`
     // excludes stop-short-circuited runs) and the merge is blocked.
     const wrapper = readLib('multi-reviewer-loop.md');
     assert.match(
@@ -295,7 +548,7 @@ describe('review-loop parse contracts', () => {
     assert.match(wrapper, /`no-verdict` — a local agent that ran but did not answer in the verdict format/);
     assert.match(
       wrapper,
-      /- `partial` — .*every executed pass returned a clean-equivalent status — `clean`, copilot `too-large`, or `capped`/,
+      /\| `partial` \|.*every executed pass returned a clean-equivalent status — `clean`, copilot `too-large`, or `capped`/,
     );
   });
 
@@ -313,8 +566,10 @@ describe('review-loop parse contracts', () => {
     assert.match(wrapper, /else\n\s*UNPUSHED=""/, 'no upstream must skip the assertion');
     assert.match(wrapper, /`git status` is not a substitute/);
     assert.match(wrapper, /\*\*record the pass as `push-failed`\*\*/);
-    // The union apply in parallel mode is the only writer, so it needs the same guard.
-    assert.match(wrapper, /\*\*Assert the applied fixes reached the remote\*\*/);
+    // The union apply in parallel mode is the only writer, so it needs the same guard
+    // (parallel-only content now lives in its own on-demand partial).
+    const parallelLib = readLib('multi-reviewer-parallel.md');
+    assert.match(parallelLib, /\*\*Assert the applied fixes reached the remote\*\*/);
   });
 
   it('routes push-failed to inconclusive and refuses to let ~opt excuse it', () => {
@@ -344,11 +599,14 @@ describe('review-loop parse contracts', () => {
     // follow it. No length>0 canary: a correctly-qualified rewording that happens to
     // avoid every stem must not fail for being differently worded — the verbatim
     // "but never for `push-failed`" assertion further down is what pins that the
-    // qualification exists at all.
+    // qualification exists at all. Now that the aggregate rules are consolidated into
+    // one ordered table (#350), each exemption's qualifying clause sits inside a longer
+    // table cell than the old bullet-list prose, so the window is wider than the single
+    // repeated bullet this test originally guarded against.
     const exemptions = [...wrapper.matchAll(/(?:ignor|exclud|excus|count|waiv|appl)\w*\s+here/gi)];
     for (const m of exemptions) {
       assert.match(
-        wrapper.slice(Math.max(0, m.index - 200), m.index + 200),
+        wrapper.slice(Math.max(0, m.index - 300), m.index + 300),
         /push-failed/,
         `an ~opt exemption at index ${m.index} does not name the statuses it covers — unqualified, it reads as license to merge a pass whose fixes never reached the remote`,
       );
@@ -358,8 +616,12 @@ describe('review-loop parse contracts', () => {
     // silence the hard-error short-circuit and downgrade the aggregate from dirty
     // to inconclusive, past do:pr's "abort before creating the PR on dirty" gate.
     assert.match(wrapper, /\*\*except a hard-error\*\* \(`cli-error`\/`broken-build`\/`test-failed`\/`rejected`\), which keeps its own status/);
-    // The consumers that restate the aggregate rule must agree with it.
-    assert.match(readCommand('release.md'), /or `push-failed`, a pass whose fix commits never reached the remote/);
+    // /do:release must consume the aggregate, not restate it: its old copy of the
+    // `inconclusive` rule had no ~opt exception and refused merges the wrapper cleared.
+    const release = fs.readFileSync(path.join(__dirname, '..', 'commands', 'do', 'release.md'), 'utf8');
+    assert.match(release, /Merge only when the wrapper's `\{OVERALL_STATUS\}` is `clean`, or `partial` with an explicit/);
+    assert.doesNotMatch(release, /\*\*at least one\*\* executed pass was inconclusive/);
+    assert.doesNotMatch(release, /Copilot-specific checks|Awaiting requested review/);
   });
 
   it('scopes the push assertion to the pass and never pushes by fan-out', () => {
@@ -372,9 +634,10 @@ describe('review-loop parse contracts', () => {
     assert.match(wrapper, /if \[ "\$PASS_START_SHA" = "\$\(git rev-parse HEAD\)" \]; then/);
     // Parallel mode reuses the whole block (derivation + scoping + push together)
     // rather than restating a push whose variables nothing in that section defines.
+    // Parallel-only content now lives in its own on-demand partial.
     assert.match(
-      wrapper,
-      /\*\*the same block\*\* the series dispatch's step 5 defines, verbatim, with `PARALLEL_START_SHA` substituted for `PASS_START_SHA`/,
+      readLib('multi-reviewer-parallel.md'),
+      /\*\*the same block\*\* the series dispatch's step 5 defines.*, verbatim, with `PARALLEL_START_SHA` substituted for `PASS_START_SHA`/,
       'parallel mode needs the same zero-commit scoping and target derivation',
     );
     // The destination must come from @{u}, never from the local branch name:
@@ -408,6 +671,17 @@ describe('review-loop parse contracts', () => {
       /git push [^\n`]*HEAD:refs\/heads\//,
       'no prescribed push may re-prefix refs/heads/ (naming it in a warning is fine)',
     );
+    // The local-agent and Ollama loops push through the one shared fix tail (#349).
+    for (const name of ['review-fix-tail.md']) {
+      const loop = readLib(name);
+      assert.match(loop, /PUSH_REMOTE="\$\(git config --get "branch\.\$BR\.remote"\)"/, `${name} must derive its push remote from branch config`);
+      assert.match(loop, /PUSH_BRANCH="\$\(git config --get "branch\.\$BR\.merge"\)"/, `${name} must derive its push ref from branch config`);
+      assert.match(loop, /\[ "\$PUSH_REMOTE" = "\." \]/, `${name} must reject a local upstream`);
+      const prescribed = [...loop.matchAll(/git push [^\n`]*?HEAD:[^\s"`]*/g)].map((m) => m[0]);
+      assert.ok(prescribed.length >= 2, `${name} must prescribe the upstream-derived push and retry`);
+      assert.ok(prescribed.every((c) => c === 'git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH'), `${name} has a non-derived push: ${prescribed.join(' | ')}`);
+      assert.doesNotMatch(loop, /git push origin \{BRANCH_NAME\}/, `${name} must not assume origin or the local branch name`);
+    }
     // The variables must be consumed in the shell that set them — spec snippets run
     // as separate Bash calls, where an empty PUSH_REMOTE means `git push "" "HEAD:"`.
     // The point is that the push lives inside the guard, in the same shell — not
@@ -445,7 +719,7 @@ describe('review-loop parse contracts', () => {
     assert.match(pr, /Leaving the fixes uncommitted is invisible to that section's assertion/);
     // The gate's push must name its form, not leave it to the orchestrator — the two
     // forms it would otherwise reach for are the two this file forbids.
-    assert.match(pr, /using the upstream-derived push described under "Open the PR"/);
+    assert.match(pr, /using "Open the PR"'s upstream-derived push below/);
     // Without a stop-on-failure clause the orchestrator falls through to gh pr create
     // and opens exactly the stale pre-review PR this guard exists to prevent.
     assert.match(pr, /\*\*If the push still fails after that one retry, do NOT create the PR\*\*/);
@@ -508,7 +782,7 @@ describe('review-loop parse contracts', () => {
     assert.match(resolver, /only then use `git rebase --skip`/);
     assert.match(resolver, /a resolved rebase is not a terminal status/);
 
-    for (const name of ['local-agent-review-loop.md', 'ollama-review-loop.md']) {
+    for (const name of ['review-fix-tail.md']) {
       const loop = readLib(name);
       assert.match(loop, /rebase-conflict-resolution\.md/, `${name} must use the shared resolver`);
       assert.match(loop, /resolve and continue the rebase/, `${name} must continue after resolving`);
@@ -556,7 +830,7 @@ describe('review-loop parse contracts', () => {
     // ${ARR[@]+"${ARR[@]}"} form is safe on bash 3.2, bash 4/5, and zsh alike.
     // Scan by PATTERN, not by a hardcoded array-name list, so a newly introduced
     // optional-argument array is covered the day it lands.
-    for (const name of LOOPS_WITH_OPTIONAL_ARRAYS) {
+    for (const name of [...LOOPS_WITH_OPTIONAL_ARRAYS, ...Object.values(LOCAL_AGENT_RECIPES)]) {
       const body = readLib(name);
       // A bare "${ARR[@]}" — the lookbehind lets through the guarded ${ARR[@]+"${ARR[@]}"},
       // and the negative lookahead exempts the literal name `ARR`, which is the prose
@@ -582,7 +856,7 @@ describe('review-loop parse contracts', () => {
     // (alias `cursor-agent`). The binary is NOT `cursor` and is NOT a bare
     // `agent` without an identity check: Grok Build also installs `agent` on
     // PATH, so treating that as Cursor would silently review with the wrong CLI.
-    const loop = readLib('local-agent-review-loop.md');
+    const loop = readLocalAgent();
     const wrapper = readLib('multi-reviewer-loop.md');
 
     assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode\|cmd\[<invocation>\]`/);
@@ -591,12 +865,12 @@ describe('review-loop parse contracts', () => {
     assert.match(loop, /command -v cursor-agent/);
     assert.match(loop, /Grok Build also installs an `agent` binary/);
     assert.match(loop, /plan\/ask by itself does not enforce/);
-    assert.match(loop, /\| `cursor` \| folded into `--model` as `\[effort=<level>\]`/);
+    assert.match(loop, /\| `cursor` \|[^\n]*\| folded into `--model` as `\[effort=<level>\]`/);
     // ~effort must actually change Cursor inference: fold into --model as
     // [effort=<level>], matching cursor[gpt-5]~effort=max and a saved
     // review-models cursor=gpt-5 plus cursor~effort=max. Never pass --effort.
     assert.match(loop, /CURSOR_MODEL="\$\{REVIEW_MODEL\}\[effort=\$\{REVIEW_EFFORT\}\]"/);
-    assert.match(loop, /"\$REVIEW_BIN" -p "\$LOCAL_PROMPT" \$\{MODEL_FLAG\[@\]\+"\$\{MODEL_FLAG\[@\]\}"\}/);
+    assert.match(loop, /"\$REVIEW_BIN" -p "\$LOCAL_PROMPT" --mode ask \$\{MODEL_FLAG\[@\]\+"\$\{MODEL_FLAG\[@\]\}"\}/);
 
     // Config and docs must advertise the same model + effort grammar as the
     // other reviewers — a saved review-models entry and a ~effort suffix.
@@ -611,10 +885,11 @@ describe('review-loop parse contracts', () => {
     assert.match(wrapper, /Cursor binary probe/);
 
     const enhance = readLib('enhance-loop.md');
-    assert.match(enhance, /`cursor` \| Verified tool-free fallback/);
+    assert.match(enhance, /`cursor` \| Binary probe \+ invocation in `lib\/local-agent-cursor\.md`/);
+    assert.match(enhance, /Only when `\{AGENT\}` is `cursor`:\n!read lib\/local-agent-cursor\.md/);
 
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'rpr.md', 'config.md']) {
-      const body = readCommand(name);
+      const body = readCommandDocs(name, { eager: true });
       assert.match(
         body,
         /`cursor`/,
@@ -632,22 +907,55 @@ describe('review-loop parse contracts', () => {
     assert.match(rpr, /\{OLLAMA_EFFORT\}/);
   });
 
+  it('cursor never auto-trusts or auto-approves, and a trust refusal is skipped, not cli-error (#399)', () => {
+    // An untrusted workspace makes cursor print "Workspace Trust Required" and
+    // exit 1 before any model call. As cli-error that is a hard error ~opt can't
+    // excuse, so the first run in any new clone aborted /do:pr.
+    const recipe = readLib(LOCAL_AGENT_RECIPES.cursor);
+    const loop = readLib('local-agent-review-loop.md');
+    const invocation = recipe.match(/^"\$REVIEW_BIN" -p [^\n]*$/m);
+    assert.ok(invocation, 'cursor recipe must carry its print-mode invocation');
+    // --trust persists (~/.cursor/projects/<ws>/.workspace-trusted): it would
+    // silently change the user's Cursor state and relax the gate that stands
+    // between an attacker-influenced checkout and the agent. --mode ask is the belt.
+    assert.doesNotMatch(invocation[0], /--trust\b/);
+    assert.match(recipe, /\*\*Do not pass `--trust`\.\*\*/);
+    assert.match(invocation[0], /--mode ask\b/);
+    // Never a flag that auto-approves commands, MCP servers, or tool calls.
+    // (The 'never grants blanket permissions' test already bans the long aliases
+    // anywhere in the local-agent text.)
+    assert.doesNotMatch(invocation[0], /(?:^|\s)(?:-f|--approve-mcps|--auto-review|--sandbox)\b/);
+    assert.match(recipe, /\*\*Never\*\* pass an auto-approve flag either — `-f`/);
+
+    // The classifier: non-zero exit + trust notice on stderr => skipped, deferred
+    // past Step 3's restoration check, matched on $ERR_FILE only.
+    assert.match(recipe, /grep -q 'Workspace Trust Required' "\$ERR_FILE" 2>/);
+    assert.match(recipe, /CURSOR_TRUST_REQUIRED=true\n/);
+    const step3 = recipe.slice(recipe.indexOf('CURSOR_TRUST_REQUIRED=true` after the restoration check'));
+    assert.match(step3, /STATUS=skipped/);
+    assert.doesNotMatch(step3, /STATUS=cli-error/);
+    assert.match(recipe, /same reasoning as `cmd`'s `126`\/`127`/);
+
+    // The generic loop must run the cursor classifier before its cli-error branch.
+    assert.match(loop, /recipe exit classifier \([^)]*cursor: workspace trust\) \*\*before\*\*/);
+    assert.match(loop, /cursor: a flagged workspace-trust refusal returns `skipped`/);
+  });
+
   it('accepts opencode (and zen aliases) as a local-agent reviewer and probes the OpenCode CLI', () => {
     // OpenCode is a model-taking local reviewer. The slug is `opencode`
     // (aliases `zen`, `opencode-zen`). The binary is `opencode`.
     // OpenCode has no slashdo-bundled model default because headless admission
     // for the former free-tier default is not verified. Explicit/configured
     // models still normalize friendly aliases, and effort maps to --variant.
-    const loop = readLib('local-agent-review-loop.md');
+    const loop = readLocalAgent();
     const wrapper = readLib('multi-reviewer-loop.md');
 
     assert.match(loop, /`--review-with codex\|agy\|claude\|grok\|pi\|cursor\|opencode\|cmd\[<invocation>\]`/);
     assert.match(loop, /`zen` and `opencode-zen` normalize to `opencode`/);
-    assert.match(loop, /`opencode` → bin `opencode`/);
+    assert.match(loop, /\| `opencode` \| `opencode` \| `--variant <level>` \|/);
     assert.match(loop, /no\s+slashdo override/);
     assert.match(loop, /headless provider admission is not verified/);
     assert.match(loop, /opencode\/muse-spark-1\.3-contributor-free/);
-    assert.match(loop, /\| `opencode` \| `--variant <level>`/);
     assert.match(loop, /opencode\)\s+EFFORT_FLAG=\(--variant "\$REVIEW_EFFORT"\) ;;/);
     assert.match(loop, /opencode run --pure/);
     assert.match(loop, /< \/dev\/null/);
@@ -662,11 +970,13 @@ describe('review-loop parse contracts', () => {
     assert.match(wrapper, /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode`/);
     assert.match(wrapper, /Use one of: codex, agy, claude, grok, pi, cursor, opencode, ollama, copilot/);
     assert.match(wrapper, /`zen`\/`opencode-zen` both probe the `opencode` binary/);
-    assert.match(wrapper, /In \*\*parallel mode\*\* the same rules apply[\s\S]*no-verdict/);
-    assert.match(wrapper, /non-optional\*\* reviewer's review was inconclusive[\s\S]*no-verdict/);
+    // Parallel-mode aggregate rules now live in their own on-demand partial.
+    const parallelLib = readLib('multi-reviewer-parallel.md');
+    assert.match(parallelLib, /In \*\*parallel mode\*\* the same rules apply[\s\S]*no-verdict/);
+    assert.match(parallelLib, /non-optional\*\* reviewer's review was inconclusive[\s\S]*no-verdict/);
 
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'rpr.md', 'config.md']) {
-      const body = readCommand(name);
+      const body = readCommandDocs(name, { eager: true });
       assert.match(
         body,
         /`opencode`/,
@@ -676,7 +986,7 @@ describe('review-loop parse contracts', () => {
   });
 
   it('maps OpenCode provider admission denial to sanitized no-verdict and preserves reviewer aggregation', () => {
-    const loop = readLib('local-agent-review-loop.md');
+    const loop = readLocalAgent();
     const wrapper = readLib('multi-reviewer-loop.md');
     const swarm = readLib('next-swarm.md');
 
@@ -694,7 +1004,8 @@ describe('review-loop parse contracts', () => {
   });
 
   it('preserves per-reviewer OpenCode admission outcomes across the parallel restoration barrier', () => {
-    const parallel = readLib('multi-reviewer-loop.md')
+    // Parallel-only content now lives in its own on-demand partial.
+    const parallel = readLib('multi-reviewer-parallel.md')
       .split('### Parallel dispatch')[1].split('### Aggregate report')[0];
     const [launch, barrier] = parallel.split('3. **Barrier**');
 
@@ -714,10 +1025,10 @@ describe('review-loop parse contracts', () => {
     // carries no model/effort bracket of its own — the invocation IS the
     // identity — and always runs review-only, since an opaque command's
     // isolation can never be verified the way codex's sandbox can.
-    const loop = readLib('local-agent-review-loop.md');
+    const loop = readLocalAgent();
     const wrapper = readLib('multi-reviewer-loop.md');
 
-    assert.match(loop, /### The `cmd` reviewer/);
+    assert.match(loop, /#+ The `cmd` reviewer/);
     assert.match(loop, /The contract is stdin in, stdout out/);
     assert.match(loop, /printf '%s' "\$LOCAL_PROMPT"/);
     assert.match(loop, /always forces review-only/);
@@ -744,7 +1055,7 @@ describe('review-loop parse contracts', () => {
     );
 
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'better-swift.md', 'rpr.md', 'config.md', 'depfree.md']) {
-      const body = readCommand(name);
+      const body = readCommandDocs(name, { eager: true });
       assert.match(body, /cmd\[<invocation>\]/, `${name} must document and accept cmd[<invocation>]`);
     }
 
@@ -752,42 +1063,45 @@ describe('review-loop parse contracts', () => {
     // cmd row must not fold the `printf ... |` into the cell — Step 2 wraps
     // {INVOCATION} in TIMEOUT_CMD, and a pipe inside it leaves the timeout wrapping
     // only the printf while the reviewer command itself runs unbounded.
-    const cmdRow = loop.split('\n').find((line) => /^\| `cmd` \|/.test(line));
-    assert.ok(cmdRow, 'local-agent-review-loop.md must carry a `cmd` invocation-table row');
+    const cmdRecipe = readLib(LOCAL_AGENT_RECIPES.cmd);
     assert.ok(
-      !/printf[^|]*\\\|\s*bash -c/.test(cmdRow),
-      'the cmd invocation row must not fold `printf ... |` into {INVOCATION} — TIMEOUT_CMD would then bound only the printf',
+      !/printf[^\n]*\|\s*bash -c/.test(cmdRecipe),
+      'the cmd recipe must not fold `printf ... |` into {INVOCATION} — TIMEOUT_CMD would then bound only the printf',
     );
-    assert.match(cmdRow, /`bash -c "\$REVIEWER_CMD"` and nothing else/);
+    assert.match(cmdRecipe, /\*\*`\{INVOCATION\}` is `bash -c "\$REVIEWER_CMD"` and nothing else\.\*\*/);
 
     // ...and the RUNNABLE templates must carry the pipe themselves. The prose rule
     // alone is not enough: both blocks say "capture the command exactly as shown",
     // so a cmd pass run from the plain form launches the reviewer with no stdin and
     // blocks until the timeout or reads EOF and reports nothing.
-    const cmdStdinForm = /if \[ "\$REVIEW_AGENT" = cmd \]; then[^\n]*\n\s*printf '%s' "\$LOCAL_PROMPT" \| \$\{TIMEOUT_CMD\[@\]\+"\$\{TIMEOUT_CMD\[@\]\}"\} \{INVOCATION\}/g;
-    assert.equal(
-      (loop.match(cmdStdinForm) || []).length,
-      2,
-      'both the background and foreground Step-2 templates must pipe $LOCAL_PROMPT into a cmd invocation',
-    );
+    // The launch is the shared runner's (#349): one block, whose stdin branch pipes the
+    // caller's PROMPT_ON_STDIN in front of the timed line, and the local-agent loop
+    // must set it to $LOCAL_PROMPT for cmd (and empty for everyone else).
+    const runner = readLib('local-cli-runner.md');
+    const stdinForm = /if \[ -n "\$PROMPT_ON_STDIN" \]; then\n\s*printf '%s' "\$PROMPT_ON_STDIN" \| \$\{TIMEOUT_CMD\[@\]\+"\$\{TIMEOUT_CMD\[@\]\}"\} \{INVOCATION\}/;
+    assert.match(runner, stdinForm, 'the runner launch must pipe the stdin prompt into the timed invocation');
+    assert.match(runner, /run the identical launch block in the foreground/, 'the no-background fallback must reuse the same stdin-aware block');
+    assert.match(loop, /Set `PROMPT_ON_STDIN="\$LOCAL_PROMPT"` for `cmd`[^\n]*`PROMPT_ON_STDIN=""` for every other reviewer/);
 
-    // The .git snapshot has to see a SYMLINKED hook. git executes one just the same,
-    // and `find -type f` alone skips it — so `ln -s /tmp/payload .git/hooks/pre-commit`
-    // would leave the baseline hash unchanged and survive the wholesale restore.
-    assert.match(loop, /find "\$GIT_COMMON\/hooks" \\\( -type f -o -type l \\\)/);
-    assert.match(loop, /readlink "\$f" 2>\/dev\/null \|\| cat "\$f"/);
+    // Tar includes symlink targets and hook modes; the untracked manifest keeps
+    // newline-containing paths and their contents intact through NUL separators.
+    assert.match(runner, /tar -cf - -C "\$GIT_COMMON" config hooks \| shasum -a 256/);
+    assert.match(runner, /tar --null -T - -cf - \| shasum -a 256/);
 
-    // The restore's `rm -rf "$GIT_COMMON/hooks"` must be guarded: GIT_COMMON is a
-    // step-1 variable and step 3 is a separate shell on most hosts, so an unbound one
-    // makes that line `rm -rf /hooks`.
-    assert.match(loop, /GIT_COMMON="\$\{GIT_COMMON:-\$\(git rev-parse --git-common-dir\)\}"/);
-    assert.match(loop, /if \[ -z "\$GIT_COMMON" \] \|\| \[ -z "\$GIT_META_BAK" \]/);
+    // The restore may run in another shell; missing saved paths fail closed, and
+    // Git cannot derive GIT_COMMON before the potentially hostile config is restored.
+    assert.match(runner, /if \[ -z "\$\{GIT_COMMON:-\}" \] \|\| \[ -z "\$\{GIT_META_BAK:-\}"/);
+    assert.doesNotMatch(runner, /GIT_COMMON="\$\{GIT_COMMON:-\$\(git rev-parse/);
 
-    // Parsing cmd is not the same as dispatching it — pr.md/release.md/review.md
-    // each name the local-agent loop's actual per-agent dispatch line inline
-    // (not via a shared partial), so `cmd` has to be added to each one by hand.
-    assert.match(readCommand('pr.md'), /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode` \| `cmd` → local-agent headless review loop/);
-    assert.match(readCommand('release.md'), /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode` \| `cmd` → local-agent headless review loop/);
+    // Parsing cmd is not the same as dispatching it — review.md names the
+    // local-agent loop's actual per-agent dispatch line inline (not via a shared
+    // partial), so `cmd` has to be added there by hand. pr.md and release.md have
+    // no inline dispatch list — their exclusion-gated `!read`s (asserted above)
+    // are the dispatch.
+    assert.match(readCommand('pr.md'), /hands off to the \*\*multi-reviewer wrapper\*\*[^\n]*`LOCAL_AGENTS`[^\n]*`cmd` included/);
+    // release.md has no inline dispatch list — its exclusion-gated `!read`s (asserted
+    // above) are the dispatch — but it must forward the saved per-agent models.
+    assert.match(readCommand('release.md'), /hand off to the \*\*multi-reviewer loop\*\*[^\n]*`\{REVIEW_MODELS\}`/);
     assert.match(readCommand('review.md'), /`codex` \| `agy` \| `claude` \| `grok` \| `pi` \| `cursor` \| `opencode` \| `cmd` \| `ollama` — invoke the local-agent review loop/);
     assert.match(readCommand('pr.md'), /`ollama\[…\]`, `cmd\[<invocation>\]`\. These review the working tree locally/);
 
@@ -817,7 +1131,7 @@ describe('review-loop parse contracts', () => {
     // Scope it to the --review-with bullet: config.md's --trusted-authors bullet
     // legitimately splits on every comma (logins can't contain one).
     for (const name of ['pr.md', 'release.md', 'rpr.md', 'review.md', 'config.md', 'depfree.md', 'better-swift.md']) {
-      const bullet = readCommand(name)
+      const bullet = readCommandDocs(name, { eager: true })
         .split('\n')
         .find((line) => /^\s*-\s.*`--review-with/.test(line) && /[Ss]plit on `,`/.test(line));
       assert.ok(bullet, `${name} must carry a --review-with bullet that states how the list is split`);
@@ -834,10 +1148,10 @@ describe('review-loop parse contracts', () => {
     // reaches agy/grok/cursor/opencode/cmd sends a user to grant an unsandboxed CLI
     // write access, and the run then trips the "modified the working tree during a
     // review-only pass — reverted" path instead of behaving as documented.
-    assert.match(loop, /so `agy`\/`grok`\/`pi`\/`cursor`\/`opencode`\/`cmd` always run review-only/);
+    assert.match(loop, /so every prompt-driven reviewer always runs review-only/);
     for (const name of ['pr.md', 'release.md', 'review.md', 'rpr.md', 'depfree.md', 'better-swift.md']) {
       assert.match(
-        readCommand(name),
+        readCommandDocs(name, { eager: true }),
         /only.{0,40}`codex`|`codex` pass/,
         `${name} must say --reviewer-applies reaches only the codex pass`,
       );
@@ -861,12 +1175,16 @@ describe('review-loop parse contracts', () => {
 
     // The snapshot+revert that lets those reviewers run must cover .git/ too —
     // write-tree/stash/ls-files never see a planted hook or a core.hooksPath edit.
-    assert.match(loop, /GIT_META_BASELINE=\$\(git_meta_hash\)/);
-    assert.match(loop, /git_meta_hash\s+# vs \$GIT_META_BASELINE/);
+    assert.match(runner, /GIT_META_BASELINE=\$\(git_meta_hash\)/);
+    assert.match(runner, /GIT_META_CURRENT=\$\(git_meta_hash\)/);
+    assert.match(runner, /untracked_manifest_hash\s+# vs \$UNTRACKED_BASELINE/);
     // ...and parallel mode, which runs only Step 2 per reviewer, must take that
     // snapshot once before the fan-out and compare once after the barrier.
-    assert.match(wrapper, /take the local-agent loop's Step-1 snapshot once, here/);
-    assert.match(wrapper, /Step-3 five-artifact comparison and wholesale restore \*\*once\*\*/);
+    // Parallel-only content now lives in its own on-demand partial.
+    const parallelLib = readLib('multi-reviewer-parallel.md');
+    assert.match(parallelLib, /take the shared runner's Snapshot once, here\*\* \(\[local-cli-runner\.md\]\(\.\/local-cli-runner\.md\)/);
+    assert.match(parallelLib, /runner's Verify and restore \(five-artifact comparison and wholesale restore\) \*\*once\*\*/);
+    assert.match(parallelLib, /never end your turn while a review is in flight/);
 
     // An oversized prompt on an argv path is a launch failure, not a verdict —
     // it must degrade to no-verdict rather than a hard cli-error.
@@ -879,9 +1197,8 @@ describe('review-loop parse contracts', () => {
     const loop = readLib('local-agent-review-loop.md');
     const wrapper = readLib('multi-reviewer-loop.md');
 
-    assert.match(loop, /`pi` → bin `pi`/);
+    assert.match(loop, /\| `pi` \| `pi` \| `--thinking <level>` \|/);
     assert.match(loop, /pi\)\s+EFFORT_FLAG=\(--thinking "\$REVIEW_EFFORT"\) ;;/);
-    assert.match(loop, /\| `pi` \| `--thinking <level>`/);
     assert.match(loop, /pi --print --no-approve --no-tools/);
     assert.match(loop, /never enable reviewer-applies for Pi/);
 
@@ -899,7 +1216,7 @@ describe('review-loop parse contracts', () => {
     // command's prose but unrecognized by the shared dispatch/validation libs
     // would make `--review-with pi` silently unsupported there.
     for (const name of ['review.md', 'pr.md', 'release.md', 'better.md', 'better-swift.md', 'rpr.md', 'config.md']) {
-      const body = readCommand(name);
+      const body = readCommandDocs(name, { eager: true });
       assert.match(
         body,
         /`pi`/,
@@ -1009,5 +1326,161 @@ describe('review-loop parse contracts', () => {
         `${name} must point at the shared empty-array-expansion partial rather than restating it`,
       );
     }
+  });
+});
+
+describe('shared review-flag parse partial (#311)', () => {
+  const raw = (name) => _read('commands', 'do', name);
+
+  it('pr.md and release.md include lib/review-flags.md instead of restating the grammar', () => {
+    for (const name of ['pr.md', 'release.md']) {
+      const body = raw(name);
+      assert.match(body, /!`cat ~\/\.claude\/lib\/review-flags\.md`/, `${name} must include the shared partial`);
+      assert.doesNotMatch(body, /Accepted values per slot/, `${name} must not carry its own copy of the --review-with grammar`);
+    }
+    assert.match(readLib('review-flags.md'), /Accepted values per slot/);
+  });
+
+  it('forwards saved review-models and names the full --review-iterations scope', () => {
+    const flags = readLib('review-flags.md');
+    assert.match(flags, /`\{REVIEW_MODELS\}` — the `EFFECTIVE_REVIEW_MODELS` map/);
+    assert.match(flags, /`\{REVIEW_ITERATIONS\}` \(the copilot \/ `@<login>` cycle cap\)/);
+    assert.match(raw('pr.md'), /and `\{REVIEW_MODELS\}` \(the saved per-agent default models/);
+    assert.doesNotMatch(raw('release.md'), /copilot iteration cap/);
+  });
+
+  it('review.md and rpr.md also include lib/review-flags.md instead of restating the grammar (#332)', () => {
+    for (const name of ['review.md', 'rpr.md']) {
+      const body = raw(name);
+      assert.match(body, /!`cat ~\/\.claude\/lib\/review-flags\.md`/, `${name} must include the shared partial`);
+      assert.doesNotMatch(body, /Accepted values per slot/, `${name} must not carry its own copy of the --review-with grammar`);
+      assert.doesNotMatch(body, /Accepted slugs: `codex`, `agy`/, `${name} must not carry a hand-copied slug list`);
+    }
+    // review.md's other own flags (parsed outside the shared partial) must survive the swap.
+    const reviewBody = raw('review.md');
+    assert.match(reviewBody, /--strict`\*\* \(alias: \*\*`--nuclear/);
+    assert.match(reviewBody, /--draft`\*\* \(PR mode only\)/);
+    assert.match(reviewBody, /--apply` \/ `--no-apply`\*\*/);
+    // rpr's own consequences of the grammar (never in the shared partial) must survive the swap.
+    const rprBody = raw('rpr.md');
+    assert.match(rprBody, /@<login>` entries are accepted by the parser but never requested/);
+    assert.match(rprBody, /forwarded as `\{MAX_ITERATIONS\}`/);
+    assert.match(rprBody, /rpr does not support `--review-iterations`/);
+  });
+
+  it('review.md forwards {REVIEW_MODELS} to the multi-reviewer wrapper (#332)', () => {
+    assert.match(raw('review.md'), /`\{REVIEW_MODELS\}` — the saved per-agent default models/);
+  });
+});
+
+describe('PLAN.md mode is retired (review/rpr/config)', () => {
+  const raw = (name) => _read('commands', 'do', name);
+  it('review and rpr treat --issues as a no-op and abort on --no-issues', () => {
+    for (const name of ['review.md', 'rpr.md']) {
+      const body = raw(name);
+      assert.match(body, /--issues is now the default \(PLAN\.md mode was removed\); the flag can be dropped\./, name);
+      assert.match(body, /--no-issues is no longer supported: PLAN\.md mode was removed\. slashdo records work only in the project's issue tracker\./, name);
+      assert.doesNotMatch(body, /ISSUE_MODE|\[--issues\|--no-issues\]|defer to PLAN\.md/, name);
+    }
+  });
+  it('config rejects --issues/--no-issues and no longer shows an issues key', () => {
+    const body = raw('config.md');
+    assert.match(body, /\/do:config --issues\/--no-issues was removed: PLAN\.md mode no longer exists, issues are always used\. Run \/do:config --unset issues to clean up a saved value\./);
+    assert.doesNotMatch(body, /^\s+issues\s+=/m);
+    assert.doesNotMatch(body, /\[--issues\|--no-issues\]/);
+  });
+  it('the shared issue libs carry no PLAN.md branch', () => {
+    for (const name of ['plan-issue-setup.md', 'plan-issue-filing.md', 'finding-disposition.md']) {
+      assert.doesNotMatch(readLib(name), /PLAN\.md|ISSUE_MODE|plan-id-format/, name);
+    }
+    assert.ok(!fs.existsSync(path.join(__dirname, '..', 'lib', 'plan-id-format.md')));
+  });
+});
+
+describe('local-agent loop loads only the launched harness recipe (#347)', () => {
+  const core = readLib('local-agent-review-loop.md');
+
+  it('gates each per-harness recipe behind its own agent', () => {
+    for (const [agent, file] of Object.entries(LOCAL_AGENT_RECIPES)) {
+      assert.match(
+        core,
+        new RegExp(`^Only when \`\\{REVIEW_AGENT\\}\` is \`${agent}\`:\\n!read lib/${file.replace('.', '\\.')}$`, 'm'),
+        `${file} must be a column-0 !read gated on ${agent} alone`,
+      );
+      assert.equal(core.split(`!read lib/${file}`).length, 2, `${file} must be read exactly once`);
+    }
+    // The curl installer ships every recipe.
+    for (const script of ['install.sh', 'uninstall.sh']) {
+      for (const file of Object.values(LOCAL_AGENT_RECIPES)) {
+        assert.match(_read(script), new RegExp(`\\b${file.replace('.md', '')}\\b`), `${script} must list ${file}`);
+      }
+    }
+  });
+
+  it('keeps harness-specific recipes out of the core every run pays for', () => {
+    assert.ok(Buffer.byteLength(core, 'utf8') <= 40000, 'the core must stay well under the old 75 KB');
+    for (const marker of [/agy models 2>/, /CURSOR_MODEL/, /OPENCODE_ADMISSION_DENIED=/, /prepare_claude_review_input/, /Why stdin/]) {
+      assert.doesNotMatch(core, marker, `${marker} belongs in its harness recipe`);
+    }
+    // Two named classes replace the per-slug enumerations; the usage line is the one list.
+    const lists = core.match(/`?\b(?:claude|codex|agy|grok|pi|cursor|opencode|cmd)\b`?(?:\s*[/,|]\s*`?\b(?:claude|codex|agy|grok|pi|cursor|opencode|cmd)\b`?){3,}/g) || [];
+    assert.equal(lists.length, 1, `the core re-enumerates the reviewer slugs: ${lists.join(' | ')}`);
+    assert.match(core, /\*\*Prompt-driven\*\* — every other reviewer/);
+  });
+
+  it('drops maintainer notes and citations that bundle libraries the loop never runs', () => {
+    const all = readLocalAgent();
+    assert.doesNotMatch(all, /keep the two in sync|Same split as/);
+    assert.doesNotMatch(all, /`lib\/(?:enhance-loop|ollama-review-loop|multi-reviewer-loop|review-config-defaults)\.md`|\]\(\.\/(?:enhance-loop|ollama-review-loop|multi-reviewer-loop)\.md\)/);
+  });
+});
+
+describe('local CLI runner and review fix tail are single-owner partials (#349)', () => {
+  const { buildPromptBundle } = require('../src/transformer');
+  const libDir = path.join(__dirname, '..', 'lib');
+  const bundleFiles = (name) => Object.keys(buildPromptBundle(_read('commands', 'do', name), libDir).files);
+
+  it('bundles the shared partials with their users and no whole-loop cross-citations', () => {
+    // enhance-loop.md used to cite local-agent-review-loop.md ("same pattern as"),
+    // and the local-agent loop once cited enhance-loop.md, so each command shipped the
+    // other's entire loop. Now both cite only the runner they actually execute.
+    for (const name of ['pr.md', 'rpr.md', 'review.md', 'release.md']) {
+      const files = bundleFiles(name);
+      for (const lib of ['local-cli-runner.md', 'review-fix-tail.md']) {
+        assert.ok(files.includes(lib), `${name} must bundle ${lib}`);
+      }
+      assert.ok(!files.includes('enhance-loop.md'), `${name} never runs the enhance loop`);
+    }
+    assert.ok(bundleFiles('plan-task.md').includes('local-cli-runner.md'), 'plan-task must bundle the runner enhance uses');
+    // What the enhance loop itself pulls in: the runner and its per-CLI recipes, never
+    // a review loop or the review fix tail.
+    const enhanceFiles = Object.keys(buildPromptBundle(readLib('enhance-loop.md'), libDir).files);
+    assert.ok(enhanceFiles.includes('local-cli-runner.md'));
+    for (const lib of ['local-agent-review-loop.md', 'ollama-review-loop.md', 'review-fix-tail.md']) {
+      assert.ok(!enhanceFiles.includes(lib), `enhance-loop.md must not bundle ${lib}`);
+    }
+    assert.doesNotMatch(readLib('enhance-loop.md'), /local-agent-review-loop\.md/);
+  });
+
+  it('keeps each timeout block and the fix-tail mechanics in one place', () => {
+    // The runner owns the 1800 s wrapper; Ollama keeps only its own per-file 600 s bound.
+    const timeoutOwners = fs.readdirSync(path.join(__dirname, '..', 'lib'))
+      .filter((f) => f.endsWith('.md') && /TIMEOUT_CMD=\(timeout 1800\)/.test(readLib(f)));
+    assert.deepEqual(timeoutOwners, ['local-cli-runner.md']);
+    for (const name of ['ollama-review-loop.md', 'enhance-loop.md']) {
+      assert.doesNotMatch(readLib(name), /Stock macOS ships/, `${name} must point at empty-array-expansion.md, not restate it`);
+    }
+    // Ollama's old shell-expansion aside is gone: the guarded expansion already prevents it.
+    assert.doesNotMatch(readLib('ollama-review-loop.md'), /rule out the shell-expansion false positive/);
+
+    const tail = readLib('review-fix-tail.md');
+    assert.match(tail, /### 4\. Verify in the main thread/);
+    assert.match(tail, /### 5\. Push verified changes/);
+    assert.match(tail, /### 6\. Re-loop or stop/);
+    assert.match(tail, /review-convergence-gate\.md/);
+    assert.match(tail, /fix-regression-guard\.md/);
+    assert.match(tail, /`STATUS=capped`/);
+    assert.match(tail, /`STATUS=guardrail`/);
+    assert.match(tail, /\*\*Status override\.\*\*/);
   });
 });

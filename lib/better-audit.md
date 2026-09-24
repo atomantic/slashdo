@@ -1,99 +1,37 @@
 ## Phase 1: Unified Audit
 
-Project conventions are already in your context. Pass relevant conventions to each agent.
+Choose scopes from the path/focus filter and the detected project, not a worker quota. Cover every applicable requested scope; do not infer an arbitrary subset to save tokens, and record why a scope is inapplicable. Combine small/overlapping scopes per worker (findings keep their category; each category has one worker), cap concurrency at the host's slots, and run serially without delegation.
 
-Choose audit scopes from the user's path/focus filter and the detected project, not a fixed worker quota. Cover every applicable requested scope; do not infer an arbitrary subset to save tokens. Record why a scope is inapplicable. Combine small/overlapping scopes in one worker and cap concurrent workers at the host's available slots. A combined worker preserves each finding's category and writes each assigned category to its own spool file; each category belongs to only one worker. Without delegation, run the same scopes serially.
+A normal audit covers every scope in the table below except the three mode-gated rows (`deps` only when third-party packages exist). A caller-specific scope roster, when supplied, is authoritative; do not add generic scopes it intentionally omits. Run `tests` after the other selected scopes so it receives their compact finding index, not their full reports. Under `SIMPLIFY_ONLY=true` the roster and gates come from the simplify contract instead.
 
-For a normal audit, cover security, code quality, DRY, architecture, bugs/performance, stack-specific behavior, dependencies when third-party packages exist, and tests. Add UX only with `HAS_UI=true` and structural ambition only with `STRICT_MODE=true`. Run the test audit after the other selected scopes so it receives their compact finding index, not their full reports. Other scopes are independent.
+**Worker context:** its assigned paths, its row below (scope and ownership, not a bug checklist), relevant repository conventions (which supersede the table), project/build/test facts, the evidence format, and the spool contract, at `AUDIT_MODEL_TIER`. Do not pass the complete command, other rows, whole ADRs, future phases, or reviewer libraries. Ask for confirmed findings and explicit coverage gaps, not a target finding count.
 
-When `SIMPLIFY_ONLY=true`, select only code-quality, dry, architecture, structural, and cognitive-load in one batch, subject to the path/focus filter. Pass simplify gates 1, 2, and 4 plus `PRIOR_REJECTIONS` and the distilled `DOMAIN_DOCS` glossary. Only cognitive-load gets `HOT_FILES` as a search priority; agents never apply churn severity adjustment.
+| Scope | Remit | Ownership boundary |
+|-------|-------|---------------------|
+| `security` | Auth, secrets, injection, unsafe input handling, supply-chain risk | Known CVEs in a dependency are reported here; whether to remove that dependency is `deps`' call |
+| `code-quality` | Brittleness, dead/unreachable code, unused imports, logging & observability | Language/framework-idiom violations belong to `stack-specific` |
+| `dry` | Duplication, speculative abstraction, YAGNI | — |
+| `architecture` | Coupling, modularity, dependency inversion, API contract consistency (not when `SIMPLIFY_ONLY=true` — that's behavior, not structure) | Reader-cost of an individual function belongs to `cognitive-load` |
+| `bugs-perf` | Runtime correctness, resource/perf, resilience, and observability of failure paths | — |
+| `stack-specific` | Detected-language/framework idioms and gotchas; general accessibility (alt text, ARIA, contrast) | Accessibility that is also a layout failure belongs to `ux` |
+| `deps` | Third-party dependency necessity and removability | — |
+| `tests` | Coverage gaps and vacuous/weak test quality | Runs last; receives the compact finding index only |
+| `ux` (`HAS_UI=true` only) | Layout, responsive behavior, visual consistency | Accessibility only when it is also a layout failure |
+| `structural` (`STRICT_MODE=true` only) | Code-judo reframings, boundary leaks, canonical-helper duplication, growth past the size a single file should carry | Only this worker gets the structural lens |
+| `cognitive-load` (`SIMPLIFY_ONLY=true` only) | How much a reader must hold in their head to change one line safely | Size/shape thresholds (god files, long functions, nesting, parameter count) belong to `architecture` |
 
-**Worker context:** give each worker its assigned paths, scope/lens below, relevant repository conventions, project/build/test facts, evidence format, and applicable mode/spool contract. Do not pass the complete command, other lenses, whole ADRs, future phases, or reviewer libraries. Resolve `AUDIT_MODEL_TIER` against the host per the model-tier guidance. Ask for confirmed findings and explicit coverage gaps, not a target finding count.
+Only when `STRICT_MODE=true`, the `structural` worker (and no other) reads the structural lens:
+!read lib/review-structural-ambition.md
 
-Only the worker assigned a scope reads its corresponding lens below. These are conditional requirements, not instructions to read the whole list:
+Per-scope output rules:
+- **`deps` severity:** unmaintained with CVEs → CRITICAL, unmaintained without CVEs → HIGH, replaceable single-function usage → MEDIUM, suspect but complex replacement → LOW. Format: `**[SEVERITY]** {package} — {tier}. Uses: {functions}. Call sites: {N} in {M} files. Replacement: {complexity}. Reason: {why removable}`.
+- **`tests` tags:** prefix the severity with `[VACUOUS]` (asserts nothing that could fail), `[WEAK]` (verifies implementation details or passes on a no-op result), or `[MISSING]` (no coverage) — e.g. `**[HIGH][VACUOUS]**`.
+- **`ux`:** bump severity one tier when a finding affects initial-viewport content at common viewports.
+- **`structural`:** file pushed past 1000 lines, spaghetti growth, thin wrappers, boundary leaks, and canonical-helper duplication are always `[CRITICAL]`.
 
-For `security`:
-!read lib/better-audit-security.md
-
-For `code-quality`:
-!read lib/better-audit-code-quality.md
-
-For `dry`:
-!read lib/better-audit-dry.md
-
-For `architecture`:
-!read lib/better-audit-architecture.md
-
-For `bugs-perf`:
-!read lib/better-audit-bugs-perf.md
-
-For `stack-specific`:
-!read lib/better-audit-stack-specific.md
-
-For `deps`:
-!read lib/better-audit-deps.md
-
-For `tests`:
-!read lib/better-audit-tests.md
-
-For `ux`:
-!read lib/better-audit-ux.md
-
-For `structural`:
-!read lib/better-audit-structural.md
-
-For `cognitive-load`:
-!read lib/better-audit-cognitive-load.md
-
-Each agent must report findings in this format:
+Finding format — each worker spools it per [lib/better-issue-mode.md](./better-issue-mode.md) and returns only the index:
 ```
 - **[CRITICAL/HIGH/MEDIUM/LOW]** `file:line` - Description. Suggested fix: ... Complexity: Simple/Medium/Complex
 ```
 
-**Issue mode (`--issues`) changes where this format goes, not what it contains.**
-Only when `ISSUE_MODE=true`, read the issue/spool contract before dispatching any agent:
-
-!read lib/plan-issue-setup.md
-!read lib/plan-issue-filing.md
-
-Then create the spool directory:
-
-```bash
-SPOOL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-issues-XXXXXX")"; echo "$SPOOL_DIR"
-```
-
-Record the printed path as `SPOOL_DIR` in run state and pass **that literal path**
-to every agent — a shell variable does not survive between tool calls, so
-re-deriving it later would hand the filer agents an empty directory.
-
-Pass `SPOOL_DIR` to every audit agent along with the **"Bulk filing — spool the
-bodies, dedup on an index"** contract from
-[lib/plan-issue-filing.md](./plan-issue-filing.md) (the partial Phase 2 reads
-in). Under that contract each agent writes one ready-to-file issue body per finding
-to `$SPOOL_DIR/<category-slug>.md` — using its own category slug from Phase 2's
-summary table (`security`, `code-quality`, `dry`, `architecture`, `bugs-perf`,
-`stack-specific`, `deps`, `tests`, `ux`, `structural`, `cognitive-load`), so no two
-agents write the same file — and **returns only the compact index**:
-
-```
-<id> | <SEVERITY-or-UNCERTAIN> | <category> | <file:line> | <one-line title>
-```
-
-Preserve `[UNCERTAIN]` as `UNCERTAIN` in the index and in the spooled body; do not assign a confirmed severity just to fit the index. Phase 2 reads only those bodies and their cited source for targeted validation.
-
-Audit agents are `Explore` agents, which have no `Write` tool — they write their
-spool file with a quoted-heredoc `cat > "$SPOOL_DIR/<slug>.md" <<'EOF'` via Bash,
-so backticks and `$` in quoted evidence survive verbatim. **Only the first write
-uses `>`; every later one must use `>>`** — an agent that spools findings across more
-than one Bash call and reaches for `cat >` a second time truncates everything it has
-already written, which is the tail-dropping this whole path exists to prevent.
-
-A large audit surfaces hundreds of findings, and the alternative pulls every body
-through this orchestrator's context twice — once reading the agent's report, once
-re-emitting it into a `gh issue create` body. That second pass is where bodies get
-truncated and tail findings get dropped. Everything Phase 2 actually decides —
-cross-agent dedup, dedup against `EXISTING_ISSUES`, [gate 3](./better-simplify.md)'s churn
-adjustment, and the `FILE_OWNER_MAP` — keys off the index fields alone, so the
-bodies stay on disk until the filer agents move them to the tracker.
-
-**Evidence bar:** inspect the relevant caller and at least 30 surrounding lines before flagging. Quote the failing code, explain its actual effect under the project's documented contracts, and name a concrete fix. Check downstream awaits/guards and framework idioms before calling a pattern a bug. Local security/trust conventions override generic checklists. Mark unresolved hypotheses `[UNCERTAIN]`; consolidation must validate or defer them, never silently promote them. Wait for all selected workers before Phase 2 and report failed/uncovered scopes.
+**Evidence bar:** inspect the relevant caller and at least 30 surrounding lines before flagging. Quote the failing code, explain its actual effect under the project's documented contracts, and name a concrete transformation or fix — never a bare "could be cleaner." Local security/trust conventions override generic checklists. Mark unresolved hypotheses `[UNCERTAIN]`; consolidation must validate or defer them, never silently promote them. Wait for all selected workers before Phase 2 and report failed/uncovered scopes.

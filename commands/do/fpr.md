@@ -4,55 +4,53 @@ description: Commit, push to fork, and open a PR against the upstream repo
 
 # Fork PR (fpr)
 
-Commit changes, push to your fork, and open a pull request against the upstream (parent) repository.
+Commit changes, push to your fork, and open a pull request (GitHub) or merge
+request (GitLab) against the upstream (parent) repository.
 
 ## Detect Fork Relationship
 
-1. **Resolve the fork from the `origin` remote** — by convention `origin` is the user's push target. A bare `gh repo view` can pick the wrong repo when both `origin` and `upstream` remotes exist (or when the user's default login resolves elsewhere), so always pass the origin slug explicitly.
+1. **Resolve the fork from the authoritative `origin`.** The shared preflight selects the forge from the remote, confirms that CLI can read the checkout, rejects unsupported forges, and seeds `{GH_HOST}`/`{ORIGIN_HOST}` and `{CR_NOUN}`. `/do:fpr` supports GitHub and GitLab; any other forge from the preflight is unsupported here:
 
-   **Derive the host; never hardcode `github.com`.** A GitHub Enterprise fork lives on the customer's own domain — `github.example.com`, and just as often one with no `github` substring at all (`git.example.com`, `scm.internal`) — so matching the remote against a literal `github.com` rejects every Enterprise fork outright. Split the remote into host and slug instead, and use `gh` itself as the arbiter of whether the host is a GitHub the user is authenticated to:
+   !read lib/vcs-host.md
+
+   On **GitHub** (`CLI_TOOL=gh`): by convention `origin` is the user's push target. A bare `gh repo view` can select the wrong repository when both `origin` and `upstream` exist, so derive its slug and pass the full host-qualified name explicitly:
+
    ```sh
-   # Strip trailing slash first so a `.git/` suffix still gets removed; then strip `.git`.
    ORIGIN_URL=$(git remote get-url origin 2>/dev/null || true)
-   ORIGIN_HOST=$(printf '%s\n' "$ORIGIN_URL" | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')
-   # Anchor the strip on the derived host, not on a literal domain. Match `$ORIGIN_HOST`
-   # followed by the `:` (SSH) or `/` (HTTPS) separator — anything before it is scheme/userinfo.
-   ORIGIN_SLUG=$(printf '%s\n' "$ORIGIN_URL" | sed -E "s|/+$||; s|.*$ORIGIN_HOST[:/]||; s|\.git$||; s|/+$||")
-   # Guard (POSIX): slug must be exactly OWNER/REPO (one slash, no whitespace) AND a host must
-   # have parsed out — otherwise a remote whose path merely looks like owner/repo (a bare local
-   # path, say) would slip through.
-   case "$ORIGIN_SLUG" in
-     ""|*/*/*|*[[:space:]]*) VALID=no ;;
-     */*)                    VALID=yes ;;
-     *)                      VALID=no ;;
-   esac
-   [ -n "$ORIGIN_HOST" ] || VALID=no
-   # A GitLab remote reaches here with a well-formed slug, so let `gh` reject it: authenticating
-   # to the host is the portable test for "this is a GitHub we can talk to", and it is the same
-   # test on github.com and on any Enterprise domain.
-   if [ "$VALID" = "yes" ] && gh auth token --hostname "$ORIGIN_HOST" >/dev/null 2>&1; then
-     GH_HOST="$ORIGIN_HOST"
-     gh repo view "$GH_HOST/$ORIGIN_SLUG" --json isFork,parent,owner,name,defaultBranchRef
-   else
-     echo "ERROR: origin is missing, is not a repo gh can reach, or gh is not authenticated to its host (origin URL: '$ORIGIN_URL', host: '$ORIGIN_HOST', slug: '$ORIGIN_SLUG'). Add an 'origin' remote pointing at your fork and run: gh auth login --hostname $ORIGIN_HOST" >&2
-     # No `exit` — this snippet may be pasted into an interactive shell; the caller should stop here.
-   fi
+   ORIGIN_PATH="${ORIGIN_URL#*://}"
+   ORIGIN_PATH="${ORIGIN_PATH#*@}"
+   ORIGIN_PATH="${ORIGIN_PATH#"$GH_HOST"}"
+   ORIGIN_PATH="${ORIGIN_PATH#[/:]}"
+   ORIGIN_PATH="${ORIGIN_PATH%/}"
+   ORIGIN_SLUG="${ORIGIN_PATH%.git}"
+   ORIGIN_SLUG="${ORIGIN_SLUG%/}"
+   gh repo view "$GH_HOST/$ORIGIN_SLUG" --json isFork,parent,owner,name,defaultBranchRef || exit 1
    ```
-   - If the guard prints the ERROR above: STOP and relay it — the user needs an `origin` remote pointing at their fork on a GitHub host `gh` is logged in to.
-   - Carry `{GH_HOST}` for the rest of the run; every URL this command prints or writes is built from it, never from a literal `github.com`.
-   - If `isFork` is `false` or `parent` is null: STOP and tell the user this repo is not a fork. Suggest using `/pr` instead.
 
-2. **Extract upstream info** from the `parent` field:
-   - `UPSTREAM_OWNER` = `parent.owner.login`
-   - `UPSTREAM_REPO` = `parent.name`
-   - `UPSTREAM_DEFAULT_BRANCH` = `parent.defaultBranchRef.name`
+   - If `isFork` is `false` or `parent` is null: STOP and tell the user this repo is not a fork. Suggest using `/do:pr` instead.
+
+   On **GitLab** (`CLI_TOOL=glab`): read the current project once; GitLab's REST
+   representation of a fork carries a `forked_from_project` object (absent on a
+   non-fork), together with the numeric project id `glab mr create --target-project`
+   needs later:
+
+   ```sh
+   PROJECT_JSON="$(glab api "projects/:id")" || exit 1
+   IS_FORK="$(printf '%s' "$PROJECT_JSON" | jq -r 'has("forked_from_project") and (.forked_from_project != null)')"
+   ```
+
+   - If `IS_FORK` is not `true`: STOP and tell the user this repo is not a fork. Suggest using `/do:pr` instead.
+
+2. **Extract upstream info**:
+   - GitHub, from the `parent` field: `UPSTREAM_OWNER` = `parent.owner.login`, `UPSTREAM_REPO` = `parent.name`, `UPSTREAM_DEFAULT_BRANCH` = `parent.defaultBranchRef.name`
+   - GitLab, from `forked_from_project` on `{PROJECT_JSON}`: `UPSTREAM_PROJECT_ID` = `.forked_from_project.id` (the numeric id `--target-project` requires, not a slug), `UPSTREAM_DEFAULT_BRANCH` = `.forked_from_project.default_branch`, and split `.forked_from_project.path_with_namespace` on the last `/` into `UPSTREAM_OWNER` (namespace) and `UPSTREAM_REPO` (project path)
 
 3. **Extract fork info**:
-   - `FORK_OWNER` = `owner.login`
-   - `FORK_DEFAULT_BRANCH` = `defaultBranchRef.name`
-   - `CURRENT_BRANCH` = output of `git branch --show-current`
+   - GitHub: `FORK_OWNER` = `owner.login`, `FORK_DEFAULT_BRANCH` = `defaultBranchRef.name`
+   - GitLab: split `{PROJECT_JSON}`'s own `.path_with_namespace` the same way into `FORK_OWNER`; `FORK_DEFAULT_BRANCH` = `.default_branch`
+   - Both hosts: `CURRENT_BRANCH` = output of `git branch --show-current`
 
-4. Print: `Fork PR flow: {FORK_OWNER}/{CURRENT_BRANCH} → {UPSTREAM_OWNER}/{UPSTREAM_REPO}:{UPSTREAM_DEFAULT_BRANCH}`
+4. Print: `Fork {CR_NOUN} flow: {FORK_OWNER}/{CURRENT_BRANCH} → {UPSTREAM_OWNER}/{UPSTREAM_REPO}:{UPSTREAM_DEFAULT_BRANCH}`
 
 ## Sync with Upstream
 
@@ -64,27 +62,36 @@ Before committing, ensure the fork is up to date with upstream:
    # a literal github.com here would add a remote that 404s on every Enterprise install.
    git remote get-url upstream 2>/dev/null || git remote add upstream "https://{GH_HOST}/{UPSTREAM_OWNER}/{UPSTREAM_REPO}.git"
    ```
-2. Fetch upstream: `git fetch upstream`
-3. If on the fork's default branch and there are upstream changes, rebase:
+   On GitLab, build the same remote from `{ORIGIN_HOST}` — already resolved by
+   `lib/vcs-host.md` above, never re-derived here; GitLab has no separate
+   API-host indirection the way `gh api` needs `{GH_HOST}`:
    ```bash
-   git rebase upstream/{UPSTREAM_DEFAULT_BRANCH}
+   git remote get-url upstream 2>/dev/null || git remote add upstream "https://{ORIGIN_HOST}/{UPSTREAM_OWNER}/{UPSTREAM_REPO}.git"
+   ```
+2. Fetch upstream: `git fetch upstream`
+3. If on the fork's default branch and there are upstream changes, rebase with autostash to preserve uncommitted edits:
+   ```bash
+   git rebase --autostash upstream/{UPSTREAM_DEFAULT_BRANCH}
    ```
    If rebase conflicts occur, abort and inform the user — do not auto-resolve.
 
 ## Commit and Push
 
-1. **Identify changes to commit**:
+1. **If on the fork's default branch, create a feature branch first:**
+   - Check if `{CURRENT_BRANCH}` equals `{FORK_DEFAULT_BRANCH}`
+   - If so, create a feature branch named for the change (e.g. `git checkout -b fix/<short-description>`) so the PR doesn't tie up the fork's default branch
+   - Update `{CURRENT_BRANCH}` to the new branch name and print the new flow
+
+2. **Identify changes to commit**:
    - Run `git status` and `git diff --stat` to see what changed
    - If there are no changes, inform the user and stop
    - Do NOT use `git add -A` or `git add .` — add specific files by name
 
-2. **Commit**:
-   - Write a clear, concise commit message describing the changes
-   - Use conventional commit prefixes: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`
-   - Do NOT include Co-Authored-By or generated-by annotations
-   - Do NOT bump version or update changelog — upstream controls those
+3. **Commit** following these conventions (and write no changelog entry — upstream controls that):
 
-3. **Push to fork**:
+!`cat ~/.claude/lib/commit-conventions.md`
+
+4. **Push to fork**:
    ```bash
    git push -u origin {CURRENT_BRANCH}
    ```
@@ -102,26 +109,30 @@ Fork PRs go to upstream maintainers who can't easily ask for changes — getting
 2. Run `git diff upstream/{UPSTREAM_DEFAULT_BRANCH}...{CURRENT_BRANCH}` to get the list of changed files
 3. For every changed file:
    a. Read the entire file using the Read tool (not just diff hunks)
-   b. Check it against the tiered checklist below (always check Tiers 1+4; check Tiers 2-3 when relevance filters match)
+   b. Review it under the review preferences below
    c. For each finding, quote the specific code line and explain why it's a problem
 4. After reviewing all files, verify: does the code actually deliver what the commits claim?
-5. Print a review summary table (see do:review for format)
+5. Print a review summary table: | finding | file | line | severity | fixable |
 6. **Worthiness check**: Classify all findings before acting on them:
    - **Fix and recommit** any finding that touches correctness, security, logic, data integrity, or API contracts
    - **Note but don't block** on pure style nitpicks, naming preferences, or "consider..." suggestions — if ALL findings are this type, proceed without fixing and mention them briefly in the PR description
-7. Only after printing the review summary may you proceed to "Open the PR"
+7. **Push fix commits** to the remote if any were made:
+   ```bash
+   git push -u origin {CURRENT_BRANCH}
+   ```
+8. Only after printing the review summary may you proceed to "Open the PR"
 
 If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.
 
 </review_gate>
 
-Checklist to apply to each file:
+Review preferences to apply to each file:
 
-!`cat ~/.claude/lib/code-review-checklist.md`
+!`cat ~/.claude/lib/review-preferences.md`
 
 Verification — confirm before proceeding:
 - [ ] Read every changed file in full (not just diffs)
-- [ ] Checked each file against the relevant checklist tiers
+- [ ] Every finding names a concrete wrong outcome, not a style preference
 - [ ] Quoted specific code for each finding
 - [ ] Printed a review summary table with findings
 
@@ -132,9 +143,11 @@ Before opening the PR, check if upstream has contribution guidelines:
 - If a PR template exists, use it for the PR body structure
 - If contribution guidelines mention branch naming, commit format, or other requirements, flag any violations to the user
 
-## Open the PR
+## Open the {CR_NOUN}
 
-Create a cross-fork PR targeting the upstream repo:
+Create a cross-fork PR (GitHub) or MR (GitLab) targeting the upstream repo.
+
+On **GitHub**:
 
 ```bash
 gh pr create \
@@ -145,12 +158,27 @@ gh pr create \
   --body "PR description here"
 ```
 
+On **GitLab** — run from inside the fork's own checkout (`origin` = the fork),
+so `glab` infers the source project from `origin` and only the target needs
+naming. `--target-project` takes the numeric `{UPSTREAM_PROJECT_ID}` from
+"Detect Fork Relationship", not a path — GitLab's fork-MR endpoint resolves
+the target by id, and a `namespace/project` string there is silently rejected:
+
+```bash
+glab mr create \
+  --source-branch {CURRENT_BRANCH} \
+  --target-branch {UPSTREAM_DEFAULT_BRANCH} \
+  --target-project {UPSTREAM_PROJECT_ID} \
+  --title "MR title here" \
+  --description "MR description here" \
+  --yes
+```
+
 - Write a clear title and rich description
-- If a PR template was found, follow its structure
-- Print the resulting PR URL so the user can review it
+- If a PR/MR template was found, follow its structure
+- Print the resulting {CR_NOUN} URL so the user can review it
 
 ## Important
 
-- Do NOT merge the PR — upstream maintainers handle that
-- Do NOT run Copilot review loops — you don't control the upstream repo's review settings
+- Do NOT merge the {CR_NOUN} — upstream maintainers handle that
 - If the fork is significantly behind upstream, warn the user about potential merge conflicts

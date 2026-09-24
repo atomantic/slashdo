@@ -15,9 +15,10 @@ const root = path.join(__dirname, '..');
 const next = readCommandDocs('next.md', { eager: true });
 const config = fs.readFileSync(path.join(root, 'commands', 'do', 'config.md'), 'utf8');
 const defaults = fs.readFileSync(
-  path.join(root, 'lib', 'review-config-defaults.md'),
+  path.join(root, 'lib', 'config-defaults-issues-merge.md'),
   'utf8',
 );
+const epicChildren = fs.readFileSync(path.join(root, 'lib', 'epic-children.md'), 'utf8');
 const swarm = fs.readFileSync(path.join(root, 'lib', 'next-swarm.md'), 'utf8');
 const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
 
@@ -41,6 +42,7 @@ describe('/do:next --collaborators claim gate', () => {
   });
 
   it('fetches live collaborators and fails closed on empty or error', () => {
+    assert.match(next, /COLLAB_LOGINS="\$\(collaborators\)"/);
     assert.match(next, /gh api --hostname "\$GH_HOST" repos\/:owner\/:repo\/collaborators --paginate/);
     assert.match(next, /glab api --paginate "projects\/:id\/members\/all"/);
     assert.match(next, /select\(\.access_level >= 30\)/);
@@ -49,7 +51,6 @@ describe('/do:next --collaborators claim gate', () => {
       /Could not list collaborators for \$OWNER_REPO — \/do:next --collaborators cannot be enforced\. Aborting/,
     );
     assert.match(next, /never fall open to `--trusted-authors` alone/);
-    // Two-step GitLab capture — a piped jq would fail-open on empty input.
     assert.match(next, /MEMBERS_JSON="\$\(glab api --paginate "projects\/:id\/members\/all"\)"/);
     assert.doesNotMatch(next, /glab api --paginate "projects\/:id\/members\/all" \| jq/);
   });
@@ -73,8 +74,8 @@ describe('/do:next --collaborators claim gate', () => {
     // GitLab walks project away `description`.
     const glabProjected = next.match(/\| \.\[\] \| \{iid,title,labels,assignees,author,created_at\}"/g) || [];
     assert.ok(glabProjected.length >= 2, `expected projected GitLab walks, got ${glabProjected.length}`);
-    assert.match(next, /gh issue view <N> --json body -q \.body/);
-    assert.match(next, /glab issue view <N> --output json --jq \.description/);
+    assert.match(next, /fetch the body for this candidate only\*\* with `issue_body <N>`/);
+    assert.match(next, /check the freshest state with `issue_state <N>`/);
     assert.match(next, /reads only the setup partial, not \[lib\/plan-issue-filing\.md\]/);
   });
 
@@ -102,6 +103,31 @@ describe('/do:next --collaborators claim gate', () => {
       next,
       /if \[ "\$COLLAB_MODE" = "true" \] && \[ "\$SELF_MODE" != "true" \]; then/,
     );
+  });
+});
+
+describe('/do:next claim branch publication', () => {
+  it('uses an absent-ref lease and aborts if another run published the claim', () => {
+    assert.match(next, /git push --force-with-lease="refs\/heads\/next\/\$\{SLUG\}:" -u origin "next\/\$\{SLUG\}:refs\/heads\/next\/\$\{SLUG\}"/);
+    assert.match(next, /REPO_ROOT="\$\(git rev-parse --show-toplevel\)"/);
+    assert.match(next, /if ! git push --force-with-lease[\s\S]*CLAIM_REMOTE_OUTPUT="\$\(git ls-remote --heads origin "refs\/heads\/next\/\$\{SLUG\}"/);
+    assert.match(next, /CLAIM_REMOTE_SHA[\s\S]*\[ "\$CLAIM_REMOTE_SHA" = "\$CLAIM_LOCAL_SHA" \][\s\S]*ownership is ambiguous; preserving/);
+    assert.match(next, /ownership could not be checked; preserving \$WORKTREE[\s\S]*exit 1/);
+    assert.match(next, /CLAIM_REMOTE_COUNT" -eq 0[\s\S]*no remote ref was published; preserving \$WORKTREE[\s\S]*exit 1/);
+    assert.match(next, /another run claimed it\. Cleaning up this unclaimed worktree\.[\s\S]*worktree remove --force "\$WORKTREE"[\s\S]*branch -D "next\/\$\{SLUG\}"/);
+    assert.doesNotMatch(next, /claim is local-only/);
+  });
+});
+
+describe('/do:next GitLab native blockers', () => {
+  it('fails closed on unresolved native links during auto-pick', () => {
+    const gitlab = fs.readFileSync(path.join(root, 'lib', 'next-gitlab.md'), 'utf8');
+    assert.match(gitlab, /failed lookup, malformed JSON, or response with the wrong shape is \*\*UNRESOLVED\*\*/);
+    assert.match(gitlab, /During auto-pick, skip that candidate with a warning/);
+    assert.match(gitlab, /never fall back to the body convention alone/);
+    assert.match(gitlab, /explicitly named issue may proceed only as an explicit override/);
+    assert.match(gitlab, /type == "array" and all\(\.\[\]; type == "object" and \(\.link_type \| type == "string"\) and \(\.state \| type == "string"\)\)/);
+    assert.match(gitlab, /\.link_type == "is_blocked_by" and \.state != "closed"/);
   });
 });
 
@@ -141,15 +167,64 @@ describe('/do:next --trusted-authors union', () => {
   });
 });
 
+describe('/do:next claim snippet', () => {
+  it('keeps the sibling-race hard stop without repeated teardown rationale', () => {
+    const claim = next.split('### Phase 2 — mark the issue in progress')[1].split('## Phase 3')[0];
+    assert.match(claim, /assign_me "\$ISSUE_NUM"/);
+    assert.match(claim, /ASSIGNEES="\$\(issue_assignees "\$ISSUE_NUM"\)"/);
+    assert.match(claim, /unassign_me "\$ISSUE_NUM"/);
+    assert.match(claim, /label_add "\$ISSUE_NUM" in-progress/);
+    assert.match(claim, /grep -qxF "\$ME"/);
+    assert.match(claim, /if printf '%s' "\$ASSIGNEES"[\s\S]*?git push origin --delete "next\/\$\{SLUG\}"[\s\S]*?exit 1/);
+    assert.doesNotMatch(claim, /Claim exclusivity is best-effort/);
+    assert.doesNotMatch(claim, /race-detected branch is a hard stop/);
+    assert.doesNotMatch(claim, /HARD STOP/);
+  });
+});
+
+describe('/do:next host verbs', () => {
+  it('defines the requested GitHub forms once and routes claim operations through them', () => {
+    for (const verb of ['issue_body', 'issue_state', 'issue_close_note', 'assign_me', 'unassign_me', 'label_add', 'label_rm', 'ci_wait_merge']) {
+      const marker = '- ' + String.fromCharCode(96) + verb;
+      const line = next.split('\n').find((candidate) => candidate.startsWith(marker));
+      assert.ok(line && line.includes('` — `') && line.includes('gh '), `${verb} must have one GitHub form`);
+    }
+    assert.match(next, /\*\*Host verbs\.\*\*/);
+    assert.match(next, /GitLab forms and the two-step `glab api` rule/);
+  });
+});
+
 describe('swarm workers inherit the orchestrator gates', () => {
-  it('passes --self/--no-self, --collaborators/--no-collaborators, and --trusted-authors', () => {
-    assert.match(swarm, /explicit `--self` or `--no-self`/);
-    assert.match(swarm, /explicit `--collaborators` or `--no-collaborators`/);
-    assert.match(swarm, /`--trusted-authors <list>` or `--trusted-authors none`/);
+  it('passes the exact resolved self, collaborators, and trusted-authors decisions', () => {
+    assert.match(
+      swarm,
+      /resolved `--self\|--no-self`, `--collaborators\|--no-collaborators`, `--trusted-authors <list>\|none` explicitly/,
+    );
     assert.match(
       swarm,
       /who is not a collaborator on <owner\/repo> \(and not on --trusted-authors\)/,
     );
+    assert.doesNotMatch(swarm, /per-run override that widened or narrowed the batch/);
+    assert.doesNotMatch(swarm, /Also pass the orchestrator's resolved claim gates explicitly/);
+  });
+});
+
+describe('swarm prose slimming keeps executable rules', () => {
+  it('retains named-blocker holds, dispatch resolution, and reviewer preflight', () => {
+    assert.match(swarm, /repeatedly hold any dependent whose named blocker is still open but was removed/);
+    assert.match(swarm, /Re-run the hold pass if A2e drops cycle members/);
+    assert.match(swarm, /light.*cheapest capable coding model.*medium.*workhorse.*heavy.*strongest available alias/);
+    assert.match(swarm, /lack of entitlement, retry once with the session model/);
+    assert.match(swarm, /exact orchestrator-owned `REVIEWER_PREFLIGHT` block/);
+  });
+});
+
+describe('GitHub native epic child pagination', () => {
+  it('fails closed when the GraphQL fallback cannot prove the full child set', () => {
+    assert.match(epicChildren, /subIssues\(first:100\)\{nodes\{number state\} pageInfo\{hasNextPage\}\}/);
+    assert.match(epicChildren, /if \(\.nodes\|type\) != "array" or \(\.pageInfo\.hasNextPage\|type\) != "boolean" then error\("incomplete sub-issue response"\) elif \.pageInfo\.hasNextPage then "__INCOMPLETE_PAGINATION__"/);
+    assert.match(epicChildren, /mark child resolution \*\*unresolved\*\* and do not fall back or close the epic/);
+    assert.match(epicChildren, /A valid empty result \/ `404` \/ `410` means "fall back"/);
   });
 });
 
@@ -160,5 +235,24 @@ describe('README documents the gates', () => {
     assert.match(readme, /Claim only collaborator-authored issues/);
     assert.match(readme, /Extra trusted authors/);
     assert.match(readme, /`--no-collaborators`/);
+  });
+});
+
+describe('/do:next is tracker-only (PLAN.md mode retired)', () => {
+  const own = ['commands/do/next.md', 'lib/next-swarm.md', 'lib/next-gitlab.md', 'lib/epic-children.md']
+    .map((rel) => [rel, fs.readFileSync(path.join(root, rel), 'utf8')]);
+
+  it('carries no PLAN.md mode, slug target, or ISSUE_MODE text', () => {
+    for (const [rel, body] of own) {
+      assert.doesNotMatch(body, /ISSUE_MODE|PLAN\.md[- ]mode(?! was removed)|issues? mode|<slug>|next\/<slug>|plan-id-format/i, rel);
+    }
+  });
+
+  it('keeps --issues as a no-op note and aborts --no-issues and non-issue targets', () => {
+    const [, body] = own[0];
+    assert.match(body, /`--issues is now the default \(PLAN\.md mode was removed\); the flag can be dropped\.`/);
+    assert.match(body, /`--no-issues is no longer supported: PLAN\.md mode was removed\. slashdo records work only in the project's issue tracker\.`/);
+    assert.match(body, /is not an issue number — \/do:next claims tracker issues only \(e\.g\. `#123`\)/);
+    assert.doesNotMatch(body.split('\n---\n')[0], /--issues\||--no-issues/, 'argument-hint drops --issues/--no-issues');
   });
 });

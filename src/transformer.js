@@ -79,6 +79,14 @@ function rewriteConfigPath(body, env) {
   return body.replace(/~\/\.claude\/\.slashdo-config\.json/g, env.configPath);
 }
 
+// Rewrites the slashdo version-file token (`~/.claude/.slashdo-version`) to the
+// host CLI's own version file so help/update commands read the right file at
+// runtime. Mirrors rewriteConfigPath above.
+function rewriteVersionPath(body, env) {
+  if (!env.versionPath || env.versionPath === '~/.claude/.slashdo-version') return body;
+  return body.replace(/~\/\.claude\/\.slashdo-version/g, env.versionPath);
+}
+
 // Canonical includes plus the citation forms used by command and library docs.
 const LIB_CAT_RE = /!`cat ~\/\.claude\/lib\/(.+?)`/g;
 const LIB_PROSE_RE = /~\/\.claude\/lib\/([A-Za-z0-9._-]+\.md)/g;
@@ -101,27 +109,27 @@ const LIB_BACKTICK_RE = /`lib\/([A-Za-z0-9._-]+\.md)`/g;
 // file rather than being left to infer it. Environments with runtime `!cat`
 // (Claude/OpenCode) never reach this path and are unaffected.
 const ON_DEMAND_LIBS = new Map([
-  // Reviewer backends: `--review-with` dispatches to exactly one of these per
-  // reviewer, so at most one of the four is ever live. The dispatcher
+  // Reviewer bodies: `--review-with` dispatches to one host-side template
+  // (plus Copilot's delta) or one local backend per reviewer. The dispatcher
   // (multi-reviewer-loop.md) deliberately stays inline — it is always on the taken
-  // path and is what names which backend to load.
+  // path and is what names which body to load.
   ['copilot-review-loop.md',
-    { what: 'Copilot reviewer loop', when: 'the reviewer list includes `copilot`' }],
-  ['github-reviewer-loop.md',
-    { what: 'GitHub-reviewer loop', when: 'the reviewer list includes an `@<login>` reviewer' }],
+    { what: 'Copilot delta for the shared host-reviewer loop', when: 'the reviewer list includes `copilot` on GitHub' }],
+  ['host-reviewer-loop.md',
+    { what: 'shared host-reviewer loop', when: 'the reviewer list includes `copilot` or an `@<login>` reviewer' }],
   ['local-agent-review-loop.md',
     { what: 'local-agent reviewer loop', when: 'the reviewer list includes `codex`, `claude`, `agy`, `grok`, `pi`, `cursor`, `opencode`, or `cmd`' }],
   ['ollama-review-loop.md',
     { what: 'Ollama reviewer loop', when: 'the reviewer list includes `ollama`' }],
 
-  // Issue-tracker machinery: only reached in issues mode. PLAN.md mode — the
-  // default — never opens the tracker at all. Split so a pure consumer (/do:next
-  // picking work) reads only setup, not the filing/dedup/spool machinery it never
-  // uses; a command that files findings reads both.
+  // Issue-tracker machinery: only reached when a run reads or files tracker issues
+  // (review commands touch it only when deferring a finding). Split so a pure
+  // consumer (/do:next picking work) reads only setup, not the filing/dedup/spool
+  // machinery it never uses; a command that files findings reads both.
   ['plan-issue-setup.md',
-    { what: 'issue-mode setup: host/LABEL_SEP reuse, lazy label creation, and the dispatch-hint vocabulary', when: 'this run is in issues mode' }],
+    { what: 'tracker issue setup: host/LABEL_SEP reuse, lazy label creation, and the dispatch-hint vocabulary', when: 'this run files or reads tracker issues' }],
   ['plan-issue-filing.md',
-    { what: 'issue-mode filing rules: dedup, --scan-only recording, labels, and bulk spool filing', when: 'this run is in issues mode and files a finding as a tracker issue' }],
+    { what: 'tracker issue filing rules: dedup, --scan-only recording, labels, and bulk spool filing', when: 'this run files a finding as a tracker issue' }],
   ['epic-children.md',
     { what: 'epic/child issue resolution rules', when: 'a candidate issue is an epic or carries children' }],
 
@@ -136,6 +144,8 @@ const ON_DEMAND_LIBS = new Map([
     { what: 'CI flake triage rules', when: 'a CI check fails in a way that looks like a flake' }],
   ['rebase-conflict-resolution.md',
     { what: 'autonomous rebase-conflict resolution playbook', when: 'a rebase stops on conflicts' }],
+  ['swift-gotchas.md',
+    { what: 'Swift/iOS/macOS gotcha catalogue', when: 'the project shows CloudKit, SwiftData, iCloud, xcstrings, XcodeGen, TestFlight CI, StoreKit, or Keychain use (Phase 0e of /do:better-swift)' }],
 
   // Review lenses: review-agent-selection.md dispatches only the lenses a diff
   // actually signals — often one or two, sometimes none.
@@ -469,15 +479,16 @@ function transformCommand(content, env, sourceLibDir, relPath, opts = {}) {
     transformedBody = bundle.body;
     if (opts.files) {
       for (const [filename, text] of Object.entries(bundle.files)) {
-        opts.files[filename] = rewriteConfigPath(text, env);
+        opts.files[filename] = rewriteVersionPath(rewriteConfigPath(text, env), env);
       }
     }
     for (const filename of Object.keys(bundle.files)) opts.bundled?.add(filename);
   }
 
-  // Run on the full body (after inlining) so config-path tokens that arrived via
-  // inlined lib content are rewritten too.
+  // Run on the full body (after inlining) so config-path/version-path tokens
+  // that arrived via inlined lib content are rewritten too.
   transformedBody = rewriteConfigPath(transformedBody, env);
+  transformedBody = rewriteVersionPath(transformedBody, env);
 
   // Run after inlining so conditionals inside inlined lib content are resolved too.
   transformedBody = applyConditionalBlocks(transformedBody, env);
@@ -520,6 +531,7 @@ function transformLib(content, env, sourceLibDir, opts = {}) {
     });
   }
   transformed = rewriteConfigPath(transformed, env);
+  transformed = rewriteVersionPath(transformed, env);
   return applyConditionalBlocks(transformed, env);
 }
 
@@ -530,6 +542,7 @@ module.exports = {
   parseFrontmatter,
   rewriteLibPaths,
   rewriteConfigPath,
+  rewriteVersionPath,
   inlineLibReferences,
   buildPromptBundle,
   applyConditionalBlocks,

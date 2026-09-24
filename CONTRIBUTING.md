@@ -18,6 +18,70 @@ Thanks for considering a contribution. slashdo is a small, actively-maintained p
 - `install.sh` / `uninstall.sh` — the no-npm curl-based install path; their `COMMANDS`/`LIBS` arrays must stay in sync with `commands/do/` and `lib/` (`test/curl-installer-allowlist.test.js` enforces this in CI)
 - `test/*.test.js` — the test suite, run with `node --test`
 
+### Shared `better-*` pipeline placeholders
+
+`/do:better` and `/do:better-swift` share Phases 3–7 verbatim via
+`lib/better-*.md` (see `lib/better-pipeline-inputs.md` and
+`lib/swift-pipeline-inputs.md`); each calling command supplies the differences
+as `{PLACEHOLDER}` values in its own `## Shared Pipeline Inputs` section. Each
+shared partial's `### Inputs` block only lists which placeholders that phase
+reads — this is where their meanings and examples live, so the runtime prompt
+doesn't re-teach them on every run:
+
+- `{BRANCH_PREFIX}` — branch namespace, no trailing slash (`better`,
+  `better-swift`); the staging branch is `{BRANCH_PREFIX}/{DATE}`.
+- `{PIPELINE_LABEL}` / `{PIPELINE_TITLE}` — human name used in commit subjects
+  (`better audit`) and the PR body heading (`Better Audit`).
+- `{VERIFY_SCOPE_SUFFIX}` / `{VERIFY_SCOPE_NOTE}` / `{VERIFY_FAILURE_SCOPE}` /
+  `{VERIFY_FAILURE_COMMIT_SLOT}` / `{VERIFY_STATUS_CLAUSE}` — widen a
+  single-target pipeline's build/test/failure/status language to cover
+  multiple targets; all empty for a single-target project. A multi-platform
+  pipeline sets `{VERIFY_SCOPE_SUFFIX}` to ` on ALL supported platforms`
+  (leading space kept), names its platform set in `{VERIFY_SCOPE_NOTE}`, scopes
+  a build failure with `{VERIFY_FAILURE_SCOPE}` (e.g. ` on any platform`), adds
+  a required `{platform} ` slot to the failure-commit subject via
+  `{VERIFY_FAILURE_COMMIT_SLOT}`, and appends a pass/fail sentence via
+  `{VERIFY_STATUS_CLAUSE}`.
+- `{REVIEW_CHECKLIST}` — name of the section (defined inline by the calling
+  command) Phase 4b reviews the remediation diff against.
+- `{SIMPLIFY_ONLY}` — `true` only in a refactor-only run that promised
+  identical behavior; pipelines with no such mode leave it `false`.
+- `{CATEGORY_SLUGS}` / `{CATEGORY_SLUG_RULE}` — the pipeline's branch-slug set,
+  and a mode-dependent narrowing of it (or empty), used where 5a chooses branch
+  names.
+- `{COMMIT_PREFIX_RULE}` — a mode-dependent override of the conventional
+  prefix the per-category commit and PR title take, or empty.
+- `{MULTI_CATEGORY_FILE_EXAMPLE}` — a representative file from this stack that
+  could pick up changes from two categories (e.g. `` `server/index.js` with
+  both security and stack-specific changes ``), used in the file-isolation
+  rule.
+- `{COMPAT_SHIM}` / `{COMPAT_HOST}` — the stack's backward-compatible shim for
+  a symbol moved between branches (`re-export`/`module` for JS/TS,
+  `typealias`/`file` for Swift).
+- `{VERSION_BUMP_SECTION}` — name of the section the calling command defines
+  inline that performs the actual version bump; mechanics are stack-specific
+  (`npm version` vs `agvtool`), the surrounding Phase 5b policy is not.
+- `{PR_BODY_SUMMARY_EXTRA}` / `{PR_BODY_EXTRA_SECTIONS}` — extra PR-body lines
+  or `###` sections, or empty (e.g. "Platforms verified: {PLATFORMS}", a
+  "Platform Impact" section).
+- `{CI_FAILURE_CAUSES_EXTRA}` — extra bullet(s) for the CI failure-cause list,
+  or empty (e.g. a JS-only "missing exports" cause, code-signing noise).
+  Lands at column 0, in the bullet list under Phase 5d's CI-fix rule.
+- `{REVIEW_LOOP_EXTRA_INSTRUCTION}` — extra paragraph handed to every Phase 6
+  review sub-agent, or empty (a multi-platform pipeline requires each fix still
+  compiles everywhere).
+- `{REVIEW_STATUS_EXTRA}` — extra line(s) for the interactive review-status
+  prompt, or empty.
+- `{SUMMARY_TABLE_ROWS}` / `{SUMMARY_TABLE_ROW_RULES}` / `{SUMMARY_TABLE_FOOTER}`
+  — the Phase 7 summary table's category rows, the (unprinted) rules for which
+  rows to omit in which mode, and extra printed line(s) under the table.
+
+Substitution rules (documented once, in `lib/better-verification.md`, and
+referenced from every other partial): an empty value alone on its line drops
+that whole line; an empty value inside a line vanishes in place, collapsing
+the doubled space; a value inside an indented list carries that list's
+indentation on every line.
+
 ## Making a change
 
 1. Fork and clone the repo. There are no npm dependencies to install — the package has none, and the test suite runs on Node's built-in test runner.
@@ -28,6 +92,10 @@ Thanks for considering a contribution. slashdo is a small, actively-maintained p
    - `node bin/cli.js --dry-run` — preview what install would do
    - `npm test` — run the full test suite
 5. If your change affects behavior covered by an existing test, update it; if it adds new behavior worth locking in, add a test under `test/`.
+
+## Releasing
+
+`/do:release` opens a PR from `main` into `release` (generic promotion; there is no temporary release-prep branch). Merging that PR triggers `.github/workflows/release.yml`, which publishes the package to npm and creates the `v{version}` tag and GitHub Release (`softprops/action-gh-release`, `target_commitish: github.sha`). `/do:release` must wait for that tag and release rather than create them itself.
 
 ## Changelog
 
@@ -44,6 +112,36 @@ This is why commit subjects matter (below): a vague subject becomes a vague rele
 - Keep PRs scoped to one logical change. A doc fix and a behavior change should be separate PRs.
 - CI runs the full test suite, a `shellcheck` pass on `install.sh`/`uninstall.sh`, and validates every command's frontmatter across Node 18/20/22 — make sure it's green before requesting review.
 - No AI-attribution footers or co-author trailers in commits or PR descriptions, regardless of what tooling you used to help write the change.
+
+## Embedding command prompts (integrator API)
+
+Hosts that want to embed slashdo's commands without going through one of the five bundled environments can use the same dependency-free renderer as the skill installer:
+
+```js
+const { buildPromptBundle, parseFrontmatter } = require('slash-do/src/transformer');
+const { body } = parseFrontmatter(commandMarkdown);
+const bundle = buildPromptBundle(body, sourceLibDirectory, {
+  teams: false,
+  skipIncludes: [], // library filenames intentionally supplied or excluded by the host
+  defer: true,
+});
+```
+
+Write `bundle.body` beside a `lib/` directory containing `bundle.files` (an object
+keyed by bare library filenames). References in the body use `lib/name.md`;
+references between supporting files use `./name.md`. Give the agent access to
+that directory. Use `defer: false` when file tools are unavailable: the returned
+body includes dependencies once and `files` is empty. Conditions are resolved
+before dependencies; missing required files fail with a named error. For legacy
+recipe consumers that intentionally include only explicit `!cat`/`!read` content,
+set `followReferences: false` to avoid traversing see-also citations. Eager mode
+also preserves bare backticked library names as citations rather than includes.
+
+In command or library source, put `!read lib/name.md` on its own line immediately
+after the phase or condition requiring it. The renderer emits a required read
+at that step, including for native Claude/OpenCode commands. Keep `!`-backticked
+`cat ~/.claude/lib/name.md` includes for content needed immediately. Deferred
+skills bundle citations instead of appending their transitive contents.
 
 ## License
 

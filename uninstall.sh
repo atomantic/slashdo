@@ -94,28 +94,44 @@ COMMANDS=(
 
 OLD_COMMANDS=(cam good makegoals makegood optimize-md)
 
-# NOTE: keep in sync with install.sh LIBS — see comment there.
-LIBS=(
-  better-audit better-audit-architecture better-audit-bugs-perf
+# Libs a prior release installed that are no longer shipped, kept here only so
+# uninstall.sh can still clean them off disk (install.sh's LIBS never installs
+# them again). Mirrors the OLD_COMMANDS/OLD_HOOKS convention above.
+OLD_LIBS=(
+  better-audit-architecture better-audit-bugs-perf
   better-audit-code-quality better-audit-cognitive-load better-audit-deps
   better-audit-dry better-audit-security better-audit-stack-specific
   better-audit-structural better-audit-tests better-audit-ux
-  better-discovery better-options better-pipeline-inputs
+  code-review-checklist github-reviewer-loop graphql-escaping
+  per-finding-root-cause post-review-doc-recommendations
+  plan-id-format replan-issues
+)
+
+# NOTE: keep in sync with install.sh LIBS — see comment there.
+LIBS=(
+  better-audit
+  better-discovery better-issue-mode better-options better-pipeline-inputs
   better-plan better-remediation better-simplify
   better-state better-test-enhancement
   better-cleanup better-pr-and-ci better-review-loop better-verification
-  ci-flake-handling code-review-checklist copilot-review-loop
+  ci-flake-handling commit-conventions config-defaults-issues-merge copilot-review-loop
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
-  gh-host github-reviewer-loop graphql-escaping
-  local-agent-review-loop model-tiers multi-reviewer-loop next-gitlab next-swarm ollama-review-loop
-  per-finding-root-cause plan-id-format plan-issue-setup plan-issue-filing pr-write-access
-  post-review-doc-recommendations rebase-conflict-resolution remediation-agent-template
-  review-agent-selection review-config-defaults review-convergence-gate
-  swift-review-checklist swift-gotchas
+  gh-host host-github host-gitlab host-reviewer-loop
+  local-agent-review-loop local-agent-agy local-agent-claude local-agent-cmd local-agent-cursor local-agent-opencode local-cli-runner
+  merge-gate model-tiers multi-reviewer-loop multi-reviewer-parallel next-gitlab next-swarm ollama-review-loop
+  plan-issue-setup plan-issue-filing pr-write-access
+  rebase-conflict-resolution remediation-agent-template
+  release-documented review-agent-selection review-config-defaults review-convergence-gate review-flags
+  review-fix-conventions review-fix-tail
+  review-pr-mode review-mr-mode
+  review-preferences
+  swift-review-checklist swift-gotchas swift-pipeline-inputs
   review-surface-scan review-surface-quality review-security-audit
   review-cross-file-tracing review-cross-file-contract
   review-structural-ambition
+  tracker-jira
+  upstream-push
   vcs-host
 )
 
@@ -189,7 +205,7 @@ uninstall_claude() {
     fi
   done
 
-  for lib in "${LIBS[@]}"; do
+  for lib in "${LIBS[@]}" "${OLD_LIBS[@]}"; do
     if [ -f "$target_lib/$lib.md" ]; then
       rm -f "$target_lib/$lib.md"
       printf "    removed: lib/%-18s${GREEN}ok${RESET}\n" "$lib.md"
@@ -261,7 +277,7 @@ uninstall_opencode() {
     fi
   done
 
-  for lib in "${LIBS[@]}"; do
+  for lib in "${LIBS[@]}" "${OLD_LIBS[@]}"; do
     if [ -f "$target_lib/$lib.md" ]; then
       rm -f "$target_lib/$lib.md"
       printf "    removed: lib/%-18s${GREEN}ok${RESET}\n" "$lib.md"
@@ -373,7 +389,7 @@ uninstall_gemini_legacy() {
     fi
   done
 
-  for lib in "${LIBS[@]}"; do
+  for lib in "${LIBS[@]}" "${OLD_LIBS[@]}"; do
     if [ -f "$target_lib/$lib.md" ]; then
       rm -f "$target_lib/$lib.md"
       printf "    removed: lib/%-18s${GREEN}ok${RESET}\n" "$lib.md"
