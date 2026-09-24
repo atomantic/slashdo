@@ -139,7 +139,7 @@ if [ -z "$PREPARED_RELEASE" ] && [ -n "$TARGET_PREPARED_RELEASE" ]; then
         ;;
     esac
   else
-    # GitLab: `glab release view` (per #414/#415's spec) has no separate HTTP-status
+    # GitLab: `glab release view` has no separate HTTP-status
     # probe; fold "not found" into an empty $TARGET_RELEASE_JSON and let the jq
     # gate below fail closed on any other unreadable/malformed response.
     TARGET_RELEASE_ERR="$(mktemp)"
@@ -494,7 +494,7 @@ that already succeeded remotely. Otherwise:
      if [ "$CLI_TOOL" = gh ]; then
        gh release view "v{version}" --json tagName,isDraft,isPrerelease,publishedAt 2>/dev/null
      else
-       # `glab release view` (per #414/#415's spec) has no draft state, so map
+       # `glab release view` has no draft state, so map
        # onto the same {tagName,isDraft,isPrerelease,publishedAt} shape the
        # shared release_is_published gate below expects: isDraft is always
        # false, isPrerelease comes from `upcoming_release`, publishedAt from

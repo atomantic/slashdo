@@ -2,7 +2,7 @@
 
 Prompt-driven reviewer (the OpenCode CLI; aliases `zen`, `opencode-zen`); always review-only. Binary `opencode`. Effort: `--variant <level>`.
 
-**Model** — run right after the shared-inputs block, in the same shell. OpenCode expects `provider/model`. Precedence: `{REVIEW_MODEL}` > `OPENCODE_REVIEW_MODEL` env > no slashdo override. There is no bundled model fallback: headless provider admission is not verified for the formerly documented free-tier model, so the operator selects a supported model/provider explicitly or configures one in OpenCode. Friendly aliases still normalize when explicitly selected:
+**Model** — run right after the shared-inputs block, in the same shell. OpenCode expects `provider/model`. Precedence: `{REVIEW_MODEL}` > `OPENCODE_REVIEW_MODEL` env > no slashdo override. There is no bundled model fallback: headless provider admission is not verified for OpenCode's free-tier models, so the operator selects a supported model/provider explicitly or configures one in OpenCode. Friendly aliases normalize when explicitly selected:
 
 ```bash
 OPENCODE_RAW_MODEL="${REVIEW_MODEL:-${OPENCODE_REVIEW_MODEL:-}}"

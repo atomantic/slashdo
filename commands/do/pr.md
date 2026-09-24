@@ -7,7 +7,7 @@ argument-hint: "[--review-with <agent>[,<agent>...]] [--review-iterations <n>] [
 
 !`cat ~/.claude/lib/review-flags.md`
 
-Parse `$ARGUMENTS` for the merge flags (auto-merge is opt-in; the historical default opens the PR and stops):
+Parse `$ARGUMENTS` for the merge flags (auto-merge is opt-in; by default the command opens the PR and stops):
 - `--merge` — once the review loop returns a mergeable status **and** CI is green, auto-merge the PR. Record `MERGE_ENABLED=true`.
 - `--merge=<method>` — same as `--merge`, pinning `<method>` ∈ {`squash`, `rebase`, `merge`}. Record `MERGE_ENABLED=true` and `MERGE_METHOD=<method>`. Abort on an unknown method with `--merge=<method> must be one of squash, rebase, merge (got: {value}).`
 - `--no-merge` — leave the PR open for manual merge. Record `MERGE_ENABLED=false`. If both `--merge` and `--no-merge` appear, abort with `--merge and --no-merge cannot be combined`.
@@ -180,7 +180,7 @@ Otherwise combine `LOCAL_OVERALL_STATUS` (from "Pre-PR Local Reviews", or `clean
 
 ## Merge the PR (only when merge mode is enabled)
 
-**If `MERGE_ENABLED` is not `true`, skip this section** — report the PR/MR URL plus the review summary and stop (the historical `/do:pr` behavior).
+**If `MERGE_ENABLED` is not `true`, skip this section** — report the PR/MR URL plus the review summary and stop.
 
 When `MERGE_ENABLED=true`, gate the merge on **all three** of the review result, the unpushed-commits check, and CI:
 

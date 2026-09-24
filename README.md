@@ -197,7 +197,7 @@ Reviewers run **in the order listed** — nothing is ever added implicitly.
 /do:pr --review-with codex,ollama~opt               # ollama is optional — can't block the merge
 ```
 
-- **Model pinning** (`<agent>[<model>]`): pin per run, or save defaults with `/do:config --review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5,opencode=provider/model`. An explicit bracket always wins.
+- **Model pinning** (`<agent>[<model>]`): pin per run, or save defaults with `/do:config --review-models codex=o3,claude=opus,cursor=gpt-5,opencode=provider/model`. An explicit bracket always wins.
 - **Optional reviewers** (`~opt`): findings still get fixed, but an inconclusive result never blocks `--merge`. A hard error still does.
 - **Per-reviewer iteration caps** (`~max=<n>`): caps that reviewer's review→fix→re-review cycles (default 3, `ollama` has its own cap). `0` = loop-until-clean, bounded by a 10-iteration guardrail.
 - **Per-reviewer reasoning effort** (`~effort=<level>`, one of `low`/`medium`/`high`/`xhigh`/`max`): e.g. `cursor[gpt-5]~effort=max`, `opencode[provider/model]~effort=high` — a saved `--review-models cursor=…` default pairs with a bare `cursor~effort=…`. Falls back to prompt guidance where a reviewer has no matching control.
@@ -273,7 +273,7 @@ Rather than passing flags every time, save them once and let future commands pic
 
 ```
 /do:config --review-with=claude,codex,cursor[gpt-5]~effort=max,opencode[provider/model],ollama[qwen2.5-coder:32b]
-/do:config --review-models codex=o3,claude=claude-opus-4-8,cursor=gpt-5,opencode=provider/model
+/do:config --review-models codex=o3,claude=opus,cursor=gpt-5,opencode=provider/model
 /do:config --issues-label plan
 /do:config --merge --merge-method squash
 /do:config --self

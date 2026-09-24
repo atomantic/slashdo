@@ -581,7 +581,7 @@ if let price {
 
 **Local StoreKit testing:** add a `.storekit` configuration file and reference it in the scheme's `LaunchAction` (`storeKitConfigurationFileReference`). Run from Xcode — purchases use the local test environment with no App Store Connect dependency. Note: only affects debug runs; archived/TestFlight builds use real sandbox.
 
-**Submitting first-time IAPs alongside the app version (the App Store Connect UI changed):**
+**Submitting first-time IAPs alongside the app version:**
 1. Go to the app version page → click "Add for Review" — this creates a Draft Submission
 2. Go to each individual IAP page → click "Submit for Review" on each — adds it to the same draft
 3. Open the Draft Submission (bottom of any page) → click "Submit for Review"
@@ -589,7 +589,7 @@ if let price {
 **Clearing rejected IAP localizations:** for each IAP, edit the English (U.S.) localization (any minor edit), Save → status changes from "Rejected" to "Prepare for Submission". This can be automated with Playwright since App Store Connect is a web app.
 
 ### Notes
-- Sandbox tester accounts (Users and Access > Sandbox) now require an existing Apple Account
+- Sandbox tester accounts (Users and Access > Sandbox) require an existing Apple Account
 - For TestFlight, sandbox purchases use the user's real Apple ID automatically — no separate sandbox account needed
 - Bank account "Processing" status does NOT block sandbox purchases for approved IAPs
 
