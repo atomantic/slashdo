@@ -38,6 +38,7 @@ List all available `/do:*` commands with their descriptions.
 
 ## Notes
 
-- Work is tracked in the project's issue tracker. The default when nothing else is configured is the repo's GitHub/GitLab issues, which is the only tracker automated today; support for other trackers is tracked in https://github.com/atomantic/slashdo/issues/372. `--issues-label`, `--self`, `--collaborators`, and `--trusted-authors` still apply. Have a legacy PLAN.md? Run `/do:replan` once to migrate it.
+- **Code host and tracker support**: slashdo runs on GitHub (cloud and Enterprise Server) and GitLab (cloud and self-managed). Issue tracking defaults to your code host (GitHub or GitLab); Jira support is rolling out ([#372](https://github.com/atomantic/slashdo/issues/372)). Auto-detection reads the `origin` remote; override with `/do:config --code-host github|gitlab` or `--tracker github|gitlab|jira` (save globally or per-repo with `--project`; Jira also needs `--jira-project <KEY>`).
+- Work is tracked in the project's issue tracker. The default when nothing else is configured is the repo's GitHub/GitLab issues. `--issues-label`, `--self`, `--collaborators`, and `--trusted-authors` still apply. Have a legacy PLAN.md? Run `/do:replan` once to migrate it.
 - Commands are installed via `npx slash-do@latest`, or `install.sh` when npm is unavailable
 - For more info, see https://github.com/atomantic/slashdo
