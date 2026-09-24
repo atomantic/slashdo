@@ -29,7 +29,7 @@ List all available `/do:*` commands with their descriptions.
 | `/do:release` | Create a release PR using the project's documented release workflow |
 | `/do:replan` | Automated audit/triage of the issue tracker — close completed issues, suggest new work, keep the backlog lean (migrates a legacy PLAN.md once) |
 | `/do:review` | Deep code review of changed files against best practices |
-| `/do:rpr` | Resolve PR review feedback with parallel agents |
+| `/do:rpr` | Resolve PR/MR review feedback with parallel agents |
 | `/do:scan` | Read-only safety audit of an unfamiliar directory — flags malware patterns, network calls, and vulnerable deps without executing code |
 | `/do:simplify` | Refactor-only audit — architecture, DRY, simplification, and cognitive load — shipped as per-category PRs that must not change behavior (`/do:better --simplify-only`) |
 | `/do:update` | Update slashdo commands to the latest version |
