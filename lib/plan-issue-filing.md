@@ -8,11 +8,10 @@ How a command files deferred or discovered work as tracker issues. **Assumes
 
 Record `EXISTING_ISSUES` up front for dedup — **all** open issues, not just
 `PLAN_LABEL`, so a hand-filed duplicate under another label is caught:
-`gh issue list --state open --limit 500 --json number,title,labels,body --jq '.'`
+`gh issue list --state open --limit 500 --json number,title,labels,body`
 (glab: `glab issue list --state opened --per-page 100 -F json`). A command that files
 only a handful of items and never otherwise needs the backlog may instead dedup each
-candidate with `gh issue list --search "<keywords>"` / `glab issue list --search
-"<keywords>"` (e.g. `/do:next` Phase 4).
+candidate with `gh`/`glab issue list --search "<keywords>"` (e.g. `/do:plan-task`).
 
 ## Recording every finding under `--scan-only`
 

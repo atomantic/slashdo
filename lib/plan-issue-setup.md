@@ -22,8 +22,10 @@ Dedup, `--scan-only` recording, severity/category labels, and bulk filing live i
    gh label create <name> --color <hex> 2>/dev/null || true               # gh
    glab label create --name <name> --color "#<hex>" 2>/dev/null || true   # glab: color required
    ```
-   The scoping label: `gh label create "$PLAN_LABEL" --description "Tracked by slashdo" 2>/dev/null || true`
-   (glab: `glab label create --name "$PLAN_LABEL" --color "#428BCA" 2>/dev/null || true`).
+
+Only on a Jira tracker (`TRACKER=jira`), if not yet read (it replaces the tracker gate, these calls, `#<n>`):
+
+!read lib/tracker-jira.md
 
 ## The dispatch hint (`model:` + `effort:`)
 
@@ -45,6 +47,6 @@ each worker's model from the tier.
 
 ## Label colors
 
-`severity`: critical `B60205`, high `D93F0B`, medium `FBCA04`, low `0E8A16`. Every
+`PLAN_LABEL`: `428BCA`. `severity`: critical `B60205`, high `D93F0B`, medium `FBCA04`, low `0E8A16`. Every
 category: `0366D6`. `model`: light `D4C5F9`, medium `A371F7`, heavy `6F42C1`.
 `effort`: low `BFE5E5`, medium `76C7C7`, high `1D7874`, xhigh `0E4F4C`, max `05403D`.

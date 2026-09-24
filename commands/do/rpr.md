@@ -23,7 +23,7 @@ After parsing the flags above, apply any **saved defaults** (set via `/do:config
 
 !`cat ~/.claude/lib/review-config-defaults.md`
 
-Parse `$ARGUMENTS` for `--issues-label <name>`: a **deferred** finding (see Finding Disposition) is filed as a GitHub/GitLab issue. Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan` (a saved `issues` key is ignored). `--issues` is a deprecated no-op: print once `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.` `--no-issues` aborts with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only in the project's issue tracker.`
+Parse `$ARGUMENTS` for `--issues-label <name>`: a **deferred** finding (see Finding Disposition) is filed as a tracker issue — GitHub, GitLab, or Jira (`/do:config --tracker`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan` (a saved `issues` key is ignored). `--issues` is a deprecated no-op: print once `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.` `--no-issues` aborts with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only in the project's issue tracker.`
 
 ## Detect Code Host
 
@@ -101,7 +101,7 @@ Only when `CODE_HOST=gitlab`, read the GitLab verbs:
    - Push to the branch.
    - **GitLab**: no persistent monitor is running to report CI (it only waits on Copilot), so check the pushed head's pipeline now, per "CI failure handling".
 
-7. **Resolve conversations**: For each addressed thread, run the `resolve-thread` verb with its thread ID (GitHub: the review-thread node `id`; GitLab: the discussion `id`). Track resolution count against the total from step 3. A thread you leave open gets a reply through the `reply-thread` verb instead: a concrete reason it is not a real issue (Finding Disposition's "reply"), or the question when the feedback is unclear. A deferred finding's reply names the filed issue. Replies go in the thread itself, never in a new top-level comment, on either host. A failed verb is a failure: report it, and never count that thread as resolved.
+7. **Resolve conversations**: For each addressed thread, run the `resolve-thread` verb with its thread ID (GitHub: the review-thread node `id`; GitLab: the discussion `id`). Track resolution count against the total from step 3. A thread you leave open gets a reply through the `reply-thread` verb instead: a concrete reason it is not a real issue (Finding Disposition's "reply"), or the question when the feedback is unclear. A deferred finding's reply names the filed issue (by key, `PROJ-123`, on a Jira tracker). Replies go in the thread itself, never in a new top-level comment, on either host. A failed verb is a failure: report it, and never count that thread as resolved.
 
 8. **Decide whether to loop** (only if `is_fork_pr=false` — **skip for fork-to-upstream PRs**): after pushing fixes, evaluate whether another review round is worth running.
 
@@ -117,7 +117,7 @@ Only when `CODE_HOST=gitlab`, read the GitLab verbs:
 
    **Repeated-comment dedup**: after a new Copilot round, compare each new unresolved thread's body and file/line against the previous round's intentionally-unresolved threads (replied to as non-issues or disagreements). If every new unresolved thread is a repeat of dismissed feedback, treat the review as clean and exit the loop.
 
-9. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input). List deferred findings with their issue numbers, or as unfiled per `plan-issue-setup.md`'s no-tracker rule.
+9. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input). List deferred findings with their issue numbers (keys on Jira), or as unfiled per `plan-issue-setup.md`'s no-tracker rule.
 
 10. **Convention encoding**: after the summary, run the end-of-cycle phase from `~/.claude/lib/review-fix-conventions.md` against the issues addressed this session. Encoded actions land in the same branch as the rpr fixes.
 
