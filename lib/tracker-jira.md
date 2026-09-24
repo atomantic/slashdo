@@ -196,6 +196,7 @@ The Phase 1 step-1 walk: every open issue, oldest first, 100 per page, capped at
 like `gh` (note the cap). `LABEL_FILTER` must be a Jira label (no whitespace or `"`):
 
 ```bash
+case "$LABEL_FILTER" in *[[:space:]\"\\]*) echo "Jira labels cannot contain spaces or quotes (got: $LABEL_FILTER)"; exit 1 ;; esac
 JQL="statusCategory != Done"
 [ -n "$LABEL_FILTER" ] && JQL="$JQL AND labels = \"$LABEL_FILTER\""
 [ "$SELF_MODE" = "true" ] && JQL="$JQL AND reporter = currentUser()"

@@ -232,6 +232,11 @@ describe('Jira queue walk, executed', () => {
     // The pre-flight's own list call is a plain one and passes; the walk's --raw call fails.
     assert.equal(result.status, 1, result.stdout);
     assert.match(result.stdout, /Could not list PROJ issues — aborting/);
+    // A label that would break out of the JQL string never reaches jira.
+    const quoted = runShell(walk(`LABEL_FILTER='plan" OR project = OPS'`), { pages: { 0: [issue('PROJ-1')] } });
+    assert.equal(quoted.status, 1, quoted.stdout);
+    assert.match(quoted.stdout, /Jira labels cannot contain spaces or quotes/);
+    assert.ok(!quoted.calls.some((c) => c.includes('--raw')));
   });
 });
 
