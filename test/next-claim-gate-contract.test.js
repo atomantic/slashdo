@@ -18,6 +18,7 @@ const defaults = fs.readFileSync(
   path.join(root, 'lib', 'config-defaults-issues-merge.md'),
   'utf8',
 );
+const epicChildren = fs.readFileSync(path.join(root, 'lib', 'epic-children.md'), 'utf8');
 const swarm = fs.readFileSync(path.join(root, 'lib', 'next-swarm.md'), 'utf8');
 const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
 
@@ -215,6 +216,15 @@ describe('swarm prose slimming keeps executable rules', () => {
     assert.match(swarm, /light.*cheapest capable coding model.*medium.*workhorse.*heavy.*strongest available alias/);
     assert.match(swarm, /lack of entitlement, retry once with the session model/);
     assert.match(swarm, /exact orchestrator-owned `REVIEWER_PREFLIGHT` block/);
+  });
+});
+
+describe('GitHub native epic child pagination', () => {
+  it('fails closed when the GraphQL fallback cannot prove the full child set', () => {
+    assert.match(epicChildren, /subIssues\(first:100\)\{nodes\{number state\} pageInfo\{hasNextPage\}\}/);
+    assert.match(epicChildren, /if \(\.nodes\|type\) != "array" or \(\.pageInfo\.hasNextPage\|type\) != "boolean" then error\("incomplete sub-issue response"\) elif \.pageInfo\.hasNextPage then "__INCOMPLETE_PAGINATION__"/);
+    assert.match(epicChildren, /mark child resolution \*\*unresolved\*\* and do not fall back or close the epic/);
+    assert.match(epicChildren, /A valid empty result \/ `404` \/ `410` means "fall back"/);
   });
 });
 

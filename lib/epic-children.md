@@ -49,15 +49,17 @@ An issue that matches none of these is an ordinary issue — handle it normally.
    ```
    GraphQL equivalent when REST is unavailable:
    ```bash
-   gh api --hostname "$GH_HOST" graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){subIssues(first:100){nodes{number state}}}}}' \
-     -F o="$OWNER" -F r="$REPO" -F n="$N" --jq '.data.repository.issue.subIssues.nodes[] | "\(.number)\t\(.state|ascii_downcase)"' 2>/dev/null
+   gh api --hostname "$GH_HOST" graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){subIssues(first:100){nodes{number state} pageInfo{hasNextPage}}}}}' \
+     -F o="$OWNER" -F r="$REPO" -F n="$N" --jq '.data.repository.issue.subIssues | if (.nodes|type) != "array" or (.pageInfo.hasNextPage|type) != "boolean" then error("incomplete sub-issue response") elif .pageInfo.hasNextPage then "__INCOMPLETE_PAGINATION__" else (.nodes[] | "\(.number)\t\(.state|ascii_downcase)") end' 2>/dev/null
    ```
    If either returns rows, **those are the children** — use them and skip the
-   convention scan. An empty result / `404` / `410` means "fall back" (feature
-   not enabled, older GHES, or no sub-issues) — it does **not** mean "zero
-   children." **On GitLab (`$CLI_TOOL = glab`), skip this step entirely** and go
-   straight to the convention fallback — there is no project-scoped equivalent
-   to probe.
+   convention scan. The GraphQL query requests only 100 children: if it prints
+   `__INCOMPLETE_PAGINATION__`, or fails because the response is malformed,
+   mark child resolution **unresolved** and do not fall back or close the epic.
+   A valid empty result / `404` / `410` means "fall back" (feature not enabled,
+   older GHES, or no sub-issues) — it does **not** mean "zero children." **On
+   GitLab (`$CLI_TOOL = glab`), skip this step entirely** and go straight to the
+   convention fallback — there is no project-scoped equivalent to probe.
 
 2. **Convention fallback** (GitHub: only when native returned nothing; GitLab: always):
    - **Body task-list issue refs.** Read the epic body:
