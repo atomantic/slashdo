@@ -84,6 +84,13 @@ describe('#296 — next-swarm.md A1 delegates to Phase 1 by name, not "below"', 
   });
 });
 
+describe('swarm cleanup preserves open PR recovery paths', () => {
+  it('keeps the worktree and branch when a PR recompute is unclean', () => {
+    assert.match(swarm, /PR opened, but its recomputed gate is not clean[\s\S]*leave the PR open and keep its worktree and branch/);
+    assert.match(swarm, /\*\*No PR:\*\* run `release_marker`, then delete the local and remote/);
+  });
+});
+
 describe('#296 — next-swarm.md jq probe no longer contradicts "reuse Phase 1 verbatim"', () => {
   it('routes every swarm path, A1e included, through the shared Pre-flight jq probe', () => {
     assert.doesNotMatch(swarm, /Swarm replaces Phases 1–7, so the\n\s*Phase 1 probe never runs/);

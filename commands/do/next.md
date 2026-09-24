@@ -233,7 +233,7 @@ Then:
    - `epic-empty` (no children resolvable either way) → treat as an ordinary issue.
 4. **Resolve declared dependencies before picking (blocked-by).** A candidate may declare a hard dependency in its **body**: a line matching `Depends on #<N>` or `Blocked by #<N>` (case-insensitive; one line may list several, e.g. `Depends on #12, #15`). Collect every `#<N>` on those lines. The step-1 walk omits bodies, so **fetch the body for this candidate only** with `issue_body <N>` — the same fetch serves step 3's task-list check. A candidate is **blocked** when ANY referenced issue is still open — check the freshest state with `issue_state <N>` and test for "closed" rather than an exact "open" match (`OPEN`/`CLOSED` vs `opened`/`closed`); a referenced number that is closed, or doesn't exist, does not block. Resolve **lazily** as you walk (only for the candidate you're about to pick).
    - `blocked` (≥1 referenced issue still open) → **skip** in auto-pick; note `#N blocked by #M (open)`. Self-clearing: when #M closes, #N becomes eligible.
-   - Also honor each host's **native** blocked-by relationship when the API surfaces it — GitHub's GraphQL `blockedBy` connection, or GitLab's Issue Links API filtered to `link_type: "is_blocked_by"`. Use the GitLab `native blocked-by lookup` procedure in [lib/next-gitlab.md](../../lib/next-gitlab.md); it captures the API status separately and treats a failed lookup as **UNRESOLVED**, not unblocked. A failed lookup falls back to the body convention alone and says so (`#N: native blocked-by lookup failed — using the body convention only`). The two sources are OR'd (blocked by *either* ⇒ skip). On Jira, both come from [lib/tracker-jira.md](../../lib/tracker-jira.md) "Queue walk" (`Depends on PROJ-12` lines, native "is blocked by" links).
+   - Also honor each host's **native** blocked-by relationship when the API surfaces it — GitHub's GraphQL `blockedBy` connection, GitLab's Issue Links API filtered to `link_type: "is_blocked_by"`, or Jira's `issuelinks`. Use the GitLab procedure in [lib/next-gitlab.md](../../lib/next-gitlab.md) and Jira procedure in [lib/tracker-jira.md](../../lib/tracker-jira.md); each treats a failed or malformed native lookup as **UNRESOLVED**, not unblocked. An unresolved native lookup skips the candidate during auto-pick and says so (`#N: native blocked-by lookup unresolved — skipping auto-pick`); it must never fall back to body dependencies alone. An explicitly named issue may proceed only as an explicit override, with a warning that native blocker state could not be verified. The body and native sources are OR'd (blocked by *either* ⇒ skip).
    - **Cycle / unresolvable chain** (A depends on B, B depends on A) → both stay skipped; note the cycle so a human can break it. Never loop trying to resolve one.
 5. **Pick the target issue:**
    - **With argument** — the issue number (strip `#`); **set `ISSUE_NUM` to that stripped number now** so the checks below can reference `$ISSUE_NUM`. Verify open and NOT in flight. **`--self` first, as a hard gate:** when `SELF_MODE` is on, confirm the issue's author is the running account — use `issue_author "$ISSUE_NUM"` and compare it with the authenticated login; on GitLab, resolve that login with the two-step capture in [lib/next-gitlab.md](../../lib/next-gitlab.md), exactly as the Phase 2 claim verb does; on Jira, use the JQL check in [lib/tracker-jira.md](../../lib/tracker-jira.md) "Claim gates", never a display-name comparison; if it does not, **refuse and stop** with `Issue #<num> was filed by <author>, not you — /do:next --self only works on issues you filed. Drop --self to claim it.` **`--collaborators` next, as a sibling hard gate:** when `COLLAB_MODE` is on and `SELF_MODE` is not, confirm the author from `issue_author "$ISSUE_NUM"` is in `TRUSTED_CLAIM_POOL`, compared **case-insensitively**; if not, **refuse and stop** with `Issue #<num> was filed by <author>, who is not a collaborator on <owner/repo> (and not on --trusted-authors) — /do:next --collaborators only claims collaborator-authored issues. Drop --collaborators to claim it.` These are the **skips an explicit number does NOT override** — `--self` and `--collaborators` are security boundaries, not curation preferences. If it's an epic, resolve its state (step 3) first — claim an `epic-wrapup`, close an `epic-done`, or warn that children are still open on an `epic-open` (the explicit request still overrides — say so). Otherwise a named number is an **explicit override**: it claims even an issue auto-pick would skip — a parking-labelled one, one with an **open declared blocker** (step 4), one outside an active `LABEL_FILTER`, or one outside an active `MODEL_FILTER`/`EFFORT_FILTER`. State plainly when you're overriding a skip (e.g. "claiming `future`-labelled #123 by explicit request", "claiming #123 despite open blocker #120 by explicit request", "claiming `model:heavy` #123 despite --model light by explicit request"). If any other check fails (closed, in flight), print why and stop.
@@ -252,6 +252,7 @@ Then:
 The worktree is a **sibling directory** (`../next-issue-<num>`) on branch `next/issue-<num>`. Run as a **single Bash invocation** so the shell vars stay in scope, substituting the real issue number:
 
 ```bash
+REPO_ROOT="$(git rev-parse --show-toplevel)" && \
 SLUG="issue-<num>" && \
 # Abort if origin already has the claim branch.
 if git ls-remote --exit-code --heads origin "next/${SLUG}" >/dev/null 2>&1; then
@@ -260,13 +261,44 @@ fi && \
 # The default-branch one-liner (Conventions):
 DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)" && \
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(git remote show origin | sed -n 's/.*HEAD branch: //p')}" && \
-WORKTREE="../next-${SLUG}" && \
+WORKTREE="$(dirname "$REPO_ROOT")/next-${SLUG}" && \
 git fetch origin "${DEFAULT_BRANCH}" && \
 git worktree add -b "next/${SLUG}" "${WORKTREE}" "origin/${DEFAULT_BRANCH}" && \
 cd "${WORKTREE}" && \
 pwd && \
-# Publish the empty claim branch now; a push failure leaves a local-only claim.
-git push -u origin "next/${SLUG}" || echo "WARN: could not publish next/${SLUG} — claim is local-only (no cross-machine protection until /do:pr pushes)."
+# Atomically publish the claim only if the remote ref is still absent.
+if ! git push --force-with-lease="refs/heads/next/${SLUG}:" -u origin "next/${SLUG}:refs/heads/next/${SLUG}"; then
+  CLAIM_LOCAL_SHA="$(git rev-parse HEAD)" || { echo "Could not identify the local claim commit; preserving $WORKTREE for recovery."; exit 1; }
+  CLAIM_REMOTE_OUTPUT="$(git ls-remote --heads origin "refs/heads/next/${SLUG}" 2>&1)"
+  CLAIM_LOOKUP_STATUS=$?
+  if [ "$CLAIM_LOOKUP_STATUS" -ne 0 ]; then
+    echo "Claim push failed and remote ownership could not be checked; preserving $WORKTREE for recovery."
+    printf '%s\n' "$CLAIM_REMOTE_OUTPUT"
+    exit 1
+  fi
+  CLAIM_REMOTE_COUNT="$(printf '%s\n' "$CLAIM_REMOTE_OUTPUT" | awk 'NF { count++ } END { print count+0 }')"
+  if [ "$CLAIM_REMOTE_COUNT" -gt 1 ]; then
+    echo "Claim push failed and remote returned multiple refs; preserving $WORKTREE for recovery."
+    exit 1
+  elif [ "$CLAIM_REMOTE_COUNT" -eq 0 ]; then
+    echo "Claim push failed and no remote ref was published; preserving $WORKTREE for recovery."
+    exit 1
+  elif [ "$CLAIM_REMOTE_COUNT" -eq 1 ]; then
+    CLAIM_REMOTE_SHA="$(printf '%s\n' "$CLAIM_REMOTE_OUTPUT" | awk 'NF { print $1; exit }')"
+    CLAIM_REMOTE_REF="$(printf '%s\n' "$CLAIM_REMOTE_OUTPUT" | awk 'NF { print $2; exit }')"
+    if ! printf '%s\n' "$CLAIM_REMOTE_SHA" | grep -Eq '^[0-9a-f]{40}$' || [ "$CLAIM_REMOTE_REF" != "refs/heads/next/${SLUG}" ]; then
+      echo "Claim push failed and remote returned an invalid ref; preserving $WORKTREE for recovery."
+      exit 1
+    elif [ "$CLAIM_REMOTE_SHA" = "$CLAIM_LOCAL_SHA" ]; then
+      echo "Claim ref exists at the local commit, but push ownership is ambiguous; preserving $WORKTREE and stopping for recovery."
+      exit 1
+    fi
+  fi
+  echo "Could not atomically publish next/${SLUG}; another run claimed it. Cleaning up this unclaimed worktree."
+  git -C "$REPO_ROOT" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || echo "WARN: remove the created worktree $WORKTREE manually."
+  git -C "$REPO_ROOT" branch -D "next/${SLUG}" >/dev/null 2>&1 || echo "WARN: remove the created local branch next/${SLUG} manually."
+  exit 1
+fi
 ```
 
 **Verify `pwd` is the worktree path**, not the main repo. If it printed the main repo path, the worktree creation or `cd` failed — STOP, report the error, do not proceed. **Re-anchor every later Bash call** with `cd "${WORKTREE}"` or absolute paths. **Re-export `WORKTREE` and `DEFAULT_BRANCH` at the top of each subsequent Bash snippet**, per the default-branch one-liner's rule (Conventions) — otherwise they'd expand empty in Phases 5/6/7.

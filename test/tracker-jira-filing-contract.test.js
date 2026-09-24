@@ -31,9 +31,11 @@ const bash = (text) => {
   assert.equal(blocks.length, 1, `expected one bash block in:\n${text.slice(0, 200)}`);
   return blocks[0];
 };
+const shellQuote = (text) => "'" + text.replace(/'/g, "'\\''") + "'";
 
 const serving = section(jira, '\n## Serving the backlog and filing commands\n');
 const preflight = bash(section(jira, '\n## Pre-flight\n')).replace(/\{COMMAND\}/g, '/do:better');
+const searchIssues = bash(section(jira, '\n### Search Jira issues safely\n'));
 const fileOne = bash(section(serving, '\n### File one issue\n'));
 const listIssues = bash(section(serving, '\n### List issues\n'));
 
@@ -52,6 +54,7 @@ case "$1 $2" in
       *) echo "PROJ-1" ;;
     esac ;;
   "issue create")
+    prev=""; for a in "$@"; do [ "$prev" = "-s" ] && { printf '%s' "$a" > "$TITLE_CAPTURE"; break; }; prev="$a"; done
     case "$JIRA_CREATE_MODE" in
       fail) echo "Error: 400 Bad Request" >&2; exit 1 ;;
       banner) echo "Issue created https://jira.example/browse/PROJ-7" ;;
@@ -78,6 +81,7 @@ function runShell(body, { env = {}, pages = {} } = {}) {
     for (const [from, issues] of Object.entries(pages)) fs.writeFileSync(path.join(pagesDir, `${from}.json`), JSON.stringify(issues));
     const callLog = path.join(dir, 'calls.log');
     fs.writeFileSync(callLog, '');
+    const titleCapture = path.join(dir, 'title.txt');
     const bodyFile = path.join(dir, 'body.md');
     fs.writeFileSync(bodyFile, 'Finding with `backticks` and $(not a command)\n');
     const script = path.join(dir, 'run.sh');
@@ -85,10 +89,11 @@ function runShell(body, { env = {}, pages = {} } = {}) {
     const result = spawnSync('sh', [script], {
       cwd: repo,
       encoding: 'utf8',
-      env: { ...process.env, HOME: home, CALL_LOG: callLog, PAGES: pagesDir, PATH: `${bin}${path.delimiter}${process.env.PATH}`, ...env },
+      env: { ...process.env, HOME: home, CALL_LOG: callLog, PAGES: pagesDir, TITLE_CAPTURE: titleCapture, PATH: `${bin}${path.delimiter}${process.env.PATH}`, ...env },
     });
     const calls = fs.readFileSync(callLog, 'utf8').split('\n').filter(Boolean);
-    return { status: result.status, stdout: result.stdout, stderr: result.stderr, calls };
+    const title = fs.existsSync(titleCapture) ? fs.readFileSync(titleCapture, 'utf8') : null;
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr, calls, title };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -104,8 +109,8 @@ const issue = (key, { labels = [], category = 'new' } = {}) => ({
 });
 
 describe('Jira "File one issue", executed', () => {
-  const file = ({ title = '"Guard the empty config path"', labels = 'plan security "severity:high" "model:light"', parent = '' } = {}) => {
-    let script = fileOne.replace('<title>', title).replace('<label>...', labels);
+  const file = ({ title = 'Guard the empty config path', labels = 'plan security "severity:high" "model:light"', parent = '' } = {}) => {
+    let script = fileOne.replace('<title>', shellQuote(title)).replace('<label>...', labels);
     if (parent) script = script.replace('<parent-KEY, or empty>', parent);
     return runShell(`${preflight}\n${script}`);
   };
@@ -139,11 +144,59 @@ describe('Jira "File one issue", executed', () => {
 
   it('fails loudly, with no key, when the create fails or prints only a banner', () => {
     for (const mode of ['fail', 'banner']) {
-      const script = fileOne.replace('<title>', '"T"').replace('<label>...', 'plan');
+      const script = fileOne.replace('<title>', shellQuote('T')).replace('<label>...', 'plan');
       const result = runShell(`${preflight}\n${script}`, { env: { JIRA_CREATE_MODE: mode } });
       assert.equal(result.status, 1, `${mode}: ${result.stdout}`);
       assert.match(result.stdout, /Could not file "T" in PROJ\./);
       assert.doesNotMatch(result.stdout, /FILED=/);
+    }
+  });
+
+  it('passes a generated title as data instead of shell source', () => {
+    const marker = path.join(os.tmpdir(), `slashdo-jira-title-injection-${process.pid}-${Date.now()}`);
+    try {
+      const title = `$(touch '${marker}')`;
+      const result = file({ title, labels: 'plan' });
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.equal(fs.existsSync(marker), false, 'the title must not execute shell syntax');
+      assert.equal(result.title, title, 'the exact title reaches Jira as data');
+      const argv = creates(result.calls)[0].split('|');
+      assert.equal(argv[argv.indexOf('-s') + 1], title);
+    } finally {
+      fs.rmSync(marker, { force: true });
+    }
+  });
+
+  it('keeps heredoc-looking title lines as data', () => {
+    const marker = path.join(os.tmpdir(), `slashdo-jira-title-delimiter-${process.pid}-${Date.now()}`);
+    try {
+      const title = `safe\nSLASHDO_JIRA_TITLE_EOF\n$(touch '${marker}')`;
+      const result = file({ title, labels: 'plan' });
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.equal(fs.existsSync(marker), false, 'title lines must not terminate shell input');
+      assert.equal(result.title, title, 'heredoc-looking lines remain part of the Jira title');
+      assert.equal(creates(result.calls).length, 1);
+    } finally {
+      fs.rmSync(marker, { force: true });
+    }
+  });
+});
+
+describe('Jira issue search, executed', () => {
+  it('quotes generated keywords as JQL data without executing shell syntax', () => {
+    const marker = path.join(os.tmpdir(), `slashdo-jira-query-injection-${process.pid}-${Date.now()}`);
+    try {
+      const keywords = `O'Connor "review" $(touch '${marker}')`;
+      const script = searchIssues.replace('<keywords>', shellQuote(keywords));
+      const result = runShell(`${preflight}\n${script}`);
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.equal(fs.existsSync(marker), false, 'search terms must not execute shell syntax');
+      const call = result.calls.find((entry) => entry.startsWith('issue|list|') && entry.split('|').includes('-q'));
+      const argv = call.split('|');
+      const query = argv[argv.indexOf('-q') + 1];
+      assert.equal(query, `statusCategory != Done AND text ~ ${JSON.stringify(keywords)}`);
+    } finally {
+      fs.rmSync(marker, { force: true });
     }
   });
 });

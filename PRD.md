@@ -81,7 +81,7 @@ Aligned with [GOALS.md](./GOALS.md)'s Core Goals:
 | FR-18 | The system MUST provide a multi-reviewer review loop (`--review-with`) that classifies each reviewer's output into a fixed status vocabulary (clean/capped/no-verdict/guardrail/cli-error/push-failed/...) and blocks merge on any non-clean status not explicitly exempted. | Must | A reviewer returning an unparseable verdict blocks merge rather than being treated as clean. |
 | FR-19 | The system MUST provide `/do:better` (and the structurally narrowed `/do:simplify`) for multi-agent DevSecOps/refactor auditing, remediation in an isolated worktree, and per-category PR creation. | Must | `/do:simplify` produces refactor-only PRs with the existing test suite passing unmodified. |
 | FR-20 | The system MUST provide `/do:next` (including `--swarm`) to claim and ship tracker issues via isolated worktrees. | Must | `/do:next --swarm` ships more than one independent issue in a single run without branch collisions. |
-| FR-21 | The system MUST provide `/do:replan` and `/do:plan-task` to keep the tactical backlog (the GitHub/GitLab issue tracker) current. | Should | `/do:replan` prunes closed items from the tracked `plan`-labeled issue set. |
+| FR-21 | The system MUST provide `/do:replan` and `/do:plan-task` to keep the tactical backlog (a supported GitHub/GitLab issue tracker or Jira project) current. | Should | `/do:replan` prunes closed items from the tracked `plan`-labeled issue set. |
 | FR-22 | The system MUST provide `/do:help`, listing every installed command with a one-line description and a check for available updates. | Must | `/do:help` output includes every file present in `commands/do/`. |
 
 ### CLI Interface
@@ -134,7 +134,7 @@ Aligned with [GOALS.md](./GOALS.md)'s Core Goals:
 
 - Single independent maintainer, no funding/sponsorship infrastructure — README and LICENSE attribute the project to Adam Eivy.
 - Distribution depends on the npm registry (primary path) and GitHub raw-content availability (curl fallback) being reachable.
-- Issue-tracker features (`--issues` modes) assume `gh` (or `glab`) is installed and authenticated; commands degrade gracefully (skip, don't halt) when it isn't.
+- Tracker-backed features require an authenticated supported backend: `gh` or `glab` for GitHub/GitLab, or the Jira CLI and a configured Jira project. Commands stop with backend-specific setup guidance when the selected tracker is unavailable.
 - Node.js >=18 is assumed present in the host environment.
 - Environment auto-detection assumes each assistant's config-directory convention (`~/.claude`, `~/.config/opencode`, etc.) is stable and not user-relocated.
 - Contributions are actively solicited via the public GitHub issue tracker (MIT license, no CLA); the process is formalized in [CONTRIBUTING.md](./CONTRIBUTING.md). No `CODE_OF_CONDUCT.md` exists yet.

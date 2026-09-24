@@ -96,6 +96,19 @@ describe('GitLab MR mode body', () => {
   });
 });
 
+describe('GitHub PR source fetch completeness', () => {
+  it('fails the review when API lookup, response validation, or decode fails', () => {
+    const prMode = readLib('review-pr-mode.md');
+    const fetch = prMode.slice(prMode.indexOf('5. **Fetch each changed file'), prMode.indexOf('\n6. Print:'));
+    assert.match(fetch, /if ! gh api --hostname "\$GH_HOST" -H "Accept: application\/vnd\.github\.raw\+json" "\$CONTENT_API_PATH" > "\$TEMP_PATH"; then\n\s*rm -f "\$TEMP_PATH"\n\s*printf 'INCOMPLETE — could not fetch the complete raw source for %s at HEAD_SHA; do not review without its source\.\\n' "\$FILE_PATH"; exit 1\n\s*fi/);
+    assert.match(fetch, /INCOMPLETE — could not fetch the complete raw source/);
+    assert.match(fetch, /The raw media type avoids depending on external `jq`/);
+    assert.match(fetch, /encoding: none` response for larger files/);
+    assert.doesNotMatch(fetch, /jq |base64|gh api[^\n]*\|/);
+    assert.doesNotMatch(fetch, /skipped \(deleted or unreadable\)/);
+  });
+});
+
 describe('MR reference parse (executed)', { skip: !hasJq && 'jq not installed' }, () => {
   const snippet = mrMode.slice(mrMode.indexOf('## Parse the MR reference')).match(/```bash\n([\s\S]*?)```/)[1];
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'do-review-mr-'));

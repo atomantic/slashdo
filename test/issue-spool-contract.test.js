@@ -53,6 +53,13 @@ describe('bulk issue-filing spool contracts', () => {
     assert.match(partial, /\*\*A filer never rewrites a\nbody\*\*/);
   });
 
+  it('passes generated issue content as data, not shell source', () => {
+    assert.match(partial, /unique, single-quoted\s+heredoc delimiter/);
+    assert.match(partial, /--title "\$TITLE"/);
+    assert.match(partial, /--description "\$\(cat "\$BODY"\)"/);
+    assert.doesNotMatch(partial, /--title "<Title>"|--description "<body>"/);
+  });
+
   it('never reports an errored finding as filed', () => {
     // A filer that hit a rate limit or a malformed block filed nothing; counting
     // it as created loses the finding with no trace.

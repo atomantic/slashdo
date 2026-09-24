@@ -66,6 +66,16 @@ describe('per-host verb contract', () => {
     assert.match(gitlab, /mergeRequestReviewerRereview/, 'an existing reviewer is re-requested, not silently no-oped');
     assert.match(gitlab, /Settle rule/, 'unbatched GitLab comments must settle before the review counts');
   });
+
+  it('passes reviewer-authored text as JSON data, not shell source', () => {
+    const github = readLib(HOST_FILES.github);
+    const gitlab = readLib(HOST_FILES.gitlab);
+    assert.match(github, /--arg body "\$BODY"[\s\S]*--input "\$PAYLOAD_FILE"/);
+    assert.match(gitlab, /--arg body "\$BODY"[\s\S]*--input "\$PAYLOAD_FILE"/);
+    assert.match(gitlab, /--arg body "\$COMMENT"[\s\S]*--arg path "\$COMMENT_PATH"/);
+    assert.doesNotMatch(github, /body: "\{BODY\}"/);
+    assert.doesNotMatch(gitlab, /-f body="\{BODY\}"|-m "<summary>"|--arg body "<comment>"/);
+  });
 });
 
 describe('host-neutral reviewer loop', () => {
@@ -157,10 +167,11 @@ describe('GitLab cr-state normalization', { skip: !hasJq && 'jq not installed' }
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cr-state-'));
     try {
       const write = (name, value) => fs.writeFileSync(path.join(dir, name), value);
-      write('mr.json', JSON.stringify({ sha: 'head2' }));
+      write('mr.json', JSON.stringify({ sha: 'head3' }));
       write('versions.json', JSON.stringify([
-        { head_commit_sha: 'head2', created_at: '2026-01-02T00:00:00.000Z' },
         { head_commit_sha: 'head1', created_at: '2026-01-01T00:00:00.000Z' },
+        { head_commit_sha: 'head2', created_at: '2026-01-02T00:00:00.000Z' },
+        { head_commit_sha: 'head3', created_at: '2026-01-03T00:00:00.000Z' },
       ]));
       // --paginate emits one array per page; the filter must merge the stream.
       write('discussions.json', discussions.map((page) => JSON.stringify(page)).join('\n'));
@@ -191,7 +202,7 @@ describe('GitLab cr-state normalization', { skip: !hasJq && 'jq not installed' }
 
   it('maps each note to the commit it reviewed and keeps the head', () => {
     const state = run({ approvedBy: ['rev.bot'], discussions });
-    assert.equal(state.head, 'head2');
+    assert.equal(state.head, 'head3');
     const byCommit = Object.fromEntries(state.reviews.map((r) => [r.commit, r]));
     assert.deepEqual(Object.keys(byCommit).sort(), ['head1', 'head2']);
     // A note written before the latest push reviewed the older version, so it can
@@ -201,6 +212,7 @@ describe('GitLab cr-state normalization', { skip: !hasJq && 'jq not installed' }
     assert.equal(byCommit.head2.state, 'APPROVED');
     assert.equal(byCommit.head2.submittedAt, '2026-01-02T02:00:00.000Z');
     assert.equal(byCommit.head2.body, '', 'a diff note is a thread, not review-body feedback');
+    assert.equal(byCommit.head3, undefined, 'the newer MR head has no review until a note covers it');
   });
 
   it('reports resolvable discussions as threads with their author', () => {

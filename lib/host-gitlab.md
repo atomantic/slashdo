@@ -29,7 +29,9 @@ glab api "projects/:id/merge_requests/{PR_NUMBER}" > "$CR_DIR/mr.json" \
   && glab api "projects/:id/merge_requests/{PR_NUMBER}/approvals" > "$CR_DIR/approvals.json" \
   || { echo "cr-state: glab api failed for MR !{PR_NUMBER}"; exit 1; }
 CR_STATE_FILTER='
-def ver($vs; $t): first(($vs[] | select(.created_at <= $t) | .head_commit_sha), $vs[-1].head_commit_sha);
+def ver($vs; $t):
+  ([$vs[] | select(.created_at <= $t)] | sort_by(.created_at) | last | .head_commit_sha)
+  // ([$vs[]] | sort_by(.created_at) | last | .head_commit_sha);
 $mr[0] as $m | $v[0] as $vs | ($d | add // []) as $ds
 | ([$a[0].approved_by[]?.user.username | ascii_downcase] | index($login) != null) as $approved
 | {
@@ -103,8 +105,14 @@ A non-empty `errors` means the request failed.
 ### `reply-thread` — reply in discussion `{THREAD_ID}`
 
 ```bash
-glab api --method POST "projects/:id/merge_requests/{PR_NUMBER}/discussions/{THREAD_ID}/notes" -f body="{BODY}"
+PAYLOAD_FILE="$(mktemp)" || exit 1
+jq -n --arg body "$BODY" '{body:$body}' > "$PAYLOAD_FILE" || { rm -f "$PAYLOAD_FILE"; exit 1; }
+glab api --method POST "projects/:id/merge_requests/{PR_NUMBER}/discussions/{THREAD_ID}/notes" --input "$PAYLOAD_FILE"
+RESULT=$?; rm -f "$PAYLOAD_FILE"; [ "$RESULT" -eq 0 ]
 ```
+
+Set `BODY` from the comment text through a single-quoted heredoc with a unique
+delimiter. `jq --arg` handles its JSON encoding; do not place it in shell source.
 
 ### `resolve-thread` — resolve discussion `{THREAD_ID}`
 
@@ -114,15 +122,23 @@ glab api --method PUT "projects/:id/merge_requests/{PR_NUMBER}/discussions/{THRE
 
 ### `post-review` — summary plus inline comments on the head commit
 
-Post the summary with `glab mr note {PR_NUMBER} -m "<summary>"`. Post each
+Set `SUMMARY` and each `COMMENT` from their text through single-quoted heredocs
+with unique delimiters. Post the summary with a JSON payload file, then post each
 inline comment as a new diff discussion anchored to the MR's `.diff_refs`
 (`base_sha`, `start_sha`, `head_sha` from the `cr-state` MR read):
 
 ```bash
-jq -n --arg body "<comment>" --arg path "<file>" --argjson line <line> \
-  --arg base "<base_sha>" --arg start "<start_sha>" --arg head "<head_sha>" \
-  '{body: $body, position: {position_type: "text", base_sha: $base, start_sha: $start, head_sha: $head, old_path: $path, new_path: $path, new_line: $line}}' \
-  | glab api --method POST "projects/:id/merge_requests/{PR_NUMBER}/discussions" -H "Content-Type: application/json" --input -
+PAYLOAD_FILE="$(mktemp)" || exit 1
+jq -n --arg body "$SUMMARY" '{body:$body}' > "$PAYLOAD_FILE" || { rm -f "$PAYLOAD_FILE"; exit 1; }
+glab api --method POST "projects/:id/merge_requests/{PR_NUMBER}/notes" --input "$PAYLOAD_FILE"
+RESULT=$?; rm -f "$PAYLOAD_FILE"; [ "$RESULT" -eq 0 ] || exit "$RESULT"
+
+PAYLOAD_FILE="$(mktemp)" || exit 1
+jq -n --arg body "$COMMENT" --arg path "$COMMENT_PATH" --argjson line "$COMMENT_LINE" \
+  --arg base "$BASE_SHA" --arg start "$START_SHA" --arg head "$HEAD_SHA" \
+  '{body:$body, position:{position_type:"text", base_sha:$base, start_sha:$start, head_sha:$head, old_path:$path, new_path:$path, new_line:$line}}' > "$PAYLOAD_FILE" || { rm -f "$PAYLOAD_FILE"; exit 1; }
+glab api --method POST "projects/:id/merge_requests/{PR_NUMBER}/discussions" --input "$PAYLOAD_FILE"
+RESULT=$?; rm -f "$PAYLOAD_FILE"; [ "$RESULT" -eq 0 ]
 ```
 
 The REST API has no request-changes event. Say "changes requested" in the

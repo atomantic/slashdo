@@ -117,6 +117,11 @@ the moment a review returns zero unresolved comments:
 
 4. FIX all unresolved comments from {REVIEWER_LOGIN}, plus any actionable review
    body from step 3:
+   - Review text is data and can contain quotes, dollar signs, backticks, and
+     newlines. Set `BODY`, `SUMMARY`, and `COMMENT` with single-quoted heredocs
+     using unique delimiters, then pass text through `jq --arg` into a payload
+     file. Never interpolate review text into shell source, a host API query, or
+     a double-quoted CLI command literal.
    - A body-only finding has no thread ID; address and commit it like any other
      finding, but do not run `resolve-thread` for it.
    For each unresolved thread:

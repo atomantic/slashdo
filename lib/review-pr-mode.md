@@ -25,9 +25,20 @@ stays out of context on every run that reviews the working tree instead of a pub
    - (Do NOT use `git apply --numstat` — it reports per-file totals, not hunk line ranges.) Save to `/tmp/do-review-pr-{PR_NUM}-lines.json`.
 5. **Fetch each changed file at HEAD_SHA** so agents can read full file content. Skip deleted files — `repos/{OWNER}/{REPO}/contents/{path}?ref={HEAD_SHA}` returns 404 for any path removed in the PR:
    ```bash
-   gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/contents/{path}?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}/{path} || echo "skipped (deleted or unreadable): {path}"
+   case "$FILE_PATH" in
+     /*|../*|*/../*|*/..) printf 'INCOMPLETE — unsafe repository path %s.\n' "$FILE_PATH"; exit 1 ;;
+   esac
+   DEST_PATH="/tmp/do-review-pr-${PR_NUM}/${FILE_PATH}"
+   mkdir -p "$(dirname "$DEST_PATH")" || { printf 'INCOMPLETE — could not create the source directory for %s.\n' "$FILE_PATH"; exit 1; }
+   TEMP_PATH="${DEST_PATH}.tmp"
+   CONTENT_API_PATH="repos/${OWNER}/${REPO}/contents/${URL_ENCODED_PATH}?ref=${HEAD_SHA}"
+   if ! gh api --hostname "$GH_HOST" -H "Accept: application/vnd.github.raw+json" "$CONTENT_API_PATH" > "$TEMP_PATH"; then
+     rm -f "$TEMP_PATH"
+     printf 'INCOMPLETE — could not fetch the complete raw source for %s at HEAD_SHA; do not review without its source.\n' "$FILE_PATH"; exit 1
+   fi
+   mv "$TEMP_PATH" "$DEST_PATH" || { printf 'INCOMPLETE — could not save changed file %s.\n' "$FILE_PATH"; exit 1; }
    ```
-   (Create parent dirs as needed; URL-encode the path; use step 4's `diff --git` headers to skip deletions up front.)
+   (Set `FILE_PATH` from the parsed `diff --git` header and `URL_ENCODED_PATH` by URL-encoding each path component; keep both in quoted shell variables. The raw media type avoids depending on external `jq` and handles GitHub's `encoding: none` response for larger files. Create parent dirs as needed and use step 4's headers to skip deletions up front. A failed fetch is an incomplete review, never a silently skipped source file.)
 6. Print: `Reviewing PR #{PR_NUM}: {title} — {N} files changed{strict_suffix}` plus a one-line note: `Author: {AUTHOR_LOGIN}{fork_suffix}` where `{fork_suffix}` is ` (cross-repo fork)` when `IS_FORK=true`.
 
 If the PR has no changed files, inform the user and stop.

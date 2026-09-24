@@ -66,7 +66,7 @@ BUILD_CMD="swift build"
 TEST_CMD="swift test"
 ```
 
-For a single-platform Xcode project, derive an available simulator before forming the commands:
+For any Xcode project whose `PLATFORMS` contains iOS, derive an available simulator before forming its commands. This includes multi-platform projects such as iOS + macOS:
 
 ```bash
 SIM_DEST=$(xcrun simctl list devices available -j | python3 -c "
@@ -75,14 +75,14 @@ devices = json.load(sys.stdin)['devices']
 for runtime in sorted(devices.keys(), reverse=True):
     for device in devices[runtime]:
         if device['isAvailable'] and 'iPhone' in device['name']:
-            version = runtime.split('.')[-3].replace('SimRuntime-iOS-', '').replace('-', '.')
+            version = runtime.rsplit('iOS-', 1)[-1].replace('-', '.')
             print(f\"{device['name']},OS={version}\")
             sys.exit(0)
 print('iPhone 16')
 ")
 ```
 
-Execute the build and test commands directly rather than expanding a shell variable:
+For an iOS-only project, execute its build and test commands directly:
 
 ```bash
 xcodebuild -scheme {SCHEME} -destination "generic/platform=iOS Simulator" build

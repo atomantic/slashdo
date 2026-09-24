@@ -48,10 +48,12 @@ describe('glab api / jq contracts', () => {
     // A pipeline reports jq's status, and jq succeeds on empty input — so a links-API
     // outage would read as "no native blockers" and the picker would claim a dependent
     // ahead of its blocker. The lookup captures glab's status first and treats a failure
-    // as UNRESOLVED (fall back to the body convention), never as unblocked.
+    // as UNRESOLVED: auto-pick must skip rather than fall back to body-only links.
     assert.doesNotMatch(next, /glab api projects\/:id\/issues\/<N>\/links \| jq/);
     assert.match(next, /LINKS_JSON="\$\(glab api "projects\/:id\/issues\/<N>\/links"\)"/);
-    assert.match(next, /A failed lookup is \*\*UNRESOLVED\*\*, not unblocked/);
+    assert.match(next, /failed or malformed native lookup as \*\*UNRESOLVED\*\*, not unblocked/);
+    assert.match(next, /An unresolved native lookup skips the candidate during auto-pick/);
+    assert.match(next, /it must never fall back to body dependencies alone/);
   });
 
   it('probes for jq in the shared GitLab pre-flight, before the Phase 1 walk', () => {

@@ -72,12 +72,15 @@ command -v jq >/dev/null 2>&1 || {
 
 ## Phase 1 — native blocked-by lookup
 
-For an issue candidate, capture the GitLab links response before parsing it. A failed lookup is **UNRESOLVED**, not unblocked; the caller then falls back to the body convention and reports the fallback.
+For an issue candidate, capture and validate the GitLab links response before parsing it. A failed lookup, malformed JSON, or response with the wrong shape is **UNRESOLVED**, not unblocked. During auto-pick, skip that candidate with a warning: never fall back to the body convention alone because that can miss a native blocker. An explicitly named issue may proceed only as an explicit override, with a warning that native blocker state could not be verified.
 
 ```bash
 LINKS_JSON="$(glab api "projects/:id/issues/<N>/links")" || {
-  echo "#<N>: native blocked-by lookup failed — using the body convention only"; false; }
-printf '%s' "$LINKS_JSON" | jq -r '.[] | select(.link_type == "is_blocked_by")'
+  echo "#<N>: native blocked-by lookup failed — skip during auto-pick; an explicitly named issue requires an override warning"; false; }
+if ! printf '%s' "$LINKS_JSON" | jq -e 'type == "array" and all(.[]; type == "object" and (.link_type | type == "string") and (.state | type == "string"))' >/dev/null; then
+  echo "#<N>: native blocked-by response is malformed — skip during auto-pick; an explicitly named issue requires an override warning"; false
+fi
+printf '%s' "$LINKS_JSON" | jq -r '.[] | select(.link_type == "is_blocked_by" and .state != "closed")'
 ```
 
 ## Phase 1 — candidate list

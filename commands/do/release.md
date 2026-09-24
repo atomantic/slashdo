@@ -58,7 +58,7 @@ Discover the project's source and target branches for releases; do NOT hardcode 
 
 1. **Source branch**:
    - GitHub: `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` (typically `main`). While here, **derive the GitHub API host `{GH_HOST}` from the `origin` remote** with the shared snippet at the end of this section and forward it to the review loop — `gh api` (used by the host-side reviewer loops' GitHub verbs) defaults to github.com rather than reading the remote, so on GitHub Enterprise those loops would silently poll the wrong host and time out. If `gh auth token --hostname "$GH_HOST"` fails, stop and tell the user to run `gh auth login --hostname $GH_HOST`.
-   - GitLab: `glab api "projects/:id" --jq .default_branch` (typically `main`). GitLab needs no separate API-host derivation for `glab` calls — it already resolves the host from `origin`, and the GitLab-side reviewer loop (`host-gitlab.md`) never needs `{GH_HOST}`. A plain host string is still needed for URLs this file builds itself (e.g. the changelog's compare link): use `{ORIGIN_HOST}`, already resolved by `lib/vcs-host.md` above — never re-derive it with a second copy of that parse.
+   - GitLab: capture `PROJECT_JSON="$(glab api "projects/:id")"` and check the call's exit status, then set `SOURCE_BRANCH="$(printf '%s\n' "$PROJECT_JSON" | jq -er '.default_branch | select(type == "string" and length > 0)')"`; stop if either step fails (typically `main`). `glab api` has no `--jq` flag, and its output must not be piped directly into jq because that can hide API failures. GitLab needs no separate API-host derivation for `glab` calls — it already resolves the host from `origin`, and the GitLab-side reviewer loop (`host-gitlab.md`) never needs `{GH_HOST}`. A plain host string is still needed for URLs this file builds itself (e.g. the changelog's compare link): use `{ORIGIN_HOST}`, already resolved by `lib/vcs-host.md` above — never re-derive it with a second copy of that parse.
 2. **Target branch** — determine by reading (in priority order):
    - **Release pipeline config** — GitHub: check `.github/workflows/release.yml` (or similar) for `on: push: branches:` to find the branch that triggers the release pipeline. GitLab: check `.gitlab-ci.yml` (and any included files) for a release/publish job's `rules`/`only: refs:` to find the equivalent trigger branch.
    - **Project conventions** (already in context) — git workflow sections, branch descriptions, or release instructions
@@ -178,9 +178,10 @@ if [ -n "$PREPARED_RELEASE" ]; then
       # GitLab: `glab mr list` has no --head/--base filter pair as precise as gh's,
       # so pull merged MRs into `{target}` and filter on source/target/SHA in jq,
       # same shape as the GitHub branch above.
-      TARGET_RELEASE_PRS_JSON="$(glab api --paginate "projects/:id/merge_requests?state=merged&target_branch={target}&per_page=100" | jq -s 'add // []' \
-        | jq '[.[] | {number: .iid, state: (.state | ascii_upcase), headRefOid: .sha, baseRefName: .target_branch, headRefName: .source_branch, url: .web_url, mergedAt: .merged_at, mergeCommit: {oid: .merge_commit_sha}}]')" \
+      TARGET_RELEASE_PRS_RESPONSE="$(glab api --paginate "projects/:id/merge_requests?state=merged&target_branch={target}&per_page=100")" \
         || incomplete "Merged release MR" "the forge query failed."
+      TARGET_RELEASE_PRS_JSON="$(printf '%s\n' "$TARGET_RELEASE_PRS_RESPONSE" | jq -s 'if length == 0 then error("expected JSON document") elif (all(.[]; type == "array") | not) then error("expected array pages") else add | if type != "array" then error("expected array") else [.[] | {number: .iid, state: (.state | ascii_upcase), headRefOid: .sha, baseRefName: .target_branch, headRefName: .source_branch, url: .web_url, mergedAt: .merged_at, mergeCommit: {oid: .merge_commit_sha}}] end end')" \
+        || incomplete "Merged release MR" "the forge response was malformed."
       if ! printf '%s\n' "$TARGET_RELEASE_PRS_JSON" | jq -e 'type == "array"' >/dev/null; then
         incomplete "Merged release MR" "the forge returned empty or malformed data."
       fi
@@ -222,7 +223,7 @@ release with no prepared release commit.
      - `feat:` or `feat(scope):` → **minor** bump
      - `fix:`, `build:`, `chore:`, `docs:`, `refactor:`, `perf:`, `style:`, `test:`, `ci:` (with or without scope) → **patch** bump
      - `revert:` → **patch** bump
-     - Commits with no recognized prefix or `address review …` commits: classify by the PR title using `gh pr list --state merged --search <sha>`, or default to **patch** bump. (These commits are part of the PR whose merge-commit title classifies the change.)
+     - Commits with no recognized prefix or `address review …` commits: classify by the merged change request's title using the detected host. On GitHub, use `gh pr list --state merged --search <sha>`; on GitLab, capture `glab api --paginate "projects/:id/repository/commits/<sha>/merge_requests"` before parsing and validate the response as an array. Use the title only when exactly one merged PR/MR is associated with the commit. If the lookup fails, is malformed, is ambiguous, or its title has no recognized prefix, default to **patch** bump. (These commits are part of the PR/MR whose merge-request title classifies the change.)
    - Use the **highest applicable level** across all commits
    - **Default mode**: Use the determined version automatically. **Interactive mode (`--interactive`)**: Present the proposed version to the user for confirmation
 
@@ -324,9 +325,10 @@ Continue with Checkpoint 3 and the post-merge verification blocks below.
     # GitLab: `glab mr list` has no combined source+target filter as precise as
     # gh's, so query the REST endpoint directly and reshape onto the same field
     # names the jq below already expects.
-    RELEASE_PRS_JSON="$(glab api --paginate "projects/:id/merge_requests?source_branch={source}&target_branch={target}&state=all&per_page=100" | jq -s 'add // []' \
-      | jq '[.[] | {number: .iid, state: (.state | ascii_upcase), headRefOid: .sha, baseRefName: .target_branch, headRefName: .source_branch, url: .web_url, createdAt: .created_at}]')" \
+    RELEASE_PRS_RESPONSE="$(glab api --paginate "projects/:id/merge_requests?source_branch={source}&target_branch={target}&state=all&per_page=100")" \
       || incomplete "Release MR" "the forge query failed."
+    RELEASE_PRS_JSON="$(printf '%s\n' "$RELEASE_PRS_RESPONSE" | jq -s 'if length == 0 then error("expected JSON document") elif (all(.[]; type == "array") | not) then error("expected array pages") else add | if type != "array" then error("expected array") else [.[] | {number: .iid, state: (.state | ascii_upcase), headRefOid: .sha, baseRefName: .target_branch, headRefName: .source_branch, url: .web_url, createdAt: .created_at}] end end')" \
+      || incomplete "Release MR" "the forge response was malformed."
   fi
   if ! printf '%s\n' "$RELEASE_PRS_JSON" | jq -e 'type == "array"' >/dev/null; then
     incomplete "Release {CR_NOUN}" "the forge returned empty or malformed data."
@@ -521,9 +523,11 @@ that already succeeded remotely. Otherwise:
      # GitLab has no separate mergedAt field distinct from the merge commit's
      # presence; reshape onto the same {state,mergedAt,mergeCommit.oid} the
      # shared jq gate below expects.
-     MERGE_JSON="$(glab api "projects/:id/merge_requests/$PR_NUMBER" \
-       | jq '{state: (if .state == "merged" then "MERGED" else (.state | ascii_upcase) end), mergedAt: .merged_at, mergeCommit: {oid: .merge_commit_sha}}')" \
+     MR_JSON="$(glab api "projects/:id/merge_requests/$PR_NUMBER")" \
        || incomplete "Merged release MR" "the forge query failed."
+     MERGE_JSON="$(printf '%s\n' "$MR_JSON" \
+       | jq '{state: (if .state == "merged" then "MERGED" else (.state | ascii_upcase) end), mergedAt: .merged_at, mergeCommit: {oid: .merge_commit_sha}}')" \
+       || incomplete "Merged release MR" "the forge response could not be parsed."
    fi
    if ! printf '%s\n' "$MERGE_JSON" | jq -e \
     'type == "object" and .state == "MERGED" and (.mergedAt | type == "string") and (.mergedAt | length > 0) and (.mergeCommit.oid | type == "string") and (.mergeCommit.oid | length > 0)' >/dev/null; then
@@ -533,7 +537,7 @@ that already succeeded remotely. Otherwise:
    if [ "$CLI_TOOL" = gh ]; then
      PR_URL="$(gh pr view "$PR_NUMBER" --json url -q .url)" || incomplete "Merged release PR" "the PR URL could not be read."
    else
-     PR_URL="$(glab api "projects/:id/merge_requests/$PR_NUMBER" --jq .web_url)" || incomplete "Merged release MR" "the MR URL could not be read."
+     PR_URL="$(printf '%s\n' "$MR_JSON" | jq -er '.web_url | select(type == "string" and length > 0)')" || incomplete "Merged release MR" "the MR URL could not be read."
    fi
    printf 'RELEASE_PR_HANDOFF\tPR_NUMBER=%s\tPR_URL=%s\tPR_STATE=MERGED\tMERGE_COMMIT=%s\n' "$PR_NUMBER" "$PR_URL" "$MERGE_COMMIT"
 

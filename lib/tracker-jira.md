@@ -104,13 +104,12 @@ would otherwise prompt.
   `statusCategory != Done`; narrow with `AND labels = "<label>"`,
   `AND reporter = currentUser()`, `AND parent = <KEY>`. GitHub/GitLab: the
   `gh issue list` / `glab issue list` calls each command already inlines.
-- `issue_search <keywords>` — `jira issue list -p "$JIRA_PROJECT" -q 'statusCategory != Done AND text ~ "<keywords>"' --plain --no-headers --columns key,summary`
-  (dedup before filing). GitHub/GitLab: `gh issue list --search` / `glab issue list --search`.
-- `issue_children <KEY>` — `J="$(jira issue list -p "$JIRA_PROJECT" -q "parent = <KEY>" --paginate 0:100 --raw)" && printf '%s' "$J" | jq -r '.[] | "\(.key)\t\(if .fields.status.statusCategory.key == "done" then "CLOSED" else "OPEN" end)"'`
-  under the empty-result rule (no children is `[]`, not a failure): one `KEY<TAB>OPEN|CLOSED`
-  row per child in every state, epic children and sub-tasks alike — the status
-  *category*, since a status name (`Resolved`, `Shipped`) is per-workflow. GitHub/GitLab:
-  `epic-children.md`.
+- `issue_search <keywords>` — dedup before filing; use the "Search Jira issues safely" block below.
+  GitHub/GitLab: `gh issue list --search` / `glab issue list --search`.
+- `issue_children <KEY>` — `issue_children "<KEY>"` (the paginating helper below). It
+  prints one `KEY<TAB>OPEN|CLOSED` row per child in every state, epic children and
+  sub-tasks alike, using the status *category* because status names are per-workflow.
+  GitHub/GitLab: `epic-children.md`.
 - `issue_body <KEY>` — `jira issue view <KEY> --plain --comments 0`
 - `issue_body --comments <KEY>` — `jira issue view <KEY> --plain --comments 50`
 - `issue_body --set <KEY> <text>` — `jira issue edit <KEY> -b <text> --no-input`
@@ -126,6 +125,7 @@ would otherwise prompt.
   in-progress marker; GitHub/GitLab: `label_add <N> in-progress`).
 - `issue_close_note <KEY> <text>` — `jira issue move <KEY> "$JIRA_DONE_STATUS" --comment <text>`
   (a `Closes #<num>` trailer does nothing on Jira; the close is this transition).
+
 - `assign_me <KEY>` — `ME="$(jira me)" && [ -n "$ME" ] && jira issue assign <KEY> "$ME"`.
   Jira has **one** assignee, so assigning replaces any other: check `issue_assignees`
   is empty first, and read the lease back with `issue_is_mine`.
@@ -141,6 +141,19 @@ would otherwise prompt.
     && KEY="$(printf '%s' "$J" | jq -er .key)" && [ -n "$KEY" ]
   ```
   One `-l` per label. Add `-P <parent-KEY>` to file an epic child or sub-task.
+
+### Search Jira issues safely
+
+Pass generated keywords as a POSIX single-quoted shell literal, replacing each apostrophe
+with the shell sequence `'\''` before wrapping the text in single quotes. Then serialize that value as a
+JQL quoted string with `jq -Rs .`:
+
+```bash
+KEYWORDS=<keywords>
+JQL_TEXT="$(printf '%s' "$KEYWORDS" | jq -Rs .)" || exit 1
+JQL="statusCategory != Done AND text ~ $JQL_TEXT"
+jira issue list -p "$JIRA_PROJECT" -q "$JQL" --plain --no-headers --columns key,summary
+```
 
 ## Serving `/do:next`
 
@@ -176,6 +189,33 @@ printf '%s\n' "$KEY" | grep -Eq '^[A-Z][A-Z0-9_]+-[1-9][0-9]*$' || {
 [ "${KEY%-*}" = "$JIRA_PROJECT" ] || {
   echo "$KEY is not in Jira project $JIRA_PROJECT — /do:next claims only the configured project's issues."; exit 1; }
 echo "TARGET=$KEY"
+```
+
+### Child listing helper
+
+Define this helper before checking Jira epics. It fetches every page, treats the
+CLI's documented empty-result response as an empty page, and fails closed on any
+other API or JSON error:
+
+```bash
+issue_children() {
+  _key="$1"; _offset=0
+  while :; do
+    _err="$(mktemp)"
+    if _page="$(jira issue list -p "$JIRA_PROJECT" -q "parent = $_key" --paginate "$_offset:100" --raw 2>"$_err")"; then
+      :
+    elif grep -q 'No result found' "$_err"; then
+      _page='[]'
+    else
+      cat "$_err" >&2; rm -f "$_err"; return 1
+    fi
+    rm -f "$_err"
+    _count="$(printf '%s' "$_page" | jq -er 'if type == "array" then length else error("expected array") end')" || return 1
+    printf '%s' "$_page" | jq -r '.[] | "\(.key)\t\(if .fields.status.statusCategory.key == "done" then "CLOSED" else "OPEN" end)"' || return 1
+    [ "$_count" -lt 100 ] && return 0
+    _offset=$((_offset + 100))
+  done
+}
 ```
 
 ### Claim gates
@@ -218,12 +258,18 @@ prepended the same way. A candidate is **assigned** when `assignee` is non-null,
 an **epic** when its `type` is `Epic`, it carries `epic`, or `subtasks` is non-zero
 (resolve it with `epic-children.md` "Jira"). **Declared dependencies** are body lines
 `Depends on PROJ-12` / `Blocked by PROJ-12` (a key where the hosts write `#<N>`), OR'd
-with Jira's native "is blocked by" links; an unreadable issue is **UNRESOLVED** — fall
-back to the body convention and say so:
+with Jira's native "is blocked by" links. An unreadable or malformed native-link
+response is **UNRESOLVED**, not unblocked: during auto-pick, skip the candidate with
+a warning rather than falling back to body-only dependencies. An explicitly named
+issue may proceed only as an explicit override, with a warning that native blocker
+state could not be verified:
 
 ```bash
-J="$(jira issue view <KEY> --raw)" || { echo "<KEY>: native blocked-by lookup failed — using the body convention only"; false; } && \
-printf '%s' "$J" | jq -r '.fields.issuelinks[]? | select(.inwardIssue and (.type.name == "Blocks" or .type.inward == "is blocked by")) | .inwardIssue | select(.fields.status.statusCategory.key != "done") | .key'
+JIRA_JSON="$(jira issue view <KEY> --raw)" || { echo "<KEY>: native blocked-by lookup failed — skip during auto-pick; an explicitly named issue requires an override warning"; false; } && \
+if ! printf '%s' "$JIRA_JSON" | jq -e 'type == "object" and (.fields.issuelinks | type == "array") and all(.fields.issuelinks[]; type == "object" and (if (.inwardIssue and (.type.name == "Blocks" or .type.inward == "is blocked by")) then (.inwardIssue.fields.status.statusCategory.key | type == "string") else true end))' >/dev/null; then \
+  echo "<KEY>: native blocked-by response is malformed — skip during auto-pick; an explicitly named issue requires an override warning"; false; \
+fi && \
+printf '%s' "$JIRA_JSON" | jq -r '.fields.issuelinks[] | select(.inwardIssue and (.type.name == "Blocks" or .type.inward == "is blocked by")) | .inwardIssue | select(.fields.status.statusCategory.key != "done") | .key'
 ```
 
 ### Lease helper
@@ -245,10 +291,12 @@ jira_lease() {  # prints yes / no / error: is $ISSUE_NUM assigned to me?
 
 ### Claim (Phase 2, in place of its marker block)
 
-Refuse an assigned issue, take the assignee, read it back, transition to
-`$JIRA_START_STATUS`, then read it back once more — a rival who assigned in between
-replaced this run, and the later read-back sees it. Print `PRE_CLAIM_STATUS` and carry
-it for `release_marker`:
+The preceding worktree step must atomically publish `next/${SLUG}` with an
+empty `--force-with-lease` expectation before this assignment step; that remote
+ref is the exclusive cross-machine claim. Jira assignment is the visible marker,
+and the read-back confirms the marker still names the current account. Refuse an
+assigned issue, take the assignee, transition to `$JIRA_START_STATUS`, then read
+it back once more. Print `PRE_CLAIM_STATUS` and carry it for `release_marker`:
 
 ```bash
 ISSUE_NUM="<KEY>"; SLUG="issue-${ISSUE_NUM}"
@@ -373,10 +421,14 @@ A full page at the cap means more exist: say so rather than treating the list as
 
 ### File one issue
 
-Write the body to a file first (it may hold backticks and `$(…)`). Labels are the
-filing partial's set — `PLAN_LABEL`, the category, `severity:<level>`, and any dispatch
-hint, built with `LABEL_SEP` (`:`) — one argument each; a label with whitespace aborts
-the filing rather than being rewritten. `PARENT` files an epic child or sub-task:
+Write the body to a file first (it may hold backticks and `$(…)`). Pass the generated
+title as a POSIX single-quoted shell literal, replacing each internal apostrophe with
+`'\''` before wrapping the complete title. Newlines, shell syntax, and heredoc-looking
+lines then remain title data.
+Labels are the filing partial's set — `PLAN_LABEL`, the category, `severity:<level>`,
+and any dispatch hint, built with `LABEL_SEP` (`:`) — one argument each; a label with
+whitespace aborts the filing rather than being rewritten. `PARENT` files an epic child
+or sub-task:
 
 ```bash
 TITLE=<title>; BODY_FILE=<body-file>; PARENT="<parent-KEY, or empty>"

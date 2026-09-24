@@ -82,8 +82,12 @@ Local models have bounded context windows, so review the diff **one changed file
 LOG_FILE="$(mktemp -t ollama-review.XXXXXX.log)"   # findings only (stdout)
 ERR_FILE="$(mktemp -t ollama-review.XXXXXX.err)"   # ollama writes its TUI spinner + ANSI cursor codes to stderr; keep them OUT of the findings log
 : > "$LOG_FILE"; : > "$ERR_FILE"
-CHANGED=$(git diff --name-only "$BASE_BRANCH...HEAD")
-TOTAL_FILES=$(printf '%s\n' "$CHANGED" | grep -c .)
+CHANGED_FILE="$(mktemp -t ollama-changed.XXXXXX)"
+FILE_MAP="$(mktemp -t ollama-file-map.XXXXXX)"   # NUL-delimited file-id/path pairs for newline-safe log attribution
+git diff --name-only -z "$BASE_BRANCH...HEAD" > "$CHANGED_FILE" || { echo "could not list changed paths"; exit 1; }
+: > "$FILE_MAP"
+TOTAL_FILES=0   # incremented by the NUL-delimited loop below; paths may contain spaces or newlines
+REVIEWABLE_FILES=0   # stable numeric IDs for files with non-empty diffs
 REVIEW_ERRORS=0   # files whose review invocation failed entirely (zero coverage)
 PARSE_ERRORS=0    # model responses that were non-empty but not a valid findings object
 TRUNCATED=0       # files reviewed only partially (diff exceeded the per-file cap)
@@ -93,19 +97,30 @@ SKIPPED_EMPTY=0   # files in TOTAL_FILES with no reviewable hunks (pure rename/m
 PER_FILE_CAP=24000   # max chars of diff sent per file; larger diffs are truncated with a note
 ```
 
-For each file `F` in `$CHANGED`:
-1. Extract the file's diff: `FILE_DIFF=$(git diff "$BASE_BRANCH...HEAD" -- "$F")`. Skip files with an empty diff (pure renames/mode changes with no hunks), incrementing `SKIPPED_EMPTY` for each — they count in `TOTAL_FILES` but were never sent to the model, so they must not inflate the coverage denominator.
+Iterate the paths without shell word splitting. Use Bash's NUL-delimited `read` loop
+and increment `TOTAL_FILES` once for each path:
+
+```bash
+while IFS= read -r -d '' F; do
+  TOTAL_FILES=$((TOTAL_FILES + 1))
+  # Run the per-file steps below for this exact path in `$F`.
+done < "$CHANGED_FILE"
+rm -f "$CHANGED_FILE"
+```
+
+For each file `F` read by that loop:
+1. Extract the file's diff: `FILE_DIFF=$(git diff "$BASE_BRANCH...HEAD" -- "$F")`. Skip files with an empty diff (pure renames/mode changes with no hunks), incrementing `SKIPPED_EMPTY` for each — they count in `TOTAL_FILES` but were never sent to the model, so they must not inflate the coverage denominator. For a reviewable file, increment `REVIEWABLE_FILES`, set `FILE_ID=$REVIEWABLE_FILES`, and append `printf '%s\0%s\0' "$FILE_ID" "$F"` to `FILE_MAP`; the map preserves the exact path without newline splitting.
 2. If `${#FILE_DIFF}` exceeds `$PER_FILE_CAP`, truncate to the cap and append a line `[diff truncated — file exceeds per-file review budget]` so the model knows it saw a partial diff. Increment `TRUNCATED` and note the file in the final report. This is a coverage gap. Unlike an invocation error, though, the file *was* partially reviewed, so it does not count toward total failure.
-3. Build the prompt and run the model via **stdin** (never as a positional arg — embedded diffs can exceed `ARG_MAX`). Wrap each file's JSON response with a delimiter line so the orchestrator can attribute and parse each section independently (back-to-back JSON objects are not a single valid document):
+3. Build the prompt and run the model via **stdin** (never as a positional arg — embedded diffs can exceed `ARG_MAX`). Encode the path in the prompt as one JSON string with `FILE_JSON="$(jq -Rn --arg path "$F" '$path')"`; tell the model to use that exact path in each finding. Wrap each file's JSON response with its numeric ID so the orchestrator can attribute and parse each section independently (back-to-back JSON objects are not a single valid document):
    ```bash
-   PROMPT="You are a senior code reviewer. A linter, type-checker, compiler, and test suite ALREADY run on this code separately — so syntax errors, lint violations, formatting, import order, unused vars, and build breakage are NOT your job and must NOT be reported. Review the unified diff for '$F' ONLY for logic issues a human finds by reasoning about behavior: correctness bugs, security / data-exposure holes, missing or wrong error handling, broken producer/consumer contracts, race conditions, and missing test coverage of real logic.
+   PROMPT="You are a senior code reviewer. A linter, type-checker, compiler, and test suite ALREADY run on this code separately — so syntax errors, lint violations, formatting, import order, unused vars, and build breakage are NOT your job and must NOT be reported. Review the unified diff for file path $FILE_JSON ONLY for logic issues a human finds by reasoning about behavior: correctness bugs, security / data-exposure holes, missing or wrong error handling, broken producer/consumer contracts, race conditions, and missing test coverage of real logic.
 
 Do NOT report any of these — they are noise that wastes the review: pure style or formatting; renaming or extracting to a helper/constant; 'this could be cleaner / more readable'; eslint-disable or other tooling comments; naming preferences; or a deletion whose replacement you cannot see — you are shown ONE file's diff in isolation, so code that looks removed was very likely moved elsewhere. Never flag a removal as breaking unless THIS diff itself proves the breakage.
 
 Raise a finding only when you can name the concrete wrong runtime behavior it causes, and say what that behavior is. When in doubt, omit it. Returning zero findings for a file is the correct, expected outcome for most files — do not invent issues to fill the list.
 
 Return a JSON object with a single key \"findings\": an array of finding objects. Each finding has:
-- file: the path under review ('$F')
+- file: the exact decoded path under review ($FILE_JSON)
 - line: integer line number in the NEW version of the file
 - severity: one of \"CRITICAL\", \"IMPROVEMENT\", \"NIT\"
 - description: one-sentence statement of the WRONG BEHAVIOR (not a style opinion)
@@ -118,15 +133,15 @@ $FILE_DIFF"
    [ -n "$OLLAMA_EFFORT" ] && PROMPT="$PROMPT Target reasoning effort level: $OLLAMA_EFFORT."
    RESP=$(printf '%s' "$PROMPT" | ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} ollama run ${OLLAMA_FLAGS[@]+"${OLLAMA_FLAGS[@]}"} "$OLLAMA_MODEL" 2>> "$ERR_FILE")
    RC=$?
-   printf '\n===== FILE: %s =====\n%s\n' "$F" "$RESP" >> "$LOG_FILE"
+   printf '\n===== FILE_ID: %s =====\n%s\n' "$FILE_ID" "$RESP" >> "$LOG_FILE"
    ```
-4. Treat a file as a failed (zero-coverage) review when **either** `RC != 0` **or** `$RESP` is empty or whitespace-only (`[ -z "$(printf '%s' "$RESP" | tr -d '[:space:]')" ]`). The empty-but-exit-0 case really happens: a reasoning model can spend its whole token budget on hidden thinking (`--hidethinking`) and emit no JSON while `ollama run` still exits 0 (observed with `qwen3.6:35b`). Without this guard the empty section parses as "no findings" and the file is miscounted as cleanly reviewed. On either condition, append a `[ollama error reviewing $F — RC=$RC, empty=$([ -z "$(printf '%s' "$RESP" | tr -d '[:space:]')" ] && echo yes || echo no); see $ERR_FILE]` marker to the log, **increment `REVIEW_ERRORS`**, and continue to the next file.
+4. Treat a file as a failed (zero-coverage) review when **either** `RC != 0` **or** `$RESP` is empty or whitespace-only (`[ -z "$(printf '%s' "$RESP" | tr -d '[:space:]')" ]`). The empty-but-exit-0 case really happens: a reasoning model can spend its whole token budget on hidden thinking (`--hidethinking`) and emit no JSON while `ollama run` still exits 0 (observed with `qwen3.6:35b`). Without this guard the empty section parses as "no findings" and the file is miscounted as cleanly reviewed. On either condition, append a `[ollama error reviewing file ID $FILE_ID — RC=$RC, empty=$([ -z "$(printf '%s' "$RESP" | tr -d '[:space:]')" ] && echo yes || echo no); see $ERR_FILE]` marker to the log, **increment `REVIEW_ERRORS`**, and continue to the next file.
 
 ### Parsing and coverage
 
 Run this once per pass, after the per-file loop. First recompute `REVIEWABLE=$((TOTAL_FILES - SKIPPED_EMPTY))`, the number of files actually sent to the model. Using `TOTAL_FILES` would let empty-diff skips inflate the denominator and make total failure unreachable.
 
-`--format` constrains the output to JSON, but still parse **defensively**, because local models are weaker than agentic CLIs. Split `$LOG_FILE` on the regex `^===== FILE: (.+) =====$`, where the captured group is the file path. JSON-parse each section and require `findings` to be an array. An empty array means the file is clean. A section that fails to parse, is not an object, or has no array `findings` value is a **parse error**, not a clean file: record the path in the report, increment `PARSE_ERRORS`, and do not invent findings from it. **Count each file at most once.** Skip the section of any file already counted in `REVIEW_ERRORS`, which carries the `[ollama error reviewing …]` marker and has no response to parse. Before acting on a finding, check that it has the required fields and that its `line` exists in the file. Drop findings with hallucinated lines.
+`--format` constrains the output to JSON, but still parse **defensively**, because local models are weaker than agentic CLIs. Split `$LOG_FILE` on `^===== FILE_ID: ([1-9][0-9]*) =====$`, then resolve each ID through the NUL-delimited `FILE_MAP` using `while IFS= read -r -d '' MAP_ID && IFS= read -r -d '' MAP_PATH`; never parse a path from a line or regex. JSON-parse each response and require `findings` to be an array. An empty array means that ID's file is clean. A section that fails to parse, is not an object, or has no array `findings` value is a **parse error**, not a clean file: record its mapped path in the report, increment `PARSE_ERRORS`, and do not invent findings from it. **Count each ID at most once.** Skip IDs already counted in `REVIEW_ERRORS`, which have an `[ollama error reviewing file ID …]` marker and no response to parse. Before acting on a finding, require its `file` to equal the mapped path, check the required fields, and verify `line` exists in that path. Drop findings with hallucinated paths or lines. Render paths in reports with shell escaping or JSON encoding so newlines stay visible.
 
 Then classify the pass:
 - **Total failure**: `REVIEWABLE > 0` and `REVIEW_ERRORS + PARSE_ERRORS >= REVIEWABLE`. No file yielded a usable verdict, so set `STATUS=cli-error` and exit. Print the last 80 lines of `$ERR_FILE`, and also the per-file `[ollama error reviewing …]` markers from `$LOG_FILE`, because in the exit-0 empty-response mode `$ERR_FILE` may hold only spinner noise. The check uses `>=`, not `==`, so it still fires if the counters overlap. The `REVIEWABLE > 0` guard keeps a rename-only diff, which has nothing to review, from reporting a hard error.
@@ -142,7 +157,7 @@ Every pass ends in the shared fix tail, which holds the apply rules and steps 4�
 !read lib/review-fix-tail.md
 
 1. **Capture baseline**: `LOOP_START_SHA=$(git rev-parse HEAD)`.
-2. **Run the per-file chunked review** (above), collecting findings into `$LOG_FILE`. Re-run the Invocation block *in full* on every iteration. Re-derive `CHANGED`/`TOTAL_FILES` for the current HEAD, reset `REVIEW_ERRORS=0`, `PARSE_ERRORS=0`, `TRUNCATED=0`, and `SKIPPED_EMPTY=0`, and truncate `$LOG_FILE`/`$ERR_FILE`. `$ERR_FILE` is append-written with `2>>`, so a stale tail would otherwise dominate the "last 80 lines" printed on a later `cli-error`. The reset also stops a coverage gap from an earlier iteration from pinning `STATUS=incomplete` after a clean re-review of the new commits.
+2. **Run the per-file chunked review** (above), collecting findings into `$LOG_FILE`. Re-run the Invocation block *in full* on every iteration. Re-derive the NUL-delimited `CHANGED_FILE` and `TOTAL_FILES` for the current HEAD, reset `REVIEWABLE_FILES=0`, `REVIEW_ERRORS=0`, `PARSE_ERRORS=0`, `TRUNCATED=0`, and `SKIPPED_EMPTY=0`, truncate `$LOG_FILE`/`$ERR_FILE` and `FILE_MAP`, and rebuild its numeric-ID/path pairs. `$ERR_FILE` is append-written with `2>>`, so a stale tail would otherwise dominate the "last 80 lines" printed on a later `cli-error`. The reset also stops a coverage gap from an earlier iteration from pinning `STATUS=incomplete` after a clean re-review of the new commits.
 3. **Parse, classify, and apply.** Run "Parsing and coverage" above; a total failure exits with `cli-error`. If there are no findings, set `STATUS=clean` (the status override applies) and exit the loop. Otherwise apply the findings per the shared tail's **Apply** section, with `{FIX_LABEL}` set to `ollama`. Local models hallucinate more than cloud agents, so be quick to drop a finding that is wrong, out of scope, or cites a line that doesn't exist.
 4. **Verify in the main thread**: the shared tail's step 4. Local models over-broaden fixes more than cloud agents, so its fix regression guard matters most here.
 5. **Push verified changes**: the shared tail's step 5.

@@ -5,7 +5,7 @@ argument-hint: "[--interactive] [--simplify-only] [--strict|--nuclear] [--review
 
 # PR-Better — Better Audit + Single PR
 
-Run the full `do:better` DevSecOps audit and remediation, but **commit all fixes directly to the current branch** instead of creating per-category PRs. Then hand off to `do:pr` so the entire result ships as one cohesive PR (with the self-review gate always, plus a multi-reviewer loop **only if** `--review-with` lists one or more agents — there is no default reviewer; omit the flag and only the self-review runs).
+Run the full `do:better` DevSecOps audit and remediation, but **commit all fixes directly to the current branch** instead of creating per-category PRs. Then hand off to `do:pr` so the entire result ships as one cohesive PR (with the self-review gate always, plus a multi-reviewer loop when `--review-with` lists one or more agents or a saved reviewer default supplies them; without either, only the self-review runs).
 
 This is the right command when:
 - You want the full `do:better` quality bar on a feature branch you're about to ship
@@ -24,8 +24,8 @@ Constraints applied automatically:
 
 ## Pre-flight
 
-1. Run `git branch --show-current` for `{CURRENT_BRANCH}`. Detect the default branch host-agnostically for this guard — this runs before `do:better`/`do:pr`'s own VCS-host detection, so it must work on GitHub and GitLab alike without invoking either CLI: `git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@'`; if empty, run `git remote set-head origin --auto` once and retry. **Never assume a name (e.g. `main`) if it's still empty** — a wrong guess here would misjudge step 2 and, if it happened to also survive into Phase B, rebase onto the wrong branch. If it cannot be resolved, skip step 2's check and proceed; `do:pr`'s own host-authoritative detection in Phase B (`gh repo view` / `glab repo view`) is the one that actually drives the rebase target and PR base, and it fails loudly if the repo is unreadable.
-2. If the current branch is the default branch, halt and tell the user: pr-better needs a feature branch — either create one first or run `/do:better` directly to produce per-category PRs from default
+1. Run `git branch --show-current` for `{CURRENT_BRANCH}`. Refresh and detect the default branch host-agnostically for this guard — this runs before `do:better`/`do:pr`'s own VCS-host detection, so it must work on GitHub and GitLab alike without invoking either CLI. Always run `git remote set-head origin --auto` once and abort with recovery guidance if it fails; then read `git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@'`. Refreshing unconditionally prevents a stale `origin/HEAD` from surviving a remote default-branch rename. **Never assume a name (e.g. `main`) if the refreshed ref is empty** — a wrong guess here would misjudge step 2 and, if it happened to also survive into Phase B, rebase onto the wrong branch. If the refreshed default cannot be resolved, halt before Phase A; do not proceed to a workflow that may commit directly to the current branch. `do:pr` also performs host-authoritative detection in Phase B, but that later guard does not protect Phase A.
+2. If the current branch is the resolved default branch, halt and tell the user: pr-better needs a feature branch — either create one first or run `/do:better` directly to produce per-category PRs from default
 3. Run `git status --porcelain` — if dirty, the do:better Phase 3a stash will handle it, but warn the user that uncommitted changes will be stashed and restored after the audit
 
 ## Phase A: Run do:better (constrained to "Commit directly")
@@ -43,7 +43,7 @@ The only Phase 7-equivalent housekeeping that still applies here:
 
 ## Phase B: Run do:pr
 
-After Phase A leaves all fixes committed on `{CURRENT_BRANCH}`, hand off to the workflow defined in `~/.claude/commands/do/pr.md`, forwarding the review flags held aside during argument forwarding unchanged — so the chosen reviewer(s), stop-mode, dispatch mode, editing mode, and iteration cap all run on the combined PR exactly as `do:pr` itself would apply them ([lib/review-flags.md](../../lib/review-flags.md); if none were passed, `do:pr` runs no external review loop — the self-review gate at step 3 is the only review):
+After Phase A leaves all fixes committed on `{CURRENT_BRANCH}`, hand off to the workflow defined in `~/.claude/commands/do/pr.md`, forwarding the review flags held aside during argument forwarding unchanged — so the chosen reviewer(s), stop-mode, dispatch mode, editing mode, and iteration cap all run on the combined PR exactly as `do:pr` itself would apply them ([lib/review-flags.md](../../lib/review-flags.md); if no review flag was passed, `do:pr` still applies its saved `review-with` default, if any; without one, the self-review gate at step 3 is the only review):
 
 1. **Detect branches** — already done in pre-flight, reuse those values
 2. **Commit and push** — commit any remaining staged changes, then run `do:pr`'s "Commit and Push" step verbatim: fast-forward the **local** `{default_branch}` ref to origin and rebase the branch onto it (`git fetch origin {default_branch}:{default_branch} && git rebase {default_branch}`), resolving and continuing through conflicts with [lib/rebase-conflict-resolution.md](../../lib/rebase-conflict-resolution.md), including regeneration of generated artifacts from their canonical inputs, so the reviewers below — which diff against the local `{default_branch}` — see a current base; then push using `do:pr`'s upstream-derived rules (`--force-with-lease` if the rebase rewrote pushed history). A rebase conflict is not a handoff or stop condition.

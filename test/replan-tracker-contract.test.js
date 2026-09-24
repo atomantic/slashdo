@@ -11,6 +11,14 @@ const read = (...segments) => fs.readFileSync(path.join(root, ...segments), 'utf
 describe('/do:replan is tracker-only', () => {
   const replan = read('commands', 'do', 'replan.md');
 
+  it('stages only exact changed paths during the commit phase', () => {
+    const commit = replan.slice(replan.indexOf('## Phase 6: Commit'), replan.indexOf('\n## Notes'));
+    assert.match(commit, /Stage those paths by name — never stage an entire directory/);
+    assert.match(commit, /git add -- PLAN\.md GOALS\.md docs\/path-you-edited\.md/);
+    assert.doesNotMatch(commit, /git add -A -- docs/);
+    assert.match(commit, /Omit any example path that this run did not change/);
+  });
+
   it('drops the PLAN.md mode machinery', () => {
     assert.doesNotMatch(replan, /ISSUE_MODE/);
     assert.doesNotMatch(replan, /plan-id-format/);
@@ -40,6 +48,15 @@ describe('/do:replan is tracker-only', () => {
     assert.match(replan, /--add-label <PLAN_LABEL>/);
     assert.match(replan, /overrides the global `~\/\.claude\/\.slashdo-config\.json`, key by key/);
     assert.doesNotMatch(replan, /review-config-defaults|replan-issues/);
+  });
+
+  it('keeps GitLab native blockers out of stale auto-closure', () => {
+    assert.match(replan, /GitLab's Issue Links API filtered to `link_type == "is_blocked_by"`/);
+    assert.match(replan, /treat any linked issue whose `\.state` is not `closed` as open/);
+    assert.match(replan, /A failed `glab api` call, non-array response, or matching link without a string `\.state` is `UNRESOLVED`, not unblocked/);
+    assert.match(replan, /protect that issue from automatic stale closure for this run/);
+    assert.match(replan, /command -v jq/);
+    assert.match(replan, /Blocked or unresolved issues are not stale/);
   });
 
   it('folds the former issue-mode lib back in and retires it from installers', () => {

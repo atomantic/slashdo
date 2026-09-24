@@ -146,6 +146,34 @@ describe('/do:release documented project delivery', () => {
 });
 
 describe('/do:release GitLab paths', () => {
+  it('classifies non-conventional commits using the selected forge or a patch fallback', () => {
+    const bump = body.slice(body.indexOf('1. **Determine version bump**'), body.indexOf('\n\n2. **Bump version**'));
+    assert.match(bump, /using the detected host/);
+    assert.match(bump, /On GitHub, use `gh pr list --state merged --search <sha>`/);
+    assert.match(bump, /on GitLab, capture `glab api --paginate "projects\/:id\/repository\/commits\/<sha>\/merge_requests"` before parsing/);
+    assert.match(bump, /Use the title only when exactly one merged PR\/MR is associated with the commit/);
+    assert.match(bump, /lookup fails, is malformed, is ambiguous, or its title has no recognized prefix, default to \*\*patch\*\* bump/);
+  });
+
+  it('captures glab api output before parsing the source branch and merged MR URL', () => {
+    assert.match(body, /PROJECT_JSON="\$\(glab api "projects\/:id"\)"/);
+    assert.match(body, /SOURCE_BRANCH="\$\(printf '%s\\n' "\$PROJECT_JSON" \| jq -er '\.default_branch/);
+    assert.doesNotMatch(body, /glab api[^|`\n]*--jq/);
+    assert.match(body, /MR_JSON="\$\(glab api "projects\/:id\/merge_requests\/\$PR_NUMBER"\)"/);
+    assert.match(body, /MERGE_JSON="\$\(printf '%s\\n' "\$MR_JSON"[\s\\]*\| jq/);
+    assert.match(body, /PR_URL="\$\(printf '%s\\n' "\$MR_JSON" \| jq -er '\.web_url \| select\(type == "string" and length > 0\)'/);
+  });
+
+  it('checks GitLab MR API calls before parsing them into release candidates', () => {
+    assert.match(body, /TARGET_RELEASE_PRS_RESPONSE="\$\(glab api --paginate[\s\S]+?\)"\s+\\\s*\n\s+\|\| incomplete "Merged release MR"/);
+    assert.match(body, /TARGET_RELEASE_PRS_JSON="\$\(printf '%s\\n' "\$TARGET_RELEASE_PRS_RESPONSE" \| jq -s 'if length == 0 then error\("expected JSON document"\) elif \(all\(\.\[\]; type == "array"\) \| not\) then error\("expected array pages"\) else add \| if type != "array"/);
+    assert.match(body, /RELEASE_PRS_RESPONSE="\$\(glab api --paginate[\s\S]+?\)"\s+\\\s*\n\s+\|\| incomplete "Release MR"/);
+    assert.match(body, /RELEASE_PRS_JSON="\$\(printf '%s\\n' "\$RELEASE_PRS_RESPONSE" \| jq -s 'if length == 0 then error\("expected JSON document"\) elif \(all\(\.\[\]; type == "array"\) \| not\) then error\("expected array pages"\) else add \| if type != "array"/);
+    assert.doesNotMatch(body, /RELEASE_PRS_JSON[\s\S]{0,300}add \/\/ \[\]/);
+    assert.doesNotMatch(body, /TARGET_RELEASE_PRS_JSON[\s\S]{0,300}add \/\/ \[\]/);
+    assert.doesNotMatch(body, /glab api --paginate[^\n]*\| *jq/);
+  });
+
   it('detects the code host up front and derives CR_NOUN for messages', () => {
     assert.match(body, /!read lib\/vcs-host\.md/);
     assert.match(body, /\{CR_NOUN\}/);

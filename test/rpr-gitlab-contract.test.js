@@ -42,15 +42,17 @@ describe('/do:rpr host routing', () => {
     }
     assert.doesNotMatch(rpr, /resolveReviewThread|reviewThreads\(|addPullRequestReviewThreadReply/,
       'thread GraphQL belongs to lib/host-github.md, not rpr');
-    // GitHub keeps rpr's previous read depth through the verb.
-    assert.match(github, /comments\(first: 10\)/);
+    // GitHub reads every thread page and fails closed when one has over 100 comments.
+    assert.match(github, /reviews\(first:100, after:\$reviewCursor\)/);
+    assert.match(github, /reviewThreads\(first:100, after:\$threadCursor\)/);
+    assert.match(github, /comments\(first:100\)/);
   });
 
   it('reaches the GitLab discussion verbs on a GitLab MR', () => {
     const docs = readCommandDocs('rpr.md', { eager: true });
     assert.ok(docs.includes('glab api --paginate "projects/:id/merge_requests/{PR_NUMBER}/discussions?per_page=100"'),
       'cr-state must list MR discussions');
-    assert.ok(docs.includes('glab api --method POST "projects/:id/merge_requests/{PR_NUMBER}/discussions/{THREAD_ID}/notes" -f body="{BODY}"'),
+    assert.ok(docs.includes('glab api --method POST "projects/:id/merge_requests/{PR_NUMBER}/discussions/{THREAD_ID}/notes" --input "$PAYLOAD_FILE"'),
       'reply-thread must post a note in the discussion');
     assert.ok(docs.includes('glab api --method PUT "projects/:id/merge_requests/{PR_NUMBER}/discussions/{THREAD_ID}" -F resolved=true'),
       'resolve-thread must resolve the discussion');

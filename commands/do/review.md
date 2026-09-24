@@ -242,9 +242,10 @@ For each verified finding (local branch mode):
 
 !read lib/review-fix-conventions.md
 
-5. After fixes, run the project's test suite and build command
-6. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
-7. Commit fixes: `address review (self): <summary>` — the parenthesized reviewer name matches the convention used by delegated `--review-with` passes.
+5. **Run end-of-cycle Convention Encoding now**, before verification or delivery. For local branch mode and `PR_DISPOSITION=apply`, apply the shared partial's smallest recurring-pattern actions to the active branch. Skip it for `PR_MODE=true` and `PR_DISPOSITION=inline`, where no branch is checked out; put recommendations in the posted review summary instead. This ordering ensures every encoded edit goes through the build/test gate and reaches the same commit as the review fixes.
+6. After direct fixes and convention encoding, run the project's test suite and build command
+7. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
+8. Commit fixes: `address review (self): <summary>` — the parenthesized reviewer name matches the convention used by delegated `--review-with` passes.
 
 `PR_MODE=true` and `PR_DISPOSITION=apply` continues from here to "Push fixes to the PR branch", `PR_DISPOSITION=inline` to "Post Review to GitHub PR", and `--merge` to "Merge the PR". All three are in the partial already loaded above, and GitLab MR mode names them with "MR" ("Post Review to GitLab MR", "Merge the MR").
 
@@ -277,13 +278,9 @@ If no issues were found, confirm the code is clean and ready for PR.
 
 In `PR_MODE`, follow "Report additions" in the PR/MR-mode partial loaded above instead — it replaces the sections above with the PR-disposition variants and the merge outcome.
 
-## Convention Encoding
+## Convention Encoding Report
 
-**Skip when `PR_MODE=true`** — convention encoding mutates the local working tree, the wrong target for someone else's remote PR; put convention recommendations in the posted review's summary body instead, as suggestions to the PR author.
-
-After the report is printed and fixes are committed (local branch mode), for each finding pattern likely to recur (fixed or accepted-as-is), apply the **smallest** code-level action that makes the convention self-evident (in-tree comment at the canonical site, a clarifying rename, or a surgical refactor that removes the footgun). CLAUDE.md / AGENTS.md additions are a **fallback** for conventions that can't be expressed locally. Encoded actions land in the same branch as the review fixes. (Root-cause identification already happened per finding, at Fix Issues step 4 above.)
-
-!read lib/review-fix-conventions.md
+Convention Encoding runs in Fix Issues, before build/test verification and commit, for local branch mode and `PR_DISPOSITION=apply`. The report includes the shared partial's `## Conventions Encoded` section. When `PR_MODE=true` and `PR_DISPOSITION=inline`, no branch is checked out or modified; post recommendations in the review summary instead.
 
 ## PR Comment Policy
 

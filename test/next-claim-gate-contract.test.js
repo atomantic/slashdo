@@ -105,6 +105,31 @@ describe('/do:next --collaborators claim gate', () => {
   });
 });
 
+describe('/do:next claim branch publication', () => {
+  it('uses an absent-ref lease and aborts if another run published the claim', () => {
+    assert.match(next, /git push --force-with-lease="refs\/heads\/next\/\$\{SLUG\}:" -u origin "next\/\$\{SLUG\}:refs\/heads\/next\/\$\{SLUG\}"/);
+    assert.match(next, /REPO_ROOT="\$\(git rev-parse --show-toplevel\)"/);
+    assert.match(next, /if ! git push --force-with-lease[\s\S]*CLAIM_REMOTE_OUTPUT="\$\(git ls-remote --heads origin "refs\/heads\/next\/\$\{SLUG\}"/);
+    assert.match(next, /CLAIM_REMOTE_SHA[\s\S]*\[ "\$CLAIM_REMOTE_SHA" = "\$CLAIM_LOCAL_SHA" \][\s\S]*ownership is ambiguous; preserving/);
+    assert.match(next, /ownership could not be checked; preserving \$WORKTREE[\s\S]*exit 1/);
+    assert.match(next, /CLAIM_REMOTE_COUNT" -eq 0[\s\S]*no remote ref was published; preserving \$WORKTREE[\s\S]*exit 1/);
+    assert.match(next, /another run claimed it\. Cleaning up this unclaimed worktree\.[\s\S]*worktree remove --force "\$WORKTREE"[\s\S]*branch -D "next\/\$\{SLUG\}"/);
+    assert.doesNotMatch(next, /claim is local-only/);
+  });
+});
+
+describe('/do:next GitLab native blockers', () => {
+  it('fails closed on unresolved native links during auto-pick', () => {
+    const gitlab = fs.readFileSync(path.join(root, 'lib', 'next-gitlab.md'), 'utf8');
+    assert.match(gitlab, /failed lookup, malformed JSON, or response with the wrong shape is \*\*UNRESOLVED\*\*/);
+    assert.match(gitlab, /During auto-pick, skip that candidate with a warning/);
+    assert.match(gitlab, /never fall back to the body convention alone/);
+    assert.match(gitlab, /explicitly named issue may proceed only as an explicit override/);
+    assert.match(gitlab, /type == "array" and all\(\.\[\]; type == "object" and \(\.link_type \| type == "string"\) and \(\.state \| type == "string"\)\)/);
+    assert.match(gitlab, /\.link_type == "is_blocked_by" and \.state != "closed"/);
+  });
+});
+
 describe('/do:next --trusted-authors union', () => {
   it('is extra authors unioned only when COLLAB_MODE is on', () => {
     assert.match(next, /\[--trusted-authors <list>\]/);

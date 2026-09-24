@@ -23,7 +23,6 @@ Effective (project overrides global):
   review-models      = (none — each reviewer's built-in default)
   review-iterations  = 1 (built-in default)
   review-mode        = series (built-in default)
-  issues             = true
   self               = false
   collaborators      = true
   trusted-authors    = howlingmime,Joebok

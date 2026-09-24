@@ -1,13 +1,13 @@
 # Tracker Issue Filing
 
-How a command files deferred or discovered work as tracker issues. **Assumes
-[plan-issue-setup.md](./plan-issue-setup.md) already ran** (`CLI_TOOL`, `LABEL_SEP`,
-`PLAN_LABEL`); with no tracker, file nothing and follow its "No tracker" rule.
+How commands file deferred/discovered work as tracker issues. **Requires
+[plan-issue-setup.md](./plan-issue-setup.md)** (`CLI_TOOL`, `LABEL_SEP`, `PLAN_LABEL`);
+with no tracker, file nothing.
 
 ## Fetch existing open issues
 
-Record `EXISTING_ISSUES` up front for dedup — **all** open issues, not just
-`PLAN_LABEL`, so a hand-filed duplicate under another label is caught:
+Record `EXISTING_ISSUES` up front for dedup — **all** open issues, so duplicates
+under another label are caught:
 `gh issue list --state open --limit 500 --json number,title,labels,body`
 (glab: `glab issue list --state opened --per-page 100 -F json`). A command that files
 only a handful of items and never otherwise needs the backlog may instead dedup each
@@ -29,13 +29,18 @@ self-contained, claimable title and a body with enough context (file paths, cate
 why it was deferred) to pick up cold. **The issue number is the ID.** Report created
 **and** reused numbers, noting which were skipped as duplicates.
 
-**Capture the number from the printed URL, never `-q`/`--jq`**: `issue create` is not
-a `--json` command, so appending one errors and aborts a `$(…)` capture. Use
-`--body-file` for any multi-line body or one containing backticks/`$(…)`:
+**Capture `NUM` from the printed URL**; issue create has no `--json`/`-q`. Keep
+generated text out of shell source: set `TITLE` with a unique, single-quoted
+heredoc delimiter; `BODY` is the body-file path.
 
 ```bash
-URL="$(gh issue create --title "<Title>" --body-file "$BODY" <label flags>)"
-NUM="${URL##*/}"   # glab: glab issue create --title "<Title>" --description "<body>" <label flags>
+TITLE="$(cat <<'SLASHDO_TITLE_EOF'
+<Title>
+SLASHDO_TITLE_EOF
+)"
+if [ "$CLI_TOOL" = gh ]; then URL="$(gh issue create --title "$TITLE" --body-file "$BODY" <label flags>)"
+else URL="$(glab issue create --title "$TITLE" --description "$(cat "$BODY")" <label flags>)"; fi
+NUM="${URL##*/}"
 ```
 
 ## Labels, not title brackets

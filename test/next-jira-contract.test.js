@@ -40,6 +40,7 @@ const serving = section(jira, '\n## Serving `/do:next`\n');
 const block = (heading, opts) => bash(section(serving, `\n### ${heading}\n`), opts);
 const preflight = bash(section(jira, '\n## Pre-flight\n')).replace(/\{COMMAND\}/g, '/do:next');
 const leaseHelper = block('Lease helper');
+const childrenHelper = block('Child listing helper');
 
 // PRIORITY_SORT (next.md Conventions) with Jira's fields filled in, escaped for the
 // double-quoted jq program the walk passes it in.
@@ -250,6 +251,7 @@ describe('Jira claim, release, and close, executed', () => {
     assert.match(result.stdout, /^PRE_CLAIM_STATUS=To Do$/m);
     assert.deepEqual(mutations(result.calls), ['issue|assign|PROJ-7|dev@example.com|', 'issue|move|PROJ-7|In Progress|']);
     assert.equal(result.calls.filter((c) => c.includes('assignee = currentUser()')).length, 2);
+    assert.match(jira, /preceding worktree step must atomically publish `next\/\$\{SLUG\}`[\s\S]*exclusive cross-machine claim/);
   });
 
   it('refuses an issue someone already holds, without touching it', () => {
@@ -315,10 +317,29 @@ describe('Jira claim, release, and close, executed', () => {
 
   it('lists epic children by status category', () => {
     const form = jira.match(/^- `issue_children <KEY>` — `([^`]*)`/m)[1].replace(/<KEY>/g, 'PROJ-1');
-    const result = runShell(`${preflight}\n${form}`, { pages: { 0: [issue('PROJ-2'), issue('PROJ-3', { status: 'Shipped', category: 'done' })] } });
+    const result = runShell(`${preflight}\n${childrenHelper}\n${form}`, { pages: { 0: [issue('PROJ-2'), issue('PROJ-3', { status: 'Shipped', category: 'done' })] } });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stdout, /^PROJ-2\tOPEN\nPROJ-3\tCLOSED$/m);
     assert.ok(result.calls.some((c) => c.includes('|-q|parent = PROJ-1|')));
+  });
+
+  it('fetches every Jira epic child page and handles empty and failed pages', () => {
+    const form = jira.match(/^- `issue_children <KEY>` — `([^`]*)`/m)[1].replace(/<KEY>/g, 'PROJ-1');
+    const first = Array.from({ length: 100 }, (_, i) => issue(`PROJ-${i + 2}`));
+    const paged = runShell(`${preflight}\n${childrenHelper}\n${form}`, {
+      pages: { 0: first, 100: [issue('PROJ-102', { category: 'done' })] },
+    });
+    assert.equal(paged.status, 0, paged.stdout + paged.stderr);
+    assert.equal(paged.stdout.trim().split('\n').length, 101);
+    assert.deepEqual(paged.calls.filter((c) => c.includes('--raw')).map((c) => c.match(/--paginate\|([^|]+)/)[1]), ['0:100', '100:100']);
+
+    const empty = runShell(`${preflight}\n${childrenHelper}\n${form}`);
+    assert.equal(empty.status, 0, empty.stdout + empty.stderr);
+    assert.equal(empty.stdout.trim(), '');
+
+    const failed = runShell(`${preflight}\n${childrenHelper}\n${form}`, { env: { JIRA_LIST_MODE: 'denied' } });
+    assert.notEqual(failed.status, 0);
+    assert.match(failed.stderr, /Error: 401 Unauthorized/);
   });
 });
 
@@ -337,6 +358,17 @@ describe('/do:next is wired to the Jira backend', () => {
       assert.match(next, new RegExp(`lib/tracker-jira\\.md[^\\n]*${heading.replace(/[`()]/g, '\\$&')}`), `next.md must route to "${heading}"`);
     }
     assert.match(next, /argument-hint: "\[#<issue>\|<JIRA-KEY> …\]/);
+  });
+
+  it('skips auto-pick when Jira native blocker state is unresolved', () => {
+    const queue = section(serving, '\n### Queue walk\n');
+    assert.match(queue, /unreadable or malformed native-link\s+response is \*\*UNRESOLVED\*\*, not unblocked/);
+    assert.match(queue, /during auto-pick, skip the candidate/);
+    assert.match(queue, /rather than falling back to body-only dependencies/);
+    assert.match(queue, /explicitly named\s+issue may proceed only as an explicit override/);
+    assert.match(queue, /JIRA_JSON="\$\(jira issue view <KEY> --raw\)"/);
+    assert.match(queue, /\.fields\.issuelinks \| type == "array"/);
+    assert.match(next, /or Jira's `issuelinks`/);
   });
 
   it('never closes a Jira issue with a Closes # trailer', () => {

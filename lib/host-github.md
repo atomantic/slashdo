@@ -9,22 +9,47 @@ success.
 
 Inputs: `{PR_NUMBER}` (the PR number), `{OWNER}`/`{REPO}`, and `{GH_HOST}`.
 Pass `--hostname {GH_HOST}` on every `gh api` call and omit the flag when it is
-empty (see `gh-host.md`). GraphQL calls inline literal values in JSON on stdin
-and pass `--input -`; never put shell-expandable `$variables` in a query string.
+empty (see `gh-host.md`). Keep query text static. Pass dynamic GraphQL values as
+variables; put free-form text into a JSON payload with `jq --arg`, then pass that
+file with `--input`. Never interpolate review text into shell source or a query.
 
 ### `cr-state` — head, reviews, and threads
 
 ```bash
-echo '{"query":"{ repository(owner: \"{OWNER}\", name: \"{REPO}\") { pullRequest(number: {PR_NUMBER}) { headRefOid reviews(last: 20) { totalCount nodes { state body author { login } submittedAt commit { oid } } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }"}' | gh api --hostname {GH_HOST} graphql --input -
+QUERY='query($owner:String!, $repo:String!, $number:Int!, $reviewCursor:String, $threadCursor:String) { repository(owner:$owner, name:$repo) { pullRequest(number:$number) { headRefOid reviews(first:100, after:$reviewCursor) { nodes { state body author { login } submittedAt commit { oid } } pageInfo { hasNextPage endCursor } } reviewThreads(first:100, after:$threadCursor) { nodes { id isResolved comments(first:100) { nodes { body path line author { login } } pageInfo { hasNextPage } } } pageInfo { hasNextPage endCursor } } } } }'
+REVIEW_CURSOR=""; THREAD_CURSOR=""; THREADS='[]'; HEAD_SHA=""; REVIEWS='[]'
+while :; do
+  GRAPHQL_ARGS=(-f query="$QUERY" -f owner="{OWNER}" -f repo="{REPO}" -F number="{PR_NUMBER}")
+  [ -z "$REVIEW_CURSOR" ] || GRAPHQL_ARGS+=(-f reviewCursor="$REVIEW_CURSOR")
+  [ -z "$THREAD_CURSOR" ] || GRAPHQL_ARGS+=(-f threadCursor="$THREAD_CURSOR")
+  RESPONSE="$(gh api --hostname {GH_HOST} graphql "${GRAPHQL_ARGS[@]}")" || { echo "cr-state: GitHub query failed"; exit 1; }
+  printf '%s' "$RESPONSE" | jq -e '((.errors // []) | length == 0) and (.data.repository.pullRequest != null) and (.data.repository.pullRequest.reviews.pageInfo.hasNextPage | type == "boolean") and (.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage | type == "boolean") and all(.data.repository.pullRequest.reviewThreads.nodes[]; .comments.pageInfo.hasNextPage != true)' >/dev/null || { echo "cr-state: GraphQL response was incomplete"; exit 1; }
+  if [ -z "$HEAD_SHA" ]; then
+    HEAD_SHA="$(printf '%s' "$RESPONSE" | jq -er '.data.repository.pullRequest.headRefOid')" || exit 1
+  fi
+  REVIEW_PAGE="$(printf '%s' "$RESPONSE" | jq -c '.data.repository.pullRequest.reviews.nodes')" || exit 1
+  REVIEWS="$(jq -cn --argjson all "$REVIEWS" --argjson page "$REVIEW_PAGE" '$all + $page')" || exit 1
+  PAGE="$(printf '%s' "$RESPONSE" | jq -c '.data.repository.pullRequest.reviewThreads.nodes')" || exit 1
+  THREADS="$(jq -cn --argjson all "$THREADS" --argjson page "$PAGE" '$all + $page')" || exit 1
+  REVIEW_MORE="$(printf '%s' "$RESPONSE" | jq -r '.data.repository.pullRequest.reviews.pageInfo.hasNextPage')"
+  THREAD_MORE="$(printf '%s' "$RESPONSE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')"
+  REVIEW_CURSOR="$(printf '%s' "$RESPONSE" | jq -r '.data.repository.pullRequest.reviews.pageInfo.endCursor // ""')" || exit 1
+  THREAD_CURSOR="$(printf '%s' "$RESPONSE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // ""')" || exit 1
+  if [ "$REVIEW_MORE" != true ] && [ "$THREAD_MORE" != true ]; then break; fi
+done
+jq -n --arg head "$HEAD_SHA" --argjson reviews "$REVIEWS" --argjson threads "$THREADS" \
+  '{head:$head, reviews:$reviews, threads:$threads}'
 ```
 
-- Head SHA: `headRefOid`.
-- Reviews: each node is one review. Its reviewed commit is `commit.oid`, and
-  `state` is already one of APPROVED, COMMENTED, CHANGES_REQUESTED, DISMISSED.
-- Threads: `reviewThreads.nodes`. The thread ID is `id`, the resolved flag is
+- Head SHA: `.head`.
+- Reviews: `.reviews[]`. The verb paginates every review, not just the latest 100.
+  The reviewed commit is `.commit.oid`, and `state` is one of APPROVED, COMMENTED,
+  CHANGES_REQUESTED, DISMISSED.
+- Threads: `.threads[]`. The thread ID is `id`, the resolved flag is
   `isResolved`, and the author is the first comment's `author.login`.
   `comments.nodes` is the thread's conversation in order (`body`, `path`,
-  `line`, `author.login`).
+  `line`, `author.login`). The loop fetches every thread page and fails closed
+  if any thread's comment page exceeds the 100 comments requested.
 
 ### `request-review` — ask `{REVIEWER_LOGIN}` to review
 
@@ -39,15 +64,24 @@ their `[bot]` suffix.
 ### `reply-thread` — reply in thread `{THREAD_ID}`
 
 ```bash
-echo '{"query":"mutation { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: \"{THREAD_ID}\", body: \"{BODY}\"}) { comment { id } } }"}' | gh api --hostname {GH_HOST} graphql --input -
+PAYLOAD_FILE="$(mktemp)" || exit 1
+jq -n --arg threadId "{THREAD_ID}" --arg body "$BODY" \
+  '{query:"mutation($threadId:ID!, $body:String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId:$threadId, body:$body}) { comment { id } } }", variables:{threadId:$threadId, body:$body}}' > "$PAYLOAD_FILE" || { rm -f "$PAYLOAD_FILE"; exit 1; }
+gh api --hostname {GH_HOST} graphql --input "$PAYLOAD_FILE"
+RESULT=$?; rm -f "$PAYLOAD_FILE"; [ "$RESULT" -eq 0 ]
 ```
 
-`{BODY}` must be JSON-escaped, because it is inlined into the query string.
+Set `BODY` from the comment text through a single-quoted heredoc with a unique
+delimiter. `jq --arg` handles its JSON encoding; do not place it in shell source.
 
 ### `resolve-thread` — resolve thread `{THREAD_ID}`
 
 ```bash
-echo '{"query":"mutation { resolveReviewThread(input: {threadId: \"{THREAD_ID}\"}) { thread { id isResolved } } }"}' | gh api --hostname {GH_HOST} graphql --input -
+PAYLOAD_FILE="$(mktemp)" || exit 1
+jq -n --arg threadId "{THREAD_ID}" \
+  '{query:"mutation($threadId:ID!) { resolveReviewThread(input: {threadId:$threadId}) { thread { id isResolved } } }", variables:{threadId:$threadId}}' > "$PAYLOAD_FILE" || { rm -f "$PAYLOAD_FILE"; exit 1; }
+gh api --hostname {GH_HOST} graphql --input "$PAYLOAD_FILE"
+RESULT=$?; rm -f "$PAYLOAD_FILE"; [ "$RESULT" -eq 0 ]
 ```
 
 ### `post-review` — summary plus inline comments on the head commit

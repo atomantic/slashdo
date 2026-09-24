@@ -11,6 +11,15 @@ const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
 describe('better progressive context', () => {
+  it('stops pr-better when the default branch cannot be resolved', () => {
+    const prBetter = read('commands/do/pr-better.md');
+    assert.match(prBetter, /Always run `git remote set-head origin --auto` once and abort/);
+    assert.match(prBetter, /Refreshing unconditionally prevents a stale `origin\/HEAD`/);
+    assert.match(prBetter, /If the refreshed default cannot be resolved, halt before Phase A/);
+    assert.match(prBetter, /do not proceed to a workflow that may commit directly to the current branch/);
+    assert.doesNotMatch(prBetter, /If it cannot be resolved, skip step 2's check and proceed/);
+  });
+
   it('keeps the initial command within a small orchestration budget', () => {
     // The original 82KB source expanded beyond 200KB with review libraries.
     // Budget the entrypoint, not the task evidence or an arbitrary line count.
@@ -88,6 +97,12 @@ describe('better progressive context', () => {
     assert.match(inputs, /DEPLOYMENT_TARGETS/);
     assert.match(inputs, /SWIFT-SPECIFIC GUARDRAILS/);
     assert.match(inputs, /platform-swiftui/);
+    assert.match(inputs, /runtime\.rsplit\('iOS-', 1\)\[-1\]\.replace\('-', '\.'\)/);
+    assert.doesNotMatch(inputs, /runtime\.split\('\.'\)\[-3\]/);
+    assert.match(inputs, /any Xcode project whose `PLATFORMS` contains iOS/);
+    assert.match(inputs, /This includes multi-platform projects such as iOS \+ macOS/);
+    assert.match(inputs, /iOS: `BUILD_CMD_IOS` uses `generic\/platform=iOS Simulator`; `TEST_CMD_IOS` uses `platform=iOS Simulator,name=\$SIM_DEST`/);
+    assert.match(inputs, /macOS: `BUILD_CMD_MACOS` and `TEST_CMD_MACOS` use `platform=macOS`/);
     assert.match(inputs, /!read lib\/swift-gotchas\.md/);
     const remediation = read('lib/better-remediation.md');
     assert.match(remediation, /WORKTREE_DIR=\.\.\/\{BRANCH_PREFIX\}-\{DATE\}/);

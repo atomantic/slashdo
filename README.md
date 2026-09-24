@@ -76,11 +76,11 @@ You've been coding with your assistant and want it committed, pushed, and PR'd �
 
 `--enhance-with <list>` (same `agent[model]` grammar as `--review-with`) sharpens the draft through a sequential agent pipeline before the approval gate — you still approve the final text.
 
-Suppose it files issue `#123`. Ship it immediately with `/do:next #123` — claims the issue, implements it in an isolated worktree, opens a reviewed PR that `Closes #123`, merges, and cleans up. Add `--plan` to approve a written implementation plan first.
+For a GitHub/GitLab issue such as `#123`, ship it immediately with `/do:next #123` — the command claims it, implements it in an isolated worktree, opens a reviewed PR/MR that closes the issue, merges, and cleans up. With Jira, pass the key instead (for example `/do:next PROJ-123`); the PR/MR references the Jira key without a code-host `Closes #…` directive. Add `--plan` to approve a written implementation plan first.
 
 ### Run a whole backlog
 
-`/do:replan` keeps the backlog honest; `/do:next` drains it — both work against your GitHub/GitLab issue tracker:
+`/do:replan` keeps the backlog honest; `/do:next` drains it — both work with a supported GitHub/GitLab issue tracker or Jira project. GitHub and GitLab use their authenticated `gh`/`glab` CLI; Jira uses the Jira CLI and configured project key:
 
 ```
 /do:replan                          # triage: close done/stale issues, file new opportunities

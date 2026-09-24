@@ -24,7 +24,7 @@ The calling command must populate these before reaching this loop:
 - `{REVIEW_STOP_MODE}` — one of:
   - `all` (default) — run every listed reviewer in order, regardless of what each reports
   - `on-findings` — stop after the first reviewer that produced a verdict status (`clean`, `capped`, or copilot `too-large`) AND added at least one commit since `PASS_START_SHA` (the orchestrator actually landed a fix). Reviewer-reported "comments" without resulting commits do NOT trigger the stop — the signal is the commit-graph delta, not the count of suggestions
-  - `on-clean` — stop after the first reviewer that reports zero findings (clean)
+  - `on-clean` — stop after the first reviewer pass that reports clean and adds no commits; continue after a pass that made fixes so the next reviewer can check them
 - `{REVIEWER_APPLIES}` — boolean, forwarded to each reviewer's loop. No effect on the copilot path.
 - `{REVIEW_ITERATIONS}` — non-negative integer (default 1), forwarded to the host-side **copilot** and **`@<login>`** loops as their review-and-fix cycle cap; each still exits early when a review returns 0 comments. `0` means "loop until 0 comments" (legacy, bounded by each loop's 10-iteration safety guardrail). No effect on the local-agent loop (`codex`/`agy`/`claude`/`grok`/`pi`/`cursor`/`opencode`/`cmd`) or the Ollama loop, which keep their own fixed caps. A per-entry `~max=<n>` **overrides this flag for that entry** — see the cap-resolution step in Pre-flight.
 - `{CODE_HOST}` — `github` or `gitlab`, resolved by `~/.claude/lib/vcs-host.md`; `github` when the caller has not resolved it. It selects the verb file the host-side loops run and the `@<login>` grammar below.

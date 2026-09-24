@@ -131,11 +131,18 @@ For every `drift-conflict` / `drift-unclear`, record: the item, the conflicting 
 
 **Agent 6: Dependency & Priority Graph**
 For every open issue under consideration:
-- Parse the body for `Depends on #<N>` / `Blocked by #<N>` lines (case-insensitive; a line may list several `#<N>`) — the portable, cross-host convention. Also read GitHub's **native** blocked-by relationship where the API exposes it (GitHub-only; on GitLab the body lines are the only source). Record each issue's blocker set.
-- Resolve each referenced #N's state with the **detected `CLI_TOOL`** (`gh issue view <N> --json state -q .state`; glab: `glab issue view <N> --output json` then read `.state`), and **normalize the value** before comparing: GitHub reports `OPEN`/`CLOSED`, GitLab `opened`/`closed`. On Jira, the lines name keys (`Depends on PROJ-12`) and the native source is the "is blocked by" link, per [lib/tracker-jira.md](../../lib/tracker-jira.md) "`/do:replan` on Jira". Mark the issue **blocked** if any blocker is still open, **clearable** if a referenced blocker is now closed (a stale marker to strip), **broken** if a referenced number doesn't exist, and detect **cycles** across the collected edges.
+- Parse the body for `Depends on #<N>` / `Blocked by #<N>` lines (case-insensitive; a line may list several `#<N>`) — the portable, cross-host convention. Also read native blocked-by relationships: GitHub's `blockedBy` connection, GitLab's Issue Links API filtered to `link_type == "is_blocked_by"`, and Jira's "is blocked by" links. For GitLab, use `glab api "projects/:id/issues/<N>/links"`, capture and validate that the response is a JSON array before parsing it, and treat any linked issue whose `.state` is not `closed` as open. A failed `glab api` call, non-array response, or matching link without a string `.state` is `UNRESOLVED`, not unblocked; protect that issue from automatic stale closure for this run and report the lookup failure. Record the union of body and native blocker sets.
+- Resolve each referenced #N's state with the **detected `CLI_TOOL`** (`gh issue view <N> --json state -q .state`; glab: `glab issue view <N> --output json` then read `.state`), and **normalize the value** before comparing: GitHub reports `OPEN`/`CLOSED`, GitLab `opened`/`closed`. On Jira, the lines name keys (`Depends on PROJ-12`) and the native source is the "is blocked by" link, per [lib/tracker-jira.md](../../lib/tracker-jira.md) "`/do:replan` on Jira". Mark the issue **blocked** if any blocker is still open, **clearable** if a body-line blocker is now closed (a stale marker to strip), **broken** if a body-line reference doesn't exist, and detect **cycles** across the collected edges.
 - Note each issue's `priority:<N>` label if present (summary only — not triage evidence).
 
 Feed this graph to Phase 2: `blocked` and `clearable` issues are both kept `still-pending` (never `stale` — a parked issue's old `updatedAt` is expected, and the run that unblocks it must not close it); `clearable`/`broken`/`cycle` findings drive the dependency-marker hygiene fixes in the Phase 2 callout.
+
+For the GitLab native-link lookup, require `jq` before starting the dependency walk:
+
+```bash
+command -v jq >/dev/null 2>&1 || {
+  echo "/do:replan needs jq to read GitLab issue links safely. Install it and re-run."; exit 1; }
+```
 
 ## Phase 2: Auto-Triage
 
@@ -172,10 +179,12 @@ it); `epic-wrapup` or `epic-open` → `still-pending` (**keep open**); `epic-emp
 ordinary classification. **Never** close an `epic-open`/`epic-wrapup` epic even if
 its title reads as done.
 
-**Blocked issues are not stale.** An issue with a `Depends on #<N>` / `Blocked by
-#<N>` line (or GitHub's native blocked-by relationship) where #N is still OPEN is
-`still-pending` (**keep open**) regardless of `updatedAt` age. (`/do:next` skips it
-for the same reason — see its Phase 1 step 4.)
+**Blocked or unresolved issues are not stale.** An issue with a `Depends on #<N>` /
+`Blocked by #<N>` line, or a native GitHub/GitLab/Jira blocked-by relationship,
+where any blocker is still open is `still-pending` (**keep open**) regardless of
+`updatedAt` age. If a GitLab native lookup fails, keep the issue open for this run
+because its blocker state is unknown. (`/do:next` skips blocked issues for the same
+reason — see its Phase 1 step 4.)
 
 **Dependency-marker hygiene.** Reconcile declared dependencies against reality and
 fold fixes into Phase 3:
@@ -347,10 +356,13 @@ as in Phase 3), then strip the tactical content from GOALS.md.
 
 ## Phase 6: Commit
 
-The tracker is the audit trail, not a commit. Commit **only** on-disk changes this
-run made (the Phase 4 PLAN.md removal, Phase 5 GOALS.md or `docs/` edits) — e.g.
-`for p in PLAN.md GOALS.md docs; do git add -A -- "$p" 2>/dev/null; done; git commit -m "docs: replan — migrated PLAN.md to issues #c, #d"`
-(Jira: the keys, `PROJ-3, PROJ-4`).
+The tracker is the audit trail, not a commit. Commit **only** exact paths this
+run changed (the Phase 4 `PLAN.md` removal, Phase 5 `GOALS.md` edit, or specific
+`docs/` files). Stage those paths by name — never stage an entire directory,
+which could include unrelated user changes. For example, list only the changed
+paths in `git add -- PLAN.md GOALS.md docs/path-you-edited.md`, then commit with
+`git commit -m "docs: replan — migrated PLAN.md to issues #c, #d"` (Jira: the
+keys, `PROJ-3, PROJ-4`). Omit any example path that this run did not change.
 If nothing on disk changed, there is no commit. Do NOT push unless explicitly asked.
 
 ## Notes
