@@ -144,3 +144,46 @@ describe('/do:release documented project delivery', () => {
     assert.match(selection, /first\s+unverified checkpoint as INCOMPLETE/);
   });
 });
+
+describe('/do:release GitLab paths', () => {
+  it('detects the code host up front and derives CR_NOUN for messages', () => {
+    assert.match(body, /!read lib\/vcs-host\.md/);
+    assert.match(body, /\{CR_NOUN\}/);
+  });
+
+  it('gives every gh-only checkpoint a glab branch instead of failing on GitLab', () => {
+    // Recover Prepared Release State: target-release lookup and merged-PR lookup.
+    assert.match(body, /glab release view "v\$\{TARGET_VERSION\}"/);
+    assert.match(body, /glab api --paginate "projects\/:id\/merge_requests\?state=merged&target_branch=\{target\}/);
+
+    // Open the Release PR: query + create.
+    assert.match(body, /glab api --paginate "projects\/:id\/merge_requests\?source_branch=\{source\}&target_branch=\{target\}/);
+    assert.match(body, /glab mr create --source-branch "\{source\}" --target-branch "\{target\}"/);
+
+    // Merging: CI gate + merge command.
+    assert.match(body, /glab ci status --wait --branch \{source\}/);
+    assert.match(body, /glab mr view "\$PR_NUMBER" --output json --jq \.state/);
+    assert.match(body, /glab mr merge "\$PR_NUMBER" --yes/);
+
+    // Post-Merge: merged-MR read-back and release detection (glab release view,
+    // per #414/#415's spec for tag/release detection).
+    assert.match(body, /glab api "projects\/:id\/merge_requests\/\$PR_NUMBER"/);
+    assert.match(body, /glab release view "v\{version\}" -F json/);
+  });
+
+  it('never derives a GitLab URL host from GH_HOST, which is only populated on GitHub', () => {
+    // Reuses {ORIGIN_HOST} already resolved by lib/vcs-host.md instead of
+    // re-typing its origin-parse sed (banned by the GH_HOST-derivation contract).
+    assert.doesNotMatch(body, /GL_HOST=/);
+    assert.match(body, /https:\/\/\{ORIGIN_HOST\}\/\{owner\}\/\{repo\}\/-\/compare\//);
+  });
+
+  it('keeps the GitHub Recover/Post-Merge literals intact for the unchanged GitHub path', () => {
+    assert.match(body, /gh api --include --hostname "\{GH_HOST\}" "repos\/\{owner\}\/\{repo\}\/releases\/tags\/v\$\{TARGET_VERSION\}"/);
+    assert.match(body, /gh pr list --state merged --base "\{target\}" --limit 100/);
+    assert.match(body, /gh pr list --state all --base "\{target\}" --head "\{source\}"/);
+    assert.match(body, /gh pr create --title "Release v\{version\}" --base "\{target\}" --head "\{source\}"/);
+    assert.match(body, /gh pr view "\$PR_NUMBER" --json state -q \.state/);
+    assert.match(body, /gh pr merge "\$PR_NUMBER" --merge/);
+  });
+});

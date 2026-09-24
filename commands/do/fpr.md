@@ -4,17 +4,16 @@ description: Commit, push to fork, and open a PR against the upstream repo
 
 # Fork PR (fpr)
 
-Commit changes, push to your fork, and open a pull request against the upstream (parent) repository.
+Commit changes, push to your fork, and open a pull request (GitHub) or merge
+request (GitLab) against the upstream (parent) repository.
 
 ## Detect Fork Relationship
 
-1. **Resolve the fork from the authoritative `origin`.** The shared preflight selects the forge from the remote, confirms that CLI can read the checkout, rejects unsupported forges, and seeds `{GH_HOST}`. `/do:fpr` supports GitHub only:
+1. **Resolve the fork from the authoritative `origin`.** The shared preflight selects the forge from the remote, confirms that CLI can read the checkout, rejects unsupported forges, and seeds `{GH_HOST}`/`{ORIGIN_HOST}` and `{CR_NOUN}`. `/do:fpr` supports GitHub and GitLab; any other forge from the preflight is unsupported here:
 
    !read lib/vcs-host.md
 
-   If `CLI_TOOL` is not `gh`, stop and report that `/do:fpr` requires a GitHub origin.
-
-   By convention `origin` is the user's push target. A bare `gh repo view` can select the wrong repository when both `origin` and `upstream` exist, so derive its slug and pass the full host-qualified name explicitly:
+   On **GitHub** (`CLI_TOOL=gh`): by convention `origin` is the user's push target. A bare `gh repo view` can select the wrong repository when both `origin` and `upstream` exist, so derive its slug and pass the full host-qualified name explicitly:
 
    ```sh
    ORIGIN_URL=$(git remote get-url origin 2>/dev/null || true)
@@ -30,17 +29,28 @@ Commit changes, push to your fork, and open a pull request against the upstream 
 
    - If `isFork` is `false` or `parent` is null: STOP and tell the user this repo is not a fork. Suggest using `/do:pr` instead.
 
-2. **Extract upstream info** from the `parent` field:
-   - `UPSTREAM_OWNER` = `parent.owner.login`
-   - `UPSTREAM_REPO` = `parent.name`
-   - `UPSTREAM_DEFAULT_BRANCH` = `parent.defaultBranchRef.name`
+   On **GitLab** (`CLI_TOOL=glab`): read the current project once; GitLab's REST
+   representation of a fork carries a `forked_from_project` object (absent on a
+   non-fork), together with the numeric project id `glab mr create --target-project`
+   needs later:
+
+   ```sh
+   PROJECT_JSON="$(glab api "projects/:id")" || exit 1
+   IS_FORK="$(printf '%s' "$PROJECT_JSON" | jq -r 'has("forked_from_project") and (.forked_from_project != null)')"
+   ```
+
+   - If `IS_FORK` is not `true`: STOP and tell the user this repo is not a fork. Suggest using `/do:pr` instead.
+
+2. **Extract upstream info**:
+   - GitHub, from the `parent` field: `UPSTREAM_OWNER` = `parent.owner.login`, `UPSTREAM_REPO` = `parent.name`, `UPSTREAM_DEFAULT_BRANCH` = `parent.defaultBranchRef.name`
+   - GitLab, from `forked_from_project` on `{PROJECT_JSON}`: `UPSTREAM_PROJECT_ID` = `.forked_from_project.id` (the numeric id `--target-project` requires, not a slug), `UPSTREAM_DEFAULT_BRANCH` = `.forked_from_project.default_branch`, and split `.forked_from_project.path_with_namespace` on the last `/` into `UPSTREAM_OWNER` (namespace) and `UPSTREAM_REPO` (project path)
 
 3. **Extract fork info**:
-   - `FORK_OWNER` = `owner.login`
-   - `FORK_DEFAULT_BRANCH` = `defaultBranchRef.name`
-   - `CURRENT_BRANCH` = output of `git branch --show-current`
+   - GitHub: `FORK_OWNER` = `owner.login`, `FORK_DEFAULT_BRANCH` = `defaultBranchRef.name`
+   - GitLab: split `{PROJECT_JSON}`'s own `.path_with_namespace` the same way into `FORK_OWNER`; `FORK_DEFAULT_BRANCH` = `.default_branch`
+   - Both hosts: `CURRENT_BRANCH` = output of `git branch --show-current`
 
-4. Print: `Fork PR flow: {FORK_OWNER}/{CURRENT_BRANCH} → {UPSTREAM_OWNER}/{UPSTREAM_REPO}:{UPSTREAM_DEFAULT_BRANCH}`
+4. Print: `Fork {CR_NOUN} flow: {FORK_OWNER}/{CURRENT_BRANCH} → {UPSTREAM_OWNER}/{UPSTREAM_REPO}:{UPSTREAM_DEFAULT_BRANCH}`
 
 ## Sync with Upstream
 
@@ -51,6 +61,12 @@ Before committing, ensure the fork is up to date with upstream:
    # Built from the derived {GH_HOST}, so an Enterprise fork gets an Enterprise upstream —
    # a literal github.com here would add a remote that 404s on every Enterprise install.
    git remote get-url upstream 2>/dev/null || git remote add upstream "https://{GH_HOST}/{UPSTREAM_OWNER}/{UPSTREAM_REPO}.git"
+   ```
+   On GitLab, build the same remote from `{ORIGIN_HOST}` — already resolved by
+   `lib/vcs-host.md` above, never re-derived here; GitLab has no separate
+   API-host indirection the way `gh api` needs `{GH_HOST}`:
+   ```bash
+   git remote get-url upstream 2>/dev/null || git remote add upstream "https://{ORIGIN_HOST}/{UPSTREAM_OWNER}/{UPSTREAM_REPO}.git"
    ```
 2. Fetch upstream: `git fetch upstream`
 3. If on the fork's default branch and there are upstream changes, rebase with autostash to preserve uncommitted edits:
@@ -127,9 +143,11 @@ Before opening the PR, check if upstream has contribution guidelines:
 - If a PR template exists, use it for the PR body structure
 - If contribution guidelines mention branch naming, commit format, or other requirements, flag any violations to the user
 
-## Open the PR
+## Open the {CR_NOUN}
 
-Create a cross-fork PR targeting the upstream repo:
+Create a cross-fork PR (GitHub) or MR (GitLab) targeting the upstream repo.
+
+On **GitHub**:
 
 ```bash
 gh pr create \
@@ -140,11 +158,27 @@ gh pr create \
   --body "PR description here"
 ```
 
+On **GitLab** — run from inside the fork's own checkout (`origin` = the fork),
+so `glab` infers the source project from `origin` and only the target needs
+naming. `--target-project` takes the numeric `{UPSTREAM_PROJECT_ID}` from
+"Detect Fork Relationship", not a path — GitLab's fork-MR endpoint resolves
+the target by id, and a `namespace/project` string there is silently rejected:
+
+```bash
+glab mr create \
+  --source-branch {CURRENT_BRANCH} \
+  --target-branch {UPSTREAM_DEFAULT_BRANCH} \
+  --target-project {UPSTREAM_PROJECT_ID} \
+  --title "MR title here" \
+  --description "MR description here" \
+  --yes
+```
+
 - Write a clear title and rich description
-- If a PR template was found, follow its structure
-- Print the resulting PR URL so the user can review it
+- If a PR/MR template was found, follow its structure
+- Print the resulting {CR_NOUN} URL so the user can review it
 
 ## Important
 
-- Do NOT merge the PR — upstream maintainers handle that
+- Do NOT merge the {CR_NOUN} — upstream maintainers handle that
 - If the fork is significantly behind upstream, warn the user about potential merge conflicts

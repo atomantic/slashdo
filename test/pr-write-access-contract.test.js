@@ -110,7 +110,6 @@ describe('VCS host portability', () => {
     assert.doesNotMatch(fpr, /https:\/\/github\.com\/\{UPSTREAM_OWNER\}/);
 
     assert.match(fpr, /!read lib\/vcs-host\.md/);
-    assert.match(fpr, /If `CLI_TOOL` is not `gh`/);
     assert.doesNotMatch(fpr, /ORIGIN_HOST=|gh auth token --hostname "\$ORIGIN_HOST"/);
     assert.match(fpr, /ORIGIN_SLUG=/);
     assert.match(fpr, /gh repo view "\$GH_HOST\/\$ORIGIN_SLUG"/);
@@ -120,6 +119,28 @@ describe('VCS host portability', () => {
     // `gh pr`/`gh repo` bare commands), so a bare OWNER/REPO here would target
     // gh's default host instead of the derived Enterprise one.
     assert.match(fpr, /gh pr create \\\n\s*--repo \{GH_HOST\}\/\{UPSTREAM_OWNER\}\/\{UPSTREAM_REPO\}/);
+  });
+
+  it('gives /do:fpr a real GitLab fork-MR path instead of stopping', () => {
+    const fpr = readCommandDocs('fpr.md');
+
+    // The old guard rejected any origin whose CLI was not `gh`; GitLab forks
+    // now get a real path instead of a hard stop.
+    assert.doesNotMatch(fpr, /stop and report that `\/do:fpr` requires a GitHub origin/);
+    assert.match(fpr, /CLI_TOOL=glab/);
+    assert.match(fpr, /glab api "projects\/:id"/);
+    assert.match(fpr, /forked_from_project/);
+
+    // GitLab's fork-MR endpoint resolves the target project by numeric id, not
+    // a namespace/project path — this must be threaded through explicitly.
+    assert.match(fpr, /UPSTREAM_PROJECT_ID/);
+    assert.match(fpr, /--target-project \{UPSTREAM_PROJECT_ID\}/);
+    assert.match(fpr, /glab mr create \\\n\s*--source-branch \{CURRENT_BRANCH\}/);
+
+    // The GitLab upstream remote must not be built on a literal github.com or
+    // an unresolved {GH_HOST} (that var is only populated on the GitHub path);
+    // it reuses {ORIGIN_HOST} from vcs-host.md rather than re-deriving it.
+    assert.match(fpr, /git remote add upstream "https:\/\/\{ORIGIN_HOST\}\//);
   });
 
   it('builds no URL and gates no branch on a literal github.com', () => {
