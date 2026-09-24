@@ -57,7 +57,7 @@ Execute the canonical phases in order. Read each partial when its phase applies;
 
 !read lib/better-pr-and-ci.md
 
-6. Run the selected GitHub review loop only when requested; leave PRs open when no reviewer is selected or the result is inconclusive.
+6. Run the selected review loop only when requested, on GitHub or GitLab alike; leave PRs open when no reviewer is selected or the result is inconclusive.
 
 !read lib/better-review-loop.md
 

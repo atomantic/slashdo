@@ -49,11 +49,12 @@ Record each category's PR number and URL.
 
 **GATE: If `--no-merge` was passed, skip CI/review/merge and proceed directly to [Phase 7 safe finalization](./better-cleanup.md).** Report all PR URLs, restore this run's stash, and retain open-PR branches and the worktree for resumption.
 
-**GATE: If `VCS_HOST` is `gitlab`, proceed directly to [Phase 7 safe finalization](./better-cleanup.md).** Report MR URLs and restore this run's stash while retaining open-MR artifacts. Automated Phase 6 review and merge run on GitHub only; GitLab MRs stay open.
-
 ## Phase 5d: CI Verification
 
 A PR passes this gate only when every expected check **for its current pushed HEAD** has passed; runs for an earlier HEAD never count. Allow each PR up to 10 minutes for checks to attach and finish. No checks reported is ambiguous: confirm the repository has no applicable CI or external required checks before treating it as green. If expected checks never attach within the wait limit, leave that PR open.
+
+- GitHub: `gh pr checks {PR_NUMBER} --required --watch --fail-fast` (also non-zero on the vacuously-green "no checks" case).
+- GitLab: `glab ci status --wait --branch {BRANCH_PREFIX}/{CATEGORY_SLUG}`; no separate required-checks list.
 
 On a failing check, read its failed-job log and fix the cause on that PR's branch in a `fix: resolve CI failure - {description}` commit (specific files staged), push, and re-gate. Causes to rule out first:
 - **Missing imports**: a symbol that lives in another PR's branch. Add a backward-compatible {COMPAT_SHIM} or revert the import.

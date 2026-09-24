@@ -648,21 +648,25 @@ Record `PR_NUMBER` and `PR_URL`.
 
 **GATE: If `--no-merge` was passed, skip straight to Phase 6 cleanup** (skip 5b, 5c, 5d). Print the PR/MR URL and summary first. Phase 6 still runs — in particular its stash restore — so a `--no-merge` run never strands the pre-audit stash; only the merge and its cleanup-owned remote-branch deletion are skipped (the PR/MR itself, and its branch, are left exactly as opened).
 
-**GATE: If `VCS_HOST=gitlab`, skip 5b, 5c, and 5d entirely** — `gh pr checks`, the review loop wrappers, and the merge step below are all GitHub-specific. Print the MR URL and summary, then proceed to Phase 6 cleanup with the MR left open for manual review and merge.
+### 5b: CI Verification
 
-### 5b: CI Verification (GitHub only)
-
-1. Wait 30 seconds for CI to start
-2. Poll CI status:
-   ```bash
-   gh pr checks {PR_NUMBER}
-   ```
-   Poll every 30 seconds, max 10 minutes.
-3. If CI fails:
+1. Wait 30 seconds for CI/the pipeline to start.
+2. Poll status:
+   - **GitHub:**
+     ```bash
+     gh pr checks {PR_NUMBER}
+     ```
+     Poll every 30 seconds, max 10 minutes.
+   - **GitLab:**
+     ```bash
+     glab ci status --wait --branch depfree/{DATE}
+     ```
+     This blocks until the head pipeline finishes (`success`/`failed`/`canceled`/etc). GitLab has no separate list of required checks.
+3. If CI/the pipeline fails:
    - Fetch failure logs, diagnose, fix, commit, push
    - Max 3 fix attempts before informing the user
 
-### 5c: Review Loop (GitHub only)
+### 5c: Review Loop
 
 **GATE — no reviewer requested: If `REVIEW_AGENTS` is empty** (no `--review-with` was passed), **skip this phase AND the Phase 5d merge.** There is no default reviewer. Leave the PR open for manual review, print its URL and summary, then proceed to Phase 6 cleanup.
 
@@ -699,9 +703,9 @@ Only for `ollama` entries:
 
 Pass: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_MODELS}` (the saved per-agent default models resolved in Parse Arguments — every local reviewer but `cmd` reads it; without it a saved `review-models` default is silently ignored), `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the GitHub-side loops' `gh api` calls hit the right host on GitHub Enterprise), the per-entry `{WAIT_SCHEDULE}` selected above, `depfree/{DATE}` (the branch the local-agent loop checks out), `{BUILD_CMD}`, and `{REVIEW_ITERATIONS}` (default 1 — one pass, returning `capped`, which counts as clean for the merge gate below; 0 = run until 0 comments, bounded by the 10-iteration guardrail).
 
-### 5d: Merge (GitHub only)
+### 5d: Merge
 
-Reached only when a review loop ran (`REVIEW_AGENTS` non-empty) and `VCS_HOST=github` — GitLab stops at the gate above 5b, before this step. Consume the multi-reviewer wrapper's `{OVERALL_STATUS}`:
+Reached only when a review loop ran (`REVIEW_AGENTS` non-empty) — Phase 5c's own "no reviewer requested" gate covers the no-reviewer case on both hosts. Consume the multi-reviewer wrapper's `{OVERALL_STATUS}`:
 
 **Default mode**: proceed to the merge gate below when `{OVERALL_STATUS}` is `clean` (or `partial` under an explicit stop-mode). On `inconclusive` (a requested reviewer timed out, errored, hit its guardrail, or was skipped — including a missing CLI binary) or `dirty` (broken build / failed tests / reject), leave the PR open, set `MERGE_OUTCOME=left open`, report the status, and skip the merge gate.
 **Interactive mode**: Ask the user for merge approval, showing `{OVERALL_STATUS}`, before running the gate.
@@ -715,7 +719,7 @@ Record the gate's outcome as `MERGE_OUTCOME` (`merged`, `queued`, or `left open`
 
 ## Phase 6: Cleanup
 
-Reached from every path through Phase 5: after 5d's merge gate (any `MERGE_OUTCOME`), from the `--no-merge` gate, from the `VCS_HOST=gitlab` gate, or from 5c's "no reviewer requested" gate. `MERGE_OUTCOME` is `merged` only when 5d's gate confirmed it there; every other path leaves it unset, which this phase treats as **the PR/MR is still open** — closing an open PR by deleting its head branch is the exact bug this phase exists to avoid.
+Reached from every path through Phase 5: after 5d's merge gate (any `MERGE_OUTCOME`), from the `--no-merge` gate, or from 5c's "no reviewer requested" gate. `MERGE_OUTCOME` is `merged` only when 5d's gate confirmed it there; every other path leaves it unset, which this phase treats as **the PR/MR is still open** — closing an open PR by deleting its head branch is the exact bug this phase exists to avoid.
 
 1. **If `MERGE_OUTCOME=merged`:** the merge gate already deleted the remote head (its step 5). Remove the worktree and delete the local branch:
    ```bash
@@ -724,12 +728,12 @@ Reached from every path through Phase 5: after 5d's merge gate (any `MERGE_OUTCO
    ```
    Use `-d`, not `-D` — a refusal here means the local branch carries commits the gate's merge doesn't account for (e.g. a squash merge rewrote the SHA); investigate before forcing.
 
-   **Otherwise** (`MERGE_OUTCOME` unset, `queued`, or `left open` — covers `--no-merge`, GitLab, no reviewer requested, and `inconclusive`/`dirty` review results): the PR/MR is still open. **Do not** remove the worktree, and do not delete the local or remote branch — deleting the head branch of an open PR closes it on GitHub. Report `{WORKTREE_DIR}` and the branch name as retained for later review/merge.
+   **Otherwise** (`MERGE_OUTCOME` unset, `queued`, or `left open` — covers `--no-merge`, no reviewer requested, and `inconclusive`/`dirty` review results, on either host): the PR/MR is still open. **Do not** remove the worktree, and do not delete the local or remote branch — deleting the head branch of an open PR/MR closes it. Report `{WORKTREE_DIR}` and the branch name as retained for later review/merge.
 2. **Restore stashed changes, on the branch that made them, in `{REPO_DIR}` — never in `{WORKTREE_DIR}`, and never after checking out a different branch there.** All remediation happened in the worktree; this phase never runs `git checkout` in `{REPO_DIR}`, because doing so would move the user off whatever branch (`{CURRENT_BRANCH}`) they were on when the run started, and popping the stash after such a checkout would apply it to the wrong branch. If Phase 3a stashed (`IS_DIRTY` was true):
    ```bash
    git -C {REPO_DIR} stash pop
    ```
-   Run this on **every** path through this phase — including `--no-merge`, GitLab, and every "PR left open" branch above — not only after a successful merge, so a run never strands the pre-audit stash. `{REPO_DIR}` remains on `{CURRENT_BRANCH}` throughout the entire command; nothing in this command checks it out elsewhere.
+   Run this on **every** path through this phase — including `--no-merge` and every "PR left open" branch above — not only after a successful merge, so a run never strands the pre-audit stash. `{REPO_DIR}` remains on `{CURRENT_BRANCH}` throughout the entire command; nothing in this command checks it out elsewhere.
 3. File each removal that was reverted or skipped after Phase 2 as a deferred issue (deduped against `EXISTING_ISSUES`, per the Phase 2 partials); when `TRACKER_AVAILABLE=false`, add it to the "Deferred (not filed — no issue tracker available)" list instead.
 4. Print the final summary, with the PR link (noting when `MERGE_OUTCOME` is unset that the PR/MR is still open rather than merged), the created and reused issue numbers for deferred removals, and (when `TRACKER_AVAILABLE=false`) the "Deferred (not filed — no issue tracker available)" list:
 
@@ -761,7 +765,7 @@ Transitive deps eliminated: ~{count} (estimated)
 ## Notes
 
 - This command complements `/do:better` — `depfree` for dependency hygiene, `better` for code quality
-- All remediation happens in an isolated worktree. Phase 3a may stash a dirty tree directly in `{REPO_DIR}` before the worktree exists, but Phase 6 always restores that stash on `{CURRENT_BRANCH}` without ever checking out another branch there — so by the time the command finishes, the user's branch and working tree are exactly as they were when it started, on every exit path (`--no-merge`, GitLab, no reviewer, merged, or left open)
+- All remediation happens in an isolated worktree. Phase 3a may stash a dirty tree directly in `{REPO_DIR}` before the worktree exists, but Phase 6 always restores that stash on `{CURRENT_BRANCH}` without ever checking out another branch there — so by the time the command finishes, the user's branch and working tree are exactly as they were when it started, on every exit path (`--no-merge`, no reviewer, merged, or left open, on either host)
 - `docs/DEPS.md` is the persistent decision log (read in Phase 0e, rewritten in Phase 4c). Major version bumps and heavy-mode escalations bypass it; manually delete an entry to force re-audit
 - **Default vs. heavy mode aggressiveness**: see Heavy Mode above
 - Replacement code should be minimal — don't over-engineer utilities that replace single-purpose packages

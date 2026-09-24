@@ -50,11 +50,11 @@ Read the shared spool/filer contract once, before any phase below touches it:
 
 !read lib/better-test-enhancement.md
 
-5. Publish category PRs and verify CI. `--no-merge` and GitLab stop after PR/MR creation and proceed to safe finalization.
+5. Publish category PRs and verify CI. `--no-merge` stops after PR/MR creation and proceeds to safe finalization.
 
 !read lib/better-pr-and-ci.md
 
-6. Only on GitHub, with reviewers configured and without `--no-merge`, run each PR's selected review loop. No reviewer means leave PRs open. Merge only what the Phase 6 merge gate permits.
+6. Only with reviewers configured and without `--no-merge`, run each PR's selected review loop, on GitHub or GitLab alike. No reviewer means leave PRs open. Merge only what the Phase 6 merge gate permits.
 
 !read lib/better-review-loop.md
 
