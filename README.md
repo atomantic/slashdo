@@ -300,6 +300,12 @@ Rather than passing flags every time, save them once and let future commands pic
 
 A typical split: personal preferences go global, repo policy goes in a committed `.slashdo.json` — `/do:config --review-with=codex --merge` everywhere, `/do:config --project --collaborators --trusted-authors howlingmime,Joebok` for one repo. See [docs/config.md](docs/config.md) for how a project default masks an inherited global one.
 
+## Code hosts and trackers
+
+slashdo runs on **GitHub** (cloud and Enterprise Server) and **GitLab** (cloud and self-managed). It auto-detects your code host from the `origin` remote, and the issue tracker defaults to that same host. **Jira** is also supported as a tracker (via an authenticated [jira CLI](https://github.com/ankitpokhrel/jira-cli)) for every tracker-backed command — `/do:next`, `/do:replan`, `/do:plan-task`, `/do:goals`, and deferred-finding filing — while PRs/MRs stay on the code host. A remote slashdo cannot identify as GitHub or GitLab aborts with an "unsupported code host" error rather than guessing. Override the auto-detected host or tracker with `/do:config --code-host github|gitlab` or `--tracker github|gitlab|jira` — save globally or per-repo with `--project`. See [`/do:config`](#configuration-doconfig) for details and how to pass `--jira-project` when using Jira.
+
+Note: some reviewers are host-scoped — `copilot` runs only on GitHub.
+
 ## Supported Environments
 
 Each environment formats commands appropriately for its host assistant:
