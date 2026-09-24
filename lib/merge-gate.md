@@ -144,3 +144,11 @@ fi
 ```
 
 Return one outcome to the caller: **merged**, **queued**, or **left open** (with the reason).
+
+## 6. Close the issue (caller)
+
+Closing the linked issue is the caller's step, and only on **merged**. A `Closes #<num>`
+trailer closes a GitHub/GitLab issue on merge to the default branch; the caller
+confirms with `issue_state`. On a Jira tracker nothing closes on merge, so the caller
+runs [tracker-jira.md](./tracker-jira.md)'s "Close after merge" (transition to Done
+with the PR URL). **queued** and **left open** close nothing.

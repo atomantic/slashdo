@@ -97,6 +97,7 @@ On a shared or public tracker, add `--collaborators` so your agent only claims i
 /do:simplify                              # refactor-only pass: architecture, DRY, cognitive load — behavior unchanged
 /do:review --strict                       # deep code review of the current branch's changes
 /do:review https://git.example.com/o/r/pull/12  # review a PR on any GitHub host — fixes pushed if writable, else inline
+/do:review https://gitlab.example.com/g/sub/p/-/merge_requests/7  # same for a GitLab MR (gitlab.com or self-managed)
 /do:depfree --heavy                       # remove unnecessary dependencies by writing replacement code
 /do:scan ~/Downloads/sketchy-repo         # read-only malware/safety audit of an unfamiliar directory
 ```
@@ -125,9 +126,9 @@ All commands live under the `do:` namespace:
 | `/do:pr` | Commit, push, and open a PR/MR with self-review. External reviewers only when listed ([Review loop](#review-loop)); `--merge` auto-merges once green ([Auto-merge](#auto-merge-dopr---merge)) |
 | `/do:pr-better` | Run a full do:better audit on the current branch, commit fixes directly, then open a single PR |
 | `/do:fpr` | Fork PR — push to fork, PR against upstream |
-| `/do:rpr` | Resolve PR review feedback with parallel agents |
+| `/do:rpr` | Resolve PR/MR review feedback with parallel agents |
 | `/do:release` | Create a release PR with version bump and changelog |
-| `/do:review` | Deep code review of changed files, a local branch or a PR (`--strict`/`--nuclear` raise the bar) |
+| `/do:review` | Deep code review of changed files, a local branch, a PR, or a GitLab MR (`--strict`/`--nuclear` raise the bar) |
 | `/do:better` | Full DevSecOps audit with multi-agent scan, remediation, and per-category PRs |
 | `/do:better-swift` | SwiftUI DevSecOps audit with multi-platform coverage (iOS, macOS, watchOS, tvOS, visionOS) |
 | `/do:simplify` | Refactor-only audit — architecture, DRY, simplification, cognitive load ([details](#refactor-only-dosimplify)) |

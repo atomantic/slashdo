@@ -192,7 +192,7 @@ LIBS=(
   rebase-conflict-resolution remediation-agent-template
   release-documented review-agent-selection review-config-defaults review-convergence-gate review-flags
   review-fix-conventions review-fix-tail
-  review-pr-mode
+  review-pr-mode review-mr-mode
   review-preferences
   swift-review-checklist swift-gotchas swift-pipeline-inputs
   review-surface-scan review-surface-quality review-security-audit
