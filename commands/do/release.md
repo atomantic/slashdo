@@ -323,8 +323,8 @@ else
   # The branch endpoint reports effective protection, including wildcard protected-branch rules that an exact-name lookup 404s on.
   BRANCH_JSON="$(glab api "projects/:id/repository/branches/$(printf '%s' '{source}' | jq -sRr @uri)")" || incomplete "Source branch admission" "the branch query failed."
   PROJECT_JSON="$(glab api "projects/:id")" || incomplete "Source branch admission" "the project query failed."
-  SOURCE_GATED="$(printf '%s\n' "$BRANCH_JSON" | jq -e '.protected | select(type == "boolean")')" || incomplete "Source branch admission" "the branch protection flag was missing."
-  SOURCE_CHECKS_REQUIRED="$(printf '%s\n' "$PROJECT_JSON" | jq -e '.only_allow_merge_if_pipeline_succeeds | select(type == "boolean")')" || incomplete "Source branch admission" "the pipeline-must-succeed setting was missing."
+  SOURCE_GATED="$(printf '%s\n' "$BRANCH_JSON" | jq -r 'if (.protected | type) == "boolean" then .protected else error("missing") end')" || incomplete "Source branch admission" "the branch protection flag was missing."
+  SOURCE_CHECKS_REQUIRED="$(printf '%s\n' "$PROJECT_JSON" | jq -r 'if (.only_allow_merge_if_pipeline_succeeds | type) == "boolean" then .only_allow_merge_if_pipeline_succeeds else error("missing") end')" || incomplete "Source branch admission" "the pipeline-must-succeed setting was missing."
 fi
 case "$SOURCE_GATED/$SOURCE_CHECKS_REQUIRED" in
   true/true|true/false|false/true|false/false) ;;

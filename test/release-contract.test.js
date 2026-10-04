@@ -287,7 +287,25 @@ describe('/do:release source branch admission', () => {
     assert.match(malformed.out, /INCOMPLETE — Source branch admission is unverified/);
   });
 
-  it('resolves GitLab protection from the effective branch endpoint, not an exact-name lookup', () => {
+  it('resolves GitLab protection from the effective branch endpoint, accepting both true and false', () => {
+    const block = admission.match(/```bash\n([\s\S]*?)\n```/)[1].replace(/\{source\}/g, 'main');
+    const run = (protectedBranch, mustSucceed) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-admission-gl-'));
+      try {
+        fs.writeFileSync(path.join(dir, 'glab'), [
+          '#!/bin/sh',
+          `case "$*" in *repository/branches*) echo '{"protected": ${protectedBranch}}' ;; *) echo '{"only_allow_merge_if_pipeline_succeeds": ${mustSucceed}}' ;; esac`,
+        ].join('\n'), { mode: 0o755 });
+        return spawnSync('bash', ['-c', block], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CLI_TOOL: 'glab' }, encoding: 'utf8' });
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    };
+    for (const [prot, ci] of [[true, true], [true, false], [false, true], [false, false]]) {
+      const r = run(prot, ci);
+      assert.equal(r.status, 0, r.stdout);
+      assert.match(r.stdout, new RegExp(`SOURCE_GATED=${prot}\\tSOURCE_CHECKS_REQUIRED=${ci}`));
+    }
     assert.match(admission, /glab api "projects\/:id\/repository\/branches\//);
     assert.doesNotMatch(admission, /protected_branches/);
   });
@@ -339,7 +357,8 @@ describe('/do:release source branch admission', () => {
   });
 
   it('applies admission to documented project delivery too', () => {
-    assert.match(resolved, /Before pushing to any branch — the temporary head or the integration branch — resolve its admission/);
+    assert.match(resolved, /Before pushing to the integration branch \(it exists remotely, so its rules are readable\), resolve its admission/);
     assert.match(resolved, /INCOMPLETE unless the project documents a PR path for it/);
+    assert.match(resolved, /freshly created temporary head branch has no remote rules to probe/);
   });
 });
