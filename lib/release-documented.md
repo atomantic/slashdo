@@ -49,7 +49,7 @@ second release workflow that reloads saved reviewer defaults.
    INCOMPLETE naming it rather than publishing ungated, while an `~opt` one is
    skipped. Those sections' promotion-specific delivery commands are replaced
    by steps 5–7 here.
-5. **Publish the preparation.** For a PR workflow, push its head and read back the
+5. **Publish the preparation.** Before pushing to any branch — the temporary head or the integration branch — resolve its admission with **Resolve Source Branch Admission** (defined later in this command), substituting that branch for `{source}`. Never push to a gated branch directly or use bypass permission: a gated temporary head lands through the gate procedure it loads, and a tool-managed or tag-only submission command that itself pushes to a gated integration branch is INCOMPLETE unless the project documents a PR path for it. For a PR workflow, push its head and read back the
    exact remote SHA, create or reuse the matching head/base PR, and read back its
    URL, head SHA, base, and state. For tool-managed or tag-only workflows, run the
    documented submission command — only once step 4's review gate is clean —
