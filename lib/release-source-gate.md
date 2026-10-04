@@ -74,10 +74,12 @@ with a repository-supported method that keeps the subject exact (merge commit fi
 `--subject "$GATE_TITLE"`; never `--admin` or `--auto`):
 
 ```bash
-gh pr merge "<GATE_PR_NUMBER>" --merge --delete-branch || gh pr merge "<GATE_PR_NUMBER>" --squash --subject "<GATE_TITLE>" --delete-branch
+gh pr merge "<GATE_PR_NUMBER>" --merge --match-head-commit "<GATE_SHA>" --delete-branch || gh pr merge "<GATE_PR_NUMBER>" --squash --match-head-commit "<GATE_SHA>" --subject "<GATE_TITLE>" --delete-branch
 ```
 
-(GitLab: `glab mr merge <GATE_PR_NUMBER> --yes --remove-source-branch`.) Read the result back — do not infer it
+(GitLab: `glab mr merge <GATE_PR_NUMBER> --sha "<GATE_SHA>" --yes --remove-source-branch`.) The merge is pinned to the
+head whose checks were verified: if `GATE_BRANCH` moved, the merge is refused — restart the procedure from the push so the
+new head is verified, never merge an unverified commit. Read the result back — do not infer it
 from the exit status — and sync the local `{source}` to the landed commit:
 
 ```bash

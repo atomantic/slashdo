@@ -279,9 +279,17 @@ describe('/do:release source branch admission', () => {
     const failed = probe({ rules: '[]', branch: unprotected, fail: '1' });
     assert.equal(failed.status, 1);
     assert.match(failed.out, /INCOMPLETE — Source branch admission is unverified/);
+    const incompleteShape = probe({ rules: '[]', branch: '{}' });
+    assert.equal(incompleteShape.status, 1);
+    assert.match(incompleteShape.out, /INCOMPLETE — Source branch admission is unverified/);
     const malformed = probe({ rules: '{"message":"Not Found"}', branch: unprotected });
     assert.equal(malformed.status, 1);
     assert.match(malformed.out, /INCOMPLETE — Source branch admission is unverified/);
+  });
+
+  it('resolves GitLab protection from the effective branch endpoint, not an exact-name lookup', () => {
+    assert.match(admission, /glab api "projects\/:id\/repository\/branches\//);
+    assert.doesNotMatch(admission, /protected_branches/);
   });
 
   it('runs admission before the release PR, loads the gate only on demand, and never pushes to a gated source', () => {
@@ -304,7 +312,8 @@ describe('/do:release source branch admission', () => {
     assert.match(gate, /gh pr checks <GATE_PR_NUMBER> --required --watch --fail-fast/);
     assert.match(gate, /none attaching is INCOMPLETE, not green/);
     assert.match(gate, /glab api "projects\/:id\/merge_requests\/<GATE_PR_NUMBER>"/);
-    assert.match(gate, /--squash --subject "<GATE_TITLE>"/);
+    assert.match(gate, /--squash --match-head-commit "<GATE_SHA>" --subject "<GATE_TITLE>"/);
+    assert.match(gate, /glab mr merge <GATE_PR_NUMBER> --sha "<GATE_SHA>"/);
     assert.match(gate, /\.mergedAt \| type == "string"/);
     assert.match(gate, /git merge-base --is-ancestor/);
     assert.match(gate, /never `--admin` or `--auto`/);
