@@ -275,6 +275,70 @@ describe('/do:release source branch admission', () => {
     assert.match(probe({ rules: rulesNoGate, branch: unprotected }).out, /SOURCE_GATED=false/);
   });
 
+  it('accepts absent classic check configuration and requires configured checks without an enforcement level', () => {
+    for (const checks of [undefined, null]) {
+      for (const protectedBranch of [true, false]) {
+        const branch = JSON.stringify({ protected: protectedBranch, protection: { required_status_checks: checks } });
+        const r = probe({ rules: '[]', branch });
+        assert.equal(r.status, 0, r.out);
+        assert.match(r.out, new RegExp(`SOURCE_GATED=${protectedBranch}\\tSOURCE_CHECKS_REQUIRED=false`));
+      }
+    }
+    for (const checks of [{ contexts: ['CI Gate'], checks: [] }, { contexts: [], checks: [{ context: 'CI Gate', app_id: null }] }]) {
+      const r = probe({ rules: '[]', branch: JSON.stringify({ protected: true, protection: { required_status_checks: checks } }) });
+      assert.equal(r.status, 0, r.out);
+      assert.match(r.out, /SOURCE_GATED=true\tSOURCE_CHECKS_REQUIRED=true/);
+    }
+  });
+
+  it('rejects malformed classic check metadata instead of inferring no gate', () => {
+    for (const checks of [false, 1, 'checks', { contexts: 'CI Gate' }, { contexts: false }, { checks: {} }, { checks: false }]) {
+      const r = probe({ rules: '[]', branch: JSON.stringify({ protected: true, protection: { required_status_checks: checks } }) });
+      assert.equal(r.status, 1);
+      assert.match(r.out, /INCOMPLETE — Source branch admission is unverified/);
+    }
+  });
+
+  it('returns from a landed review-fix branch with the local source advanced, preserving unrelated refs', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-source-sync-'));
+    const git = (...args) => {
+      const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+      assert.equal(r.status, 0, r.stderr);
+      return r.stdout.trim();
+    };
+    try {
+      git('init', '-b', 'main');
+      git('config', 'user.name', 'Release Test');
+      git('config', 'user.email', 'release@example.test');
+      fs.writeFileSync(path.join(dir, 'version'), 'before');
+      git('add', 'version');
+      git('commit', '-m', 'initial');
+      const oldSource = git('rev-parse', 'HEAD');
+      git('branch', 'unrelated');
+      git('checkout', '-b', 'release-fix/v1.0.1-1');
+      fs.writeFileSync(path.join(dir, 'version'), 'after');
+      git('commit', '-am', 'fix');
+      const landed = git('rev-parse', 'HEAD');
+      const remote = path.join(dir, 'remote.git');
+      git('init', '--bare', remote);
+      git('remote', 'add', 'origin', remote);
+      git('push', 'origin', 'HEAD:refs/heads/main');
+      fs.writeFileSync(path.join(dir, 'gh'), `#!/bin/sh\nprintf '%s\\n' '{"state":"MERGED","mergedAt":"2026-10-04T00:00:00Z","mergeCommit":{"oid":"${landed}"}}'\n`, { mode: 0o755 });
+      const blocks = [...gate.matchAll(/```bash\n([\s\S]*?)\n```/g)];
+      const sync = blocks.at(-1)[1].replace(/\{source\}/g, 'main').replace(/<GATE_PR_NUMBER>/g, '1');
+      const r = spawnSync('bash', ['-c', 'incomplete() { echo "INCOMPLETE: $*"; exit 1; }\n' + sync], {
+        cwd: dir, env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CLI_TOOL: 'gh' }, encoding: 'utf8',
+      });
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.equal(git('branch', '--show-current'), 'main');
+      assert.equal(git('rev-parse', 'main'), landed);
+      assert.equal(git('rev-parse', 'unrelated'), oldSource);
+      assert.equal(fs.readFileSync(path.join(dir, 'version'), 'utf8'), 'after');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('fails closed when the rules cannot be read or parsed', () => {
     const failed = probe({ rules: '[]', branch: unprotected, fail: '1' });
     assert.equal(failed.status, 1);

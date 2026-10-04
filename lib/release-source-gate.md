@@ -94,6 +94,7 @@ else
 fi
 git fetch origin "refs/heads/{source}:refs/remotes/origin/{source}" || incomplete "Source gate merge" "origin/{source} could not be fetched."
 git merge-base --is-ancestor "$GATE_MERGE_OID" "origin/{source}" || incomplete "Source gate merge" "origin/{source} does not contain the merge commit."
+git checkout "{source}" || incomplete "Source gate merge" "the local {source} could not be checked out."
 if ! git merge --ff-only "origin/{source}"; then
   # A squash/rebase merge rewrites the commit: accept only when the trees are identical.
   git diff --quiet HEAD "origin/{source}" || incomplete "Source gate merge" "the local {source} differs from the landed origin/{source}."

@@ -313,7 +313,18 @@ incomplete() {
 if [ "$CLI_TOOL" = gh ]; then
   RULES_JSON="$(gh api --hostname "{GH_HOST}" "repos/{owner}/{repo}/rules/branches/{source}")" || incomplete "Source branch admission" "the branch-rules query failed."
   BRANCH_JSON="$(gh api --hostname "{GH_HOST}" "repos/{owner}/{repo}/branches/{source}")" || incomplete "Source branch admission" "the branch query failed."
-  SOURCE_CHECKS_REQUIRED="$(jq -n --argjson rules "$RULES_JSON" --argjson branch "$BRANCH_JSON" 'if ($rules | type) != "array" or ([$rules[] | select((type != "object") or ((.type | type) != "string"))] | length) > 0 or ($branch.protected | type) != "boolean" or ($branch.protection | type) != "object" or ($branch.protection.required_status_checks | type) != "object" then error("unexpected shape") else (([$rules[] | select(.type == "required_status_checks")] | length) > 0) or (($branch.protection.required_status_checks.enforcement_level // "off") != "off" and ((($branch.protection.required_status_checks.contexts // []) | length) + (($branch.protection.required_status_checks.checks // []) | length)) > 0) end')" \
+  SOURCE_CHECKS_REQUIRED="$(jq -n --argjson rules "$RULES_JSON" --argjson branch "$BRANCH_JSON" '
+    $branch.protection.required_status_checks as $raw_checks |
+    (if $raw_checks == null then {} else $raw_checks end) as $checks |
+    ($checks.contexts | if . == null then [] else . end) as $contexts |
+    ($checks.checks | if . == null then [] else . end) as $status_checks |
+    if ($rules | type) != "array" or ([$rules[] | select((type != "object") or ((.type | type) != "string"))] | length) > 0
+      or ($branch.protected | type) != "boolean" or ($branch.protection | type) != "object"
+      or ($checks | type) != "object" or ($contexts | type) != "array" or ($status_checks | type) != "array"
+    then error("unexpected shape")
+    else (([$rules[] | select(.type == "required_status_checks")] | length) > 0)
+      or (($checks.enforcement_level // "configured") != "off" and (($contexts | length) + ($status_checks | length)) > 0)
+    end')" \
     || incomplete "Source branch admission" "the branch rules were malformed."
   # Classic protection hides its pull-request-review requirement from non-admins, so any classic
   # protection counts as a gate: landing through a PR is always allowed, a bare push may not be.
