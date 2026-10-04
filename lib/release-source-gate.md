@@ -63,10 +63,12 @@ A resumed run reuses the open or already-merged PR for the same head instead of
 opening a second one, and a merged one skips straight to the sync below — so the
 version is never bumped or landed twice.
 
-When `GATE_PR_STATE=OPEN`, wait for the required remote checks on that head. GitHub:
+When `GATE_PR_STATE=OPEN` and `SOURCE_CHECKS_REQUIRED=true`, wait for the required remote checks on that head. GitHub:
 `gh pr checks <GATE_PR_NUMBER> --required`; on `no (required )?checks reported`, poll for up to five
-minutes for one to attach (the gate exists, so none attaching is INCOMPLETE, not green), then
+minutes for one to attach (the gate requires one, so none attaching is INCOMPLETE, not green), then
 `gh pr checks <GATE_PR_NUMBER> --required --watch --fail-fast`. GitLab: `glab ci status --wait --branch "$GATE_BRANCH"`.
+When `SOURCE_CHECKS_REQUIRED=false` (a PR-only gate), there is no check to wait for: attempt the merge directly, and if the
+gate's review requirement is unmet the merge is refused — leave the PR open and report INCOMPLETE rather than bypassing it.
 A red check is fixed on `GATE_BRANCH` and re-pushed through this same procedure — never merged over. Then merge
 with a repository-supported method that keeps the subject exact (merge commit first, then squash with
 `--subject "$GATE_TITLE"`; never `--admin` or `--auto`):
@@ -79,11 +81,17 @@ gh pr merge "<GATE_PR_NUMBER>" --merge --delete-branch || gh pr merge "<GATE_PR_
 from the exit status — and sync the local `{source}` to the landed commit:
 
 ```bash
-GATE_JSON="$(gh pr view "<GATE_PR_NUMBER>" --json state,mergedAt,mergeCommit)" || incomplete "Source gate merge" "the forge state query failed."
-printf '%s\n' "$GATE_JSON" | jq -e '.state == "MERGED" and (.mergedAt | type == "string" and length > 0) and (.mergeCommit.oid | type == "string" and length > 0)' >/dev/null \
-  || incomplete "Source gate merge" "the PR is not merged with a merge commit."
+if [ "$CLI_TOOL" = gh ]; then
+  GATE_JSON="$(gh pr view "<GATE_PR_NUMBER>" --json state,mergedAt,mergeCommit)" || incomplete "Source gate merge" "the forge state query failed."
+  GATE_MERGE_OID="$(printf '%s\n' "$GATE_JSON" | jq -er 'select(.state == "MERGED" and (.mergedAt | type == "string" and length > 0)) | .mergeCommit.oid | select(type == "string" and length > 0)')" \
+    || incomplete "Source gate merge" "the PR is not merged with a merge commit."
+else
+  GATE_JSON="$(glab api "projects/:id/merge_requests/<GATE_PR_NUMBER>")" || incomplete "Source gate merge" "the forge state query failed."
+  GATE_MERGE_OID="$(printf '%s\n' "$GATE_JSON" | jq -er 'select(.state == "merged") | (.merge_commit_sha // .squash_commit_sha) | select(type == "string" and length > 0)')" \
+    || incomplete "Source gate merge" "the MR is not merged with a landed commit."
+fi
 git fetch origin "refs/heads/{source}:refs/remotes/origin/{source}" || incomplete "Source gate merge" "origin/{source} could not be fetched."
-git merge-base --is-ancestor "$(printf '%s\n' "$GATE_JSON" | jq -r '.mergeCommit.oid')" "origin/{source}" || incomplete "Source gate merge" "origin/{source} does not contain the merge commit."
+git merge-base --is-ancestor "$GATE_MERGE_OID" "origin/{source}" || incomplete "Source gate merge" "origin/{source} does not contain the merge commit."
 if ! git merge --ff-only "origin/{source}"; then
   # A squash/rebase merge rewrites the commit: accept only when the trees are identical.
   git diff --quiet HEAD "origin/{source}" || incomplete "Source gate merge" "the local {source} differs from the landed origin/{source}."

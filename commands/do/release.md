@@ -313,27 +313,34 @@ incomplete() {
 if [ "$CLI_TOOL" = gh ]; then
   RULES_JSON="$(gh api --hostname "{GH_HOST}" "repos/{owner}/{repo}/rules/branches/{source}")" || incomplete "Source branch admission" "the branch-rules query failed."
   BRANCH_JSON="$(gh api --hostname "{GH_HOST}" "repos/{owner}/{repo}/branches/{source}")" || incomplete "Source branch admission" "the branch query failed."
-  SOURCE_GATED="$(jq -n --argjson rules "$RULES_JSON" --argjson branch "$BRANCH_JSON" 'if ($rules | type) != "array" or ($branch | type) != "object" then error("unexpected shape") else (([$rules[] | select(.type == "required_status_checks" or .type == "pull_request")] | length) > 0) or (($branch.protection.required_status_checks.enforcement_level // "off") != "off" and ((($branch.protection.required_status_checks.contexts // []) | length) + (($branch.protection.required_status_checks.checks // []) | length)) > 0) end')" \
+  SOURCE_CHECKS_REQUIRED="$(jq -n --argjson rules "$RULES_JSON" --argjson branch "$BRANCH_JSON" 'if ($rules | type) != "array" or ($branch | type) != "object" then error("unexpected shape") else (([$rules[] | select(.type == "required_status_checks")] | length) > 0) or (($branch.protection.required_status_checks.enforcement_level // "off") != "off" and ((($branch.protection.required_status_checks.contexts // []) | length) + (($branch.protection.required_status_checks.checks // []) | length)) > 0) end')" \
+    || incomplete "Source branch admission" "the branch rules were malformed."
+  # Classic protection hides its pull-request-review requirement from non-admins, so any classic
+  # protection counts as a gate: landing through a PR is always allowed, a bare push may not be.
+  SOURCE_GATED="$(jq -n --argjson rules "$RULES_JSON" --argjson branch "$BRANCH_JSON" --argjson checks "$SOURCE_CHECKS_REQUIRED" '$checks or (([$rules[] | select(.type == "pull_request")] | length) > 0) or ($branch.protected == true)')" \
     || incomplete "Source branch admission" "the branch rules were malformed."
 else
   PROTECTED_ERR="$(mktemp)"
   if PROTECTED_JSON="$(glab api "projects/:id/protected_branches/$(printf '%s' '{source}' | jq -sRr @uri)" 2>"$PROTECTED_ERR")"; then
     SOURCE_GATED="$(printf '%s\n' "$PROTECTED_JSON" | jq '[.push_access_levels[]?.access_level] as $levels | ($levels | length) > 0 and all($levels[]; . == 0)')" \
       || incomplete "Source branch admission" "the protected-branch response was malformed."
+    SOURCE_CHECKS_REQUIRED=true   # GitLab's pipeline-must-succeed setting is merge-time; wait for the head pipeline
   elif grep -qi '404\|not found' "$PROTECTED_ERR"; then
     SOURCE_GATED=false
+    SOURCE_CHECKS_REQUIRED=false
   else
     incomplete "Source branch admission" "the protected-branch query failed: $(cat "$PROTECTED_ERR")."
   fi
   rm -f "$PROTECTED_ERR"
 fi
-if ! printf '%s\n' "$SOURCE_GATED" | grep -Eq '^(true|false)$'; then
-  incomplete "Source branch admission" "the gate result was neither true nor false."
-fi
-printf 'SOURCE_ADMISSION_HANDOFF\tSOURCE_GATED=%s\n' "$SOURCE_GATED"
+case "$SOURCE_GATED/$SOURCE_CHECKS_REQUIRED" in
+  true/true|true/false|false/true|false/false) ;;
+  *) incomplete "Source branch admission" "the gate result was neither true nor false." ;;
+esac
+printf 'SOURCE_ADMISSION_HANDOFF\tSOURCE_GATED=%s\tSOURCE_CHECKS_REQUIRED=%s\n' "$SOURCE_GATED" "$SOURCE_CHECKS_REQUIRED"
 ```
 
-Unreadable or malformed rules are INCOMPLETE, never "not gated". Carry the printed `SOURCE_GATED` value into every later block as the literal `<source-gated>`.
+Unreadable or malformed rules are INCOMPLETE, never "not gated". Carry the printed `SOURCE_GATED` value into every later block as the literal `<source-gated>`, and `SOURCE_CHECKS_REQUIRED` into the gate procedure's CI wait.
 
 - **`SOURCE_GATED=false`** — no remote admission applies; continue at **Open the Release PR** and push as documented. A project-documented direct-push flow stays supported here.
 - **`SOURCE_GATED=true`** — read the gate procedure and land the preparation commit (and every later review-fix commit) through a temporary branch and a gated PR into `{source}` instead of pushing to it. The release PR below is unchanged: it still promotes `{source}` into `{target}` and shows the full unreleased range.

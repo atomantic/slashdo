@@ -262,6 +262,13 @@ describe('/do:release source branch admission', () => {
     assert.match(probe({ rules: JSON.stringify([{ type: 'pull_request' }]), branch: unprotected }).out, /SOURCE_GATED=true/);
   });
 
+  it('gates classic protection that only requires reviews, without waiting for nonexistent checks', () => {
+    const reviewsOnly = JSON.stringify({ protected: true, protection: { enabled: true, required_status_checks: { enforcement_level: 'off', contexts: [], checks: [] } } });
+    assert.match(probe({ rules: '[]', branch: reviewsOnly }).out, /SOURCE_GATED=true\tSOURCE_CHECKS_REQUIRED=false/);
+    assert.match(probe({ rules: JSON.stringify([{ type: 'pull_request' }]), branch: unprotected }).out, /SOURCE_GATED=true\tSOURCE_CHECKS_REQUIRED=false/);
+    assert.match(probe({ rules: JSON.stringify([{ type: 'required_status_checks' }]), branch: unprotected }).out, /SOURCE_GATED=true\tSOURCE_CHECKS_REQUIRED=true/);
+  });
+
   it('leaves an unprotected or only force-push-protected source on the direct-push path', () => {
     assert.match(probe({ rules: '[]', branch: unprotected }).out, /SOURCE_GATED=false/);
     const rulesNoGate = JSON.stringify([{ type: 'non_fast_forward' }]);
@@ -296,6 +303,7 @@ describe('/do:release source branch admission', () => {
     assert.match(gate, /\.headRefOid == \$sha and \(\.state == "OPEN" or \.state == "MERGED"\)/);
     assert.match(gate, /gh pr checks <GATE_PR_NUMBER> --required --watch --fail-fast/);
     assert.match(gate, /none attaching is INCOMPLETE, not green/);
+    assert.match(gate, /glab api "projects\/:id\/merge_requests\/<GATE_PR_NUMBER>"/);
     assert.match(gate, /--squash --subject "<GATE_TITLE>"/);
     assert.match(gate, /\.mergedAt \| type == "string"/);
     assert.match(gate, /git merge-base --is-ancestor/);
