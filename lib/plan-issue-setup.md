@@ -47,6 +47,11 @@ each worker's model from the tier.
 
 ## Label colors
 
-`PLAN_LABEL`: `428BCA`. `severity`: critical `B60205`, high `D93F0B`, medium `FBCA04`, low `0E8A16`. Every
-category: `0366D6`. `model`: light `D4C5F9`, medium `A371F7`, heavy `6F42C1`.
-`effort`: low `BFE5E5`, medium `76C7C7`, high `1D7874`, xhigh `0E4F4C`, max `05403D`.
+Create each label immediately before applying it, passing the name and `--color` as separate arguments (glab requires `--name <name>` and `--color "#<hex>"`):
+
+- **`PLAN_LABEL`:** `gh label create <PLAN_LABEL> --color 428BCA 2>/dev/null || true` (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" 2>/dev/null || true`)
+- **Every category:** `gh label create <category> --color 0366D6 2>/dev/null || true` (glab: `glab label create --name <category> --color "#0366D6" 2>/dev/null || true`)
+- **`severity`:** `gh label create severity${LABEL_SEP}critical --color B60205 2>/dev/null || true`, `gh label create severity${LABEL_SEP}high --color D93F0B 2>/dev/null || true`, `gh label create severity${LABEL_SEP}medium --color FBCA04 2>/dev/null || true`, `gh label create severity${LABEL_SEP}low --color 0E8A16 2>/dev/null || true`
+- **`model`:** `gh label create model${LABEL_SEP}light --color D4C5F9 2>/dev/null || true`, `gh label create model${LABEL_SEP}medium --color A371F7 2>/dev/null || true`, `gh label create model${LABEL_SEP}heavy --color 6F42C1 2>/dev/null || true`
+- **`effort`:** `gh label create effort${LABEL_SEP}low --color BFE5E5 2>/dev/null || true`, `gh label create effort${LABEL_SEP}medium --color 76C7C7 2>/dev/null || true`, `gh label create effort${LABEL_SEP}high --color 1D7874 2>/dev/null || true`, `gh label create effort${LABEL_SEP}xhigh --color 0E4F4C 2>/dev/null || true`, `gh label create effort${LABEL_SEP}max --color 05403D 2>/dev/null || true`
+
