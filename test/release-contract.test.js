@@ -215,3 +215,150 @@ describe('/do:release GitLab paths', () => {
     assert.match(body, /gh pr merge "\$PR_NUMBER" --merge/);
   });
 });
+
+
+describe('/do:release source branch admission', () => {
+  const { spawnSync } = require('child_process');
+  const os = require('os');
+  const admission = resolved.slice(
+    resolved.indexOf('## Resolve Source Branch Admission'),
+    resolved.indexOf('## Open the Release PR'),
+  );
+  const gate = fs.readFileSync(path.join(__dirname, '..', 'lib', 'release-source-gate.md'), 'utf8');
+
+  // Run the rendered probe block against a stub `gh` that serves canned branch-rules/branch JSON.
+  function probe({ rules, branch, fail }) {
+    const block = admission.match(/```bash\n([\s\S]*?)\n```/)[1]
+      .replace(/\{GH_HOST\}/g, 'github.com').replace(/\{owner\}/g, 'o').replace(/\{repo\}/g, 'r').replace(/\{source\}/g, 'main');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-admission-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'rules.json'), rules);
+      fs.writeFileSync(path.join(dir, 'branch.json'), branch);
+      fs.writeFileSync(path.join(dir, 'gh'), [
+        '#!/bin/sh',
+        `[ -n "${fail || ''}" ] && exit 1`,
+        `case "$*" in *rules/branches*) cat "${dir}/rules.json" ;; *) cat "${dir}/branch.json" ;; esac`,
+      ].join('\n'), { mode: 0o755 });
+      const result = spawnSync('bash', ['-c', block], {
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CLI_TOOL: 'gh' },
+        encoding: 'utf8',
+      });
+      return { status: result.status, out: result.stdout };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const unprotected = JSON.stringify({ protected: false, protection: { enabled: false, required_status_checks: { enforcement_level: 'off', contexts: [], checks: [] } } });
+
+  it('gates a source whose ruleset requires status checks, even for a bypass-capable actor', () => {
+    const r = probe({ rules: JSON.stringify([{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'CI Gate' }] } }]), branch: unprotected });
+    assert.equal(r.status, 0);
+    assert.match(r.out, /SOURCE_ADMISSION_HANDOFF\tSOURCE_GATED=true/);
+  });
+
+  it('gates a source with classic required status checks or a required-PR rule', () => {
+    const classic = JSON.stringify({ protected: true, protection: { enabled: true, required_status_checks: { enforcement_level: 'everyone', contexts: ['CI Gate'], checks: [] } } });
+    assert.match(probe({ rules: '[]', branch: classic }).out, /SOURCE_GATED=true/);
+    assert.match(probe({ rules: JSON.stringify([{ type: 'pull_request' }]), branch: unprotected }).out, /SOURCE_GATED=true/);
+  });
+
+  it('gates classic protection that only requires reviews, without waiting for nonexistent checks', () => {
+    const reviewsOnly = JSON.stringify({ protected: true, protection: { enabled: true, required_status_checks: { enforcement_level: 'off', contexts: [], checks: [] } } });
+    assert.match(probe({ rules: '[]', branch: reviewsOnly }).out, /SOURCE_GATED=true\tSOURCE_CHECKS_REQUIRED=false/);
+    assert.match(probe({ rules: JSON.stringify([{ type: 'pull_request' }]), branch: unprotected }).out, /SOURCE_GATED=true\tSOURCE_CHECKS_REQUIRED=false/);
+    assert.match(probe({ rules: JSON.stringify([{ type: 'required_status_checks' }]), branch: unprotected }).out, /SOURCE_GATED=true\tSOURCE_CHECKS_REQUIRED=true/);
+  });
+
+  it('leaves an unprotected or only force-push-protected source on the direct-push path', () => {
+    assert.match(probe({ rules: '[]', branch: unprotected }).out, /SOURCE_GATED=false/);
+    const rulesNoGate = JSON.stringify([{ type: 'non_fast_forward' }]);
+    assert.match(probe({ rules: rulesNoGate, branch: unprotected }).out, /SOURCE_GATED=false/);
+  });
+
+  it('fails closed when the rules cannot be read or parsed', () => {
+    const failed = probe({ rules: '[]', branch: unprotected, fail: '1' });
+    assert.equal(failed.status, 1);
+    assert.match(failed.out, /INCOMPLETE — Source branch admission is unverified/);
+    const incompleteShape = probe({ rules: '[]', branch: '{}' });
+    assert.equal(incompleteShape.status, 1);
+    assert.match(incompleteShape.out, /INCOMPLETE — Source branch admission is unverified/);
+    const malformed = probe({ rules: '{"message":"Not Found"}', branch: unprotected });
+    assert.equal(malformed.status, 1);
+    assert.match(malformed.out, /INCOMPLETE — Source branch admission is unverified/);
+  });
+
+  it('resolves GitLab protection from the effective branch endpoint, accepting both true and false', () => {
+    const block = admission.match(/```bash\n([\s\S]*?)\n```/)[1].replace(/\{source\}/g, 'main');
+    const run = (protectedBranch, mustSucceed) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-admission-gl-'));
+      try {
+        fs.writeFileSync(path.join(dir, 'glab'), [
+          '#!/bin/sh',
+          `case "$*" in *repository/branches*) echo '{"protected": ${protectedBranch}}' ;; *) echo '{"only_allow_merge_if_pipeline_succeeds": ${mustSucceed}}' ;; esac`,
+        ].join('\n'), { mode: 0o755 });
+        return spawnSync('bash', ['-c', block], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CLI_TOOL: 'glab' }, encoding: 'utf8' });
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    };
+    for (const [prot, ci] of [[true, true], [true, false], [false, true], [false, false]]) {
+      const r = run(prot, ci);
+      assert.equal(r.status, 0, r.stdout);
+      assert.match(r.stdout, new RegExp(`SOURCE_GATED=${prot}\\tSOURCE_CHECKS_REQUIRED=${ci}`));
+    }
+    assert.match(admission, /glab api "projects\/:id\/repository\/branches\//);
+    assert.doesNotMatch(admission, /protected_branches/);
+  });
+
+  it('runs admission before the release PR, loads the gate only on demand, and never pushes to a gated source', () => {
+    assert.ok(body.indexOf('## Resolve Source Branch Admission') > body.indexOf('## Local Code Review'));
+    assert.ok(body.indexOf('## Resolve Source Branch Admission') < body.indexOf('## Open the Release PR'));
+    assert.match(admission, /^!read lib\/release-source-gate\.md$/m);
+    assert.match(body, /\[ "<source-gated>" = "true" \] \|\| git push -u origin "HEAD:refs\/heads\/\{source\}"/);
+    assert.match(body, /Do not push yet — publication to `\{source\}` happens only through/);
+    assert.doesNotMatch(body, /commit and push\n/);
+    assert.match(admission, /Never use bypass permission, force push, or relax the branch protection/);
+  });
+
+  it('lands gated work through a temporary branch PR with exact-head verification and CI', () => {
+    assert.match(gate, /GATE_BRANCH="release-prep\/v\{version\}"/);
+    assert.match(gate, /GATE_TITLE="chore: release v\{version\}"/);
+    assert.match(gate, /git push -u origin "HEAD:refs\/heads\/\$GATE_BRANCH"/);
+    assert.match(gate, /\[ "\$REMOTE_GATE_SHA" != "\$GATE_SHA" \]/);
+    assert.match(gate, /gh pr create --base "\{source\}" --head "\$GATE_BRANCH"/);
+    assert.match(gate, /\.headRefOid == \$sha and \(\.state == "OPEN" or \.state == "MERGED"\)/);
+    assert.match(gate, /gh pr checks <GATE_PR_NUMBER> --required --watch --fail-fast/);
+    assert.match(gate, /none attaching is INCOMPLETE, not green/);
+    assert.match(gate, /glab api "projects\/:id\/merge_requests\/<GATE_PR_NUMBER>"/);
+    assert.match(gate, /--squash --match-head-commit "<GATE_SHA>" --subject "<GATE_TITLE>"/);
+    assert.match(gate, /glab mr merge <GATE_PR_NUMBER> --sha "<GATE_SHA>"/);
+    assert.match(gate, /\.mergedAt \| type == "string"/);
+    assert.match(gate, /git merge-base --is-ancestor/);
+    assert.match(gate, /never `--admin` or `--auto`/);
+    assert.doesNotMatch(gate, /gh pr merge[^\n]*(--admin|--auto)/);
+    assert.match(gate, /never force-push, never disable or edit the protection/);
+  });
+
+  it('keeps the release PR a source-to-target promotion and routes review fixes through the gate', () => {
+    assert.match(admission, /still promotes `\{source\}` into `\{target\}` and shows the full unreleased range/);
+    assert.match(gate, /Review fixes under a gated source/);
+    assert.match(gate, /release-fix\/v\{version\}-<n>/);
+    assert.match(gate, /re-read the release PR's head SHA; it must equal the local `\{source\}` head/);
+    assert.match(body, /\*\*Gated source\.\*\* When `SOURCE_GATED=true`, the loops' fix pushes must not land on `\{source\}` directly/);
+  });
+
+  it('resumes a pending preparation PR without a second version bump or duplicate PR', () => {
+    const recovery = body.slice(body.indexOf('## Recover Prepared Release State'), body.indexOf('## Determine Version and Finalize Changelog'));
+    assert.match(recovery, /startswith\("release-prep\/v"\)/);
+    assert.match(recovery, /git merge --ff-only FETCH_HEAD/);
+    assert.match(recovery, /more than one open release-prep\/v\* PR targets/);
+    assert.match(recovery, /the admission procedure then reuses the open PR/);
+    assert.match(gate, /resumed run reuses the open or already-merged PR for the same head/);
+  });
+
+  it('applies admission to documented project delivery too', () => {
+    assert.match(resolved, /Before pushing to the integration branch \(it exists remotely, so its rules are readable\), resolve its admission/);
+    assert.match(resolved, /INCOMPLETE unless the project documents a PR path for it/);
+    assert.match(resolved, /freshly created temporary head branch has no remote rules to probe/);
+  });
+});
