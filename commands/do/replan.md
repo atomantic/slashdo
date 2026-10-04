@@ -60,7 +60,7 @@ Parse `$ARGUMENTS` for:
 
    Otherwise, stop, naming the tracker, if its tracker gate leaves `TRACKER_CLI`
    empty.
-2. **Ensure the scoping label exists** (skip on Jira, whose labels need no creation). `gh label create <PLAN_LABEL> --description "Tracked by /do:replan" 2>/dev/null || true` (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" 2>/dev/null || true` — glab requires a color).
+2. **Ensure the scoping label exists** (skip on Jira, whose labels need no creation). `gh label create <PLAN_LABEL> --color 428BCA --description "Tracked by /do:replan" 2>/dev/null || true` (glab: `glab label create --name <PLAN_LABEL> --color "#428BCA" --description "Tracked by /do:replan" 2>/dev/null || true` — glab requires a color).
 3. **Legacy PLAN.md.** If a `PLAN.md` exists, this run migrates it once (Phases 1, 3, 4): its open items become issues and the plan content is removed.
 
 ## Phase 1: Automated Evidence Gathering
@@ -270,7 +270,7 @@ files through its "File one issue" block and closes by transition) —
   Capture the returned issue number (created or reused) for the summary.
 - `drifted` → **never auto-close.** Post the `⚠️ DRIFT:` description as a
   comment (`gh issue comment <n> --body "⚠️ DRIFT: <collision> — conflicting commit <sha>"`)
-  and apply a `drift` label (`gh label create drift 2>/dev/null || true` first, then
+  and apply a `drift` label (`gh label create drift --color E8A33D 2>/dev/null || true` first, then
   `gh issue edit <n> --add-label drift`; glab: `glab label create --name drift --color "#E8A33D" 2>/dev/null || true` first, then `glab issue note <n> -m "<drift>"` + `glab issue update <n> --label drift`).
 
 The audit trail is the issue's close event + comment — **not** git log. Then print a
