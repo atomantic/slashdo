@@ -96,6 +96,26 @@ The {CR_NOUN} direction is `{source}` → `{target}` (e.g., `main` → `release`
 
 ## Recover Prepared Release State
 
+**Pending admission PR first.** When `{source}` is gated (see **Resolve Source Branch Admission**), an interrupted run may have pushed the preparation to a temporary `release-prep/v*` branch that has not merged yet. Look for one before the block below, so the retry resumes that version instead of bumping again:
+
+```bash
+if [ "$CLI_TOOL" = gh ]; then
+  PREP_PRS_JSON="$(gh pr list --state open --base "{source}" --limit 100 --json number,headRefName,headRefOid)" || { echo "INCOMPLETE — Preparation PR is unverified; the forge query failed. Preserve the prepared release state and retry."; exit 1; }
+  PREP_PRS="$(printf '%s\n' "$PREP_PRS_JSON" | jq -c '[.[] | select(.headRefName | startswith("release-prep/v"))]')" || { echo "INCOMPLETE — Preparation PR is unverified; the forge response was malformed. Preserve the prepared release state and retry."; exit 1; }
+  case "$(printf '%s\n' "$PREP_PRS" | jq 'length')" in
+    0) ;;
+    1)
+      PREP_BRANCH="$(printf '%s\n' "$PREP_PRS" | jq -r '.[0].headRefName')"
+      git fetch origin "refs/heads/$PREP_BRANCH" && git merge --ff-only FETCH_HEAD \
+        || { echo "INCOMPLETE — Preparation PR is unverified; $PREP_BRANCH could not be fast-forwarded onto the local {source}. Close the stale PR or resolve it, then retry."; exit 1; }
+      ;;
+    *) echo "INCOMPLETE — Preparation PR is ambiguous; more than one open release-prep/v* PR targets {source}. Preserve the prepared release state and retry."; exit 1 ;;
+  esac
+fi
+```
+
+On GitLab list open MRs the same way (`glab api "projects/:id/merge_requests?state=opened&target_branch={source}"`, filtering `source_branch` on `release-prep/v`, validated like the other MR queries) and apply the same 0/1/many handling. After a fast-forward, the preparation commit is local `HEAD` again and the block below detects it; the admission procedure then reuses the open PR.
+
 Before determining a new version, look for an existing release-preparation commit on the current source history; an interrupted run must resume the prepared version, not bump it again. This block also defines the shared checkpoint helpers reused by the merged checkpoint blocks below — **redefine them at the top of any other block that calls them**, since shell state does not persist across separate tool invocations:
 
 ```bash
@@ -268,8 +288,8 @@ release with no prepared release commit.
    c. For each finding, quote the specific code line and explain why it's a problem
 4. After reviewing all files, verify: does the aggregate change set deliver what the release claims?
 5. Print a review summary table (`| File | Tier | Finding | Severity | Status |`)
-6. Fix any issues, run tests, verify tests cover the changed code paths, commit and push
-7. Only after printing the review summary may you proceed to "Open the Release PR"
+6. Fix any issues, run tests, verify tests cover the changed code paths, and commit. Do not push yet — publication to `{source}` happens only through **Resolve Source Branch Admission** and **Open the Release PR** below, so a gated `{source}` is never updated by a bare push
+7. Only after printing the review summary may you proceed to "Resolve Source Branch Admission"
 
 If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.
 
@@ -281,13 +301,63 @@ Verification — self-check before proceeding (no user prompt needed):
 - [ ] Quoted specific code for each finding
 - [ ] Printed a review summary table with findings
 
+## Resolve Source Branch Admission
+
+Skip this section when `TARGET_RECOVERY=true`. Before the first push of the preparation commit or of any review fix to `{source}`, read what the forge requires to land a commit there. A branch whose rules require status checks or a PR is **gated**: an account with bypass permission can still push straight onto it, and GitHub reports "Bypassed rule violations" — the commit lands before its required remote check exists, and local tests/build/pregate do not satisfy that check. Never use bypass permission, force push, or relax the branch protection to get past a gate.
+
+```bash
+incomplete() {
+  echo "INCOMPLETE — $1 is unverified; $2 Preserve the prepared release state and retry."
+  exit 1
+}
+if [ "$CLI_TOOL" = gh ]; then
+  RULES_JSON="$(gh api --hostname "{GH_HOST}" "repos/{owner}/{repo}/rules/branches/{source}")" || incomplete "Source branch admission" "the branch-rules query failed."
+  BRANCH_JSON="$(gh api --hostname "{GH_HOST}" "repos/{owner}/{repo}/branches/{source}")" || incomplete "Source branch admission" "the branch query failed."
+  SOURCE_CHECKS_REQUIRED="$(jq -n --argjson rules "$RULES_JSON" --argjson branch "$BRANCH_JSON" '
+    $branch.protection.required_status_checks as $raw_checks |
+    (if $raw_checks == null then {} else $raw_checks end) as $checks |
+    ($checks.contexts | if . == null then [] else . end) as $contexts |
+    ($checks.checks | if . == null then [] else . end) as $status_checks |
+    if ($rules | type) != "array" or ([$rules[] | select((type != "object") or ((.type | type) != "string"))] | length) > 0
+      or ($branch.protected | type) != "boolean" or ($branch.protection | type) != "object"
+      or ($checks | type) != "object" or ($contexts | type) != "array" or ($status_checks | type) != "array"
+    then error("unexpected shape")
+    else (([$rules[] | select(.type == "required_status_checks")] | length) > 0)
+      or (($checks.enforcement_level // "configured") != "off" and (($contexts | length) + ($status_checks | length)) > 0)
+    end')" \
+    || incomplete "Source branch admission" "the branch rules were malformed."
+  # Classic protection hides its pull-request-review requirement from non-admins, so any classic
+  # protection counts as a gate: landing through a PR is always allowed, a bare push may not be.
+  SOURCE_GATED="$(jq -n --argjson rules "$RULES_JSON" --argjson branch "$BRANCH_JSON" --argjson checks "$SOURCE_CHECKS_REQUIRED" '$checks or (([$rules[] | select(.type == "pull_request")] | length) > 0) or ($branch.protected == true)')" \
+    || incomplete "Source branch admission" "the branch rules were malformed."
+else
+  # The branch endpoint reports effective protection, including wildcard protected-branch rules that an exact-name lookup 404s on.
+  BRANCH_JSON="$(glab api "projects/:id/repository/branches/$(printf '%s' '{source}' | jq -sRr @uri)")" || incomplete "Source branch admission" "the branch query failed."
+  PROJECT_JSON="$(glab api "projects/:id")" || incomplete "Source branch admission" "the project query failed."
+  SOURCE_GATED="$(printf '%s\n' "$BRANCH_JSON" | jq -r 'if (.protected | type) == "boolean" then .protected else error("missing") end')" || incomplete "Source branch admission" "the branch protection flag was missing."
+  SOURCE_CHECKS_REQUIRED="$(printf '%s\n' "$PROJECT_JSON" | jq -r 'if (.only_allow_merge_if_pipeline_succeeds | type) == "boolean" then .only_allow_merge_if_pipeline_succeeds else error("missing") end')" || incomplete "Source branch admission" "the pipeline-must-succeed setting was missing."
+fi
+case "$SOURCE_GATED/$SOURCE_CHECKS_REQUIRED" in
+  true/true|true/false|false/true|false/false) ;;
+  *) incomplete "Source branch admission" "the gate result was neither true nor false." ;;
+esac
+printf 'SOURCE_ADMISSION_HANDOFF\tSOURCE_GATED=%s\tSOURCE_CHECKS_REQUIRED=%s\n' "$SOURCE_GATED" "$SOURCE_CHECKS_REQUIRED"
+```
+
+Unreadable or malformed rules are INCOMPLETE, never "not gated". Carry the printed `SOURCE_GATED` value into every later block as the literal `<source-gated>`, and `SOURCE_CHECKS_REQUIRED` into the gate procedure's CI wait.
+
+- **`SOURCE_GATED=false`** — no remote admission applies; continue at **Open the Release PR** and push as documented. A project-documented direct-push flow stays supported here.
+- **`SOURCE_GATED=true`** — read the gate procedure and land the preparation commit (and every later review-fix commit) through a temporary branch and a gated PR into `{source}` instead of pushing to it. The release PR below is unchanged: it still promotes `{source}` into `{target}` and shows the full unreleased range.
+
+!read lib/release-source-gate.md
+
 ## Open the Release PR
 
 When `TARGET_RECOVERY=true`, use the carried `RELEASE_TARGET_HANDOFF` instead of
 running Checkpoints 1–2; the already-merged PR is the release PR for this retry.
 Continue with Checkpoint 3 and the post-merge verification blocks below.
 
-- **Checkpoint 1 — source push.** Push the prepared source commit and verify the
+- **Checkpoint 1 — source push.** Push the prepared source commit — unless `SOURCE_GATED=true`, where **Resolve Source Branch Admission** already landed it and the local `{source}` is fast-forwarded to the remote head, so nothing is pushed here — and verify the
   forge reports the exact same commit before creating or reusing a PR; empty,
   malformed, or mismatched output is an incomplete release and must name
   `Source push` as the first unverified checkpoint.
@@ -308,7 +378,8 @@ Continue with Checkpoint 3 and the post-merge verification blocks below.
     git log --format='%H%x09%s' "$1" | awk -F '\t' '$2 ~ /^chore: release v[0-9]+\.[0-9]+\.[0-9]+$/ { print; exit }'
   }
 
-  git push -u origin "HEAD:refs/heads/{source}"
+  # A gated {source} already received the preparation through its admission PR; never push to it directly.
+  [ "<source-gated>" = "true" ] || git push -u origin "HEAD:refs/heads/{source}"
   SOURCE_SHA="$(git rev-parse HEAD)"
   PREPARED_RELEASE_SHA="$(prepared_release_sha HEAD | cut -f1)"
   if ! printf '%s\n' "$PREPARED_RELEASE_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
@@ -378,6 +449,8 @@ For each host-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before disp
 - `@<login>` — expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s.
 
 Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass both schedules.
+
+**Gated source.** When `SOURCE_GATED=true`, the loops' fix pushes must not land on `{source}` directly: follow "Review fixes under a gated source" in the gate procedure loaded by **Resolve Source Branch Admission**, so every fix reaches `{source}` through a gated PR and the merge gate below runs on the release PR's updated head.
 
 ### Multi-reviewer wrapper
 
