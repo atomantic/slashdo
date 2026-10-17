@@ -789,6 +789,76 @@ describe('review-loop parse contracts', () => {
     }
   });
 
+  it('does not rebase a conflict-free branch just because the default branch advanced', () => {
+    const pr = readCommand('pr.md');
+    const prBetter = readCommand('pr-better.md');
+    const commit = pr.slice(pr.indexOf('## Commit and Push'), pr.indexOf('## Local Code Review'));
+    const phaseB = prBetter.slice(prBetter.indexOf('## Phase B'));
+    const gate = readLib('merge-gate.md');
+
+    // Review base is the fetched remote-tracking ref; the local default branch is left alone.
+    assert.match(commit, /git fetch origin \{default_branch\}`/);
+    assert.match(commit, /\*\*Record `origin\/\{default_branch\}` as `\{REVIEW_BASE\}`\*\*/);
+    assert.doesNotMatch(commit, /git fetch origin \{default_branch\}:\{default_branch\}`[^\n]*to fast-forward/);
+    assert.doesNotMatch(commit, /Sync the branch onto the latest/);
+    assert.doesNotMatch(commit, /un-rebased branch makes them flag/);
+    assert.doesNotMatch(commit, /After a clean rebase, `git diff/);
+    assert.match(commit, /already excludes commits that landed only on the default branch/);
+
+    // Rebase only on conflict, enforced strict policy, or evidenced semantic overlap.
+    assert.match(commit, /Default-branch movement alone is not a reason to rebase/);
+    assert.match(commit, /actually conflicts/);
+    assert.match(commit, /host enforces an up-to-date branch/);
+    assert.match(commit, /semantic overlap/);
+    assert.match(commit, /A changed HEAD invalidates head-bound results/);
+    assert.match(commit, /rerun the affected validation, the required reviews, and the required checks/);
+    assert.match(commit, /`--force-with-lease`[^\n]*only if a rebase above rewrote already-pushed history/);
+
+    // pr-better restates the same policy instead of the mandatory fast-forward + rebase.
+    assert.doesNotMatch(phaseB, /git fetch origin \{default_branch\}:\{default_branch\} && git rebase/);
+    assert.match(phaseB, /without rebasing/);
+    assert.match(phaseB, /default-branch movement alone must not rewrite a ready branch/);
+
+    // The merge gate never updates the branch and only trusts the MERGED read-back.
+    assert.match(gate, /The gate does not update the branch/);
+    assert.match(gate, /a merge that is only queued all stay unmerged outcomes/);
+    assert.match(gate, /step 5's `MERGED` read-back is the only success signal/);
+  });
+
+  it('keeps next-flow re-syncs conditional on file overlap with the base', () => {
+    const next = readCommand('next.md');
+    const swarm = readLib('next-swarm.md');
+    assert.match(next, /Re-sync only if the base now overlaps this branch/);
+    assert.match(next, /keeping the validated HEAD/);
+    assert.match(swarm, /Re-sync onto the advanced default branch only when it overlaps the PR/);
+    assert.match(swarm, /otherwise keep the validated HEAD/);
+  });
+
+  it('three-dot diff excludes base-only commits without a rebase (fixture)', () => {
+    const { execFileSync } = require('child_process');
+    const os = require('os');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-threedot-'));
+    try {
+      const git = (...args) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { encoding: 'utf8' });
+      git('init', '-q', '-b', 'main');
+      fs.writeFileSync(path.join(dir, 'a.txt'), 'a\n');
+      git('add', '.'); git('commit', '-q', '-m', 'base');
+      git('checkout', '-q', '-b', 'feature');
+      fs.writeFileSync(path.join(dir, 'feature.txt'), 'f\n');
+      git('add', '.'); git('commit', '-q', '-m', 'feature');
+      const head = git('rev-parse', 'HEAD').trim();
+      git('checkout', '-q', 'main');
+      fs.writeFileSync(path.join(dir, 'unrelated.txt'), 'u\n');
+      git('add', '.'); git('commit', '-q', '-m', 'base-only');
+      git('checkout', '-q', 'feature');
+      const names = git('diff', '--name-only', 'main...HEAD').trim().split('\n');
+      assert.deepEqual(names, ['feature.txt']);
+      assert.equal(git('rev-parse', 'HEAD').trim(), head, 'branch HEAD is untouched');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('files issues inside the scan-only gate, not after it', () => {
     // The instruction originally sat in the paragraph AFTER "STOP HERE ... and exit",
     // so an orchestrator following the gate literally exited before reaching it and

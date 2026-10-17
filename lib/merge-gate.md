@@ -14,6 +14,8 @@ The caller sets each value before it reads this file:
 - `{LINKED_WORKTREE}`: `1` when `{GIT}` runs in a linked `git worktree`, otherwise `0`. `/do:next` and the swarm always run in one (`1`). `/do:pr` resolves it in step 2.
 - `{MERGE_METHOD}`: the method the caller's Parse Arguments recorded, from an explicit flag or the saved `merge-method` default. It may be unset. Step 1 completes it.
 
+**The gate does not update the branch.** The default branch having advanced is not a reason to rebase, merge the base in, or restart CI/review; merge the head that was validated. Update the branch only when the host refuses the merge for a reason that needs it (the PR conflicts, or an enforced up-to-date requirement reports it behind) or the caller has evidenced semantic integration risk, then rerun the affected validation, required reviews, and required checks on the new head, and push with `--force-with-lease` only if published history was rewritten. Missing or failing required checks, an unavailable required review, and a merge that is only queued all stay unmerged outcomes; step 5's `MERGED` read-back is the only success signal.
+
 Shell variables do not survive from one Bash call to the next. Write every placeholder, including the resolved method, literally into each block.
 
 ## 1. Resolve the merge method (GitHub)
