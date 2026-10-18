@@ -99,6 +99,7 @@ On a shared or public tracker, add `--collaborators` so your agent only claims i
 /do:review https://git.example.com/o/r/pull/12  # review a PR on any GitHub host — fixes pushed if writable, else inline
 /do:review https://gitlab.example.com/g/sub/p/-/merge_requests/7  # same for a GitLab MR (gitlab.com or self-managed)
 /do:depfree --heavy                       # remove unnecessary dependencies by writing replacement code
+/do:depfree --extreme --scan-only         # zero-dependency plan: strongest model, no size ceiling, large libraries included
 /do:scan ~/Downloads/sketchy-repo         # read-only malware/safety audit of an unfamiliar directory
 ```
 
@@ -133,7 +134,7 @@ All commands live under the `do:` namespace:
 | `/do:better-swift` | SwiftUI DevSecOps audit with multi-platform coverage (iOS, macOS, watchOS, tvOS, visionOS) |
 | `/do:simplify` | Refactor-only audit — architecture, DRY, simplification, cognitive load ([details](#refactor-only-dosimplify)) |
 | `/do:scan` | Read-only safety audit of an unfamiliar directory — malware patterns, network calls, vulnerable deps |
-| `/do:depfree` | Audit dependencies, remove unnecessary ones, write replacement code (`--heavy` for a deeper pass) |
+| `/do:depfree` | Audit dependencies, remove unnecessary ones, write replacement code (`--heavy` for a deeper pass; `--extreme` for a zero-dependency pass that puts the strongest model on even large libraries) |
 | `/do:goals` | Generate GOALS.md from codebase analysis — `--prd` generates PRD.md instead ([details](#prd-mode-dogoals---prd)) |
 | `/do:prd` | Generate a detailed PRD.md from codebase analysis (`/do:goals --prd`) ([details](#prd-mode-dogoals---prd)) |
 | `/do:plan-task` | Investigate the codebase, draft a decision-complete issue, get approval, file it in the tracker |

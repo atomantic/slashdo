@@ -429,14 +429,19 @@ On `dirty`/`inconclusive`, or when `MERGE_ENABLED=false` (`--no-merge`), **stop 
 
 **Encode `[issue-<num>]` in the PR title** if `/do:pr` didn't — call `pr_title <num> "feat([issue-<num>]): <description>"`.
 
-**Re-sync, then merge (only when the gate above passed).** A long review loop can let sibling claims merge after your Phase-5 sync — re-sync once more so a stale changelog can't resurrect lines they removed:
+**Re-sync only if the base now overlaps this branch, then merge (only when the gate above passed).** A long review loop can let sibling claims merge after your Phase-5 sync. Default-branch movement alone is not a reason to rewrite a ready branch or restart CI/review — but when the base-only commits touch a file this branch also changes (the shared changelog is the usual case; a stale one can resurrect lines siblings removed), re-sync once more. Skip the merge when the two file lists below don't intersect:
 
 ```bash
 # Re-declare (Conventions; `-C` since we're not cd'd here):
 SLUG="issue-<num>"; WORKTREE="../next-${SLUG}"
 DEFAULT_BRANCH="$(git -C "${WORKTREE}" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)"
 [ -n "$DEFAULT_BRANCH" ] || DEFAULT_BRANCH="$(git -C "${WORKTREE}" remote show origin | sed -n 's/.*HEAD branch: //p')"
-cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && git merge --no-edit "origin/${DEFAULT_BRANCH}"
+cd "${WORKTREE}" && git fetch origin "${DEFAULT_BRANCH}" && \
+  if [ -n "$(comm -12 <(git diff --name-only "HEAD...origin/${DEFAULT_BRANCH}" | sort) <(git diff --name-only "origin/${DEFAULT_BRANCH}...HEAD" | sort))" ]; then
+    git merge --no-edit "origin/${DEFAULT_BRANCH}"   # then rerun validation/required checks on the new HEAD
+  else
+    echo "base moved without touching this branch's files — keeping the validated HEAD"
+  fi
 ```
 
 **If that merge reports a conflict**, **STOP and resolve it by hand** under Phase 5's **deletions win** rule (and its ban on `git add -A` while paths are unmerged). Only once `git status` shows no unmerged paths is it safe to push and merge.
