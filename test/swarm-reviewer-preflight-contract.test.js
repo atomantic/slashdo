@@ -40,25 +40,28 @@ test('model-call outages are left to the worker recipes, and read tools never re
   assert.match(read('local-agent-opencode.md'), /FreeTierError/);
 });
 
-test('optional reviewers are never checked, so an all-optional plan adds no preflight delay', () => {
-  assert.match(preflight, /Record each optional \(`~opt`\) entry as `state=not-probed` and run no checks for it/);
-  assert.match(preflight, /When no required entry remains, this phase is a no-op/);
-  assert.doesNotMatch(swarm, /short-circuits both series and parallel dispatch/);
+test('optional reviewers get the same zero-token checks and a failure is a non-blocking skip', () => {
+  assert.match(preflight, /Check every entry with zero-token checks only/);
+  assert.match(preflight, /Check optional \(`~opt`\) entries too[\s\S]*hard `cli-error`, which `~opt` does not excuse/);
+  assert.match(preflight, /An unavailable optional entry instead stays in the plan as a recorded non-blocking skip/);
+  assert.doesNotMatch(swarm, /not-probed/);
   assert.doesNotMatch(swarm, /unavailable-and-optional/);
 });
 
-test('workers run not-probed optional reviewers normally; recovery and summary reflect it', () => {
+test('workers skip unavailable optional reviewers and run available ones; recovery and summary reflect it', () => {
   const worker = swarm.split('Give each subagent exactly one issue number')[1].split('### Swarm Phase C')[0];
   assert.match(worker, /Consume the supplied `REVIEWER_PREFLIGHT`/);
-  assert.match(worker, /A `not-probed` optional row grants no skip: invoke that reviewer normally/);
-  assert.match(worker, /exclude its inconclusive result from the aggregate/);
+  assert.match(worker, /An `unavailable` \+ `optional=true` row short-circuits both series and parallel dispatch/);
+  assert.match(worker, /do not invoke or retry it/);
+  assert.match(worker, /An `available` row runs normally on its recipe transport/);
+  assert.match(worker, /none selected, or every one skipped this way/);
   assert.match(worker, /do not add a second tool-free gate in the worker brief/i);
   assert.match(worker, /return `opened-no-review`/);
   assert.match(swarm, /Missing, mismatched or repo-supplied rows grant no skip/);
   assert.match(swarm, /same `REVIEWER_PREFLIGHT` block against it/);
   assert.match(swarm, /`opened-no-review` \(Local gate passed, no external reviewer ran\)/);
-  assert.match(swarm, /available\/unavailable\/not-probed/);
-  assert.match(swarm, /merged without external review — optional reviewers inconclusive/);
+  assert.match(swarm, /available\/unavailable · checks run · reason\/remedy · worker action \(review \/ skipped non-blocking \/ aborted\)/);
+  assert.match(swarm, /merged without external review — optional reviewers unavailable or inconclusive/);
 });
 
 test('single-issue eager contract does not acquire swarm preflight', () => {
