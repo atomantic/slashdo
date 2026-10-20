@@ -139,10 +139,10 @@ pi --print --no-approve --no-tools --no-builtin-tools --no-extensions --no-skill
 
 Do not forward configured resource flags or approve project files. Verify these isolation flags against the installed binary's help first; a binary without them is unavailable, not an invitation to drop controls. The command has no tools, filesystem writes, or tool network access; the model transport still uses the operator's configured provider.
 
-**Grok runner.** Grok Build takes the shared `grok[<model>]`, `~opt`, `~max`, and `~effort` grammar; review-only — never enable reviewer-applies for Grok. Its single-turn prompt goes through `--prompt-file`, never argv, so an inlined diff never meets the argv size limit. `{INVOCATION}`:
+**Grok runner.** Grok Build takes the shared `grok[<model>]`, `~opt`, `~max`, and `~effort` grammar; review-only — never enable reviewer-applies for Grok. Its single-turn prompt goes through `--prompt-file`, never argv, so an inlined diff never meets the argv size limit. Output is `streaming-messages-json`, not `plain`: both `plain` and `json` concatenate every turn's text, so the narration before a tool call (`I'll read the file first.`) lands on the verdict's line and the strict parser rightly calls it `no-verdict`. The stream's final `result` line carries only the last message. `{INVOCATION}`:
 
 ```bash
-grok --prompt-file "$GROK_REVIEW_INPUT" --verbatim --output-format plain --permission-mode plan --sandbox read-only --disable-web-search --no-subagents --tools read_file,grep,list_dir --disallowed-tools run_terminal_cmd,search_replace,write,web_search,web_fetch,Agent,search_tool,use_tool ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"}
+grok --prompt-file "$GROK_REVIEW_INPUT" --verbatim --output-format streaming-messages-json --permission-mode plan --sandbox read-only --disable-web-search --no-subagents --tools read_file,grep,list_dir --disallowed-tools run_terminal_cmd,search_replace,write,web_search,web_fetch,Agent,search_tool,use_tool ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"}
 ```
 
 **Grok prompt file** — the Step 2 pre-launch step for `grok`. Run it in the invocation's shell on **every** pass, after the diff payload is appended to `LOCAL_PROMPT`, so the file never carries a stale patch. Like the claude stdin transport it accepts at most **8 MiB (8,388,608 bytes)**; a missing/empty payload, a failed write/count, or a larger input is `STATUS=no-verdict` without launching:
@@ -163,7 +163,22 @@ if [ "$REVIEW_AGENT" = grok ]; then
 fi
 ```
 
-`mktemp` creates the file with owner-only permissions outside the repository. Keep it until the reviewer exits, including in the background. **Grok prompt-file cleanup** — the Step 2 post-launch cleanup for `grok`, run after reading the exit code and before handling any result (also when a launch is abandoned after preparation): `[ -n "${GROK_REVIEW_INPUT:-}" ] && rm -f "$GROK_REVIEW_INPUT"; GROK_REVIEW_INPUT=""`. Preserve `EXIT_CODE`.
+`mktemp` creates the file with owner-only permissions outside the repository. Keep it until the reviewer exits, including in the background. **Grok post-launch** — the Step 2 post-launch cleanup for `grok`, run after reading the exit code and before handling any result. It deletes the prompt file (do that alone when a launch is abandoned after preparation) and replaces `$LOG_FILE` with the final message, keeping the raw stream as the reported log:
+
+```bash
+if [ "$REVIEW_AGENT" = grok ]; then
+  [ -n "${GROK_REVIEW_INPUT:-}" ] && rm -f "$GROK_REVIEW_INPUT"
+  GROK_REVIEW_INPUT=""
+  GROK_STREAM_LOG="$LOG_FILE"
+  LOG_FILE="${GROK_STREAM_LOG%.log}.verdict.log"
+  # Last successful result line only. A missing jq, a malformed stream, or no result line leaves the
+  # verdict log empty, which Step 3 parses as no-verdict — never as clean.
+  jq -rs 'map(select(.type == "result" and .subtype == "success")) | last | .result // empty' "$GROK_STREAM_LOG" > "$LOG_FILE" 2>/dev/null || : > "$LOG_FILE"
+  REPORT_LOG_FILE="$GROK_STREAM_LOG"
+fi
+```
+
+Preserve `EXIT_CODE`.
 
 ### Enforced reviewer permissions
 
@@ -200,7 +215,7 @@ Every pass ends in the shared fix tail, which holds the apply rules and steps 4�
 
    Launch with the runner's **Launch and wait**, with `RUN_TAG="local-review-${REVIEW_AGENT}"`. Set `PROMPT_ON_STDIN="$LOCAL_PROMPT"` for `cmd` (its recipe), and `PROMPT_ON_STDIN=""` for every other reviewer.
 
-   - After capturing `EXIT_CODE`, run any recipe post-launch cleanup (claude: its stdin file; grok: its prompt file). Then run any recipe exit classifier (opencode: provider admission; cursor: workspace trust) **before** the generic branch below.
+   - After capturing `EXIT_CODE`, run any recipe post-launch cleanup (claude: its stdin file; grok: its prompt file and verdict extraction). Then run any recipe exit classifier (opencode: provider admission; cursor: workspace trust) **before** the generic branch below.
    - If `EXIT_CODE != 0`, no recipe classifier claimed it, and the CLI produced no commits, set `STATUS=cli-error`. Print the last 80 lines of **`$ERR_FILE`** (fall back to `$LOG_FILE` if it is empty), surface both paths, and exit the loop. A timed-out run (the runner's `124` or gave-up case) is `cli-error` with the log paths, never `clean`.
 
 3. **Detect changes and apply fixes** (the logic depends on `{REVIEWER_APPLIES}`):
