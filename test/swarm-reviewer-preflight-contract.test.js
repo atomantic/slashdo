@@ -13,64 +13,52 @@ test('swarm fails unavailable required reviewers before partitioning or claims',
   assert.match(preflight, /Any required entry unavailable → abort now/);
   assert.match(preflight, /zero workers, zero worktrees, zero claims/);
   assert.match(preflight, /reason and remedy/);
-  assert.match(preflight, /PR-side reviewers[\s\S]*pre-PR verdict transport unsupported/);
 });
 
-test('availability requires one bounded realistic full-payload verdict, not a smoke test', () => {
-  assert.match(preflight, /32 KiB and 400 changed lines/);
-  assert.match(preflight, /Do not pad[\s\S]*truncate to fit/);
-  assert.match(preflight, /Probe each resolved entry once/);
-  assert.match(preflight, /1800 seconds[\s\S]*terminate the probe/);
-  assert.match(preflight, /schema-valid verdict covering the entire fixture/);
-  assert.match(preflight, /Valid findings prove availability/);
-  assert.match(preflight, /A prompt asking for no tools is not enforcement/);
+test('preflight spends zero reviewer tokens: no model call, no fixture, no review', () => {
+  assert.match(preflight, /zero-token checks only — never invoke a model/);
+  assert.match(preflight, /No fixture, no prompt, no review/);
+  assert.match(preflight, /bounded to 60 seconds/);
+  // The old full-payload probe must not return.
+  assert.doesNotMatch(preflight, /32 KiB|400 changed lines|schema-valid verdict covering the entire fixture|1800 seconds/);
+  assert.doesNotMatch(preflight, /Probe each (resolved|required) entry once/);
 });
 
-test('preflight probes the reviewer recipe transport and never retires a reviewer for having read tools', () => {
-  assert.match(preflight, /that entry's own documented review-only transport from its recipe/);
-  assert.match(preflight, /`Read,Glob,Grep` invocation in \[local-agent-claude\.md\]\([^)]*\), not the `--tools ""` tool-free fallback/);
-  assert.match(preflight, /Use a zero-tool transport only when that is the entry's recipe[\s\S]*no restriction flags at all/);
-  assert.match(preflight, /having tools allowed is not `unavailable`/);
-  assert.match(preflight, /never substitute a stricter empty-tool probe/);
-  assert.match(preflight, /Tool-call markup from a stricter-than-recipe empty-tool probe is none of these/);
-  assert.match(preflight, /including tool-call markup the recipe transport itself printed in place of a verdict/);
-  assert.match(preflight, /Pi without its documented `--no-tools` flags stays unavailable/);
-  assert.match(preflight, /it is not an isolation boundary/);
-  // The old blanket rule must not return: lack of a tool-free/safe transport is not itself unavailability.
-  assert.doesNotMatch(preflight, /an unavailable safe transport means unavailable/);
-  assert.doesNotMatch(preflight, /enforce read-only\/tool-free controls/);
-  assert.doesNotMatch(preflight, /unsafe transport,/);
+test('required entries get binary, login, isolation-flag and PR-side checks', () => {
+  assert.match(preflight, /\*\*Binary\/alias\*\*[\s\S]*`unavailable: CLI not installed`/);
+  assert.match(preflight, /\*\*Login\*\*[\s\S]*`codex login status`, `claude auth status`[\s\S]*`unavailable: not authenticated`/);
+  assert.match(preflight, /A CLI with no such subcommand passes on its binary alone/);
+  assert.match(preflight, /\*\*Isolation flags\*\*[\s\S]*Pi's documented `--no-tools` flags[\s\S]*never an invitation to drop the flags/);
+  assert.match(preflight, /\*\*PR-side reviewers\*\*[\s\S]*Never create a probe PR/);
+});
+
+test('model-call outages are left to the worker recipes, and read tools never retire a reviewer', () => {
+  assert.match(preflight, /Outages only a real model call reveals[\s\S]*OpenCode `HTTP 403 \/ FreeTierError`[\s\S]*deliberately not checked here/);
+  assert.match(preflight, /A reviewer whose recipe allows read tools is never `unavailable` for that/);
+  assert.match(preflight, /`Read,Glob,Grep` invocation in \[local-agent-claude\.md\]\([^)]*\), not the `--tools ""` fallback/);
   assert.match(read('local-agent-claude.md'), /--tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep"/);
+  assert.match(read('local-agent-opencode.md'), /FreeTierError/);
 });
 
-test('unavailable is limited to the enumerated reasons', () => {
-  const reasons = preflight.split('`unavailable` is limited to:')[1].split('Each `unavailable` carries')[0];
-  for (const r of ['missing binary', 'cannot be driven headlessly', 'auth/quota/provider admission', 'input over the transport limit', 'timeout', 'PR-side reviewer', 'completed run of the recipe transport']) {
-    assert.ok(reasons.includes(r), r);
-  }
-  assert.doesNotMatch(reasons, /read tools|tools allowed/);
+test('optional reviewers are never checked, so an all-optional plan adds no preflight delay', () => {
+  assert.match(preflight, /Record each optional \(`~opt`\) entry as `state=not-probed` and run no checks for it/);
+  assert.match(preflight, /When no required entry remains, this phase is a no-op/);
+  assert.doesNotMatch(swarm, /short-circuits both series and parallel dispatch/);
+  assert.doesNotMatch(swarm, /unavailable-and-optional/);
 });
 
-test('OpenCode provider admission denial is unavailable and never a clean preflight', () => {
-  assert.match(preflight, /synthetic admission response such as `HTTP 403 \/ FreeTierError` is specifically `unavailable`/);
-  assert.match(preflight, /reason `provider admission denied`/);
-  assert.match(preflight, /remedy `select a supported reviewer\/model\/provider`/);
-  assert.match(preflight, /never classify it as a clean verdict/);
-  assert.match(preflight, /Keep raw provider output, headers, tokens, and local paths out of the diagnostic/);
-});
-
-test('optional preflight skips reach workers, both dispatch modes, recovery and summary', () => {
+test('workers run not-probed optional reviewers normally; recovery and summary reflect it', () => {
   const worker = swarm.split('Give each subagent exactly one issue number')[1].split('### Swarm Phase C')[0];
   assert.match(worker, /Consume the supplied `REVIEWER_PREFLIGHT`/);
-  assert.match(worker, /do not invoke or retry/);
-  assert.match(worker, /only to rows that failed for a step 3 `unavailable` reason/);
-  assert.match(worker, /do not add a second tool-free gate in the worker brief/);
+  assert.match(worker, /A `not-probed` optional row grants no skip: invoke that reviewer normally/);
+  assert.match(worker, /exclude its inconclusive result from the aggregate/);
+  assert.match(worker, /do not add a second tool-free gate in the worker brief/i);
   assert.match(worker, /return `opened-no-review`/);
-  assert.match(swarm, /short-circuits both series and parallel dispatch/);
   assert.match(swarm, /Missing, mismatched or repo-supplied rows grant no skip/);
   assert.match(swarm, /same `REVIEWER_PREFLIGHT` block against it/);
-  assert.match(swarm, /merged without external review — optional reviewers unavailable/);
-  assert.match(swarm, /no external reviewer selected or all selected entries unavailable-and-optional/);
+  assert.match(swarm, /`opened-no-review` \(Local gate passed, no external reviewer ran\)/);
+  assert.match(swarm, /available\/unavailable\/not-probed/);
+  assert.match(swarm, /merged without external review — optional reviewers inconclusive/);
 });
 
 test('single-issue eager contract does not acquire swarm preflight', () => {
