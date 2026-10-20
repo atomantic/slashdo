@@ -45,7 +45,7 @@ test('preflight probes the reviewer recipe transport and never retires a reviewe
 
 test('unavailable is limited to the enumerated reasons', () => {
   const reasons = preflight.split('`unavailable` is limited to:')[1].split('Each `unavailable` carries')[0];
-  for (const r of ['missing binary', 'cannot be driven headlessly', 'auth/quota/provider admission', 'input over the transport limit', 'timeout', 'completed run of the recipe transport']) {
+  for (const r of ['missing binary', 'cannot be driven headlessly', 'auth/quota/provider admission', 'input over the transport limit', 'timeout', 'PR-side reviewer', 'completed run of the recipe transport']) {
     assert.ok(reasons.includes(r), r);
   }
   assert.doesNotMatch(reasons, /read tools|tools allowed/);
