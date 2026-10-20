@@ -64,6 +64,8 @@ describe('local-cli-runner git metadata verify/restore (#447)', () => {
     ['submodule.<n>.update', cfg("submodule.x.update '!/evil'")],
     ['browser.<tool>.cmd', cfg('browser.x.cmd /evil')],
     ['web.browser', cfg('web.browser evil')],
+    ['remote.<name>.uploadpack', cfg("remote.origin.uploadpack '/evil'")],
+    ['core.attributesFile', cfg('core.attributesFile /evil')],
   ]) {
     it(`still detects and reverts a planted ${name} while keeping concurrent branch config`, () => {
       const r = run(cfg('branch.other.remote origin') + '; ' + mutate);
