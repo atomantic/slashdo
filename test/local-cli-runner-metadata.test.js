@@ -57,6 +57,13 @@ describe('local-cli-runner git metadata verify/restore (#447)', () => {
     ['remote.origin.url', cfg('remote.origin.url http://evil')],
     ['diff.external', cfg('diff.external /evil')],
     ['diff.<driver>.command', cfg('diff.x.command /evil')],
+    ['interactive.diffFilter', cfg('interactive.diffFilter /evil')],
+    ['trailer.<tok>.command', cfg('trailer.x.command /evil')],
+    ['core.alternateRefsCommand', cfg('core.alternateRefsCommand /evil')],
+    ['uploadpack.packObjectsHook', cfg('uploadpack.packObjectsHook /evil')],
+    ['submodule.<n>.update', cfg("submodule.x.update '!/evil'")],
+    ['browser.<tool>.cmd', cfg('browser.x.cmd /evil')],
+    ['web.browser', cfg('web.browser evil')],
   ]) {
     it(`still detects and reverts a planted ${name} while keeping concurrent branch config`, () => {
       const r = run(cfg('branch.other.remote origin') + '; ' + mutate);

@@ -247,6 +247,13 @@ describe('Claude structured verdict', () => {
     assert.equal(two.verdict, 'FINDING 1:\nfile: src/a.js\nline: 3\nseverity: CRITICAL\ndescription: Reads past the end.\nfix: Use arr.length - 1.\n\nFINDING 2:\nfile: src/a.js\nline: 9\nseverity: NIT\ndescription: Reads past the end.\nfix: Use arr.length - 1.\n');
   });
 
+  it('collapses a multi-line fix so every converted block stays complete', () => {
+    const r = convert(ok({ verdict: 'FINDINGS', findings: [{ ...finding, fix: 'Replace with:\n  const x = arr[arr.length - 1];\r\n' }] }));
+    assert.equal(r.status, 'converted');
+    assert.match(r.verdict, /\nfix: Replace with: +const x = arr\[arr\.length - 1\]; *\n$/);
+    assert.equal(r.verdict.trim().split('\n').length, 6);
+  });
+
   it('fails closed to no-verdict, never clean, on errors, prose, and contradictions', () => {
     const bad = [
       { type: 'result', subtype: 'error_max_turns', is_error: true },

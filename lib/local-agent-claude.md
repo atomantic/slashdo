@@ -67,7 +67,7 @@ fi
 
 Preserve `EXIT_CODE`; cleanup success is not reviewer success. Use this same cleanup if launch is abandoned after preparation, and only after terminating/reaping the reviewer if the host cancels the pass.
 
-**Claude structured verdict** — Step 3 recipe rule for the subprocess path, after the runner's Verify and restore and before the strict verdict parser. Only a CLI JSON result (an object with `"type": "result"`) is converted; the in-process path writes the text verdict itself, and anything else that is not CLI JSON is left for the strict parser, which rejects it. Convert its `structured_output` into the text contract and point `LOG_FILE` at that file; an error result, a missing or schema-invalid object, or a contradictory verdict (`NO FINDINGS` with findings, `FINDINGS` with none) is `STATUS=no-verdict`, never `clean`. Keep the raw JSON log for the report:
+**Claude structured verdict** — Step 3 recipe rule for the subprocess path, after the runner's Verify and restore and before the strict verdict parser. Only a CLI JSON result (an object with `"type": "result"`) is converted; the in-process path writes the text verdict itself, and anything else that is not CLI JSON is left for the strict parser, which rejects it. Convert its `structured_output` into the text contract (newlines inside a field are collapsed so every block stays complete) and point `LOG_FILE` at that file; an error result, a missing or schema-invalid object, or a contradictory verdict (`NO FINDINGS` with findings, `FINDINGS` with none) is `STATUS=no-verdict`, never `clean`. Keep the raw JSON log for the report:
 
 ```bash
 claude_structured_verdict() {   # $1 = the CLI's JSON result; prints the text verdict contract, or fails
@@ -82,7 +82,7 @@ claude_structured_verdict() {   # $1 = the CLI's JSON result; prints the text ve
                and (.severity | IN("CRITICAL", "IMPROVEMENT", "NIT"))
                and (.description | type) == "string" and (.description | length) > 0
                and (.fix | type) == "string" and (.fix | length) > 0
-            then "FINDING \($i + 1):\nfile: \(.file | gsub("[\r\n]+"; " "))\nline: \(.line)\nseverity: \(.severity)\ndescription: \(.description | gsub("[\r\n]+"; " "))\nfix: \(.fix)"
+            then "FINDING \($i + 1):\nfile: \(.file | gsub("[\r\n]+"; " "))\nline: \(.line)\nseverity: \(.severity)\ndescription: \(.description | gsub("[\r\n]+"; " "))\nfix: \(.fix | gsub("[\r\n]+"; " "))"
             else error("malformed finding") end ]
         | join("\n\n")
       else error("contradictory verdict") end' "$1"
