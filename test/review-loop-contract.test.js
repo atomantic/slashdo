@@ -1299,7 +1299,8 @@ describe('review-loop parse contracts', () => {
     const invocation = runner.match(/```bash\n(grok [^\n]+)\n```/);
     assert.ok(invocation, 'the Grok runner must give a concrete invocation');
     for (const flag of [
-      '--prompt-file "$GROK_REVIEW_INPUT"', '--verbatim', '--permission-mode plan', '--sandbox read-only',
+      '--prompt-file "$GROK_REVIEW_INPUT"', '--verbatim', '--output-format streaming-messages-json',
+      '--permission-mode plan', '--sandbox read-only',
       '--disable-web-search', '--no-subagents', '--tools read_file,grep,list_dir',
       '--disallowed-tools run_terminal_cmd,search_replace,write,web_search,web_fetch,Agent,search_tool,use_tool',
       '${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"}',
@@ -1309,7 +1310,7 @@ describe('review-loop parse contracts', () => {
     assert.doesNotMatch(loop, /grok -p "\$LOCAL_PROMPT"/);
     assert.match(loop, /all but `claude` and `cmd`, which use stdin, and `grok`, which reads its prompt file/);
     assert.match(loop, /pre-launch step first \(claude: stdin preparation; grok: its prompt file\)/);
-    assert.match(loop, /post-launch cleanup \(claude: its stdin file; grok: its prompt file\)/);
+    assert.match(loop, /post-launch cleanup \(claude: its stdin file; grok: its prompt file and verdict extraction\)/);
 
     // Isolation now names grok's real controls instead of the no-flags fallback.
     const grokIsolation = loop.split('\n').find((l) => l.startsWith('- **Grok**:'));
@@ -1328,6 +1329,37 @@ describe('review-loop parse contracts', () => {
     assert.ok(okFile.length > 0);
     assert.equal(okBody, 'review this\ndiff');
     assert.equal(runPrep('').split('|').slice(0, 2).join('|'), 'no-verdict|');
+
+    // `plain`/`json` glue pre-tool narration onto the verdict line (seen live:
+    // "I'll read `package.json` first.NO FINDINGS"); the post-launch step must hand
+    // Step 3 only the stream's final result, and an unusable stream must parse empty.
+    const post = runner.match(/```bash\n(if \[ "\$REVIEW_AGENT" = grok \]; then\n[\s\S]*?)```/)[1];
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'grok-verdict-'));
+    const verdictOf = (stream) => {
+      const log = path.join(tmp, `s${Math.random().toString(36).slice(2)}.log`);
+      fs.writeFileSync(log, stream);
+      return execFileSync('bash', ['-c', `${post}\nprintf '%s|%s|' "$REPORT_LOG_FILE" "$LOG_FILE"; cat "$LOG_FILE"`], {
+        env: { ...process.env, REVIEW_AGENT: 'grok', LOG_FILE: log, GROK_REVIEW_INPUT: '' },
+        encoding: 'utf8',
+      }).split('|');
+    };
+    try {
+      const stream = [
+        { type: 'system', subtype: 'init' },
+        { type: 'assistant', message: { content: [{ type: 'text', text: "I'll read `package.json` first." }, { type: 'tool_use' }] } },
+        { type: 'user', message: { content: [{ type: 'tool_result' }] } },
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'NO FINDINGS' }] } },
+        { type: 'result', subtype: 'success', result: 'NO FINDINGS' },
+      ].map((l) => JSON.stringify(l)).join('\n');
+      const [reported, verdictLog, verdict] = verdictOf(stream);
+      assert.equal(verdict.trim(), 'NO FINDINGS');
+      assert.match(verdictLog, /\.verdict\.log$/);
+      assert.notEqual(reported, verdictLog, 'the raw stream stays the reported log');
+      assert.equal(verdictOf('not json\n')[2], '');
+      assert.equal(verdictOf(JSON.stringify({ type: 'result', subtype: 'error_max_turns', result: 'NO FINDINGS' }))[2], '');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it('accepts pi as a model-taking local reviewer with a --thinking effort carrier', () => {
