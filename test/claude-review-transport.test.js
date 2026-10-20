@@ -268,6 +268,11 @@ describe('Claude structured verdict', () => {
     assert.match(core, /after stripping blank lines, the result must be either exactly `NO FINDINGS`/);
   });
 
+  it('LOCAL_PROMPT review-only branch forbids prose around the verdict', () => {
+    const reviewOnly = core.slice(core.indexOf('REVIEW-ONLY MODE'), core.indexOf('# codex exec prompt for REVIEWER_APPLIES=true'));
+    assert.match(reviewOnly, /Your entire output must be only the FINDING blocks or the single line NO FINDINGS — no preamble, progress notes, status lines, or summary/);
+  });
+
   it('repeats the output contract after the diff for every prompt-driven reviewer', () => {
     assert.match(core, /End the payload with the output contract again, after the diff/);
     assert.match(core, /OUTPUT CONTRACT: your final message must contain ONLY the line NO FINDINGS or complete FINDING <N>: blocks/);
