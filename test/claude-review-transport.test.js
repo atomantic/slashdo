@@ -249,8 +249,6 @@ describe('Claude structured verdict', () => {
 
   it('fails closed to no-verdict, never clean, on errors, prose, and contradictions', () => {
     const bad = [
-      'I reviewed the diff and it looks fine. NO FINDINGS',
-      '',
       { type: 'result', subtype: 'error_max_turns', is_error: true },
       { type: 'result', is_error: false, result: 'NO FINDINGS' },
       ok({ verdict: 'NO FINDINGS', findings: [finding] }),
@@ -260,6 +258,14 @@ describe('Claude structured verdict', () => {
       ok({ verdict: 'FINDINGS', findings: [{ ...finding, fix: '' }] }),
     ];
     for (const result of bad) assert.equal(convert(result).status, 'no-verdict', JSON.stringify(result));
+  });
+
+  it('leaves a non-JSON log (the in-process text verdict, or prose) untouched for the strict parser', () => {
+    for (const text of ['NO FINDINGS', 'FINDING 1:\nfile: a.js\nline: 1\nseverity: NIT\ndescription: d\nfix: f', 'I reviewed the diff and it looks fine. NO FINDINGS']) {
+      assert.deepEqual(convert(text), { status: 'converted', verdict: text, stderr: '' });
+    }
+    assert.match(source, /`command -v jq` succeeds/);
+    assert.match(core, /after stripping blank lines, the result must be either exactly `NO FINDINGS`/);
   });
 
   it('repeats the output contract after the diff for every prompt-driven reviewer', () => {

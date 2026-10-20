@@ -20,7 +20,7 @@ The subprocess path below applies outside Claude Code and whenever the in-proces
 
 Expose only `Read,Glob,Grep`, auto-allow those same tools, disable MCP, hooks and Chrome, and supply the complete orchestrator-computed diff through the stdin transport below. No shell tool: even an apparently read-only `git diff` can execute a configured external diff helper. `--tools` restricts availability; an allowlist alone does not remove other tools. For the tool-free fallback set both tool lists to `""` and include the needed source context in the same stdin payload.
 
-**Structured verdict.** A prompt alone does not stop a long review from ending in a summary that mixes prose with its findings, which the strict parser then (correctly) rejects as `no-verdict`. The subprocess path therefore asks the CLI for schema-validated output: `--output-format json --json-schema "$CLAUDE_VERDICT_SCHEMA"` (the schema is defined in the stdin-transport block below) returns a `structured_output` object with no surrounding prose, and Step 3 converts it to the text verdict contract before the parser runs. Before the first pass, confirm `claude --help` lists `--json-schema`; if it does not, record `STATUS=no-verdict` without launching, with remedy `update the claude CLI`. The in-process path has no schema control and relies on the prompt's closing output-contract reminder.
+**Structured verdict.** A prompt alone does not stop a long review from ending in a summary that mixes prose with its findings, which the strict parser then (correctly) rejects as `no-verdict`. The subprocess path therefore asks the CLI for schema-validated output: `--output-format json --json-schema "$CLAUDE_VERDICT_SCHEMA"` (the schema is defined in the stdin-transport block below) returns a `structured_output` object with no surrounding prose, and Step 3 converts it to the text verdict contract before the parser runs. Before the first subprocess pass, confirm `claude --help` lists `--json-schema` and `command -v jq` succeeds (the conversion needs it); if either fails, record `STATUS=no-verdict` without launching, with remedy `update the claude CLI` or `install jq`. The in-process path has no schema control and relies on the prompt's closing output-contract reminder.
 
 **Subprocess invocation** (`{INVOCATION}`; reviewer-applies is never selected — the orchestrator applies findings):
 
@@ -67,7 +67,7 @@ fi
 
 Preserve `EXIT_CODE`; cleanup success is not reviewer success. Use this same cleanup if launch is abandoned after preparation, and only after terminating/reaping the reviewer if the host cancels the pass.
 
-**Claude structured verdict** — Step 3 recipe rule for the subprocess path, after the runner's Verify and restore and before the strict verdict parser. `$LOG_FILE` holds the CLI's JSON result. Convert its `structured_output` into the text contract and point `LOG_FILE` at that file; an error result, a missing or schema-invalid object, or a contradictory verdict (`NO FINDINGS` with findings, `FINDINGS` with none) is `STATUS=no-verdict`, never `clean`. Keep the raw JSON log for the report:
+**Claude structured verdict** — Step 3 recipe rule for the subprocess path, after the runner's Verify and restore and before the strict verdict parser. Only a CLI JSON result (an object with `"type": "result"`) is converted; the in-process path writes the text verdict itself, and anything else that is not CLI JSON is left for the strict parser, which rejects it. Convert its `structured_output` into the text contract and point `LOG_FILE` at that file; an error result, a missing or schema-invalid object, or a contradictory verdict (`NO FINDINGS` with findings, `FINDINGS` with none) is `STATUS=no-verdict`, never `clean`. Keep the raw JSON log for the report:
 
 ```bash
 claude_structured_verdict() {   # $1 = the CLI's JSON result; prints the text verdict contract, or fails
@@ -87,7 +87,8 @@ claude_structured_verdict() {   # $1 = the CLI's JSON result; prints the text ve
         | join("\n\n")
       else error("contradictory verdict") end' "$1"
 }
-if [ "$REVIEW_AGENT" = claude ]; then
+if [ "$REVIEW_AGENT" = claude ] && command -v jq >/dev/null 2>&1 &&
+   jq -e 'type == "object" and .type == "result"' "$LOG_FILE" >/dev/null 2>&1; then
   if CLAUDE_VERDICT_TEXT="$(claude_structured_verdict "$LOG_FILE" 2>/dev/null)"; then
     printf '%s\n' "$CLAUDE_VERDICT_TEXT" > "$LOG_FILE.verdict" && LOG_FILE="$LOG_FILE.verdict"
   else
