@@ -9,7 +9,8 @@ PUSH_BRANCH="$(git config --get "branch.$BR.merge")"   # already a full refs/hea
 # Inherited base tracking (a worktree cut from origin/main auto-tracks it) is not a publication
 # target: treat it as unpublished so feature commits never reach the default branch.
 BASE_BRANCH="$(git symbolic-ref --quiet --short "refs/remotes/$PUSH_REMOTE/HEAD" 2>/dev/null | sed "s@^$PUSH_REMOTE/@@")"
-if [ "$PUSH_BRANCH" = "refs/heads/${BASE_BRANCH:-main}" ] && [ "$BR" != "${BASE_BRANCH:-main}" ]; then PUSH_REMOTE=""; fi
+[ -n "$BASE_BRANCH" ] || BASE_BRANCH="$(git remote show "$PUSH_REMOTE" 2>/dev/null | sed -n 's/.*HEAD branch: //p')"
+if { [ "$PUSH_BRANCH" = "refs/heads/${BASE_BRANCH:-main}" ] || { [ -z "$BASE_BRANCH" ] && [ "$PUSH_BRANCH" = refs/heads/master ]; }; } && [ "$BR" != "${PUSH_BRANCH#refs/heads/}" ]; then PUSH_REMOTE=""; fi
 ```
 
 - **Inherited base tracking is not a destination.** `git worktree add -b feature ../wt origin/main` auto-sets `branch.feature.remote=origin` and `.merge=refs/heads/main`, so a naive config-derived push would run `git push origin HEAD:refs/heads/main` and put feature commits on the default branch. When `PUSH_BRANCH` is the remote's default branch (`refs/remotes/<remote>/HEAD`, else `main`) and the current branch is not that branch, the guard above clears `PUSH_REMOTE` and the branch is handled as unpublished. A differently named feature/PR head (`origin/pr-123-head`, `upstream/feature-x`) or a same-named one is untouched; working directly on the default branch still pushes to it.

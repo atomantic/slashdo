@@ -68,9 +68,31 @@ test('every config-derived push or delete site carries the inherited-base guard'
     ['lib/merge-gate.md', 'UP_REMOTE', 'UP_REF'],
     ['lib/merge-gate.md', 'DEL_REMOTE', 'DEL_REF'],
   ]) {
-    assert.ok(
-      read(file).includes(`if [ "$${ref}" = "refs/heads/\${BASE_BRANCH:-main}" ] && [ "$BR" != "\${BASE_BRANCH:-main}" ]; then ${remote}=""; fi`),
+    assert.match(
+      read(file),
+      new RegExp(`\\[ "\\$${ref}" = "refs/heads/\\$\\{BASE_BRANCH:-main\\}" \\][^\\n]*; then ${remote}=""; fi`),
       `${file} must clear ${remote} on inherited base tracking`,
     );
   }
+});
+
+test('the guard resolves a non-main default branch when origin/HEAD is unset', () => {
+  const { dir, bare, main } = fixture();
+  try {
+    git(main, 'checkout', '-q', '-b', 'trunk');
+    git(main, 'push', '-q', 'origin', 'trunk');
+    git(dir, '--git-dir', bare, 'symbolic-ref', 'HEAD', 'refs/heads/trunk');
+    git(main, 'remote', 'set-head', 'origin', '-d');
+    const wt = path.join(dir, 'feature');
+    git(main, 'worktree', 'add', '-q', '-b', 'feature', wt, 'origin/trunk');
+    assert.match(resolve(wt), /^\|/, 'inherited tracking of a non-main default must be cleared');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the merge gate guards both the GitHub and GitLab wait-mode pushes', () => {
+  const gate = read('lib/merge-gate.md');
+  const guards = gate.match(/then UP_REMOTE=""; fi/g) || [];
+  assert.equal(guards.length, 2);
 });
