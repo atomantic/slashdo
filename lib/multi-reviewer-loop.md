@@ -98,6 +98,10 @@ Iterate `REVIEW_AGENTS` in order, running each reviewer's full single-reviewer l
    BR="$(git branch --show-current)"
    PUSH_REMOTE="$(git config --get "branch.$BR.remote")"
    PUSH_BRANCH="$(git config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
+   # Inherited base tracking (a worktree cut from origin/main auto-tracks it) is not a publication
+   # target: treat it as unpublished so feature commits never reach the default branch.
+   BASE_BRANCH="$(git symbolic-ref --quiet --short "refs/remotes/$PUSH_REMOTE/HEAD" 2>/dev/null | sed "s@^$PUSH_REMOTE/@@")"
+   if [ "$PUSH_BRANCH" = "refs/heads/${BASE_BRANCH:-main}" ] && [ "$BR" != "${BASE_BRANCH:-main}" ]; then PUSH_REMOTE=""; fi
    if [ -z "$PUSH_REMOTE" ] || [ "$PUSH_REMOTE" = "." ]; then
      UNPUSHED=""   # upstream is a local branch (or none) — no remote to assert against
    fi

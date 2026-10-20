@@ -108,10 +108,14 @@ This phase hands off to the **multi-reviewer wrapper** (under "Reviewer loop bod
   BR="$(git branch --show-current)"
   PUSH_REMOTE="$(git config --get "branch.$BR.remote")"
   PUSH_BRANCH="$(git config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
+  # Inherited base tracking (a worktree cut from origin/main auto-tracks it) is not a publication
+  # target: treat it as unpublished so feature commits never reach the default branch.
+  BASE_BRANCH="$(git symbolic-ref --quiet --short "refs/remotes/$PUSH_REMOTE/HEAD" 2>/dev/null | sed "s@^$PUSH_REMOTE/@@")"
+  if [ "$PUSH_BRANCH" = "refs/heads/${BASE_BRANCH:-main}" ] && [ "$BR" != "${BASE_BRANCH:-main}" ]; then PUSH_REMOTE=""; fi
   if [ -z "$PUSH_REMOTE" ] || [ "$PUSH_REMOTE" = "." ]; then
     # Upstream is a LOCAL branch (branch.<n>.remote=".", what `git branch
     # --set-upstream-to=main` produces) or absent — there is no remote to push to.
-    echo "REFUSING TO CREATE THE PR — '$BR' tracks a local ref, not a remote; publish it first (git push -u origin $BR)"
+    echo "REFUSING TO CREATE THE PR — '$BR' tracks a local ref or only the inherited base branch, not its own remote ref; publish it first (git push -u origin $BR)"
     exit 1
   fi
   git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"
