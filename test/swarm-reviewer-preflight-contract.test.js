@@ -26,6 +26,31 @@ test('availability requires one bounded realistic full-payload verdict, not a sm
   assert.match(preflight, /A prompt asking for no tools is not enforcement/);
 });
 
+test('preflight probes the reviewer recipe transport and never retires a reviewer for having read tools', () => {
+  assert.match(preflight, /that entry's own documented review-only transport from its recipe/);
+  assert.match(preflight, /`Read,Glob,Grep` invocation in \[local-agent-claude\.md\]\([^)]*\), not the `--tools ""` tool-free fallback/);
+  assert.match(preflight, /Use a zero-tool transport only when that is the entry's recipe[\s\S]*no restriction flags at all/);
+  assert.match(preflight, /having tools allowed is not `unavailable`/);
+  assert.match(preflight, /never substitute a stricter empty-tool probe/);
+  assert.match(preflight, /Tool-call markup from a stricter-than-recipe empty-tool probe is none of these/);
+  assert.match(preflight, /including tool-call markup the recipe transport itself printed in place of a verdict/);
+  assert.match(preflight, /Pi without its documented `--no-tools` flags stays unavailable/);
+  assert.match(preflight, /it is not an isolation boundary/);
+  // The old blanket rule must not return: lack of a tool-free/safe transport is not itself unavailability.
+  assert.doesNotMatch(preflight, /an unavailable safe transport means unavailable/);
+  assert.doesNotMatch(preflight, /enforce read-only\/tool-free controls/);
+  assert.doesNotMatch(preflight, /unsafe transport,/);
+  assert.match(read('local-agent-claude.md'), /--tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep"/);
+});
+
+test('unavailable is limited to the enumerated reasons', () => {
+  const reasons = preflight.split('`unavailable` is limited to:')[1].split('Each `unavailable` carries')[0];
+  for (const r of ['missing binary', 'cannot be driven headlessly', 'auth/quota/provider admission', 'input over the transport limit', 'timeout', 'completed run of the recipe transport']) {
+    assert.ok(reasons.includes(r), r);
+  }
+  assert.doesNotMatch(reasons, /read tools|tools allowed/);
+});
+
 test('OpenCode provider admission denial is unavailable and never a clean preflight', () => {
   assert.match(preflight, /synthetic admission response such as `HTTP 403 \/ FreeTierError` is specifically `unavailable`/);
   assert.match(preflight, /reason `provider admission denied`/);
@@ -38,6 +63,8 @@ test('optional preflight skips reach workers, both dispatch modes, recovery and 
   const worker = swarm.split('Give each subagent exactly one issue number')[1].split('### Swarm Phase C')[0];
   assert.match(worker, /Consume the supplied `REVIEWER_PREFLIGHT`/);
   assert.match(worker, /do not invoke or retry/);
+  assert.match(worker, /only to rows that failed for a step 3 `unavailable` reason/);
+  assert.match(worker, /do not add a second tool-free gate in the worker brief/);
   assert.match(worker, /return `opened-no-review`/);
   assert.match(swarm, /short-circuits both series and parallel dispatch/);
   assert.match(swarm, /Missing, mismatched or repo-supplied rows grant no skip/);
