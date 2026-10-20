@@ -16,7 +16,7 @@ elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_CMD=(gtimeout 1800); fi
 
 ### Snapshot
 
-Take this before the CLI runs. It captures the caller's entire pre-pass state as five artifacts, including staged, unstaged and untracked content, pre-existing dirty files, and git metadata. The artifacts are HEAD (`HEAD_BASELINE`), the index (`INDEX_TREE`), tracked worktree content (`SNAPSHOT`), untracked content (`UNTRACKED_TAR`), and git metadata (`GIT_META_BAK`, which holds `.git/config` plus hooks). Having all five is what lets the restore work wholesale instead of enumerating what a misbehaving CLI touched:
+Take this before the CLI runs. It captures the caller's entire pre-pass state as five artifacts, including staged, unstaged and untracked content, pre-existing dirty files, and git metadata. The artifacts are HEAD (`HEAD_BASELINE`), the index (`INDEX_TREE`), tracked worktree content (`SNAPSHOT`), untracked content (`UNTRACKED_TAR`), and git metadata (`GIT_META_BAK`, which holds a `.git/config` copy plus hooks). Having all five is what lets the restore work wholesale instead of enumerating what a misbehaving CLI touched:
 
 ```bash
 HEAD_BASELINE=$(git rev-parse HEAD)
@@ -39,18 +39,26 @@ UNTRACKED_BASELINE=$(untracked_manifest_hash) || {
 }
 MTIME_STAMP="$(mktemp -t cli-stamp.XXXXXX)"              # gitignored-file detection window
 # A planted hook or core.hooksPath/fsmonitor/pager/alias in .git/config runs on the next git command.
+# $GIT_COMMON is shared by every linked worktree, so OTHER agents legitimately write to its config
+# during the pass (a `git push -u` adds a [branch "x"] section). Fingerprint and restore only the
+# keys that can execute code or redirect where data goes; never the whole file.
 GIT_COMMON="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
 GIT_META_BAK="$(mktemp -d -t cli-gitmeta.XXXXXX)"
 cp -p "$GIT_COMMON/config" "$GIT_META_BAK/config"
 { tar -cf "$GIT_META_BAK/hooks.tar" -C "$GIT_COMMON" hooks 2>/dev/null; } || : > "$GIT_META_BAK/hooks.tar"
-git_meta_hash() {
+GIT_SEC_KEYS='^(core\.(hookspath|fsmonitor|pager|editor|sshcommand|askpass|gitproxy)|alias\..+|include\..+|includeif\..+|filter\..+|diff\..+\.textconv|credential\..+|remote\..+\.(url|pushurl)|url\..+\.(insteadof|pushinsteadof)|gpg\.(.+\.)?program|sequence\.editor)$'
+# `git config --file` reads only the named file, so no repo config (aliases, pager, fsmonitor) is consulted.
+git_sec_hash() {   # $1 = config file; git exit 1 means "no matching key", which is fine
+  (set -o pipefail; { git config --file "$1" --null --get-regexp "$GIT_SEC_KEYS"; [ $? -le 1 ]; } | sort -z | shasum -a 256)
+}
+git_hooks_hash() {
   if [ -d "$GIT_COMMON/hooks" ]; then
-    (set -o pipefail; tar -cf - -C "$GIT_COMMON" config hooks | shasum -a 256)
+    (set -o pipefail; tar -cf - -C "$GIT_COMMON" hooks | shasum -a 256)
   else
-    (set -o pipefail; tar -cf - -C "$GIT_COMMON" config | shasum -a 256)
+    echo "no-hooks-dir"
   fi
 }
-GIT_META_BASELINE=$(git_meta_hash) || {
+GIT_CFG_BASELINE=$(git_sec_hash "$GIT_COMMON/config") && GIT_HOOKS_BASELINE=$(git_hooks_hash) || {
   echo "cannot fingerprint git metadata" >&2
   exit 1
 }
@@ -108,29 +116,54 @@ if [ "$GIT_COMMON" = "/" ]; then
   echo "cannot restore git metadata: invalid saved common-dir path" >&2
   exit 1
 fi
-git_meta_hash() {
+GIT_SEC_KEYS='^(core\.(hookspath|fsmonitor|pager|editor|sshcommand|askpass|gitproxy)|alias\..+|include\..+|includeif\..+|filter\..+|diff\..+\.textconv|credential\..+|remote\..+\.(url|pushurl)|url\..+\.(insteadof|pushinsteadof)|gpg\.(.+\.)?program|sequence\.editor)$'   # identical to Snapshot
+git_sec_hash() {
+  (set -o pipefail; { git config --file "$1" --null --get-regexp "$GIT_SEC_KEYS"; [ $? -le 1 ]; } | sort -z | shasum -a 256)
+}
+git_hooks_hash() {
   if [ -d "$GIT_COMMON/hooks" ]; then
-    (set -o pipefail; tar -cf - -C "$GIT_COMMON" config hooks | shasum -a 256)
+    (set -o pipefail; tar -cf - -C "$GIT_COMMON" hooks | shasum -a 256)
   else
-    (set -o pipefail; tar -cf - -C "$GIT_COMMON" config | shasum -a 256)
+    echo "no-hooks-dir"
   fi
 }
-GIT_META_CURRENT=$(git_meta_hash) || {
+GIT_CFG_CURRENT=$(git_sec_hash "$GIT_COMMON/config") && GIT_HOOKS_CURRENT=$(git_hooks_hash) || {
   echo "cannot inspect git metadata; stop before running Git" >&2
   exit 1
 }
-if [ "$GIT_META_CURRENT" != "$GIT_META_BASELINE" ]; then
-  # Restore config and hooks before any Git command can consult attacker-edited settings.
-  cp -p "$GIT_META_BAK/config" "$GIT_COMMON/config" || exit 1
+if [ "$GIT_CFG_CURRENT" != "$GIT_CFG_BASELINE" ]; then
+  # Restore ONLY the security-relevant keys, before any Git command can consult them: drop every such
+  # key now in the live file, then re-add the snapshot's. Everything else (notably other agents'
+  # [branch "x"] sections) is concurrent activity and is left exactly as it is.
+  while IFS= read -r -d '' key; do
+    git config --file "$GIT_COMMON/config" --unset-all -- "$key" || [ $? -eq 5 ] || exit 1
+  done < <(git config --file "$GIT_COMMON/config" --null --name-only --get-regexp "$GIT_SEC_KEYS")
+  while IFS= read -r -d '' rec; do
+    case "$rec" in
+      *$'\n'*) git config --file "$GIT_COMMON/config" --add -- "${rec%%$'\n'*}" "${rec#*$'\n'}" || exit 1 ;;
+      *) echo "cannot restore valueless config key ${rec}; stop before running Git" >&2; exit 1 ;;
+    esac
+  done < <(git config --file "$GIT_META_BAK/config" --null --get-regexp "$GIT_SEC_KEYS")
+  GIT_CFG_CURRENT=$(git_sec_hash "$GIT_COMMON/config") || exit 1
+  if [ "$GIT_CFG_CURRENT" != "$GIT_CFG_BASELINE" ]; then
+    echo "git config restore failed; stop before running Git" >&2
+    exit 1
+  fi
+fi
+if [ "$GIT_HOOKS_CURRENT" != "$GIT_HOOKS_BASELINE" ]; then
   rm -rf "$GIT_COMMON/hooks" || exit 1
   if [ -s "$GIT_META_BAK/hooks.tar" ]; then
     tar -xpf "$GIT_META_BAK/hooks.tar" -C "$GIT_COMMON" || exit 1
   fi
-  GIT_META_CURRENT=$(git_meta_hash) || exit 1
-  if [ "$GIT_META_CURRENT" != "$GIT_META_BASELINE" ]; then
-    echo "git metadata restore failed; stop before running Git" >&2
+  GIT_HOOKS_CURRENT=$(git_hooks_hash) || exit 1
+  if [ "$GIT_HOOKS_CURRENT" != "$GIT_HOOKS_BASELINE" ]; then
+    echo "git hooks restore failed; stop before running Git" >&2
     exit 1
   fi
+fi
+# Informational only: other worktrees' branch.* (or any non-security) config writes during the pass.
+if [ "$(git config --file "$GIT_META_BAK/config" --list | sort)" != "$(git config --file "$GIT_COMMON/config" --list | sort)" ]; then
+  echo "note: non-security git config changed during the pass (likely a concurrent worktree); left untouched" >&2
 fi
 ```
 
@@ -152,7 +185,7 @@ untracked_manifest_hash                         # vs $UNTRACKED_BASELINE
 2. **Index**: `git read-tree "$INDEX_TREE"`.
 3. **Tracked worktree**: `git restore --source="${SNAPSHOT:-$HEAD_BASELINE}" --worktree -- .`.
 4. **Untracked**: run `git clean -fd -- .` to remove all non-ignored untracked content, then `tar -xpf "$UNTRACKED_TAR"` to restore the snapshot. This deletes and restores the entire untracked set without parsing filenames as newline-delimited text.
-5. Recompute all five comparisons, including `untracked_manifest_hash` and `git_meta_hash`. If the tree is not back at baseline, the restore **failed**. The caller must stop with a loud warning naming the log, and must never continue on top of that tree.
+5. Recompute all five comparisons, including `untracked_manifest_hash` and `git_sec_hash` and `git_hooks_hash`. If the tree is not back at baseline, the restore **failed**. The caller must stop with a loud warning naming the log, and must never continue on top of that tree.
 
 **Gitignored files are outside the snapshot/restore guarantee**, because hashing or tarring them has no size bound (`node_modules/`, build output). They still get a cheap check: `find . -path ./.git -prune -o -type f -newer "$MTIME_STAMP" -print` lists files modified during the pass. For any hit that git ignores (`git check-ignore`), such as `.env` or a local generated config, print a loud warning naming the file: `local CLI modified gitignored file {path} — not auto-restorable; inspect before committing/running`.
 

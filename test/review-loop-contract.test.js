@@ -435,7 +435,7 @@ describe('review-loop parse contracts', () => {
     assert.match(step4, /no-op \(modified the working tree — contract violation\)/);
     assert.match(step4, /\*\*If the restore failed\*\*, stop the\s+pipeline/);
     for (const [name, body] of [['enhance-loop.md', enhance], ['local-agent-review-loop.md', readLib('local-agent-review-loop.md')]]) {
-      assert.doesNotMatch(body, /git_meta_hash\(\) \{|UNTRACKED_TAR=|git stash create/, `${name} must not restate the runner's snapshot`);
+      assert.doesNotMatch(body, /git_sec_hash\(\) \{|UNTRACKED_TAR=|git stash create/, `${name} must not restate the runner's snapshot`);
     }
 
     const runner = readLib('local-cli-runner.md');
@@ -443,11 +443,14 @@ describe('review-loop parse contracts', () => {
     assert.match(snapshot, /GIT_COMMON="\$\(cd "\$\(git rev-parse --git-common-dir\)" && pwd -P\)"/);
     assert.match(snapshot, /cp -p "\$GIT_COMMON\/config" "\$GIT_META_BAK\/config"/);
     assert.match(snapshot, /tar -cf "\$GIT_META_BAK\/hooks\.tar" -C "\$GIT_COMMON" hooks/);
-    assert.match(snapshot, /git_meta_hash\(\) \{/);
-    assert.match(snapshot, /tar -cf - -C "\$GIT_COMMON" config hooks \| shasum -a 256/);
+    assert.match(snapshot, /git_sec_hash\(\) \{/);
+    assert.match(snapshot, /git_hooks_hash\(\) \{/);
+    assert.match(snapshot, /tar -cf - -C "\$GIT_COMMON" hooks \| shasum -a 256/);
+    assert.doesNotMatch(snapshot, /tar -cf - -C "\$GIT_COMMON" config/, 'the whole config file must not be fingerprinted (#447)');
     assert.match(snapshot, /git ls-files --others --exclude-standard -z \| tar --null -T - -cf - \| shasum -a 256/);
     assert.doesNotMatch(snapshot, /git ls-files --others --exclude-standard \| sort/);
-    assert.match(snapshot, /GIT_META_BASELINE=\$\(git_meta_hash\)/);
+    assert.match(snapshot, /GIT_CFG_BASELINE=\$\(git_sec_hash "\$GIT_COMMON\/config"\)/);
+    assert.match(snapshot, /GIT_HOOKS_BASELINE=\$\(git_hooks_hash\)/);
     assert.match(snapshot, /MTIME_STAMP=/);
 
     const restore = runner.slice(runner.indexOf('### Verify and restore'));
@@ -455,8 +458,10 @@ describe('review-loop parse contracts', () => {
     const metadataEnd = restore.indexOf('\n```', metadataStart);
     const metadataCode = restore.slice(metadataStart, metadataEnd);
     assert.doesNotMatch(metadataCode, /\bgit\s+(?:rev-parse|write-tree|diff|ls-files|hash-object|clean|restore|reset|read-tree)\b/);
-    assert.match(metadataCode, /GIT_META_CURRENT=\$\(git_meta_hash\)/);
-    assert.match(metadataCode, /cp -p "\$GIT_META_BAK\/config" "\$GIT_COMMON\/config"/);
+    assert.match(metadataCode, /GIT_CFG_CURRENT=\$\(git_sec_hash "\$GIT_COMMON\/config"\)/);
+    assert.match(metadataCode, /GIT_HOOKS_CURRENT=\$\(git_hooks_hash\)/);
+    assert.match(metadataCode, /--unset-all/);
+    assert.doesNotMatch(metadataCode, /cp -p "\$GIT_META_BAK\/config" "\$GIT_COMMON\/config"/, 'must not overwrite the shared config wholesale (#447)');
     assert.match(restore, /rm -rf "\$GIT_COMMON\/hooks"/);
     assert.match(restore, /tar -xpf "\$GIT_META_BAK\/hooks\.tar" -C "\$GIT_COMMON"/);
     assert.match(restore, /\[ ! -f "\$GIT_META_BAK\/hooks\.tar" \]/);
@@ -1155,7 +1160,7 @@ describe('review-loop parse contracts', () => {
 
     // Tar includes symlink targets and hook modes; the untracked manifest keeps
     // newline-containing paths and their contents intact through NUL separators.
-    assert.match(runner, /tar -cf - -C "\$GIT_COMMON" config hooks \| shasum -a 256/);
+    assert.match(runner, /tar -cf - -C "\$GIT_COMMON" hooks \| shasum -a 256/);
     assert.match(runner, /tar --null -T - -cf - \| shasum -a 256/);
 
     // The restore may run in another shell; missing saved paths fail closed, and
@@ -1245,8 +1250,8 @@ describe('review-loop parse contracts', () => {
 
     // The snapshot+revert that lets those reviewers run must cover .git/ too —
     // write-tree/stash/ls-files never see a planted hook or a core.hooksPath edit.
-    assert.match(runner, /GIT_META_BASELINE=\$\(git_meta_hash\)/);
-    assert.match(runner, /GIT_META_CURRENT=\$\(git_meta_hash\)/);
+    assert.match(runner, /GIT_CFG_BASELINE=\$\(git_sec_hash/);
+    assert.match(runner, /GIT_CFG_CURRENT=\$\(git_sec_hash/);
     assert.match(runner, /untracked_manifest_hash\s+# vs \$UNTRACKED_BASELINE/);
     // ...and parallel mode, which runs only Step 2 per reviewer, must take that
     // snapshot once before the fan-out and compare once after the barrier.
