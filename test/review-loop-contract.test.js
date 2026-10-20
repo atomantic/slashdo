@@ -1074,8 +1074,8 @@ describe('review-loop parse contracts', () => {
     assert.match(loop, /Never retry by changing the pinned model, removing `--pure`, granting tools/);
     assert.match(wrapper, /OpenCode's sanitized provider-admission diagnostic is one of these `no-verdict` outcomes/);
     assert.match(wrapper, /optionality only removes its merge-blocking effect/);
-    assert.match(swarm, /synthetic admission response such as `HTTP 403 \/ FreeTierError` is specifically `unavailable`/);
-    assert.match(swarm, /never classify it as a clean verdict/);
+    // The swarm preflight makes no model call, so admission is classified by the worker's real review (above).
+    assert.match(swarm, /provider admission \(OpenCode `HTTP 403 \/ FreeTierError`\)[\s\S]*deliberately not checked here/);
     assert.doesNotMatch(loop, /FreeTierError[\s\S]{0,240}STATUS=clean/);
   });
 
