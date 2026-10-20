@@ -20,10 +20,12 @@ The subprocess path below applies outside Claude Code and whenever the in-proces
 
 Expose only `Read,Glob,Grep`, auto-allow those same tools, disable MCP, hooks and Chrome, and supply the complete orchestrator-computed diff through the stdin transport below. No shell tool: even an apparently read-only `git diff` can execute a configured external diff helper. `--tools` restricts availability; an allowlist alone does not remove other tools. For the tool-free fallback set both tool lists to `""` and include the needed source context in the same stdin payload.
 
+**Structured verdict.** A prompt alone does not stop a long review from ending in a summary that mixes prose with its findings, which the strict parser then (correctly) rejects as `no-verdict`. The subprocess path therefore asks the CLI for schema-validated output: `--output-format json --json-schema "$CLAUDE_VERDICT_SCHEMA"` (the schema is defined in the stdin-transport block below) returns a `structured_output` object with no surrounding prose, and Step 3 converts it to the text verdict contract before the parser runs. Before the first subprocess pass, confirm `claude --help` lists `--json-schema` and `command -v jq` succeeds (the conversion needs it); if either fails, record `STATUS=no-verdict` without launching, with remedy `update the claude CLI` or `install jq`. The in-process path has no schema control and relies on the prompt's closing output-contract reminder.
+
 **Subprocess invocation** (`{INVOCATION}`; reviewer-applies is never selected — the orchestrator applies findings):
 
 ```bash
-claude -p --input-format text ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"} --permission-mode plan --tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --settings '{"disableAllHooks":true}' --no-chrome --no-session-persistence < "$CLAUDE_REVIEW_INPUT"
+claude -p --input-format text --output-format json --json-schema "$CLAUDE_VERDICT_SCHEMA" ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"} --permission-mode plan --tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --settings '{"disableAllHooks":true}' --no-chrome --no-session-persistence < "$CLAUDE_REVIEW_INPUT"
 ```
 
 #### Claude stdin transport
@@ -33,6 +35,8 @@ The no-shell profile cannot reconstruct a Git patch itself. Use Claude's documen
 Before **each subprocess invocation**, after constructing the full payload, run this block in the invocation's shell. It accepts at most **8 MiB (8,388,608 bytes)** — a transport safety bound, not a promise about model context. A missing/empty payload, failed write/count, or larger input is `STATUS=no-verdict`; return to the caller without launching. Required reviewers remain unsatisfied; `~opt` only excuses inconclusive results, never turns them into clean reviews. If a verified CLI/provider has a smaller input limit, enforce that too; never silently accept incomplete coverage.
 
 ```bash
+# The verdict schema for --json-schema: either a clean verdict with no findings, or one or more complete findings.
+CLAUDE_VERDICT_SCHEMA='{"type":"object","additionalProperties":false,"required":["verdict","findings"],"properties":{"verdict":{"type":"string","enum":["NO FINDINGS","FINDINGS"]},"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["file","line","severity","description","fix"],"properties":{"file":{"type":"string","minLength":1},"line":{"type":"integer","minimum":1},"severity":{"type":"string","enum":["CRITICAL","IMPROVEMENT","NIT"]},"description":{"type":"string","minLength":1},"fix":{"type":"string","minLength":1}}}}}}'
 prepare_claude_review_input() {
   CLAUDE_REVIEW_INPUT="$(mktemp -t slashdo-claude-review.XXXXXX)" || return 1
   if ! printf '%s' "${LOCAL_PROMPT:-}" > "$CLAUDE_REVIEW_INPUT" ||
@@ -62,3 +66,35 @@ fi
 ```
 
 Preserve `EXIT_CODE`; cleanup success is not reviewer success. Use this same cleanup if launch is abandoned after preparation, and only after terminating/reaping the reviewer if the host cancels the pass.
+
+**Claude structured verdict** — Step 3 recipe rule for the subprocess path, after the runner's Verify and restore and before the strict verdict parser. Only a CLI JSON result (an object with `"type": "result"`) is converted; the in-process path writes the text verdict itself, and anything else that is not CLI JSON is left for the strict parser, which rejects it. Convert its `structured_output` into the text contract and point `LOG_FILE` at that file; an error result, a missing or schema-invalid object, or a contradictory verdict (`NO FINDINGS` with findings, `FINDINGS` with none) is `STATUS=no-verdict`, never `clean`. Keep the raw JSON log for the report:
+
+```bash
+claude_structured_verdict() {   # $1 = the CLI's JSON result; prints the text verdict contract, or fails
+  jq -er '
+    if type == "object" and .is_error == false and (.structured_output | type) == "object"
+    then .structured_output else error("no structured output") end
+    | if .verdict == "NO FINDINGS" and .findings == [] then "NO FINDINGS"
+      elif .verdict == "FINDINGS" and (.findings | type) == "array" and (.findings | length) > 0 then
+        [ .findings | to_entries[] | .key as $i | .value
+          | if (.file | type) == "string" and (.file | length) > 0
+               and (.line | type) == "number" and .line >= 1 and (.line | floor) == .line
+               and (.severity | IN("CRITICAL", "IMPROVEMENT", "NIT"))
+               and (.description | type) == "string" and (.description | length) > 0
+               and (.fix | type) == "string" and (.fix | length) > 0
+            then "FINDING \($i + 1):\nfile: \(.file | gsub("[\r\n]+"; " "))\nline: \(.line)\nseverity: \(.severity)\ndescription: \(.description | gsub("[\r\n]+"; " "))\nfix: \(.fix)"
+            else error("malformed finding") end ]
+        | join("\n\n")
+      else error("contradictory verdict") end' "$1"
+}
+if [ "$REVIEW_AGENT" = claude ] && command -v jq >/dev/null 2>&1 &&
+   jq -e 'type == "object" and .type == "result"' "$LOG_FILE" >/dev/null 2>&1; then
+  if CLAUDE_VERDICT_TEXT="$(claude_structured_verdict "$LOG_FILE" 2>/dev/null)"; then
+    printf '%s\n' "$CLAUDE_VERDICT_TEXT" > "$LOG_FILE.verdict" && LOG_FILE="$LOG_FILE.verdict"
+  else
+    STATUS=no-verdict
+    REVIEW_DIAGNOSTIC="Claude returned no schema-valid structured verdict."
+    REVIEW_REMEDY="Re-run the pass; if it repeats, confirm the installed claude CLI supports --json-schema."
+  fi
+fi
+```
