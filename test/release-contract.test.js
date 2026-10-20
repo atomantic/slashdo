@@ -92,7 +92,7 @@ describe('/do:release remote promotion contracts', () => {
     assert.match(body, /\.isDraft == false/);
     assert.match(body, /\.isPrerelease == false/);
     assert.match(body, /incomplete "GitHub Release" "no published release was found after the bounded wait\."/);
-    assert.match(body, /incomplete\(\) \{\n {2}echo "INCOMPLETE — \$1 is unverified; \$2 Preserve the prepared release state and retry\."/);
+    assert.match(body, /incomplete\(\) \{\n {2}printf 'INCOMPLETE — %s is unverified; %s Preserve the prepared release state and retry\.\\n' "\$@"/);
   });
 
   it('deduplicates repeated checkpoint logic into shared shell helpers', () => {

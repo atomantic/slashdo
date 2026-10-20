@@ -123,7 +123,7 @@ Build the in-flight set:
 git fetch --prune 2>/dev/null
 IN_FLIGHT_REFS="$(git branch -a --no-color --format='%(refname:short)'; open_refs 2>/dev/null || true)"
 # in_flight <ID>: some ref has a `/`-segment that is exactly `issue-<ID>` (ID = issue number or Jira key)
-in_flight() { printf '%s\n' "$IN_FLIGHT_REFS" | tr '/' '\n' | awk -v id="$1" 'substr($0, 1, 6) == "issue-" && toupper(substr($0, 7)) == toupper(id) { hit = 1 } END { exit !hit }'; }
+in_flight() { printf '%s\n' "$IN_FLIGHT_REFS" | tr '/' '\n' | grep -qixF -- "issue-$*"; }
 ```
 
 Every ref's `/`-segments are the raw in-flight set, and `in_flight <ID>` is an exact segment match (a Jira project compares case-insensitively): `issue-12` never matches `feature/12` or `issue-123`, and `issue-PROJ-12` never matches `PROJ-123`. Shell state does not persist, so call it in the same Bash call that built `IN_FLIGHT_REFS`.
@@ -284,8 +284,8 @@ if ! git push --force-with-lease="refs/heads/next/${SLUG}:" -u origin "next/${SL
     echo "Claim push failed and no remote ref was published; preserving $WORKTREE for recovery."
     exit 1
   elif [ "$CLAIM_REMOTE_COUNT" -eq 1 ]; then
-    CLAIM_REMOTE_SHA="$(printf '%s\n' "$CLAIM_REMOTE_OUTPUT" | awk 'NF { print $1; exit }')"
-    CLAIM_REMOTE_REF="$(printf '%s\n' "$CLAIM_REMOTE_OUTPUT" | awk 'NF { print $2; exit }')"
+    CLAIM_REMOTE_SHA="$(printf '%s\n' "$CLAIM_REMOTE_OUTPUT" | grep . | head -n1 | cut -f1)"
+    CLAIM_REMOTE_REF="$(printf '%s\n' "$CLAIM_REMOTE_OUTPUT" | grep . | head -n1 | cut -f2)"
     if ! printf '%s\n' "$CLAIM_REMOTE_SHA" | grep -Eq '^[0-9a-f]{40}$' || [ "$CLAIM_REMOTE_REF" != "refs/heads/next/${SLUG}" ]; then
       echo "Claim push failed and remote returned an invalid ref; preserving $WORKTREE for recovery."
       exit 1

@@ -67,6 +67,11 @@ echo "LINKED_WORKTREE=$LINKED_WORKTREE"
 BR="$({GIT} branch --show-current)"
 UP_REMOTE="$({GIT} config --get "branch.$BR.remote")"
 UP_REF="$({GIT} config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
+# Inherited base tracking (a worktree cut from origin/main auto-tracks it) is not a publication
+# target: treat it as unpublished so feature commits never reach the default branch.
+BASE_BRANCH="$({GIT} symbolic-ref --quiet --short "refs/remotes/$UP_REMOTE/HEAD" 2>/dev/null | sed "s@^$UP_REMOTE/@@")"
+[ -n "$BASE_BRANCH" ] || BASE_BRANCH="$({GIT} remote show "$UP_REMOTE" 2>/dev/null | sed -n '/HEAD branch: (unknown)$/d; s/.*HEAD branch: //p')"
+if { [ "$UP_REF" = "refs/heads/${BASE_BRANCH:-main}" ] || { [ -z "$BASE_BRANCH" ] && [ "$UP_REF" = refs/heads/master ]; }; } && [ "$BR" != "${UP_REF#refs/heads/}" ]; then UP_REMOTE=""; fi
 if [ -z "$UP_REMOTE" ] || [ "$UP_REMOTE" = "." ] || [ -z "$UP_REF" ]; then
   echo "No remote upstream for '$BR' — not merging PR {PR}"; exit 1
 fi
@@ -98,6 +103,9 @@ GitLab has no separate list of required checks. The project's pipeline-must-succ
 BR="$({GIT} branch --show-current)"
 UP_REMOTE="$({GIT} config --get "branch.$BR.remote")"
 UP_REF="$({GIT} config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
+BASE_BRANCH="$({GIT} symbolic-ref --quiet --short "refs/remotes/$UP_REMOTE/HEAD" 2>/dev/null | sed "s@^$UP_REMOTE/@@")"
+[ -n "$BASE_BRANCH" ] || BASE_BRANCH="$({GIT} remote show "$UP_REMOTE" 2>/dev/null | sed -n '/HEAD branch: (unknown)$/d; s/.*HEAD branch: //p')"
+if { [ "$UP_REF" = "refs/heads/${BASE_BRANCH:-main}" ] || { [ -z "$BASE_BRANCH" ] && [ "$UP_REF" = refs/heads/master ]; }; } && [ "$BR" != "${UP_REF#refs/heads/}" ]; then UP_REMOTE=""; fi
 if [ -z "$UP_REMOTE" ] || [ "$UP_REMOTE" = "." ] || [ -z "$UP_REF" ]; then
   echo "No remote upstream for '$BR' — not merging MR {PR}"; exit 1
 fi
@@ -122,6 +130,11 @@ if [ "$(gh pr view {PR} --json state -q .state)" = "MERGED" ]; then
   BR="$({GIT} branch --show-current)"
   DEL_REMOTE="$({GIT} config --get "branch.$BR.remote")"
   DEL_REF="$({GIT} config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
+  # Inherited base tracking (a worktree cut from origin/main auto-tracks it) is not a publication
+  # target: treat it as unpublished so feature commits never reach the default branch.
+  BASE_BRANCH="$({GIT} symbolic-ref --quiet --short "refs/remotes/$DEL_REMOTE/HEAD" 2>/dev/null | sed "s@^$DEL_REMOTE/@@")"
+  [ -n "$BASE_BRANCH" ] || BASE_BRANCH="$({GIT} remote show "$DEL_REMOTE" 2>/dev/null | sed -n '/HEAD branch: (unknown)$/d; s/.*HEAD branch: //p')"
+  if { [ "$DEL_REF" = "refs/heads/${BASE_BRANCH:-main}" ] || { [ -z "$BASE_BRANCH" ] && [ "$DEL_REF" = refs/heads/master ]; }; } && [ "$BR" != "${DEL_REF#refs/heads/}" ]; then DEL_REMOTE=""; fi
   # $DEL_REF must be non-empty too: `git push --delete ""` fails, and
   # `ls-remote --heads <remote> ""` returns 2, so an empty ref would report
   # the benign "already gone" for a delete that never ran.

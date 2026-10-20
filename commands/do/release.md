@@ -120,11 +120,11 @@ Before determining a new version, look for an existing release-preparation commi
 
 ```bash
 incomplete() {
-  echo "INCOMPLETE — $1 is unverified; $2 Preserve the prepared release state and retry."
+  printf 'INCOMPLETE — %s is unverified; %s Preserve the prepared release state and retry.\n' "$@"
   exit 1
 }
 prepared_release_sha() {
-  git log --format='%H%x09%s' "$1" | awk -F '\t' '$2 ~ /^chore: release v[0-9]+\.[0-9]+\.[0-9]+$/ { print; exit }'
+  git log --format='%H%x09%s' "$@" | grep -m1 -E "$(printf '\t')"'chore: release v[0-9]+\.[0-9]+\.[0-9]+$'
 }
 
 case "{publishes_github_release}" in
@@ -143,12 +143,12 @@ PREPARED_RELEASE="$(prepared_release_sha "origin/{target}..HEAD")"
 TARGET_PREPARED_RELEASE="$(prepared_release_sha "origin/{target}")"
 if [ -z "$PREPARED_RELEASE" ] && [ -n "$TARGET_PREPARED_RELEASE" ]; then
   TARGET_VERSION="$(printf '%s\n' "$TARGET_PREPARED_RELEASE" | sed -E 's/.*release v//')"
-  TARGET_TAG="$(git ls-remote origin "refs/tags/v${TARGET_VERSION}^{}" | awk 'NF { print $1; exit }')"
+  TARGET_TAG="$(git ls-remote origin "refs/tags/v${TARGET_VERSION}^{}" | head -n1 | cut -f1)"
   if ! printf '%s\n' "$TARGET_TAG" | grep -Eq '^[0-9a-f]{40}$'; then
-    TARGET_TAG="$(git ls-remote origin "refs/tags/v${TARGET_VERSION}" | awk 'NF { print $1; exit }')"
+    TARGET_TAG="$(git ls-remote origin "refs/tags/v${TARGET_VERSION}" | head -n1 | cut -f1)"
   fi
   if [ "$CLI_TOOL" = gh ]; then
-    TARGET_RELEASE_STATUS="$(gh api --include --hostname "{GH_HOST}" "repos/{owner}/{repo}/releases/tags/v${TARGET_VERSION}" 2>/dev/null | awk '$1 ~ /^HTTP\// { print $2; exit }' || true)"
+    TARGET_RELEASE_STATUS="$(gh api --include --hostname "{GH_HOST}" "repos/{owner}/{repo}/releases/tags/v${TARGET_VERSION}" 2>/dev/null | sed -n 's|^HTTP/[^ ]* \([0-9]*\).*|\1|p' | head -n1 || true)"
     case "$TARGET_RELEASE_STATUS" in
       200)
         TARGET_RELEASE_JSON="$(gh release view "v${TARGET_VERSION}" --json isDraft,isPrerelease,publishedAt 2>/dev/null)" || incomplete "Prepared release state" "GitHub Release metadata could not be read."
@@ -307,7 +307,7 @@ Skip this section when `TARGET_RECOVERY=true`. Before the first push of the prep
 
 ```bash
 incomplete() {
-  echo "INCOMPLETE — $1 is unverified; $2 Preserve the prepared release state and retry."
+  printf 'INCOMPLETE — %s is unverified; %s Preserve the prepared release state and retry.\n' "$@"
   exit 1
 }
 if [ "$CLI_TOOL" = gh ]; then
@@ -371,11 +371,11 @@ Continue with Checkpoint 3 and the post-merge verification blocks below.
   push is verified once, then reused to query or create the PR:
   ```bash
   incomplete() {
-    echo "INCOMPLETE — $1 is unverified; $2 Preserve the prepared release state and retry."
+    printf 'INCOMPLETE — %s is unverified; %s Preserve the prepared release state and retry.\n' "$@"
     exit 1
   }
   prepared_release_sha() {
-    git log --format='%H%x09%s' "$1" | awk -F '\t' '$2 ~ /^chore: release v[0-9]+\.[0-9]+\.[0-9]+$/ { print; exit }'
+    git log --format='%H%x09%s' "$@" | grep -m1 -E "$(printf '\t')"'chore: release v[0-9]+\.[0-9]+\.[0-9]+$'
   }
 
   # A gated {source} already received the preparation through its admission PR; never push to it directly.
@@ -385,7 +385,7 @@ Continue with Checkpoint 3 and the post-merge verification blocks below.
   if ! printf '%s\n' "$PREPARED_RELEASE_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
     incomplete "Prepared release state" "the release preparation commit could not be identified."
   fi
-  REMOTE_SOURCE_SHA="$(git ls-remote --heads origin "refs/heads/{source}" | awk 'NF { print $1; exit }')"
+  REMOTE_SOURCE_SHA="$(git ls-remote --heads origin "refs/heads/{source}" | head -n1 | cut -f1)"
   if ! printf '%s\n' "$REMOTE_SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$' || [ "$REMOTE_SOURCE_SHA" != "$SOURCE_SHA" ]; then
     incomplete "Source push" "expected $SOURCE_SHA, got ${REMOTE_SOURCE_SHA:-empty}."
   fi
@@ -552,14 +552,14 @@ that already succeeded remotely. Otherwise:
    timeout of at least 600 seconds:
    ```bash
    incomplete() {
-     echo "INCOMPLETE — $1 is unverified; $2 Preserve the prepared release state and retry."
+     printf 'INCOMPLETE — %s is unverified; %s Preserve the prepared release state and retry.\n' "$@"
      exit 1
    }
    remote_tag_commit() {
      local sha
-     sha="$(git ls-remote origin "refs/tags/v{version}^{}" | awk 'NF { print $1; exit }')"
+     sha="$(git ls-remote origin "refs/tags/v{version}^{}" | head -n1 | cut -f1)"
      if ! printf '%s\n' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
-       sha="$(git ls-remote origin "refs/tags/v{version}" | awk 'NF { print $1; exit }')"
+       sha="$(git ls-remote origin "refs/tags/v{version}" | head -n1 | cut -f1)"
      fi
      printf '%s\n' "$sha"
    }
@@ -577,7 +577,7 @@ that already succeeded remotely. Otherwise:
      fi
    }
    release_is_published() {
-     printf '%s\n' "$1" | jq -e \
+     printf '%s\n' "$*" | jq -e \
        'type == "object" and .tagName == "v{version}" and .isDraft == false and .isPrerelease == false and (.publishedAt | type == "string") and (.publishedAt | length > 0)' >/dev/null 2>&1
    }
 

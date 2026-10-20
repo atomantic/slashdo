@@ -26,6 +26,8 @@ function bashBlockAfter(marker) {
 }
 
 const preparation = bashBlockAfter('#### Claude stdin transport');
+const structured = bashBlockAfter('**Claude structured verdict**');
+const schema = preparation.match(/^CLAUDE_VERDICT_SCHEMA='([^']*)'$/m)[1];
 const cleanup = bashBlockAfter('**Claude input cleanup**');
 const invocation = bashBlockAfter('**Subprocess invocation**');
 assert.doesNotMatch(invocation, /\n/, 'the invocation must be a single command line');
@@ -141,7 +143,8 @@ describe('Claude review stdin transport', () => {
       assert.equal(result.stderr, 'fixture CLI progress\n');
       assert.ok(result.argv.every(arg => Buffer.byteLength(arg) < 1024));
       assert.deepEqual(result.argv, [
-        '-p', '--input-format', 'text', '--model', 'pinned-model', '--effort', 'high',
+        '-p', '--input-format', 'text', '--output-format', 'json', '--json-schema', schema,
+        '--model', 'pinned-model', '--effort', 'high',
         '--permission-mode', 'plan', '--tools', 'Read,Glob,Grep', '--allowedTools', 'Read,Glob,Grep',
         '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
         '--settings', '{"disableAllHooks":true}', '--no-chrome', '--no-session-persistence',
@@ -205,5 +208,81 @@ describe('Claude review stdin transport', () => {
       assert.match(renderedCore, /resolved base\/head commit IDs and the complete changed-file scope/);
       assert.match(renderedCore, /Rebuild this payload from the current review target on every iteration/);
     }
+  });
+});
+
+// Run the shipped Step 3 conversion against a CLI JSON result; returns { status, verdict }.
+function convert(result) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude structured '));
+  try {
+    const log = path.join(root, 'review.log');
+    fs.writeFileSync(log, typeof result === 'string' ? result : JSON.stringify(result));
+    const run = spawnSync('bash', ['-c', `REVIEW_AGENT=claude; STATUS=""; LOG_FILE="$1"
+${structured}
+printf '%s\\n' "\${STATUS:-converted}"; [ -z "$STATUS" ] && cat "$LOG_FILE"`, 'convert', log], { encoding: 'utf8', timeout: 15000 });
+    assert.ifError(run.error);
+    const [status, ...rest] = run.stdout.split('\n');
+    return { status, verdict: rest.join('\n'), stderr: run.stderr };
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+const ok = output => ({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(output), structured_output: output });
+const finding = { file: 'src/a.js', line: 3, severity: 'CRITICAL', description: 'Reads past\nthe end.', fix: 'Use arr.length - 1.' };
+
+describe('Claude structured verdict', () => {
+  it('requests schema-validated JSON output in the subprocess invocation', () => {
+    assert.match(invocation, /--output-format json --json-schema "\$CLAUDE_VERDICT_SCHEMA"/);
+    const parsed = JSON.parse(schema);
+    assert.deepEqual(parsed.properties.verdict.enum, ['NO FINDINGS', 'FINDINGS']);
+    assert.deepEqual(parsed.properties.findings.items.properties.severity.enum, ['CRITICAL', 'IMPROVEMENT', 'NIT']);
+    assert.ok(Buffer.byteLength(schema) < 1024);
+    assert.match(source, /confirm `claude --help` lists `--json-schema`/);
+  });
+
+  it('converts a clean verdict and findings into the strict text contract', () => {
+    assert.deepEqual(convert(ok({ verdict: 'NO FINDINGS', findings: [] })), { status: 'converted', verdict: 'NO FINDINGS\n', stderr: '' });
+    const two = convert(ok({ verdict: 'FINDINGS', findings: [finding, { ...finding, line: 9, severity: 'NIT' }] }));
+    assert.equal(two.status, 'converted');
+    assert.equal(two.verdict, 'FINDING 1:\nfile: src/a.js\nline: 3\nseverity: CRITICAL\ndescription: Reads past the end.\nfix: Use arr.length - 1.\n\nFINDING 2:\nfile: src/a.js\nline: 9\nseverity: NIT\ndescription: Reads past the end.\nfix: Use arr.length - 1.\n');
+  });
+
+  it('collapses a multi-line fix so every converted block stays complete', () => {
+    const r = convert(ok({ verdict: 'FINDINGS', findings: [{ ...finding, fix: 'Replace with:\n  const x = arr[arr.length - 1];\r\n' }] }));
+    assert.equal(r.status, 'converted');
+    assert.match(r.verdict, /\nfix: Replace with: +const x = arr\[arr\.length - 1\]; *\n$/);
+    assert.equal(r.verdict.trim().split('\n').length, 6);
+  });
+
+  it('fails closed to no-verdict, never clean, on errors, prose, and contradictions', () => {
+    const bad = [
+      { type: 'result', subtype: 'error_max_turns', is_error: true },
+      { type: 'result', is_error: false, result: 'NO FINDINGS' },
+      ok({ verdict: 'NO FINDINGS', findings: [finding] }),
+      ok({ verdict: 'FINDINGS', findings: [] }),
+      ok({ verdict: 'FINDINGS', findings: [{ ...finding, severity: 'MAJOR' }] }),
+      ok({ verdict: 'FINDINGS', findings: [{ ...finding, line: 0 }] }),
+      ok({ verdict: 'FINDINGS', findings: [{ ...finding, fix: '' }] }),
+    ];
+    for (const result of bad) assert.equal(convert(result).status, 'no-verdict', JSON.stringify(result));
+  });
+
+  it('leaves a non-JSON log (the in-process text verdict, or prose) untouched for the strict parser', () => {
+    for (const text of ['NO FINDINGS', 'FINDING 1:\nfile: a.js\nline: 1\nseverity: NIT\ndescription: d\nfix: f', 'I reviewed the diff and it looks fine. NO FINDINGS']) {
+      assert.deepEqual(convert(text), { status: 'converted', verdict: text, stderr: '' });
+    }
+    assert.match(source, /`command -v jq` succeeds/);
+    assert.match(core, /after stripping blank lines, the result must be either exactly `NO FINDINGS`/);
+  });
+
+  it('LOCAL_PROMPT review-only branch forbids prose around the verdict', () => {
+    const reviewOnly = core.slice(core.indexOf('REVIEW-ONLY MODE'), core.indexOf('# codex exec prompt for REVIEWER_APPLIES=true'));
+    assert.match(reviewOnly, /Your entire output must be only the FINDING blocks or the single line NO FINDINGS — no preamble, progress notes, status lines, or summary/);
+  });
+
+  it('repeats the output contract after the diff for every prompt-driven reviewer', () => {
+    assert.match(core, /End the payload with the output contract again, after the diff/);
+    assert.match(core, /OUTPUT CONTRACT: your final message must contain ONLY the line NO FINDINGS or complete FINDING <N>: blocks/);
+    assert.match(core, /claude: its subprocess structured verdict is converted to the text contract here/);
   });
 });
