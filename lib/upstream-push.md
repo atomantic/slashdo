@@ -9,7 +9,7 @@ PUSH_BRANCH="$(git config --get "branch.$BR.merge")"   # already a full refs/hea
 # Inherited base tracking (a worktree cut from origin/main auto-tracks it) is not a publication
 # target: treat it as unpublished so feature commits never reach the default branch.
 BASE_BRANCH="$(git symbolic-ref --quiet --short "refs/remotes/$PUSH_REMOTE/HEAD" 2>/dev/null | sed "s@^$PUSH_REMOTE/@@")"
-[ -n "$BASE_BRANCH" ] || BASE_BRANCH="$(git remote show "$PUSH_REMOTE" 2>/dev/null | sed -n 's/.*HEAD branch: //p')"
+[ -n "$BASE_BRANCH" ] || BASE_BRANCH="$(git remote show "$PUSH_REMOTE" 2>/dev/null | sed -n '/HEAD branch: (unknown)$/d; s/.*HEAD branch: //p')"
 if { [ "$PUSH_BRANCH" = "refs/heads/${BASE_BRANCH:-main}" ] || { [ -z "$BASE_BRANCH" ] && [ "$PUSH_BRANCH" = refs/heads/master ]; }; } && [ "$BR" != "${PUSH_BRANCH#refs/heads/}" ]; then PUSH_REMOTE=""; fi
 ```
 

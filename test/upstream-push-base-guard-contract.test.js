@@ -96,3 +96,25 @@ test('the merge gate guards both the GitHub and GitLab wait-mode pushes', () => 
   const guards = gate.match(/then UP_REMOTE=""; fi/g) || [];
   assert.equal(guards.length, 2);
 });
+
+test('an unresolvable remote HEAD ("HEAD branch: (unknown)") still clears inherited default-branch tracking', () => {
+  const { dir, bare, main } = fixture();
+  try {
+    git(bare, 'symbolic-ref', 'HEAD', 'refs/heads/does-not-exist');
+    git(main, 'remote', 'set-head', 'origin', '-d');
+    assert.match(git(main, 'remote', 'show', 'origin'), /HEAD branch: \(unknown\)/, 'precondition: git prints the placeholder');
+    const wt = path.join(dir, 'feature');
+    git(main, 'worktree', 'add', '-q', '-b', 'feature', wt, 'origin/main');
+    assert.match(resolve(wt), /^\|/, 'PUSH_REMOTE must be cleared, not compared against "(unknown)"');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('every inherited-base guard site discards the "(unknown)" placeholder', () => {
+  for (const f of ['commands/do/pr.md', 'commands/do/push.md', 'lib/merge-gate.md', 'lib/upstream-push.md', 'lib/multi-reviewer-loop.md', 'lib/review-fix-tail.md']) {
+    const lines = read(f).split('\n').filter(l => l.includes('BASE_BRANCH="$(') && l.includes('remote show'));
+    assert.ok(lines.length > 0, f);
+    for (const l of lines) assert.match(l, /\/HEAD branch: \(unknown\)\$\/d;/, f);
+  }
+});
