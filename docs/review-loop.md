@@ -8,7 +8,8 @@ This is the implementation detail behind the [Review loop](../README.md#review-l
 
 | Reviewer | Flag |
 |:---|:---|
-| `claude` / `grok` | `--effort <level>` |
+| `claude` | `--effort <level>` |
+| `grok` | `--reasoning-effort <level>` — Grok tops out at `xhigh`, so `max` is clamped to `xhigh` |
 | `codex` | `-c model_reasoning_effort=<level>` |
 | `opencode` | `--variant <level>` |
 | `pi` | `--thinking <level>` |
