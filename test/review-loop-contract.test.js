@@ -1335,11 +1335,11 @@ describe('review-loop parse contracts', () => {
     // Step 3 only the stream's final result, and an unusable stream must parse empty.
     const post = runner.match(/```bash\n(if \[ "\$REVIEW_AGENT" = grok \]; then\n[\s\S]*?)```/)[1];
     const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'grok-verdict-'));
-    const verdictOf = (stream) => {
+    const verdictOf = (stream, exitCode = '0') => {
       const log = path.join(tmp, `s${Math.random().toString(36).slice(2)}.log`);
       fs.writeFileSync(log, stream);
       return execFileSync('bash', ['-c', `${post}\nprintf '%s|%s|' "$REPORT_LOG_FILE" "$LOG_FILE"; cat "$LOG_FILE"`], {
-        env: { ...process.env, REVIEW_AGENT: 'grok', LOG_FILE: log, GROK_REVIEW_INPUT: '' },
+        env: { ...process.env, REVIEW_AGENT: 'grok', LOG_FILE: log, GROK_REVIEW_INPUT: '', EXIT_CODE: exitCode },
         encoding: 'utf8',
       }).split('|');
     };
@@ -1357,6 +1357,12 @@ describe('review-loop parse contracts', () => {
       assert.notEqual(reported, verdictLog, 'the raw stream stays the reported log');
       assert.equal(verdictOf('not json\n')[2], '');
       assert.equal(verdictOf(JSON.stringify({ type: 'result', subtype: 'error_max_turns', result: 'NO FINDINGS' }))[2], '');
+      // A failed launch keeps the raw stream as LOG_FILE so the cli-error dump shows grok's stdout error.
+      const failed = verdictOf('{"type":"error","message":"boom"}', '1');
+      assert.doesNotMatch(failed[1], /\.verdict\.log$/);
+      assert.match(failed[2], /boom/);
+      // Parallel mode must run the same per-reviewer pre/post-launch steps.
+      assert.match(readLib('multi-reviewer-parallel.md'), /grok: its prompt file and verdict extraction/);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
