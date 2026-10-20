@@ -99,7 +99,7 @@ severity: CRITICAL|IMPROVEMENT|NIT
 description: <one-sentence problem statement>
 fix: <concrete code change — quote the exact replacement when possible>
 
-If no findings are warranted, print exactly the line 'NO FINDINGS' and exit cleanly. The orchestrator will parse this output and apply any fixes itself."
+If no findings are warranted, print exactly the line 'NO FINDINGS' and exit cleanly. Your entire output must be only the FINDING blocks or the single line NO FINDINGS — no preamble, progress notes, status lines, or summary before, between, or after them; the orchestrator's strict parser rejects any other text and discards the whole review. The orchestrator will parse this output and apply any fixes itself."
 fi
 
 # codex exec prompt for REVIEWER_APPLIES=true.
