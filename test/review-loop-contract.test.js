@@ -295,7 +295,8 @@ describe('review-loop parse contracts', () => {
 
     // Per-agent carrier, asserted as a table so a new reviewer adds a row.
     const CARRIERS = [
-      ['claude|grok', /claude\|grok\) EFFORT_FLAG=\(--effort "\$REVIEW_EFFORT"\)/],
+      ['claude', /claude\)\s+EFFORT_FLAG=\(--effort "\$REVIEW_EFFORT"\)/],
+      ['grok', /grok\)\s+GROK_EFFORT="\$REVIEW_EFFORT"; \[ "\$GROK_EFFORT" = max \] && GROK_EFFORT=xhigh[^\n]*\n\s+EFFORT_FLAG=\(--reasoning-effort "\$GROK_EFFORT"\) ;;/],
       ['codex', /codex\)\s+EFFORT_FLAG=\(-c "model_reasoning_effort=\$REVIEW_EFFORT"\)/],
       ['pi', /pi\)\s+EFFORT_FLAG=\(--thinking "\$REVIEW_EFFORT"\)/],
       ['opencode', /opencode\)\s+EFFORT_FLAG=\(--variant "\$REVIEW_EFFORT"\)/],
@@ -1264,6 +1265,69 @@ describe('review-loop parse contracts', () => {
     // An oversized prompt on an argv path is a launch failure, not a verdict —
     // it must degrade to no-verdict rather than a hard cli-error.
     assert.match(loop, /128 KiB \(`MAX_ARG_STRLEN`\)[\s\S]{0,400}`STATUS=no-verdict`/);
+  });
+
+  it('drives grok with --reasoning-effort (max clamped to xhigh), a prompt file, and its real isolation flags', () => {
+    // #452: grok rejects `max` (`unknown effort level 'max'; use one of: xhigh,
+    // high, medium, low`), so `grok~effort=max` failed fast as cli-error. Grok
+    // Build 1.0.62 `grok --help`: `-p/--single`, `--prompt-file`,
+    // `--reasoning-effort` (alias `--effort`), `--permission-mode plan`,
+    // `--sandbox`, `--tools`, `--disallowed-tools`, `--disable-web-search`,
+    // `--no-subagents`, `--verbatim`.
+    const { execFileSync } = require('child_process');
+    const loop = readLib('local-agent-review-loop.md');
+
+    const row = loop.split('\n').find((l) => l.startsWith('| `grok` |'));
+    assert.ok(row, 'the reviewer table must keep a grok row');
+    assert.match(row, /`--reasoning-effort <level>`, with `max` clamped to `xhigh`/);
+    assert.doesNotMatch(row, /unverified/i);
+    assert.doesNotMatch(row, /`--effort <level>`/);
+
+    // Run the real carrier block: max must reach grok as xhigh, other levels unchanged.
+    const start = loop.indexOf('# Reasoning effort carrier.');
+    const carrier = loop.slice(start, loop.indexOf('```', start));
+    const effortArgv = (effort) => execFileSync('bash', ['-c', `${carrier}\nprintf '%s\\n' "\${EFFORT_FLAG[@]}"`], {
+      env: { ...process.env, REVIEW_AGENT: 'grok', REVIEW_EFFORT: effort },
+      encoding: 'utf8',
+    }).trim().split('\n');
+    assert.deepEqual(effortArgv('max'), ['--reasoning-effort', 'xhigh']);
+    assert.deepEqual(effortArgv('xhigh'), ['--reasoning-effort', 'xhigh']);
+    assert.deepEqual(effortArgv('high'), ['--reasoning-effort', 'high']);
+
+    // The prompt rides a file, never argv, under the verified isolation flags.
+    const runner = loop.slice(loop.indexOf('**Grok runner.**'), loop.indexOf('### Enforced reviewer permissions'));
+    const invocation = runner.match(/```bash\n(grok [^\n]+)\n```/);
+    assert.ok(invocation, 'the Grok runner must give a concrete invocation');
+    for (const flag of [
+      '--prompt-file "$GROK_REVIEW_INPUT"', '--verbatim', '--permission-mode plan', '--sandbox read-only',
+      '--disable-web-search', '--no-subagents', '--tools read_file,grep,list_dir',
+      '--disallowed-tools run_terminal_cmd,search_replace,write,web_search,web_fetch,Agent,search_tool,use_tool',
+      '${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"}',
+    ]) {
+      assert.ok(invocation[1].includes(flag), `grok invocation must pass ${flag}`);
+    }
+    assert.doesNotMatch(loop, /grok -p "\$LOCAL_PROMPT"/);
+    assert.match(loop, /all but `claude` and `cmd`, which use stdin, and `grok`, which reads its prompt file/);
+    assert.match(loop, /pre-launch step first \(claude: stdin preparation; grok: its prompt file\)/);
+    assert.match(loop, /post-launch cleanup \(claude: its stdin file; grok: its prompt file\)/);
+
+    // Isolation now names grok's real controls instead of the no-flags fallback.
+    const grokIsolation = loop.split('\n').find((l) => l.startsWith('- **Grok**:'));
+    assert.match(grokIsolation, /--disallowed-tools/);
+    assert.match(grokIsolation, /--sandbox read-only/);
+    assert.doesNotMatch(grokIsolation, /no verified invocation-local tool allowlist|tool-free fallback anyway/);
+
+    // Execute the prompt-file block: a real prompt lands in a private file; an empty one is no-verdict.
+    const prep = runner.match(/```bash\n(GROK_REVIEW_INPUT=""[\s\S]*?)```/)[1];
+    const runPrep = (prompt) => execFileSync('bash', ['-c', `${prep}\nprintf '%s|%s|' "$STATUS" "$GROK_REVIEW_INPUT"; [ -n "$GROK_REVIEW_INPUT" ] && cat "$GROK_REVIEW_INPUT" && rm -f "$GROK_REVIEW_INPUT"; true`], {
+      env: { ...process.env, REVIEW_AGENT: 'grok', LOCAL_PROMPT: prompt },
+      encoding: 'utf8',
+    });
+    const [okStatus, okFile, okBody] = runPrep('review this\ndiff').split('|');
+    assert.equal(okStatus, '');
+    assert.ok(okFile.length > 0);
+    assert.equal(okBody, 'review this\ndiff');
+    assert.equal(runPrep('').split('|').slice(0, 2).join('|'), 'no-verdict|');
   });
 
   it('accepts pi as a model-taking local reviewer with a --thinking effort carrier', () => {
