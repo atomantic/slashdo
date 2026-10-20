@@ -101,7 +101,8 @@ Iterate `REVIEW_AGENTS` in order, running each reviewer's full single-reviewer l
    # Inherited base tracking (a worktree cut from origin/main auto-tracks it) is not a publication
    # target: treat it as unpublished so feature commits never reach the default branch.
    BASE_BRANCH="$(git symbolic-ref --quiet --short "refs/remotes/$PUSH_REMOTE/HEAD" 2>/dev/null | sed "s@^$PUSH_REMOTE/@@")"
-   if [ "$PUSH_BRANCH" = "refs/heads/${BASE_BRANCH:-main}" ] && [ "$BR" != "${BASE_BRANCH:-main}" ]; then PUSH_REMOTE=""; fi
+   [ -n "$BASE_BRANCH" ] || BASE_BRANCH="$(git remote show "$PUSH_REMOTE" 2>/dev/null | sed -n 's/.*HEAD branch: //p')"
+   if { [ "$PUSH_BRANCH" = "refs/heads/${BASE_BRANCH:-main}" ] || { [ -z "$BASE_BRANCH" ] && [ "$PUSH_BRANCH" = refs/heads/master ]; }; } && [ "$BR" != "${PUSH_BRANCH#refs/heads/}" ]; then PUSH_REMOTE=""; fi
    if [ -z "$PUSH_REMOTE" ] || [ "$PUSH_REMOTE" = "." ]; then
      UNPUSHED=""   # upstream is a local branch (or none) — no remote to assert against
    fi
