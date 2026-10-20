@@ -163,18 +163,20 @@ if [ "$REVIEW_AGENT" = grok ]; then
 fi
 ```
 
-`mktemp` creates the file with owner-only permissions outside the repository. Keep it until the reviewer exits, including in the background. **Grok post-launch** — the Step 2 post-launch cleanup for `grok`, run after reading the exit code and before handling any result. It deletes the prompt file (do that alone when a launch is abandoned after preparation) and replaces `$LOG_FILE` with the final message, keeping the raw stream as the reported log:
+`mktemp` creates the file with owner-only permissions outside the repository. Keep it until the reviewer exits, including in the background. **Grok post-launch** — the Step 2 post-launch cleanup for `grok`, run after reading the exit code and before handling any result. It deletes the prompt file (do that alone when a launch is abandoned after preparation) and, only on a zero exit, replaces `$LOG_FILE` with the final message, keeping the raw stream as the reported log. A non-zero exit leaves `$LOG_FILE` as the raw stream, so the `cli-error` dump still shows an error grok wrote to stdout:
 
 ```bash
 if [ "$REVIEW_AGENT" = grok ]; then
   [ -n "${GROK_REVIEW_INPUT:-}" ] && rm -f "$GROK_REVIEW_INPUT"
   GROK_REVIEW_INPUT=""
-  GROK_STREAM_LOG="$LOG_FILE"
-  LOG_FILE="${GROK_STREAM_LOG%.log}.verdict.log"
-  # Last successful result line only. A missing jq, a malformed stream, or no result line leaves the
-  # verdict log empty, which Step 3 parses as no-verdict — never as clean.
-  jq -rs 'map(select(.type == "result" and .subtype == "success")) | last | .result // empty' "$GROK_STREAM_LOG" > "$LOG_FILE" 2>/dev/null || : > "$LOG_FILE"
-  REPORT_LOG_FILE="$GROK_STREAM_LOG"
+  if [ "${EXIT_CODE:-1}" -eq 0 ]; then
+    GROK_STREAM_LOG="$LOG_FILE"
+    LOG_FILE="${GROK_STREAM_LOG%.log}.verdict.log"
+    # Last successful result line only. A missing jq, a malformed stream, or no result line leaves the
+    # verdict log empty, which Step 3 parses as no-verdict — never as clean.
+    jq -rs 'map(select(.type == "result" and .subtype == "success" and .is_error != true)) | last | .result // empty' "$GROK_STREAM_LOG" > "$LOG_FILE" 2>/dev/null || : > "$LOG_FILE"
+    REPORT_LOG_FILE="$GROK_STREAM_LOG"
+  fi
 fi
 ```
 
