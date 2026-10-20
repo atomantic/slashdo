@@ -46,10 +46,10 @@ GIT_COMMON="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
 GIT_META_BAK="$(mktemp -d -t cli-gitmeta.XXXXXX)"
 cp -p "$GIT_COMMON/config" "$GIT_META_BAK/config"
 { tar -cf "$GIT_META_BAK/hooks.tar" -C "$GIT_COMMON" hooks 2>/dev/null; } || : > "$GIT_META_BAK/hooks.tar"
-GIT_SEC_KEYS='^(core\.(hookspath|fsmonitor|pager|editor|sshcommand|askpass|gitproxy)|alias\..+|include\..+|includeif\..+|filter\..+|diff\..+\.textconv|credential\..+|remote\..+\.(url|pushurl)|url\..+\.(insteadof|pushinsteadof)|gpg\.(.+\.)?program|sequence\.editor)$'
+GIT_SEC_KEYS='^(core\.(hookspath|fsmonitor|pager|editor|sshcommand|askpass|gitproxy)|alias\..+|include\..+|includeif\..+|filter\..+|diff\..+|merge\..+\.driver|(diff|merge)tool\..+\.cmd|pager\..+|credential\..+|remote\..+\.(url|pushurl)|url\..+\.(insteadof|pushinsteadof)|gpg\.(.+\.)?program|sequence\.editor)$'
 # `git config --file` reads only the named file, so no repo config (aliases, pager, fsmonitor) is consulted.
 git_sec_hash() {   # $1 = config file; git exit 1 means "no matching key", which is fine
-  (set -o pipefail; { git config --file "$1" --null --get-regexp "$GIT_SEC_KEYS"; [ $? -le 1 ]; } | sort -z | shasum -a 256)
+  (set -o pipefail; { git config --file "$1" --null --get-regexp "$GIT_SEC_KEYS"; [ $? -le 1 ]; } | shasum -a 256)   # file order, not sorted: credential.helper order matters
 }
 git_hooks_hash() {
   if [ -d "$GIT_COMMON/hooks" ]; then
@@ -116,9 +116,9 @@ if [ "$GIT_COMMON" = "/" ]; then
   echo "cannot restore git metadata: invalid saved common-dir path" >&2
   exit 1
 fi
-GIT_SEC_KEYS='^(core\.(hookspath|fsmonitor|pager|editor|sshcommand|askpass|gitproxy)|alias\..+|include\..+|includeif\..+|filter\..+|diff\..+\.textconv|credential\..+|remote\..+\.(url|pushurl)|url\..+\.(insteadof|pushinsteadof)|gpg\.(.+\.)?program|sequence\.editor)$'   # identical to Snapshot
+GIT_SEC_KEYS='^(core\.(hookspath|fsmonitor|pager|editor|sshcommand|askpass|gitproxy)|alias\..+|include\..+|includeif\..+|filter\..+|diff\..+|merge\..+\.driver|(diff|merge)tool\..+\.cmd|pager\..+|credential\..+|remote\..+\.(url|pushurl)|url\..+\.(insteadof|pushinsteadof)|gpg\.(.+\.)?program|sequence\.editor)$'   # identical to Snapshot
 git_sec_hash() {
-  (set -o pipefail; { git config --file "$1" --null --get-regexp "$GIT_SEC_KEYS"; [ $? -le 1 ]; } | sort -z | shasum -a 256)
+  (set -o pipefail; { git config --file "$1" --null --get-regexp "$GIT_SEC_KEYS"; [ $? -le 1 ]; } | shasum -a 256)   # file order, not sorted: credential.helper order matters
 }
 git_hooks_hash() {
   if [ -d "$GIT_COMMON/hooks" ]; then

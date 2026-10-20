@@ -17,13 +17,15 @@ function bashBlock(heading) {
   return rest.slice(start, rest.indexOf('\n```', start));
 }
 
-function run(mutate) {
+function run(mutate, setup = '') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-meta-'));
   try {
     const sh = (cmd, cwd) => spawnSync('bash', ['-c', cmd], { cwd, encoding: 'utf8' });
     sh('git init -q r && cd r && git -c user.email=a@b -c user.name=n commit -q --allow-empty -m i && git remote add origin https://example.com/x.git && git worktree add -q ../w -b b', dir);
     const wt = path.join(dir, 'w');
     const script = [
+      'GIT_COMMON="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"',
+      setup,
       bashBlock('### Snapshot'),
       mutate,
       bashBlock('### Verify and restore'),
@@ -53,6 +55,8 @@ describe('local-cli-runner git metadata verify/restore (#447)', () => {
     ['core.fsmonitor', cfg('core.fsmonitor /evil')],
     ['include.path', cfg('include.path /evil')],
     ['remote.origin.url', cfg('remote.origin.url http://evil')],
+    ['diff.external', cfg('diff.external /evil')],
+    ['diff.<driver>.command', cfg('diff.x.command /evil')],
   ]) {
     it(`still detects and reverts a planted ${name} while keeping concurrent branch config`, () => {
       const r = run(cfg('branch.other.remote origin') + '; ' + mutate);
@@ -62,6 +66,14 @@ describe('local-cli-runner git metadata verify/restore (#447)', () => {
       assert.match(r.stdout, /\[branch "other"\]/);
     });
   }
+
+  it('detects and restores a reordering of credential.helper entries', () => {
+    const setup = cfg('--add credential.helper first') + '; ' + cfg('--add credential.helper second');
+    const mutate = cfg('--unset-all credential.helper') + '; ' + cfg('--add credential.helper second') + '; ' + cfg('--add credential.helper first');
+    const r = run(mutate, setup);
+    assert.match(r.stdout, /RESTORE_OK/, r.stderr);
+    assert.match(r.stdout, /helper = first\s+helper = second/);
+  });
 
   it('still detects and removes a planted hook', () => {
     const r = run('mkdir -p "$GIT_COMMON/hooks" && echo x > "$GIT_COMMON/hooks/planted-hook"');
