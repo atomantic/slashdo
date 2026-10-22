@@ -15,7 +15,7 @@ Pass each sub-agent: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (`
 For each host-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
 
 - `copilot` — max wait 3 minutes in iteration 1, 2 minutes in iteration 2, 90 seconds in iteration 3, 60 seconds in iteration 4, then 45 seconds; poll every 15 seconds.
-- `@<login>` — expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s.
+- `@<login>` — a login ending in `[bot]` is an automated reviewer: expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s. Any other login is presumed human: max wait 4 hours; poll every 30s for the first 5 minutes, then every 60s.
 
 Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass both schedules.
 
