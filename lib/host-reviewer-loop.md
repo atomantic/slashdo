@@ -159,6 +159,8 @@ When done, report back:
     feedback
   - `capped` — the configured iteration cap was reached after applying every fix
   - `timeout` — no qualifying current-head review arrived within the wait budget
+    (the "awaiting @login" state: the review was requested and the PR is left open
+    with the request pending, so a host can resume once the reviewer responds)
   - `not-requestable` — the request failed and no qualifying review arrived
   - `guardrail` — unlimited mode reached 10 iterations with work outstanding
   - `error` — an unexpected host API failure prevented a verdict
