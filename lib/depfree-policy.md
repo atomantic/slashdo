@@ -97,3 +97,9 @@ no REMOVE candidate remains. A policy-kept parent counts as kept in every mode.
 from the current config on every run, regardless of version or mode. When an
 allowance is removed, discard that old policy row and classify the package
 normally; never carry it forward as `KEPT_AUDITED`.
+
+
+Prior `KEPT_TRANSITIVE` decisions are also recomputed through normal classification
+and Phase 1d on every run. A dependency formerly retained through a policy-kept
+parent is no longer protected by that old chain after the parent's allowance is
+removed; only the current kept-parent graph can justify a transitive KEEP.

@@ -188,6 +188,7 @@ A prior decision is **valid for skipping re-evaluation** when ALL of these are t
 3. The decision is not `REMOVED` or `REVERTED` (those packages should not be in the manifest; if they are, treat as new)
 4. Under `EXTREME_MODE`, the decision is not `SKIPPED_INFEASIBLE` — infeasibility is re-tested on every extreme run, because the bar it was measured against (model capability, runtime built-ins) moves
 5. The decision is not `KEPT_POLICY` — current config is always checked again; an old policy row never authorizes keeping a package after its allowance was removed
+6. The decision is not `KEPT_TRANSITIVE` — a kept-parent chain can disappear when policy or removal candidates change. Reclassify these packages normally and rerun Phase 1d against this run's kept-parent graph; never skip analysis based on a cached chain
 
 Otherwise, the dependency is re-evaluated in Phase 1 normally.
 
@@ -230,7 +231,6 @@ and installed versions. It also applies when the user named the package explicit
 For non-matches, check `PRIOR_DECISIONS` (from Phase 0e). If a valid prior decision exists for the package + major version + mode, carry it forward:
 - `KEPT_TIER1` → classify as **Tier 1** (skip further audit)
 - `KEPT_AUDITED` → classify as **Tier 2** with recommendation **KEEP** (skip Phase 1c usage analysis)
-- `KEPT_TRANSITIVE` → classify as **Tier 2** with recommendation **KEEP (transitive)** (skip Phase 1c usage analysis and Phase 1d transitive check; the prior `Kept Via` chain is recorded)
 - `SKIPPED_INFEASIBLE` → classify as **Tier 2** with recommendation **KEEP** (skip Phase 1c usage analysis)
 
 Record carried-forward decisions in `DEPENDENCY_MAP` with a `from_prior: true` flag. Print one line per skipped dependency: `↻ {package}@{major} — carrying forward prior {decision} ({decision_date})`.
@@ -562,7 +562,7 @@ After all replacement agents complete, run these steps once, in the orchestrator
 Write the consolidated decision record to `{WORKTREE_DIR}/docs/DEPS.md`. Create the `docs/` directory if it does not exist.
 
 Build the new file from:
-1. **All carried-forward entries** from `PRIOR_DECISIONS` whose packages are still in the manifest at the same major version (preserve `decision_date` and `mode`), excluding old `KEPT_POLICY` rows and entries superseded by current policy
+1. **All carried-forward entries** from `PRIOR_DECISIONS` whose packages are still in the manifest at the same major version (preserve `decision_date` and `mode`), excluding old `KEPT_POLICY` and `KEPT_TRANSITIVE` rows and entries superseded by current policy
 2. **New decisions** from this run:
    - Each `from_policy: true` package → `KEPT_POLICY` in **Kept — Policy allowlist**, with reason `policy allowlist` and the matching pattern. This takes precedence over all other decisions for that package
    - Each non-policy Tier 1 package → `KEPT_TIER1`
@@ -583,7 +583,8 @@ skip re-evaluation. Re-audit triggers: major version bump, a run in a stricter
 mode than the row records (default < heavy < extreme), or manual deletion of an
 entry. Extreme runs always re-test `SKIPPED_INFEASIBLE` rows. Policy rows are
 recomputed from current config in every mode; removing an allowance triggers
-normal classification, regardless of the row's version or mode.
+normal classification, regardless of the row's version or mode. Transitive rows
+are re-evaluated against the current kept-parent graph on every run.
 
 Last updated: {YYYY-MM-DD}
 

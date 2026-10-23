@@ -96,11 +96,19 @@ describe('dependency policy procedure', () => {
     assert.equal(depfreePolicyDecision('pg', ['pg']).decision, 'KEPT_POLICY');
     assert.equal(depfreePolicyDecision('pg', resolveDepfreeAllow({}, {})), null);
     assert.match(depfree, /The decision is not `KEPT_POLICY`/);
-    assert.match(depfree, /excluding old `KEPT_POLICY` rows and entries superseded by current policy/);
+    assert.match(depfree, /excluding old `KEPT_POLICY` and `KEPT_TRANSITIVE` rows and entries superseded by current policy/);
   });
 });
 
 describe('dependency policy workflow integration', () => {
+  it('recomputes cached transitive decisions after a policy parent can become removable', () => {
+    assert.match(depfree, /The decision is not `KEPT_TRANSITIVE`/);
+    assert.match(depfree, /rerun Phase 1d against this run's kept-parent graph/);
+    const classification = depfree.slice(depfree.indexOf('### 1b:'), depfree.indexOf('### 1c:'));
+    assert.doesNotMatch(classification, /`KEPT_TRANSITIVE` →/);
+    assert.match(depfree, /excluding old `KEPT_POLICY` and `KEPT_TRANSITIVE` rows/);
+  });
+
   it('preserves usage exclusion, vulnerability reporting, and transitive accounting', () => {
     assert.match(depfree, /Skip any dependency with `from_policy: true` or `from_prior: true`/);
     assert.match(depfree, /Exclude `from_policy: true` from REMOVE, EVALUATE, deferred findings, and remediation/);
