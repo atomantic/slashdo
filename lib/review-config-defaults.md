@@ -49,9 +49,7 @@ Procedure (once, during argument parsing):
 
 Only flags the command documents are eligible: `/do:rpr` reads `review-with`,
 `reviewer-applies`, and `review-models` and ignores `review-iterations` /
-`review-stop-mode` / `review-mode`. `depfree-allow` is a separate dependency-policy
-key: `/do:depfree` and `/do:config` read both original lists and union them;
-the scalar merge above must never drop global allowances. Other non-review keys
-(`issues-label`, `merge`, …)
+`review-stop-mode` / `review-mode`. `depfree-allow` unions scopes separately; never drop global allowances.
+Other non-review keys (`issues-label`, `merge`, …)
 follow this precedence via [lib/config-defaults-issues-merge.md](./config-defaults-issues-merge.md)
 or the command's own inline rules.

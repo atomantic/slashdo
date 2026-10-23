@@ -130,7 +130,7 @@ describe('dependency policy workflow integration', () => {
     assert.match(config, /`--depfree-allow <patterns>` → key `depfree-allow`/);
     assert.match(config, /`--unset depfree-allow`/);
     assert.match(config, /depfree-allow\s+= \{global\/project union as JSON array, or \[\]\}/);
-    assert.match(read('lib/review-config-defaults.md'), /scalar merge above must never drop global allowances/);
+    assert.match(read('lib/review-config-defaults.md'), /`depfree-allow` unions scopes separately; never drop global allowances/);
     assert.match(read('docs/config.md'), /@aws-sdk\/\*,pg/);
   });
 
