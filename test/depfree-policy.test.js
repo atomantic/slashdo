@@ -10,7 +10,7 @@ const { buildPromptBundle } = require('../src/transformer');
 const root = path.join(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8');
 const policy = read('lib/depfree-policy.md');
-// Execute the actual procedure shipped to command hosts, not a test-side matcher.
+// Execute the optional reference shipped to hosts, not a test-side matcher.
 const source = policy.match(/```javascript\n([\s\S]*?)\n```/)[1];
 const { readDepfreeDefaults, resolveDepfreeAllow, depfreePolicyDecision } =
   new Function('require', `${source}\nreturn { readDepfreeDefaults, resolveDepfreeAllow, depfreePolicyDecision };`)(require);
@@ -140,6 +140,11 @@ describe('dependency policy workflow integration', () => {
       const bundle = buildPromptBundle(command, path.join(root, 'lib'));
       assert.match(bundle.files['depfree-policy.md'], /function depfreePolicyDecision/);
       assert.match(bundle.files['depfree-policy.md'], /function resolveDepfreeAllow/);
+      // Both installed commands must support shell installs without Node.js.
+      assert.match(bundle.files['depfree-policy.md'], /Use the host's file tools to read and parse the two JSON files/);
+      assert.match(bundle.files['depfree-policy.md'], /do not require Node\.js, Python, `jq`, or another runtime/);
+      assert.match(bundle.files['depfree-policy.md'], /optional reference implementation/);
+      assert.match(bundle.files['depfree-policy.md'], /`DEPFREE_ALLOW` with steps 1–3/);
     }
   });
 });

@@ -20,10 +20,30 @@ more characters, including `/`); every other character is literal. These are
 name patterns, never filesystem globs, regex input, shell commands, or links.
 `@aws-sdk/*` matches `@aws-sdk/client-s3`; `pg` does not match `pg-native`.
 
-Use these functions when loading the two defaults objects and applying policy to
-the inventory. They need only Node built-ins; inline them in a local Node
-invocation, passing config paths as arguments and package data as JSON, never
-interpolating config values or package names into shell code.
+Use the host's file tools to read and parse the two JSON files, as `/do:config`
+does; do not require Node.js, Python, `jq`, or another runtime. Shell installs
+and audits of non-JavaScript projects must work with those file tools alone.
+
+Apply this runtime-independent procedure:
+
+1. For each config file, treat only a missing file as `{}`. Read and parse an
+   existing file as JSON; propagate read/parse errors. Require the top-level
+   value and any present `defaults` value to be non-null objects, not arrays.
+2. Read `defaults["depfree-allow"]`, using `[]` only when the key is absent.
+   Require an array of strings; trim each string and reject blank entries or
+   any remaining whitespace. Validate both scopes before combining them.
+3. Combine global entries followed by project entries, keeping only the first
+   occurrence of each case-sensitive pattern. Save the result as `DEPFREE_ALLOW`.
+4. For each package, find the first pattern whose literal text and `*` wildcards
+   match the entire name under the rules above. A match returns
+   `{decision: "KEPT_POLICY", recommendation: "KEEP", reason: "policy allowlist",
+   policy_pattern: <matching pattern>, from_policy: true}`; otherwise return null.
+
+The function names used below and in `/do:depfree` name these operations; they
+do not require executing JavaScript. When Node.js is already available, this
+optional reference implementation performs the same operations. Inline it in a
+local Node invocation, passing config paths as arguments and package data as
+JSON, never interpolating config values or package names into shell code.
 
 ```javascript
 function readDepfreeDefaults(file) {
@@ -77,9 +97,10 @@ function depfreePolicyDecision(packageName, allowlist) {
 }
 ```
 
-Set `DEPFREE_ALLOW = resolveDepfreeAllow(readDepfreeDefaults(GLOBAL_CONFIG_PATH),
-readDepfreeDefaults(PROJECT_CONFIG_PATH))`, resolving the paths above for this
-host CLI and repo. Preserve the list through compaction.
+Resolve the config paths above for this host CLI and repo, then set
+`DEPFREE_ALLOW` with steps 1–3. With the optional helper this is
+`resolveDepfreeAllow(readDepfreeDefaults(GLOBAL_CONFIG_PATH),
+readDepfreeDefaults(PROJECT_CONFIG_PATH))`. Preserve the list through compaction.
 
 Policy wins **before prior decisions and tier classification**, in **default,
 heavy, and extreme** modes, including explicitly named packages. For each
