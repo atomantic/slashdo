@@ -37,6 +37,14 @@ Set `DEPFREE_MODE` to `extreme` if `--extreme` was passed, else `heavy` if `--he
 
 ## Configuration
 
+### Dependency policy
+
+Before discovery, load the project/global `depfree-allow` lists and resolve their
+union using the shared procedure. This policy takes precedence over every mode's
+removal rules below, including `--extreme`:
+
+!read lib/depfree-policy.md
+
 ### Default Mode (autonomous)
 
 Use the **Balanced** model profile automatically (`AUDIT_MODEL_TIER=medium`, `REMEDIATION_MODEL_TIER=medium`).
@@ -94,8 +102,8 @@ Record the selection as `MODEL_PROFILE` and derive two **tiers**:
 3. **Design before code for any Complex or larger replacement.** Before writing a replacement estimated above ~100 lines (Phase 1c "Complex" or anything that was "Infeasible" under heavy rules), the remediation agent writes a short **replacement design** into its commit message body or a `docs/deps/<package>.md` note: the exact used surface (symbols, options, behaviors relied on), the owned module's public API, the parity test plan, the edge cases the original handled that the call sites reach, the edge cases provably unreachable (and therefore omitted), and the risk the swap carries. The design is the reviewer's checklist in Phase 4b.
 4. **Consolidate before replacing.** Phase 2 plans the owned-module layout across *all* removals first (one `http/` module for a framework plus its body parser plus its static server; one `text/` module for the string utilities), so three removals do not produce three overlapping utilities.
 5. **One package per agent, at most 3 agents in flight, each dispatched at `REMEDIATION_MODEL_TIER=heavy` with effort `max` in the brief.** A large replacement needs the whole context window; grouping is only for packages whose replacement is a single shared module.
-6. **Nothing is silently skipped.** A package that stays after an extreme run is one of: `KEPT_TIER1` under the collapsed definition in rule 1, `KEPT_AUDITED` with a reason a reviewer could argue with (not "popular" or "large"), or `SKIPPED_INFEASIBLE` **with a design sketch and a filed tracker issue** naming what a future run would need (a conformance suite, a native addon, a product-level rewrite). `REVERTED` is allowed only after a genuine parity failure the agent could not fix; record the failing test.
-7. **Transitive downgrades narrow.** Phase 1d's `KEEP (transitive)` downgrade applies only when the kept parent is Tier 1 under rule 1. A candidate that is transitive of a Tier 2/3 package stays `REMOVE`, because the parent is on the same list.
+6. **Nothing is silently skipped.** A package that stays after an extreme run is one of: `KEPT_POLICY` with its current allowlist pattern, `KEPT_TIER1` under the collapsed definition in rule 1, `KEPT_AUDITED` with a reason a reviewer could argue with (not "popular" or "large"), or `SKIPPED_INFEASIBLE` **with a design sketch and a filed tracker issue** naming what a future run would need (a conformance suite, a native addon, a product-level rewrite). `REVERTED` is allowed only after a genuine parity failure the agent could not fix; record the failing test.
+7. **Transitive downgrades narrow.** Phase 1d's `KEEP (transitive)` downgrade applies only when the kept parent is Tier 1 under rule 1 or kept by current policy. A candidate that is transitive of another Tier 2/3 removal candidate stays `REMOVE`, because the parent is on the same list.
 8. **Verification deepens.** Phase 4a runs the project's end-to-end or smoke suite when one exists, not only the unit suite, and Phase 4b's parity review is a second `heavy`-tier agent reading the design from rule 3 against the diff.
 
 Extreme mode is slower and more expensive than heavy mode by design. It is the mode for a repository whose stated goal is owning its stack; run it with `--scan-only` first when the goal is a plan rather than a PR.
@@ -105,6 +113,7 @@ Extreme mode is slower and more expensive than heavy mode by design. It is the m
 When compacting during this workflow, always preserve:
 - The `DEPENDENCY_MAP` (complete classification of all dependencies)
 - The `PRIOR_DECISIONS` map loaded from `./docs/DEPS.md`
+- `DEPFREE_ALLOW` (the union of global and project policy patterns) and every `from_policy` decision
 - All REMOVABLE findings with package names and usage details
 - The current phase number and what phases remain
 - All PR numbers and URLs created so far
@@ -165,7 +174,7 @@ Record as `BUILD_CMD` and `TEST_CMD`.
 Read `{REPO_DIR}/docs/DEPS.md` if it exists — the decision record from prior `/do:depfree` runs, used to skip re-evaluation of already-audited dependencies.
 
 Parse the file into `PRIOR_DECISIONS` — a map keyed by package name, with values:
-- `decision`: one of `KEPT_TIER1`, `KEPT_AUDITED`, `KEPT_TRANSITIVE`, `REMOVED`, `REVERTED`, `SKIPPED_INFEASIBLE`
+- `decision`: one of `KEPT_POLICY`, `KEPT_TIER1`, `KEPT_AUDITED`, `KEPT_TRANSITIVE`, `REMOVED`, `REVERTED`, `SKIPPED_INFEASIBLE`
 - `major_version`: the major version that was evaluated (e.g., `18` for react@18.x)
 - `mode`: the mode the decision was made under (`default`, `heavy`, `extreme`, or the legacy `both`, which reads as `heavy`)
 - `reason`: the rationale recorded
@@ -178,6 +187,8 @@ A prior decision is **valid for skipping re-evaluation** when ALL of these are t
 2. The recorded mode is **at least as strict** as the current run mode, on the order `default` < `heavy` < `extreme` (a `default` decision does NOT skip a `heavy` run; a `heavy` decision skips a `default` run but NOT an `extreme` run; an `extreme` decision skips any run; legacy `both` counts as `heavy`)
 3. The decision is not `REMOVED` or `REVERTED` (those packages should not be in the manifest; if they are, treat as new)
 4. Under `EXTREME_MODE`, the decision is not `SKIPPED_INFEASIBLE` — infeasibility is re-tested on every extreme run, because the bar it was measured against (model capability, runtime built-ins) moves
+5. The decision is not `KEPT_POLICY` — current config is always checked again; an old policy row never authorizes keeping a package after its allowance was removed
+6. The decision is not `KEPT_TRANSITIVE` — a kept-parent chain can disappear when policy or removal candidates change. Reclassify these packages normally and rerun Phase 1d against this run's kept-parent graph; never skip analysis based on a cached chain
 
 Otherwise, the dependency is re-evaluated in Phase 1 normally.
 
@@ -210,10 +221,16 @@ Then run the whole-tree vulnerability audit **once** (`npm audit --json`, `cargo
 
 ### 1b: Classify Dependencies
 
-For each dependency, first check `PRIOR_DECISIONS` (from Phase 0e). If a valid prior decision exists for the package + major version + mode, carry it forward:
+For each dependency, first apply `depfreePolicyDecision(packageName, DEPFREE_ALLOW)`
+from the shared policy procedure. A match is **KEEP** with `decision: KEPT_POLICY`,
+`reason: policy allowlist`, `from_policy: true`, and the matching `policy_pattern`;
+record it as kept Tier 2 and skip all remaining tier/removal rules and Phase 1c.
+This applies in default, heavy, and extreme modes, across all workspace manifests
+and installed versions. It also applies when the user named the package explicitly.
+
+For non-matches, check `PRIOR_DECISIONS` (from Phase 0e). If a valid prior decision exists for the package + major version + mode, carry it forward:
 - `KEPT_TIER1` → classify as **Tier 1** (skip further audit)
 - `KEPT_AUDITED` → classify as **Tier 2** with recommendation **KEEP** (skip Phase 1c usage analysis)
-- `KEPT_TRANSITIVE` → classify as **Tier 2** with recommendation **KEEP (transitive)** (skip Phase 1c usage analysis and Phase 1d transitive check; the prior `Kept Via` chain is recorded)
 - `SKIPPED_INFEASIBLE` → classify as **Tier 2** with recommendation **KEEP** (skip Phase 1c usage analysis)
 
 Record carried-forward decisions in `DEPENDENCY_MAP` with a `from_prior: true` flag. Print one line per skipped dependency: `↻ {package}@{major} — carrying forward prior {decision} ({decision_date})`.
@@ -297,7 +314,7 @@ Record the full classification as `DEPENDENCY_MAP`.
 
 ### 1c: Usage Analysis (Tier 2 & 3 only)
 
-Skip any dependency with `from_prior: true`. For all remaining Tier 2 and Tier 3 dependencies, launch parallel Explore agents (using `AUDIT_MODEL_TIER`) to determine actual usage:
+Skip any dependency with `from_policy: true` or `from_prior: true`. For all remaining Tier 2 and Tier 3 dependencies, launch parallel Explore agents (using `AUDIT_MODEL_TIER`) to determine actual usage:
 
 Each agent should:
 1. Search all source files for imports/requires of the package
@@ -330,6 +347,11 @@ Wait for all agents to complete before proceeding.
 
 ### 1d: Transitive Dependency Check
 
+Always include policy-kept packages as kept parents in the dependency graph and
+record their transitive footprint, even when there are no REMOVE candidates.
+Their recommendation remains **KEEP**; this phase never makes them candidates.
+Do not count packages still installed through a policy-kept parent as eliminated.
+
 Removing a direct dependency that remains in the lock file as a transitive dep of a kept package provides zero supply chain benefit — the code is still installed and executable. For each REMOVE candidate:
 
 1. Check if it appears as a transitive dependency of any Tier 1 or kept Tier 2 package (a nested entry under a kept package's tree, not just the project root):
@@ -340,7 +362,7 @@ Removing a direct dependency that remains in the lock file as a transitive dep o
    - **Python**: `pipdeptree -r -p {package}` or `uv pip tree --invert | grep {package}` (record the full chain)
    - **Go**: `go mod graph | grep {package}`
    - **Ruby**: `bundle why {gem}`
-2. If it IS transitive of a kept package, determine the **removal motivation** (under `EXTREME_MODE`, a parent only counts as "kept" when it is Tier 1 under Extreme Mode rule 1 — a parent that is itself a Tier 2/3 candidate does not shelter its children):
+2. If it IS transitive of a kept package, determine the **removal motivation** (under `EXTREME_MODE`, a parent only counts as "kept" when it is Tier 1 under Extreme Mode rule 1 or `from_policy: true` — a parent that is itself a Tier 2/3 removal candidate does not shelter its children):
    - **Supply chain only** (flagged purely for attack surface reduction) → downgrade to **KEEP (transitive)** — removing the direct entry doesn't remove the code from the lock file or the runtime.
    - **Consolidation** (overlaps in purpose with another kept dependency, e.g., zustand→redux, moment→dayjs, lodash→native utils) → keep the **REMOVE** recommendation — the value is eliminating redundant usage from *our* code. Record the consolidation target (e.g., "consolidate state management into redux").
    - Record the dependency chain in either case, root-to-leaf (e.g., `@react-three/fiber → tunnel-rat → zustand`)
@@ -363,7 +385,7 @@ Unless `TRACKER_AVAILABLE=false`, read the tracker setup and filing partials now
 !read lib/plan-issue-filing.md
 
 1. Fetch `EXISTING_ISSUES` per those partials (skip when `TRACKER_AVAILABLE=false`).
-2. Filter to only REMOVE recommendations from Phase 1c/1d (exclude any downgraded to KEEP (transitive) in Phase 1d)
+2. Filter to only REMOVE recommendations from Phase 1c/1d (exclude any downgraded to KEEP (transitive) in Phase 1d). Exclude `from_policy: true` from REMOVE, EVALUATE, deferred findings, and remediation, regardless of mode
 3. For EVALUATE recommendations: **Default mode** — treat as KEEP (conservative). **Heavy mode** — treat as REMOVE (see Heavy Mode). **Interactive mode** — present to user via `AskUserQuestion` for each. If both `--interactive` and `--heavy` are set, still prompt for each EVALUATE item (interactive takes precedence), but present REMOVE as the default suggestion
 4. Group removable dependencies by replacement strategy:
    - **Native replacement**: built-in API replaces the library (e.g., `crypto.randomUUID()`)
@@ -379,9 +401,14 @@ Unless `TRACKER_AVAILABLE=false`, read the tracker setup and filing partials now
 |------------|-------|-----------------------------------|
 | Acceptable | ...   | react, express, typescript, ...   |
 | Kept       | ...   | {packages kept with reasons}      |
+| Policy kept | ...  | {packages kept: policy allowlist} |
 | Removable  | ...   | {packages to remove}              |
 | Total      | ...   |                                   |
 ```
+
+The Policy kept row is a subset of Kept, not an extra contribution to Total.
+Print each policy-kept package and matching pattern with reason `policy allowlist`,
+including on scan-only and "All dependencies are justified" exits.
 
 **GATE: If `--scan-only` was passed, STOP HERE** — but not before doing the one thing a scan-only run exists to do: **file every surviving finding as an issue first**, then print the summary and exit. (When `TRACKER_AVAILABLE=false`, list them under "Deferred (not filed — no issue tracker available)" instead.)
 
@@ -535,10 +562,11 @@ After all replacement agents complete, run these steps once, in the orchestrator
 Write the consolidated decision record to `{WORKTREE_DIR}/docs/DEPS.md`. Create the `docs/` directory if it does not exist.
 
 Build the new file from:
-1. **All carried-forward entries** from `PRIOR_DECISIONS` whose packages are still in the manifest at the same major version (preserve `decision_date` and `mode`)
+1. **All carried-forward entries** from `PRIOR_DECISIONS` whose packages are still in the manifest at the same major version (preserve `decision_date` and `mode`), excluding old `KEPT_POLICY` and `KEPT_TRANSITIVE` rows and entries superseded by current policy
 2. **New decisions** from this run:
-   - Each Tier 1 package → `KEPT_TIER1`
-   - Each Tier 2 package with KEEP recommendation → `KEPT_AUDITED`
+   - Each `from_policy: true` package → `KEPT_POLICY` in **Kept — Policy allowlist**, with reason `policy allowlist` and the matching pattern. This takes precedence over all other decisions for that package
+   - Each non-policy Tier 1 package → `KEPT_TIER1`
+   - Each non-policy Tier 2 package with KEEP recommendation → `KEPT_AUDITED`
    - Each Tier 2/3 package downgraded to KEEP (transitive) in Phase 1d → `KEPT_TRANSITIVE`
    - Each successfully removed package → `REMOVED`
    - Each reverted package (replacement failed in 4a) → `REVERTED`
@@ -553,9 +581,18 @@ Use this layout:
 Auto-maintained by `/do:depfree`. Records prior audit decisions so repeat runs
 skip re-evaluation. Re-audit triggers: major version bump, a run in a stricter
 mode than the row records (default < heavy < extreme), or manual deletion of an
-entry. Extreme runs always re-test `SKIPPED_INFEASIBLE` rows.
+entry. Extreme runs always re-test `SKIPPED_INFEASIBLE` rows. Policy rows are
+recomputed from current config in every mode; removing an allowance triggers
+normal classification, regardless of the row's version or mode. Transitive rows
+are re-evaluated against the current kept-parent graph on every run.
 
 Last updated: {YYYY-MM-DD}
+
+## Kept — Policy allowlist
+
+| Package | Major | Mode | Reviewed | Reason | Pattern |
+|---------|-------|------|----------|--------|---------|
+| ...     | ...   | ...  | ...      | policy allowlist | ... |
 
 ## Kept — Tier 1 (foundational)
 
@@ -661,8 +698,8 @@ Estimated supply chain attack surface reduction: {N} packages ({transitive count
 |---------|-------------|-------------------|
 {table of removed packages}
 
-### Dependencies Kept (audited)
-{count} dependencies audited and kept with rationale (recorded in `docs/DEPS.md`).
+### Dependencies Kept
+{count} dependencies kept with rationale (recorded in `docs/DEPS.md`), including {policy count} kept by policy allowlist (list package names and matching patterns; these were not usage-audited).
 
 ### Replacement Code
 {bulleted list of new utility files or inline changes}
@@ -783,7 +820,7 @@ Reached from every path through Phase 5: after 5d's merge gate (any `MERGE_OUTCO
 | Package          | Status   | Replacement              | Lines |
 |------------------|----------|--------------------------|-------|
 | {package}        | Removed  | {utility/native API}     | {N}   |
-| {package}        | Kept     | {reason}                 | —     |
+| {package}        | Kept     | {reason, including policy allowlist + matching pattern} | — |
 | {package}        | Reverted | {reason for failure}     | —     |
 
 Total dependencies before: {before}
@@ -808,7 +845,7 @@ Transitive deps eliminated: ~{count} (estimated)
 
 - This command complements `/do:better` — `depfree` for dependency hygiene, `better` for code quality
 - All remediation happens in an isolated worktree. Phase 3a may stash a dirty tree directly in `{REPO_DIR}` before the worktree exists, but Phase 6 always restores that stash on `{CURRENT_BRANCH}` without ever checking out another branch there — so by the time the command finishes, the user's branch and working tree are exactly as they were when it started, on every exit path (`--no-merge`, no reviewer, merged, or left open, on either host)
-- `docs/DEPS.md` is the persistent decision log (read in Phase 0e, rewritten in Phase 4c). Major version bumps and mode escalations (default → heavy → extreme) bypass it; manually delete an entry to force re-audit
+- `docs/DEPS.md` is the persistent decision log (read in Phase 0e, rewritten in Phase 4c). Major version bumps and mode escalations (default → heavy → extreme) bypass ordinary prior decisions; manually delete an entry to force re-audit. Current `depfree-allow` policy still wins in every mode; remove the allowance from its config scope to audit that package
 - **Default vs. heavy vs. extreme aggressiveness**: see Heavy Mode and Extreme Mode above. Extreme is the only mode that also raises the model tier
 - Replacement code should be minimal — don't over-engineer utilities that replace single-purpose packages
 - For monorepos, audit the root manifest and each workspace package manifest
