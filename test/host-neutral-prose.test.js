@@ -14,6 +14,7 @@ const BACKEND_FILES = new Set([
   'lib/host-github.md',
   'lib/host-gitlab.md',
   'lib/gh-host.md',
+  'lib/next-github.md',
   'lib/next-gitlab.md',
   'lib/review-pr-mode.md',
   'lib/review-mr-mode.md',

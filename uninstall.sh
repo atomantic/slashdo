@@ -114,12 +114,12 @@ LIBS=(
   better-plan better-remediation better-simplify
   better-state better-test-enhancement
   better-cleanup better-pr-and-ci better-review-loop better-verification
-  ci-flake-handling commit-conventions config-defaults-issues-merge copilot-review-loop
+  ci-flake-handling commit-conventions config-defaults-issues-merge copilot-review-loop depfree-policy
   empty-array-expansion enhance-loop epic-children
   finding-disposition fix-regression-guard
   gh-host host-github host-gitlab host-reviewer-loop
   local-agent-review-loop local-agent-agy local-agent-claude local-agent-cmd local-agent-cursor local-agent-opencode local-cli-runner
-  merge-gate model-tiers multi-reviewer-loop multi-reviewer-parallel next-gitlab next-swarm ollama-review-loop
+  merge-gate model-tiers multi-reviewer-loop multi-reviewer-parallel next-github next-gitlab next-swarm ollama-review-loop
   plan-issue-setup plan-issue-filing pr-write-access
   rebase-conflict-resolution remediation-agent-template
   release-documented release-source-gate review-agent-selection review-config-defaults review-convergence-gate review-flags
