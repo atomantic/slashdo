@@ -188,6 +188,51 @@ function remoteModeInstaller() {
   return dest;
 }
 
+// Separate from stdout: mktemp's stdout belongs to command substitution and
+// must remain withheld until the test has signalled the allocating installer.
+function makePausedMktemp(bin, pattern) {
+  const realMktemp = execFileSync('which', ['mktemp'], { encoding: 'utf8' }).trim();
+  const quote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+  fs.writeFileSync(path.join(bin, 'mktemp'), `#!/bin/sh
+for arg do template="$arg"; done
+case "$template" in
+  ${pattern})
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    allocated=$(${quote(realMktemp)} "$@") || exit 1
+    printf 'READY\\t%s\\t%s\\n' "$$" "$allocated" >&3
+    IFS= read -r release <&4 || exit 1
+    printf '%s\\n' "$allocated"
+    ;;
+  *) exec ${quote(realMktemp)} "$@" ;;
+esac
+`);
+  fs.chmodSync(path.join(bin, 'mktemp'), 0o755);
+}
+
+function allocationReady(child) {
+  return new Promise((resolve, reject) => {
+    let output = '';
+    const timer = setTimeout(() => finish(new Error('allocator never became ready')), 20000);
+    const onData = (chunk) => {
+      output += chunk;
+      if (output.includes('\n')) finish();
+    };
+    const onExit = () => finish(new Error('installer exited before allocation'));
+    function finish(error) {
+      clearTimeout(timer);
+      child.stdio[3].off('data', onData);
+      child.off('exit', onExit);
+      child.off('error', finish);
+      if (error) reject(error);
+      else resolve(output.trim().split('\t'));
+    }
+    child.stdio[3].on('data', onData);
+    child.once('exit', onExit);
+    child.once('error', finish);
+  });
+}
+
 after(() => {
   for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -590,7 +635,9 @@ describe('install.sh — atomic writes', () => {
       try {
         const exited = once(child, 'exit', { signal: controller.signal });
         process.kill(-child.pid, 'SIGTERM');
-        await exited;
+        const [code, signal] = await exited;
+        assert.equal(signal, null);
+        assert.equal(code, 143);
       } finally {
         clearTimeout(timer);
       }
@@ -609,6 +656,82 @@ describe('install.sh — atomic writes', () => {
 // ── install.sh: temp file safety ────────────────────────────────────
 
 describe('install.sh — temp file safety', () => {
+  const allocations = [
+    ['Claude staging', ['.claude'], '*/slashdo-claude.*'],
+    ['OpenCode staging', ['.config/opencode'], '*/slashdo-install.*'],
+    ['settings module', ['.claude'], '*/slashdo-mod.*'],
+    ['download file', ['.claude'], '*/slashdo-claude.*/.slashdo-tmp.*'],
+    ['installed file', ['.claude'], '*/.claude/commands/do/.slashdo-tmp.*'],
+  ];
+  const interruptions = [
+    ...allocations.map((allocation) => [allocation, 'SIGTERM', true]),
+    [allocations[0], 'SIGINT', true],
+    [allocations[0], 'SIGTERM', false],
+  ];
+  for (const [[label, envDirs, pattern], signal, group] of interruptions) {
+    it(`cleans interrupted allocation: ${label}, ${signal}, ${group ? 'group' : 'parent'}`, { timeout: 60000 }, async () => {
+      const home = makeHome(envDirs);
+      const tmpdir = makeTmpdir();
+      const command = envDirs[0] === '.claude'
+        ? path.join(home, '.claude', 'commands', 'do', 'better.md')
+        : path.join(home, '.config', 'opencode', 'commands', 'do-better.md');
+      fs.mkdirSync(path.dirname(command), { recursive: true });
+      fs.writeFileSync(command, 'PREVIOUS COMMAND\n');
+      const bin = makeServingCurl();
+      const curl = path.join(bin, 'curl');
+      fs.writeFileSync(curl, fs.readFileSync(curl, 'utf8').replace('#!/bin/sh',
+        '#!/bin/sh\nprintf called >> "$HOME/curl-called"'));
+      makePausedMktemp(bin, pattern);
+      const child = spawn('bash', [remoteModeInstaller()], {
+        env: childEnv({ home, tmpdir, pathPrefix: bin }),
+        detached: true,
+        stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'],
+      });
+      // A killed old allocator may close its release pipe before this write.
+      child.stdio[4].on('error', (error) => {
+        if (error.code !== 'EPIPE') throw error;
+      });
+      try {
+        const [marker, allocatorPid, allocated] = await allocationReady(child);
+        assert.equal(marker, 'READY');
+        assert.ok(fs.existsSync(allocated), 'the resource exists before its pathname is returned');
+        const stat = fs.statSync(allocated);
+        assert.equal(stat.mode & 0o777, stat.isDirectory() ? 0o700 : 0o600,
+          'allocation must retain mktemp privacy');
+        if (label.endsWith('staging')) {
+          assert.equal(fs.existsSync(path.join(home, 'curl-called')), false,
+            'this boundary precedes any transfer');
+        }
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 20000);
+        try {
+          const exited = once(child, 'exit', { signal: controller.signal });
+          process.kill(group ? -child.pid : child.pid, signal);
+          // Let the allocator finish naturally after the signal; no sleeps or
+          // retries determine whether the signal lands in the allocation gap.
+          child.stdio[4].end('release\n');
+          const [code, exitSignal] = await exited;
+          assert.equal(exitSignal, null);
+          assert.equal(code, signal === 'SIGINT' ? 130 : 143);
+        } finally {
+          clearTimeout(timer);
+        }
+        assert.equal(fs.existsSync(allocated), false, 'allocated resource must be removed');
+        assert.deepEqual(fs.readdirSync(tmpdir), [], 'all private staging must be removed');
+        assert.deepEqual(strayTempFiles(path.dirname(command)), [], 'no atomic files may remain');
+        assert.throws(() => process.kill(Number(allocatorPid), 0), { code: 'ESRCH' },
+          'the allocator must be reaped before installer exit');
+        if (label !== 'settings module') {
+          assert.equal(fs.readFileSync(command, 'utf8'), 'PREVIOUS COMMAND\n');
+        }
+      } finally {
+        try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ }
+        child.stdio[3].destroy();
+        child.stdio[4].destroy();
+      }
+    });
+  }
+
   it('derives every temp path from mktemp, never a literal', () => {
     // Strip comments so the rule reads the code, not the prose explaining it.
     const code = fs.readFileSync(INSTALL_SH, 'utf8')
@@ -616,8 +739,9 @@ describe('install.sh — temp file safety', () => {
       .filter((line) => !line.trim().startsWith('#'))
       .join('\n');
     assert.doesNotMatch(code, /\/tmp\/slashdo/, 'staging must not use a predictable /tmp/slashdo-* name');
-    assert.match(code, /mktemp -d "\$\{TMPDIR:-\/tmp\}\/slashdo-install\.XXXXXX"/, 'staging dir must come from mktemp -d');
-    assert.match(code, /mktemp "\$\(dirname "\$dest"\)\/\.slashdo-tmp\.XXXXXX"/, 'file staging must come from mktemp');
+    assert.match(code, /mktemp "\$@"/, 'allocation must use mktemp');
+    assert.match(code, /allocate_temp STAGE_DIR -d "\$\{TMPDIR:-\/tmp\}\/slashdo-install\.XXXXXX"/, 'staging dir must come from mktemp -d');
+    assert.match(code, /allocate_temp ACTIVE_TMP "\$\(dirname "\$dest"\)\/\.slashdo-tmp\.XXXXXX"/, 'file staging must come from mktemp');
   });
 
   it('never writes through a pre-existing path in TMPDIR', () => {
