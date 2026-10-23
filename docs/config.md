@@ -31,3 +31,22 @@ Effective (project overrides global):
 ```
 
 Defaults are stored per host CLI (the one you run `/do:config` in) under a `defaults` key, alongside settings like `autoUpdate`. `/do:config` never mirrors defaults into other installed environments.
+
+## PR/MR approval policy
+
+`/do:review` approves a completed review with zero unresolved CRITICAL findings
+when the authenticated reviewer is not the author and the head still matches
+the reviewed commit. This is enabled by default, independently of `--merge`.
+Teams that reserve approval for humans can save:
+
+```
+/do:config --no-approve
+/do:config --project --no-approve
+```
+
+These store `defaults.approve=false` globally or for one project. The normal
+precedence applies: explicit `--approve`/`--no-approve` → project → global →
+built-in `true`. `--unset approve` removes the chosen scope's preference.
+`--draft` always publishes nothing, and local branch reviews never approve.
+An approval does not bypass protected-branch rules, other required approvers,
+or CI. Trusted project policy remains binding.
