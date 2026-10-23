@@ -98,10 +98,13 @@ On a shared or public tracker, add `--collaborators` so your agent only claims i
 /do:review --strict                       # deep code review of the current branch's changes
 /do:review https://git.example.com/o/r/pull/12  # review a PR on any GitHub host — fixes pushed if writable, else inline
 /do:review https://gitlab.example.com/g/sub/p/-/merge_requests/7  # same for a GitLab MR (gitlab.com or self-managed)
+/do:review --no-approve https://github.com/o/r/pull/12  # review and comment without approving
 /do:depfree --heavy                       # remove unnecessary dependencies by writing replacement code
 /do:depfree --extreme --scan-only         # zero-dependency plan: strongest model, no size ceiling, large libraries included
 /do:scan ~/Downloads/sketchy-repo         # read-only malware/safety audit of an unfamiliar directory
 ```
+
+`/do:review` approves a completed PR/MR review with zero unresolved CRITICAL findings when reviewing someone else's change at the exact reviewed head. `--no-approve` opts out; save `/do:config --no-approve` for a team that reserves approvals for humans. `--draft` publishes nothing. Approval does not merge a change or waive CI and other required approvals.
 
 Note: these only run their review loop **and auto-merge** when you pass (or have saved) `--review-with` — without it PRs are left open for manual review.
 
@@ -292,6 +295,7 @@ Rather than passing flags every time, save them once and let future commands pic
 | `/do:config --self\|--no-self` | Save the self-only issue gate for `/do:next` |
 | `/do:config --collaborators\|--no-collaborators` | Save the collaborators-only issue gate for `/do:next` (union `--trusted-authors`) |
 | `/do:config --trusted-authors <list>` | Save extra trusted authors unioned into the collaborators gate; `none` clears |
+| `/do:config --approve\|--no-approve` | Save `/do:review`'s clean PR/MR approval default (built-in `true`) |
 | `/do:config --merge\|--no-merge [--merge-method=squash\|rebase\|merge]` | Save `/do:pr`'s auto-merge default (and method) |
 | `--project` | Read/write a per-repo `.slashdo.json` instead of the global config; per-project values override global ones key by key |
 | `--unset <key>` | Clear one saved default |

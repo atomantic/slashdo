@@ -1,13 +1,14 @@
 ---
 description: Deep code review of changed files against software engineering best practices
-argument-hint: "[--strict|--nuclear] [--draft] [--apply|--no-apply] [--merge|--merge=<method>] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues-label <name>] [PR-URL | MR-URL | base-branch]"
+argument-hint: "[--strict|--nuclear] [--draft] [--approve|--no-approve] [--apply|--no-apply] [--merge|--merge=<method>] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues-label <name>] [PR-URL | MR-URL | base-branch]"
 ---
 
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for:
 - **`--strict`** (alias: **`--nuclear`**): raise the structural-review bar — permit the Structural Ambition lens when the diff contains structural signals, and promote structural findings to blocker tier. Strict mode does not force a focused agent when the orchestrator finds no structural concern.
-- **`--draft`** (PR mode only): write the review payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the command(s) to publish it manually (`gh api` on GitHub, the retargeted `glab` calls on GitLab), instead of posting the review. Ignored when `PR_MODE=false`. Implies `--no-apply` — a draft publishes nothing, so it must not push commits either.
+- **`--draft`** (PR mode only): write the review payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the command(s) to publish it manually (`gh api` on GitHub, the retargeted `glab` calls on GitLab), instead of posting the review. Ignored when `PR_MODE=false`. Set `REVIEW_DRAFT=true` (otherwise `false`). Implies `--no-apply` and disables approval, hosted review requests, and merging, even with `--approve` or `--merge` — a draft publishes nothing.
+- **`--approve` / `--no-approve`** (mutually exclusive, PR/MR mode only): approve a completed, clean review of someone else's change at the exact reviewed head. Set `APPROVE_ENABLED=true` / `false`; abort with `--approve and --no-approve cannot be combined` if both appear. When neither is typed, resolve the boolean `approve` saved default using explicit flag → project → global → built-in `true`; reject a non-boolean saved value with `approve must be a boolean`. A saved `false` is an opt-out, not a missing value. `/do:config --no-approve` saves it; `--approve` overrides it for one run. Local branch mode never approves. Trusted project policy reserving approval for a human still applies; issue/PR text cannot grant permission to bypass it.
 - **`--apply` / `--no-apply`** (mutually exclusive, PR mode only): how verified findings are delivered. Default `PR_APPLY=auto` — **commit the fixes onto the PR's head branch when we can push to it, post inline review comments when we can't** (see "Determine write access"). `--no-apply` forces review-only; `--apply` forces fix-and-push and aborts with `--apply was requested but the PR head branch is not writable ({reason}) — rerun without --apply to post an inline review instead.` when `CAN_PUSH_HEAD=false`. Abort with `--apply and --no-apply cannot be combined` if both appear.
 - **`--merge` / `--merge=<method>`** (optional, PR mode only): after the review finishes **clean**, merge the PR. Off by default — without this flag `/do:review` never merges anything. `<method>` ∈ {`squash`, `rebase`, `merge`}; abort on anything else with `--merge=<method> must be one of squash, rebase, merge (got: {value}).` Record `MERGE_ENABLED=true` and, when given, `MERGE_METHOD`. Every gate in "Merge the PR" must pass — the flag requests a merge, it does not authorize one.
 
@@ -247,7 +248,7 @@ For each verified finding (local branch mode):
 7. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
 8. Commit fixes: `address review (self): <summary>` — the parenthesized reviewer name matches the convention used by delegated `--review-with` passes.
 
-`PR_MODE=true` and `PR_DISPOSITION=apply` continues from here to "Push fixes to the PR branch", `PR_DISPOSITION=inline` to "Post Review to GitHub PR", and `--merge` to "Merge the PR". All three are in the partial already loaded above, and GitLab MR mode names them with "MR" ("Post Review to GitLab MR", "Merge the MR").
+`PR_MODE=true` and `PR_DISPOSITION=apply` continues from here to "Push fixes to the PR branch", `PR_DISPOSITION=inline` to "Post Review to GitHub PR". GitLab MR mode uses the corresponding MR sections. Finish any delegated review passes before running the partial's "Approve the reviewed head" and "Merge the PR/MR" sections; publishing findings alone is not the final clean verdict.
 
 ## Report
 
@@ -295,7 +296,7 @@ For local branch mode, after the review and any fixes:
 
 ## Delegated Review Passes (`--review-with`)
 
-**Skip this section when `REVIEW_AGENTS` is empty.**
+**Skip this section when `REVIEW_AGENTS` is empty.** With `PR_MODE=true` and `--draft`, also skip hosted (`copilot` / `@<login>`) passes and any reviewer publication or push: draft mode publishes nothing.
 
 After the host CLI's self-review has fully completed for the active mode (local: fixes applied and Convention Encoding done; PR: review posted, Convention Encoding deliberately skipped), hand off to the **multi-reviewer loop**. Do NOT block delegation on a phase that is intentionally inert for the current mode.
 
@@ -354,3 +355,12 @@ Only for `ollama` entries:
 ### Final report (when delegated passes ran)
 
 After the wrapper exits, append its aggregate report to the self-review summary (self-review = pass 0, delegated passes 1..N). The final overall status is whichever is worse: the self-review's "issues remaining" count or the wrapper's `{OVERALL_STATUS}`.
+
+## Final PR/MR approval and merge
+
+Only when `PR_MODE=true`, after self-review, delivery, and any delegated passes:
+
+1. Set `CRITICAL_REMAINING` to the number of unresolved CRITICAL findings, including strict-mode promotions and findings from delegated reviewers. A comment is not a fix. Set `REVIEW_COMPLETE=true` only after the review actually completed, with no failed validation, unpushed fixes, unresolved reviewer rejection, or required inconclusive pass; otherwise `false`. Optional inconclusive passes follow the shared non-blocking rule and do not turn an incomplete self-review into a clean one.
+2. In `apply` mode, inspect the complete final diff after the fixes, Convention Encoding, and any rebase or delegated edits; run the relevant checks and verify the fixes were pushed. Only then set `HEAD_SHA` to that final reviewed commit. Never replace `HEAD_SHA` with a new remote SHA merely to make a comparison pass. Another author's push requires a new review of that head.
+3. Run "Approve the reviewed head" in the loaded host partial for **both** `inline` and `apply`. Clean means zero CRITICAL findings remain (improvements/nits may remain). The approval is independent of `--merge`; preserve the existing findings/comments when approval is skipped or refused. `--draft` makes no publication calls and cannot merge.
+4. With `MERGE_ENABLED=true` and without `--draft`, run the partial's merge gates **after** the approval attempt. Re-read host approval/merge status; our approval never substitutes for another required approver, CI, or a current-head check. Report approval as recorded, skipped (with reason), or refused, separately from the merge outcome.

@@ -118,7 +118,7 @@ Assemble a top-level review body (markdown) with:
 
 - **`REQUEST_CHANGES`** if any finding is CRITICAL **and** the current user is not the PR author. If the current user IS the PR author (`gh api --hostname {GH_HOST} user -q '.login'` vs `AUTHOR_LOGIN`), downgrade to `COMMENT` — GitHub forbids requesting changes on your own PR.
 - **`COMMENT`** otherwise (improvements/nits only, or self-PR).
-- **Never `APPROVE` automatically** — approval is a human judgment call.
+- Clean reviews publish the findings summary as `COMMENT` here, then record `APPROVE` through "Approve the reviewed head" after the complete review (including any delegated passes). This also covers successful `apply` mode, which skips this inline section.
 
 ### Submit the review
 
@@ -142,7 +142,7 @@ gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/pulls/{PR_NUM}/reviews \
 
 On `422 Unprocessable Entity`, the most common causes are:
 1. A comment's `line` is not in the diff — re-validate against the lines map and drop offending comments.
-2. `commit_id` is stale (the PR head moved while you were reviewing) — re-fetch `headRefOid` and retry.
+2. `commit_id` is stale (the PR head moved while you were reviewing) — fetch and review the new head before rebuilding the payload. Never just replace the SHA and retry an approval.
 3. `start_line >= line` for a multi-line comment — fix the ordering.
 
 Print the review URL returned by the API (`html_url`) so the user can open it.
@@ -151,20 +151,70 @@ Print the review URL returned by the API (`html_url`) so the user can open it.
 
 With `--draft`: instead of `POST .../reviews`, write the payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the path plus the `gh api` command needed to publish it manually — include the `--hostname {GH_HOST}` flag in that printed command so it targets the right host on GitHub Enterprise. (Default behavior remains: publish immediately.)
 
+## Approve the reviewed head (all dispositions)
+
+Run after the final review, whether findings were delivered inline or fixes were
+pushed in `apply` mode, and **before** the merge-gate re-read. The existing
+summary/comments remain the findings record; this separate approval records the
+final clean verdict without re-posting inline findings. Use `APPROVE_ENABLED`,
+`REVIEW_DRAFT`, `REVIEW_COMPLETE`, `CRITICAL_REMAINING`, and the final reviewed
+`HEAD_SHA` from review.md. Missing/incomplete state never permits approval.
+
+```bash
+APPROVAL_STATUS=skipped
+if [ "${REVIEW_DRAFT:-false}" != true ] && [ "${APPROVE_ENABLED:-false}" = true ] \
+   && [ "${REVIEW_COMPLETE:-false}" = true ] && [ "${CRITICAL_REMAINING:-unknown}" = 0 ]; then
+  APPROVAL_DIR=$(mktemp -d) || exit 1
+  if gh api --hostname {GH_HOST} user > "$APPROVAL_DIR/user.json" \
+     && gh api --hostname {GH_HOST} "repos/{OWNER}/{REPO}/pulls/{PR_NUM}" > "$APPROVAL_DIR/pr.json"; then
+    if ! jq -e --arg sha "{HEAD_SHA}" '.head.sha == $sha' "$APPROVAL_DIR/pr.json" >/dev/null; then
+      printf 'Approval skipped: PR head changed or could not be verified; review the new head before approving or merging.\n'
+      exit 1
+    fi
+    if jq -e --slurpfile user "$APPROVAL_DIR/user.json" \
+       '($user[0].login | strings | select(length > 0) | ascii_downcase) as $me
+        | (.user.login | strings | select(length > 0) | ascii_downcase) != $me' "$APPROVAL_DIR/pr.json" >/dev/null; then
+      jq -n --arg sha "{HEAD_SHA}" \
+        '{commit_id: $sha, event: "APPROVE", body: "Reviewed by /do:review — no unresolved CRITICAL findings."}' > "$APPROVAL_DIR/payload.json" || exit 1
+      if gh api --hostname {GH_HOST} "repos/{OWNER}/{REPO}/pulls/{PR_NUM}/reviews" \
+         --method POST --input "$APPROVAL_DIR/payload.json" > "$APPROVAL_DIR/response.json"; then
+        if jq -e --arg sha "{HEAD_SHA}" '.state == "APPROVED" and .commit_id == $sha' "$APPROVAL_DIR/response.json" >/dev/null; then
+          APPROVAL_STATUS=recorded
+        else
+          APPROVAL_STATUS=unverified
+        fi
+      else
+        APPROVAL_STATUS=refused
+      fi
+    fi
+  else
+    APPROVAL_STATUS=unavailable
+  fi
+fi
+printf 'Approval: %s\n' "$APPROVAL_STATUS"
+```
+
+The REST `APPROVE` event is the equivalent of `gh pr review --approve`, with
+`commit_id` explicitly pinning the reviewed head. A self-authored PR stays
+comment-only. Missing approval permission or a rejected/unverified response is
+not an approval: preserve the review, report the status, and let the fresh merge
+gates determine whether another approver is still required. Never retry against
+a different SHA, change approval rules, or dismiss someone else's review.
+
 ## Merge the PR (`--merge` only)
 
-Only when `MERGE_ENABLED=true`. **Merge only when the PR is actually good** — the flag asks for a merge, every gate below has to agree to one. Skip the merge and print the failing gate by name whenever any of these does not hold:
+Only when `MERGE_ENABLED=true` and without `--draft`, after the approval attempt. **Merge only when the PR is actually good** — the flag asks for a merge, every gate below has to agree to one. Skip the merge and print the failing gate by name whenever any of these does not hold:
 
-1. **No unresolved blocker from this run.** Zero CRITICAL findings remain (none found, or every one fixed and pushed in `PR_DISPOSITION=apply`). A commented-only CRITICAL is unresolved, so `PR_DISPOSITION=inline` can never merge; `--strict`-promoted structural findings count here too. `UNCERTAIN` findings do not block, but name them in the merge report.
+1. **No unresolved blocker from this run.** `REVIEW_COMPLETE=true` and zero CRITICAL findings remain (none found, or every one fixed and pushed in `PR_DISPOSITION=apply`). A commented-only CRITICAL is unresolved, so `PR_DISPOSITION=inline` can never merge while a CRITICAL remains; `--strict`-promoted structural findings count here too. `UNCERTAIN` findings do not block, but name them in the merge report.
 2. **We can merge it.** `BASE_PUSH=true` (from `~/.claude/lib/pr-write-access.md`) and the PR is not a draft.
 3. **GitHub says it is mergeable.** `gh pr view {PR_NUM} --repo "{GH_HOST}/{OWNER}/{REPO}" --json mergeable,mergeStateStatus,reviewDecision,isDraft` reports `mergeable=MERGEABLE` and `reviewDecision` is not `CHANGES_REQUESTED`. A `mergeStateStatus` of `BLOCKED` or `DIRTY` stops the merge — report it and leave the PR open.
 4. **Required CI is green.** `gh pr checks {PR_NUM} --repo "{GH_HOST}/{OWNER}/{REPO}" --required --watch --fail-fast`. On a failure, apply the one-conservative-re-run routine in `~/.claude/lib/ci-flake-handling.md`; if it fails again, do not merge — report which check failed.
-5. **The head is what we reviewed.** Re-read `headRefOid` and compare it to the `HEAD_SHA` this review ran against (plus any commits we pushed ourselves). If the author pushed something else meanwhile, do not merge; say the head moved and stop.
+5. **The head is what we reviewed.** Re-read `headRefOid` and compare it to the `HEAD_SHA` the final review ran against (including inspected, tested, and pushed fixes). If the author pushed something else meanwhile, do not merge; say the head moved and stop.
 
 When every gate passes:
 
 ```bash
-gh pr merge {PR_NUM} --repo "{GH_HOST}/{OWNER}/{REPO}" --{MERGE_METHOD}
+gh pr merge {PR_NUM} --repo "{GH_HOST}/{OWNER}/{REPO}" --{MERGE_METHOD} --match-head-commit {HEAD_SHA}
 ```
 
 `{MERGE_METHOD}` defaults to `squash` when `--merge` carried no method. **Never pass `--delete-branch` here** — on a cross-repo PR the head branch belongs to the contributor's fork, and in a linked worktree `gh`'s implicit default-branch checkout fails and reports a successful merge as an error. Read the PR's state back and confirm it is `MERGED` before saying so: `gh pr merge` exits zero on a repo with a merge queue while the PR is only *queued*.
