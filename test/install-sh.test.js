@@ -24,6 +24,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execFile, execFileSync, spawn, spawnSync } = require('child_process');
+const { once } = require('node:events');
 
 const { ENVIRONMENTS } = require('../src/environments');
 const { install: npmInstall } = require('../src/installer');
@@ -176,7 +177,9 @@ const makeServingCurlWithoutHook = (hook) => makeCurlStub(
 const makeFailingCurl = () => makeCurlStub('[ -n "$dest" ] && printf TRUNCATED > "$dest"\nexit 1');
 
 // Same, but hangs afterwards so a test can interrupt the install mid-write.
-const makeHangingCurl = () => makeCurlStub('[ -n "$dest" ] && printf TRUNCATED > "$dest"\nsleep 30\nexit 1');
+const makeHangingCurl = () => makeCurlStub(
+  '[ -n "$dest" ] && printf TRUNCATED > "$dest" || exit 1\nprintf "SLASHDO_TEST_WRITE_READY\\n"\nsleep 30\nexit 1'
+);
 
 // Copy install.sh somewhere with no sibling commands//lib/, forcing remote mode.
 function remoteModeInstaller() {
@@ -184,8 +187,6 @@ function remoteModeInstaller() {
   fs.copyFileSync(INSTALL_SH, dest);
   return dest;
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 after(() => {
   for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
@@ -552,19 +553,47 @@ describe('install.sh — atomic writes', () => {
     const child = spawn('bash', [remoteModeInstaller()], {
       env: childEnv({ home, pathPrefix: makeHangingCurl() }),
       detached: true,
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'ignore'],
     });
-    const exited = new Promise((resolve) => child.on('exit', resolve));
+    const ready = new Promise((resolve, reject) => {
+      let output = '';
+      const timer = setTimeout(() => finish(new Error('installer writer never became ready')), 20000);
+      const onData = (chunk) => {
+        output += chunk;
+        if (output.includes('SLASHDO_TEST_WRITE_READY\n')) finish();
+      };
+      const onExit = () => finish(new Error('installer exited before the write began'));
+      function finish(error) {
+        clearTimeout(timer);
+        child.stdout.off('data', onData);
+        child.off('exit', onExit);
+        child.off('error', finish);
+        if (error) reject(error);
+        else resolve();
+      }
+      child.stdout.on('data', onData);
+      child.once('exit', onExit);
+      child.once('error', finish);
+    });
 
     try {
-      // Wait until the private staging directory exists, so the signal lands
-      // while a write is genuinely in flight rather than before or after it.
-      const deadline = Date.now() + 20000;
-      while (stagingDirs(home).length === 0 && Date.now() < deadline) await sleep(25);
-      assert.ok(stagingDirs(home).length > 0, 'expected an in-flight staging directory to interrupt');
+      // Directory creation can precede mktemp returning its path to the shell.
+      // The writer's event proves the cleanup variables and partial file exist.
+      await ready;
+      const partialFiles = stagingDirs(home).flatMap((dir) =>
+        strayTempFiles(path.join(home, dir)).map((file) => path.join(home, dir, file)));
+      assert.ok(partialFiles.some((file) => fs.readFileSync(file, 'utf8') === 'TRUNCATED'),
+        'expected an in-flight partial download to interrupt');
 
-      process.kill(-child.pid, 'SIGTERM');
-      await Promise.race([exited, sleep(20000)]);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20000);
+      try {
+        const exited = once(child, 'exit', { signal: controller.signal });
+        process.kill(-child.pid, 'SIGTERM');
+        await exited;
+      } finally {
+        clearTimeout(timer);
+      }
     } finally {
       // Never leave a detached installer (or its hanging curl) behind holding
       // the sandbox open past the after() hook.
