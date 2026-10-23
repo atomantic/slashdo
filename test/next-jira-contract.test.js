@@ -146,7 +146,8 @@ describe('in-flight segment match (next.md), executed', () => {
 
   it('is defined once, in the Phase 1 in-flight block', () => {
     assert.ok(inFlight, 'next.md must define in_flight() as a shell function');
-    assert.match(next, /IN_FLIGHT_REFS="\$\(git branch -a --no-color --format='%\(refname:short\)'; open_refs 2>\/dev\/null \|\| true\)"/);
+    assert.match(next, /LOCAL_REFS="\$\(git branch -a --no-color --format='%\(refname:short\)'\)" \|\| return 1/);
+    assert.match(next, /OPEN_REFS="\$\(open_refs\)" \|\| return 1/);
     assert.match(next, /Issue `N` is in flight if EITHER `in_flight N` succeeds/);
   });
 
