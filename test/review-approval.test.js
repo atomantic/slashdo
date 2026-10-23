@@ -25,19 +25,24 @@ function run(t, host, cli, file, overrides = {}) {
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 const post = args.includes('POST');
+const dismiss = args.includes('PUT');
 const call = { args };
 if (args.includes('--input')) call.payload = JSON.parse(fs.readFileSync(args[args.indexOf('--input') + 1], 'utf8'));
 fs.appendFileSync(process.env.CALLS, JSON.stringify(call) + '\\n');
-if (process.env.FAIL_READ === 'true' && !post) process.exit(1);
+if (process.env.FAIL_READ === 'true' && !post && !dismiss) process.exit(1);
+if (dismiss && process.env.REFUSE_DISMISSAL === 'true') process.exit(1);
 if (post && process.env.REFUSE === 'true') process.exit(1);
 if (post && process.env.BAD_RESPONSE === 'true') { console.log('{}'); process.exit(0); }
 if (process.env.BAD_READ === 'true' && !post) { console.log('bad json'); process.exit(0); }
 const login = process.env.LOGIN;
-const head = process.env.LIVE_SHA;
+const afterPost = fs.readFileSync(process.env.CALLS, 'utf8').includes('POST');
+if (afterPost && !post && !dismiss && process.env.FAIL_AFTER_READ === 'true') process.exit(1);
+const head = afterPost && process.env.AFTER_SHA ? process.env.AFTER_SHA : process.env.LIVE_SHA;
 const id = process.env.BAD_ID === 'true' ? undefined : 7;
 let result;
 if (args.includes('user')) result = { login, username: login, id };
-else if (post) result = { state: 'APPROVED', commit_id: process.env.APPROVED_SHA || head, approved_by: [{ user: { id: 7 } }] };
+else if (dismiss) result = { id: 99, state: 'DISMISSED' };
+else if (post) result = { id: 99, user: { login }, state: 'APPROVED', commit_id: process.env.APPROVED_SHA || call.payload?.commit_id || process.env.LIVE_SHA, approved_by: [{ user: { id: 7 } }] };
 else result = { head: { sha: head }, sha: head, user: { login: 'author' }, author: { username: 'author' } };
 console.log(JSON.stringify(result));
 `;
@@ -123,6 +128,31 @@ for (const [host, cli, file] of hosts) {
         assert.equal(result.posts.length, 0);
       });
     } else {
+      it('withdraws its own approval and stops if the head moves during publication', (t) => {
+        const result = run(t, host, cli, file, { AFTER_SHA: 'b'.repeat(40) });
+        assert.equal(result.status, 1);
+        assert.equal(result.posts.length, 1);
+        const dismissals = result.calls.filter(({ args }) => args.includes('PUT'));
+        assert.equal(dismissals.length, 1);
+        assert.ok(dismissals[0].args.includes('repos/org/repo/pulls/42/reviews/99/dismissals'));
+        assert.ok(dismissals[0].args.includes('event=DISMISS'));
+        assert.match(result.stdout, /Approval: stale-withdrawn/);
+      });
+
+      it('withdraws its approval if the post-publication head cannot be read', (t) => {
+        const result = run(t, host, cli, file, { FAIL_AFTER_READ: 'true' });
+        assert.equal(result.status, 1);
+        assert.equal(result.calls.filter(({ args }) => args.includes('PUT')).length, 1);
+        assert.match(result.stdout, /Approval: stale-withdrawn/);
+      });
+
+      it('leaves a failed stale-approval withdrawal unresolved and stops before merge', (t) => {
+        const result = run(t, host, cli, file, { AFTER_SHA: 'b'.repeat(40), REFUSE_DISMISSAL: 'true' });
+        assert.equal(result.status, 1);
+        assert.match(result.stdout, /Approval: withdrawal-failed/);
+        assert.doesNotMatch(result.stdout, /Approval: recorded/);
+      });
+
       it('does not claim approval of a different response commit', (t) => {
         const result = run(t, host, cli, file, { APPROVED_SHA: 'b'.repeat(40) });
         assert.match(result.stdout, /Approval: unverified/);

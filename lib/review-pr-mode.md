@@ -178,8 +178,25 @@ if [ "${REVIEW_DRAFT:-false}" != true ] && [ "${APPROVE_ENABLED:-false}" = true 
         '{commit_id: $sha, event: "APPROVE", body: "Reviewed by /do:review — no unresolved CRITICAL findings."}' > "$APPROVAL_DIR/payload.json" || exit 1
       if gh api --hostname {GH_HOST} "repos/{OWNER}/{REPO}/pulls/{PR_NUM}/reviews" \
          --method POST --input "$APPROVAL_DIR/payload.json" > "$APPROVAL_DIR/response.json"; then
-        if jq -e --arg sha "{HEAD_SHA}" '.state == "APPROVED" and .commit_id == $sha' "$APPROVAL_DIR/response.json" >/dev/null; then
-          APPROVAL_STATUS=recorded
+        if jq -e --arg sha "{HEAD_SHA}" --slurpfile user "$APPROVAL_DIR/user.json" \
+           '.state == "APPROVED" and .commit_id == $sha and (.id | type == "number" and . > 0 and floor == .)
+            and ((.user.login | ascii_downcase) == ($user[0].login | ascii_downcase))' "$APPROVAL_DIR/response.json" >/dev/null; then
+          APPROVAL_REVIEW_ID=$(jq -er '.id' "$APPROVAL_DIR/response.json") || exit 1
+          if gh api --hostname {GH_HOST} "repos/{OWNER}/{REPO}/pulls/{PR_NUM}" > "$APPROVAL_DIR/after.json" \
+             && jq -e --arg sha "{HEAD_SHA}" '.head.sha == $sha' "$APPROVAL_DIR/after.json" >/dev/null; then
+            APPROVAL_STATUS=recorded
+          else
+            # Withdraw only the exact approval returned for this authenticated user.
+            if gh api --hostname {GH_HOST} "repos/{OWNER}/{REPO}/pulls/{PR_NUM}/reviews/${APPROVAL_REVIEW_ID}/dismissals" \
+               --method PUT -f event=DISMISS -f message="/do:review: head changed or could not be verified after approval; a new review is required." > "$APPROVAL_DIR/dismissal.json" \
+               && jq -e --argjson id "$APPROVAL_REVIEW_ID" '.id == $id and .state == "DISMISSED"' "$APPROVAL_DIR/dismissal.json" >/dev/null; then
+              APPROVAL_STATUS=stale-withdrawn
+            else
+              APPROVAL_STATUS=withdrawal-failed
+            fi
+            printf 'Approval: %s; stop before merge and review the current head.\n' "$APPROVAL_STATUS"
+            exit 1
+          fi
         else
           APPROVAL_STATUS=unverified
         fi
@@ -195,7 +212,12 @@ printf 'Approval: %s\n' "$APPROVAL_STATUS"
 ```
 
 The REST `APPROVE` event is the equivalent of `gh pr review --approve`, with
-`commit_id` explicitly pinning the reviewed head. A self-authored PR stays
+`commit_id` explicitly identifying the reviewed commit. GitHub has no atomic
+current-head guard for this review API: `commit_id` alone does not prevent a
+stale approval from counting when stale-review dismissal is disabled. Re-read
+the head after publishing and dismiss **only this run's returned approval** if
+it moved or cannot be verified, then stop before merge. A failed withdrawal is
+an unresolved publication state to report and recover, never approval success. A self-authored PR stays
 comment-only. Missing approval permission or a rejected/unverified response is
 not an approval: preserve the review, report the status, and let the fresh merge
 gates determine whether another approver is still required. Never retry against
