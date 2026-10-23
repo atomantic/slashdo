@@ -56,6 +56,24 @@ trap cleanup_temp EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# Defer cancellation until mktemp's pathname is registered with cleanup_temp.
+# The allocator inherits ignored signals so a process-group signal cannot kill
+# it after creation but before stdout returns. The parent still records that
+# signal and exits immediately after reaping the allocator and owning its path.
+# Usage: allocate_temp <cleanup-variable> [mktemp arguments...]
+allocate_temp() {
+  local variable="$1" allocated="" status=0 pending_signal=0
+  shift
+  trap 'pending_signal=130' INT
+  trap 'pending_signal=143' TERM
+  allocated="$(trap '' INT TERM; mktemp "$@")" || status=$?
+  printf -v "$variable" '%s' "$allocated"
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  if [ "$pending_signal" -ne 0 ]; then exit "$pending_signal"; fi
+  return "$status"
+}
+
 # Run a writer command against a temp file in the destination directory, then
 # rename it into place. Writing straight to the final path (curl -o "$dest",
 # sed > "$dest") truncates it up front, so a failed or interrupted transfer
@@ -66,8 +84,8 @@ atomic_write() {
   local dest="$1"
   shift
   local tmp mode
-  tmp="$(mktemp "$(dirname "$dest")/.slashdo-tmp.XXXXXX")" || return 1
-  ACTIVE_TMP="$tmp"
+  allocate_temp ACTIVE_TMP "$(dirname "$dest")/.slashdo-tmp.XXXXXX" || return 1
+  tmp="$ACTIVE_TMP"
   # mktemp creates the file 0600; restore the mode a plain create would have
   # produced under the user's umask, so staging neither loosens nor tightens
   # what curl -o / cp used to write directly.
@@ -228,7 +246,7 @@ install_claude() {
   local target_hooks="$CLAUDE_CONFIG_DIR/hooks"
   local registration_failed=false
   local hooks_ready=true
-  if ! CLAUDE_STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-claude.XXXXXX")"; then
+  if ! allocate_temp CLAUDE_STAGE_DIR -d "${TMPDIR:-/tmp}/slashdo-claude.XXXXXX"; then
     printf "    ${YELLOW}failed (could not create a temp directory)${RESET}\n"
     return 1
   fi
@@ -292,7 +310,7 @@ install_claude() {
   if [ "$hooks_ready" = true ] && command -v node &>/dev/null &&
      [ -f "$target_hooks/slashdo-check-update.js" ] &&
      [ -f "$target_hooks/slashdo-statusline.js" ]; then
-    MOD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-mod.XXXXXX")" || MOD_DIR=""
+    allocate_temp MOD_DIR -d "${TMPDIR:-/tmp}/slashdo-mod.XXXXXX" || MOD_DIR=""
     if [ -n "$MOD_DIR" ] && fetch_file "src/settings-hooks.js" "$MOD_DIR/settings-hooks.js"; then
       # Keep a copy beside the hooks so uninstall.sh can deregister offline.
       if ! cp "$MOD_DIR/settings-hooks.js" "$target_hooks/$SETTINGS_HOOKS_CACHE" 2>/dev/null; then
@@ -341,7 +359,7 @@ install_opencode() {
   # Stage downloads in a private, randomized directory (removed by the EXIT
   # trap) rather than fixed /tmp/slashdo-* names another local user could
   # pre-create or a concurrent install could clobber.
-  if ! STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slashdo-install.XXXXXX")"; then
+  if ! allocate_temp STAGE_DIR -d "${TMPDIR:-/tmp}/slashdo-install.XXXXXX"; then
     printf "    ${YELLOW}skipped (could not create a temp directory)${RESET}\n"
     return 1
   fi

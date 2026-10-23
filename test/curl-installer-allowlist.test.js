@@ -130,9 +130,10 @@ describe('curl-installer OpenCode temporary files', () => {
     // Ignore comments so the rule reads the code, not the prose about it.
     const code = installer.split('\n').filter((line) => !line.trim().startsWith('#')).join('\n');
 
-    assert.match(code, /mktemp -d "\$\{TMPDIR:-\/tmp\}\/slashdo-install\.XXXXXX"/,
+    assert.match(code, /mktemp "\$@"/, 'the allocation helper must use mktemp');
+    assert.match(code, /allocate_temp STAGE_DIR -d "\$\{TMPDIR:-\/tmp\}\/slashdo-install\.XXXXXX"/,
       'the OpenCode staging directory must come from mktemp -d');
-    assert.match(code, /mktemp "\$\(dirname "\$dest"\)\/\.slashdo-tmp\.XXXXXX"/,
+    assert.match(code, /allocate_temp ACTIVE_TMP "\$\(dirname "\$dest"\)\/\.slashdo-tmp\.XXXXXX"/,
       'destination writes must stage through mktemp in the destination directory');
     assert.doesNotMatch(code, /\/tmp\/slashdo/, 'no predictable /tmp/slashdo-* path');
   });
