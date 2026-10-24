@@ -499,8 +499,10 @@ directly to **Checkpoint 3**, so an interrupted rerun can recover from a merge
 that already succeeded remotely. Otherwise:
 
 - **Gate on required CI first, following the same rule as step 6 above.**
-  - **GitHub** (`ci-status` verb, `host-github.md`) — check once, without watching: `gh pr checks <number> --required`. If the output matches `no (required )?checks reported`, that is not automatically green: when a workflow is configured to run on PRs into `{target}`, poll for up to five minutes for a required check to attach (re-running the same command), then report INCOMPLETE if none does; when no such workflow exists for `{target}`, the gate is vacuously satisfied — merge directly. Once at least one required check is reported, watch it in-session: `gh pr checks <number> --required --watch --fail-fast`.
-  - **GitLab** (`ci-status` verb, `host-gitlab.md`) — GitLab has no separate list of required checks; the project's pipeline-must-succeed setting applies instead. Watch the head pipeline in-session: `glab ci status --wait --branch {source}`. If it reports no pipeline at all for `{source}`, poll for up to five minutes for one to attach, then report INCOMPLETE if none does.
+  - Apply the shared release CI gate below to this PR's live head and `{target}`. Verify configured expected CI independently of protection-required checks; an empty required list is not missing CI.
+
+!read lib/release-ci-gate.md
+
   - On a required-check/pipeline **failure**, apply the **CI flake handling** routine — one conservative re-run on the same commit (see **CI flake handling** above). If the same SHA passes on the re-run, treat it as a flake and proceed (logging which check flaked); if it fails again, **abort the release merge** and report which check failed.
 - Once confirmed clean, merge (the `merge` verb — GitHub reads the PR state and merges directly since a release PR is never squashed/rebased away from its exact head; GitLab has no separate list-required-checks step, so the pipeline wait above is its whole gate):
   ```bash
@@ -511,7 +513,7 @@ that already succeeded remotely. Otherwise:
       exit 1
     }
     if [ "$CURRENT_PR_STATE" = "OPEN" ]; then
-      gh pr merge "$PR_NUMBER" --merge
+      gh pr merge "$PR_NUMBER" --merge --match-head-commit "<ci-verified-head>"
     elif [ "$CURRENT_PR_STATE" != "MERGED" ]; then
       echo "INCOMPLETE — Merged release PR is unverified; expected OPEN or MERGED, got ${CURRENT_PR_STATE:-empty}. Preserve the prepared release state and retry."
       exit 1
