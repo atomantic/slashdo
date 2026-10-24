@@ -58,8 +58,12 @@ second release workflow that reloads saved reviewer defaults.
    INCOMPLETE; preserve the prepared state for retry.
 6. **Deliver through the project's gates.** For an open PR, wait for the expected
    CI on the current head and satisfy the configured review gate before merging
-   with a repository-supported method. No reported checks is not green when CI
-   is expected: poll for up to five minutes, then report INCOMPLETE if none attach.
+   with a repository-supported method. Apply the shared release CI gate to this
+   preparation PR's live head and integration base. No reported checks is not green when CI
+   is expected; distinguish protection-required checks from configured expected CI.
+
+!read lib/release-ci-gate.md
+
    Diagnose and fix red CI; never merge over a failure. Read back `state=MERGED`,
    `mergedAt`, and `mergeCommit`, fetch the integration branch, and verify it
    contains that merge commit. Squash/rebase merges need verification of the
