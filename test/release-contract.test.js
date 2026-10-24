@@ -11,6 +11,55 @@ const body = fs.readFileSync(path.join(__dirname, '..', 'commands', 'do', 'relea
 // via `!read` so recovery/generic-promotion runs don't pay for it — resolve it here
 // so the contract below still pins its text.
 const resolved = readCommandDocs('release.md', { eager: true });
+const ciGate = fs.readFileSync(path.join(__dirname, '..', 'lib', 'release-ci-gate.md'), 'utf8');
+
+describe('/do:release expected CI independent of branch protection', () => {
+  it('routes both release paths to the same installed gate', () => {
+    assert.match(body, /^!read lib\/release-ci-gate\.md$/m);
+    const documented = fs.readFileSync(path.join(__dirname, '..', 'lib', 'release-documented.md'), 'utf8');
+    assert.match(documented, /^!read lib\/release-ci-gate\.md$/m);
+    const { buildPromptBundle, parseFrontmatter } = require('../src/transformer');
+    const source = parseFrontmatter(body).body;
+    const libs = path.join(__dirname, '..', 'lib');
+    const deferred = buildPromptBundle(source, libs, { teams: false, defer: true });
+    assert.ok(deferred.files['release-ci-gate.md']);
+    const eager = buildPromptBundle(source, libs, { teams: false, defer: false });
+    assert.match(eager.body, /empty required list does not block/);
+  });
+
+  it('allows successful expected CI on an unprotected branch without waiting for required checks to appear', () => {
+    assert.match(ciGate, /unfiltered checks/);
+    assert.match(ciGate, /empty required list does not block\s+an unprotected release branch whose expected CI has succeeded/);
+    assert.doesNotMatch(body, /poll for up to five minutes for a required check to attach/);
+    assert.match(ciGate, /No required checks and no applicable configured CI is a valid\s+no-CI case only after this configuration inspection succeeds/);
+  });
+
+  it('cannot infer expected workflows from whichever checks happened to attach', () => {
+    assert.match(ciGate, /PR base's workflow definitions/);
+    assert.match(ciGate, /branches.*branches-ignore/);
+    assert.match(ciGate, /paths.*paths-ignore/);
+    assert.match(ciGate, /complete\s+changed-path list/);
+    assert.match(ciGate, /configured path\/ID/);
+    assert.match(ciGate, /latest applicable run and latest attempt/);
+    assert.match(ciGate, /Missing expected workflow, pending, queued/);
+    assert.match(ciGate, /failed, cancelled, timed-out, skipped, neutral, action-required/);
+    assert.match(ciGate, /then report\s+INCOMPLETE with the missing workflow\/check and current head/);
+  });
+
+  it('retains actual required failures and invalidates proof on head changes', () => {
+    assert.match(ciGate, /Expected workflow success cannot excuse a missing, pending\s+or failed required check/);
+    assert.match(ciGate, /new head or changed base invalidates this gate's evidence/);
+    assert.match(ciGate, /recorded PR\/head association/);
+    assert.match(ciGate, /pull_request_target.*base alone is not head-test proof/s);
+    assert.match(body, /gh pr merge "\$PR_NUMBER" --merge --match-head-commit "<ci-verified-head>"/);
+  });
+
+  it('keeps API uncertainty and unsupported configuration blocked', () => {
+    assert.match(ciGate, /permission errors, rate limits, malformed data and other API failures\s+are INCOMPLETE/);
+    assert.match(ciGate, /unsupported configuration or an incomplete\/paginated\s+path\/workflow listing must remain INCOMPLETE/);
+    assert.match(ciGate, /never\s+grants admission or changes branch protection/);
+  });
+});
 
 describe('/do:release remote promotion contracts', () => {
   it('requires ordered remote checkpoints before reporting completion', () => {
@@ -189,7 +238,7 @@ describe('/do:release GitLab paths', () => {
     assert.match(body, /glab mr create --source-branch "\{source\}" --target-branch "\{target\}"/);
 
     // Merging: CI gate + merge command.
-    assert.match(body, /glab ci status --wait --branch \{source\}/);
+    assert.match(resolved, /glab ci status --wait --branch <head-branch>/);
     assert.match(body, /glab mr view "\$PR_NUMBER" --output json --jq \.state/);
     assert.match(body, /glab mr merge "\$PR_NUMBER" --yes/);
 
