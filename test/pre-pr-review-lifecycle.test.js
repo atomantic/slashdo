@@ -64,6 +64,9 @@ it('keeps host CI/review current while preserving pre-PR completion and explicit
   const pr = fs.readFileSync(path.join(root, 'commands/do/pr.md'), 'utf8');
   assert.ok(pr.indexOf('!read lib/pre-pr-review-lifecycle.md') < pr.indexOf('## Local Code Review'));
   assert.match(pr, /Bind publication once/);
+  assert.match(pr, /Before \*\*first creation\*\*, after all push\/rebase retries, repeat the lifecycle resume check against the current HEAD/);
+  assert.match(pr, /current HEAD must equal the completed receipt's `reviewedHead`/);
+  assert.match(pr, /mismatch runs `PR_SIDE_AGENTS` in full, without respawning local reviewers/);
   assert.match(pr, /required hosted reviews and checks on the new HEAD/);
   const review = fs.readFileSync(path.join(root, 'commands/do/review.md'), 'utf8');
   assert.match(review, /explicit invocation.*requests a fresh review/);
