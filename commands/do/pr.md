@@ -101,7 +101,7 @@ Partition `REVIEW_AGENTS` into two ordered sublists, preserving relative order:
 - `LOCAL_AGENTS` — every entry that is neither `copilot` nor an `@<login>`: `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, `ollama[…]`, `cmd[<invocation>]`. These review the working tree locally and need no PR.
 - `PR_SIDE_AGENTS` — `copilot` plus every `@<login>` entry; these review the PR cloud-side and need it to exist.
 
-**Only when the lifecycle resume gate did not restore a completed phase and `LOCAL_AGENTS` is non-empty**, run the multi-reviewer loop now, **before the PR is created**, over `LOCAL_AGENTS` only, so every local reviewer's fixes land before the PR opens. Pass `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`, and `{REVIEW_MODELS}` (the saved per-agent default models — every local reviewer but `cmd` reads it). Record the result as `LOCAL_OVERALL_STATUS`.
+**Only when no PR/MR exists, the lifecycle resume gate did not restore a completed phase and `LOCAL_AGENTS` is non-empty**, run the multi-reviewer loop now, **before the PR is created**, over `LOCAL_AGENTS` only, so every local reviewer's fixes land before the PR opens. Pass `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`, and `{REVIEW_MODELS}` (the saved per-agent default models — every local reviewer but `cmd` reads it). Record the result as `LOCAL_OVERALL_STATUS`.
 
 - If `LOCAL_OVERALL_STATUS` is `dirty` (broken build / test failure / rejected), **abort before creating the PR** — print the proximate failure and stop.
 - Any other status (`clean`, `partial`, `inconclusive`) allows proceeding — a non-clean local pass is a signal to the user, not a hard block on PR creation.
@@ -110,7 +110,7 @@ Partition `REVIEW_AGENTS` into two ordered sublists, preserving relative order:
 
 This phase hands off to the **multi-reviewer wrapper** (under "Reviewer loop bodies" below) over `LOCAL_AGENTS` — its own gated `!read`s are the dispatch for every local-agent slug, `cmd` included.
 
-After this phase, persist its status and original reviewed head using **Record the completed phase** in the lifecycle procedure. Do not overwrite a restored receipt. An incomplete reviewer attempt is not successful completion.
+For a new delivery only, after this phase persist its status and original reviewed head using **Record the completed phase** in the lifecycle procedure. Do not overwrite a restored receipt. An incomplete reviewer attempt is not successful completion.
 
 ## Open the PR
 
@@ -141,7 +141,7 @@ After this phase, persist its status and original reviewed head using **Record t
   - GitHub: `gh pr create --base {default_branch} --head {current_branch} --title "..." --body "..."`
   - GitLab: `glab mr create --source-branch {current_branch} --target-branch {default_branch} --title "..." --description "..."` (add `--yes` to skip the interactive prompt; `--remove-source-branch` if the project deletes merged branches)
 - Create a rich PR/MR description
-- Capture the resulting PR/MR URL to report at the end, then run **Bind publication once** from the lifecycle procedure. A create retry reuses completed review; binding failure blocks merge until repaired without another reviewer call.
+- Capture the resulting PR/MR URL to report at the end, then run **Bind publication once** from the lifecycle procedure when a real local receipt exists (skip for legacy continuation). A create retry reuses completed review; binding failure blocks merge until repaired without another reviewer call.
 
 ## Run the PR-side Reviews
 

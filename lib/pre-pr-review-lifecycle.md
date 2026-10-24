@@ -26,16 +26,26 @@ node - "$REVIEW_RECEIPT" "$REVIEW_BRANCH" "$REVIEW_ORIGIN" "$DEFAULT_BRANCH" "$R
 const fs = require('node:fs');
 const [file, branch, origin, base, head, prUrl] = process.argv.slice(2);
 let receipt;
-try { receipt = JSON.parse(fs.readFileSync(file, 'utf8')); }
+let hasReceipt = false;
+try { receipt = JSON.parse(fs.readFileSync(file, 'utf8')); hasReceipt = true; }
 catch (error) { if (error.code !== 'ENOENT') throw error; }
 const matches = receipt?.version === 1 && receipt.branch === branch && receipt.origin === origin && receipt.base === base;
 const valid = matches && ['clean', 'partial', 'inconclusive'].includes(receipt.status)
   && /^[a-f0-9]{40}$/.test(receipt.reviewedHead)
   && (prUrl ? receipt.prUrl === prUrl : !receipt.prUrl && receipt.reviewedHead === head);
-if (prUrl && !valid) throw new Error('Existing PR lacks matching completed local phase evidence: recover original records, do not automatically spawn reviewers');
-console.log(JSON.stringify({ reuseLocalPhase: Boolean(valid && receipt.status !== 'inconclusive'), retryIncompleteLocalPhase: Boolean(valid && receipt.status === 'inconclusive'), receipt: valid ? receipt : null }));
+if (prUrl && hasReceipt && !valid) throw new Error('Existing PR lacks matching completed local phase evidence: recover original records, do not automatically spawn reviewers');
+console.log(JSON.stringify({ legacyPublished: Boolean(prUrl && !hasReceipt), reuseLocalPhase: Boolean(valid && receipt.status !== 'inconclusive'), retryIncompleteLocalPhase: Boolean(valid && receipt.status === 'inconclusive'), receipt: valid ? receipt : null }));
 NODE
 ```
+
+On `legacyPublished:true`, an existing PR predates receipts or was opened by hand.
+Report that prior local-review execution/model evidence is unavailable; do not
+invent a clean local verdict, model label or reviewed head. Skip automatic local
+review and continue PR-side feedback/CI/required hosted approval. Preserve any
+explicit unresolved finding or recorded required-review block. Do not record or
+bind a fabricated local receipt for this legacy continuation. The absent local
+phase is not an inconclusive requested reviewer in this invocation's aggregate;
+report it separately and aggregate the actual requested PR-side outcomes.
 
 On `reuseLocalPhase:true`, restore `LOCAL_OVERALL_STATUS`, `LOCAL_PHASE_START_SHA`
 and `LOCAL_PHASE_COMMITS` from the receipt; skip the Local Code Review gate and

@@ -817,7 +817,7 @@ describe('review-loop parse contracts', () => {
     assert.match(commit, /host enforces an up-to-date branch/);
     assert.match(commit, /semantic overlap/);
     assert.match(commit, /A changed HEAD invalidates head-bound results/);
-    assert.match(commit, /rerun the affected validation, the required reviews, and the required checks/);
+    assert.match(commit, /rerun affected validation, required hosted reviews and checks/);
     assert.match(commit, /`--force-with-lease`[^\n]*only if a rebase above rewrote already-pushed history/);
 
     // pr-better restates the same policy instead of the mandatory fast-forward + rebase.

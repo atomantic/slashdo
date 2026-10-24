@@ -30,6 +30,10 @@ it('executes the installed lifecycle recipe across retries, feedback pushes and 
   git('remote', 'add', 'origin', 'https://github.com/example/repo.git');
   commit();
   const head = git('rev-parse', 'HEAD');
+  const legacy = check({ PR_URL: 'https://github.com/example/repo/pull/older' });
+  assert.equal(legacy.legacyPublished, true);
+  assert.equal(legacy.reuseLocalPhase, false);
+  assert.equal(legacy.receipt, null);
   assert.equal(check().reuseLocalPhase, false);
   const completed = { LOCAL_OVERALL_STATUS: 'clean', LOCAL_PHASE_START_SHA: head, LOCAL_PHASE_COMMITS: '0' };
   assert.notEqual(run(1, { ...completed, LOCAL_OVERALL_STATUS: 'pending' }).status, 0);
