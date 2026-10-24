@@ -83,7 +83,7 @@ sort_by([ (([<labels> | select(test("^priority${LABEL_SEP}[0-9]+$")) | ltrimstr(
 DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(git remote show origin | sed -n 's/.*HEAD branch: //p')}"
 ```
-Git-native, not `gh repo view`/`glab repo view` — one less API round-trip, still works mid-auth-hiccup: local `origin/HEAD` first, remote query as fallback. **Shell variables do NOT persist across Bash tool calls — only the working directory does**, so every phase below that needs `DEFAULT_BRANCH` (or `SLUG`/`WORKTREE`) after Phase 2 re-declares them at the top of its own snippet, recomputing this one-liner rather than trusting it survived.
+Git-native, not `gh repo view`/`glab repo view` — one less API round-trip, still works mid-auth-hiccup: local `origin/HEAD` first, remote query as fallback. **Neither shell variables nor `cd` working-directory changes are guaranteed to persist across separate Bash tool calls on all harnesses** (some harnesses preserve `cwd`, while others reset every Bash tool call to the workspace root), so every phase below that needs `DEFAULT_BRANCH`, `SLUG`, or `WORKTREE` after Phase 2 re-declares them at the top of its own snippet and explicitly `cd "$WORKTREE"` (or uses `git -C "$WORKTREE"`) rather than trusting prior shell state.
 
 **`release_marker` — retracting a claim without shipping it:** run `unassign_me "$ISSUE_NUM" 2>/dev/null || true`, then `label_rm "$ISSUE_NUM" in-progress 2>/dev/null || true`. Both verbs are best-effort so one failed release cannot suppress the other. On a Jira tracker, run [lib/tracker-jira.md](../../lib/tracker-jira.md)'s `release_marker` block instead (the transition back, then the unassign).
 
@@ -272,7 +272,7 @@ Then:
 > `/do:next` always uses a worktree so a *second* `/do:next` in another tab doesn't fight over the main repo's working tree. **A `/do:next` without a worktree is a broken claim — it blocks every subsequent claim until cleaned up.**
 >
 > - ❌ NEVER `git checkout -b next/issue-<num>` or `git switch -c next/issue-<num>` in the main repo.
-> - ✅ ALWAYS use `git worktree add` with an explicit path, then `cd` in and verify with `pwd`. (The bash-tool "avoid `cd`" guidance does not apply — invoking `/do:next` is a request for a working-directory change.)
+> - ✅ ALWAYS use `git worktree add` with an explicit path, `cd "$WORKTREE"` at the start of every subsequent Bash tool call (since some harnesses reset `cwd` between calls), and pass explicit `$WORKTREE/...` paths to file-reading/editing tools.
 
 The worktree is a **sibling directory** (`../next-issue-<num>`) on branch `next/issue-<num>`. Run as a **single Bash invocation** so the shell vars stay in scope, substituting the real issue number:
 

@@ -57,12 +57,12 @@ The `Read` tool auto-processes certain types as multimodal input, which can carr
 
 - Images: `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.bmp`, `*.webp`, `*.tiff`, `*.tif`, `*.heic`, `*.heif`, `*.ico`
 - PDFs: `*.pdf`
-- Jupyter notebooks: `*.ipynb` (output cells contain images/HTML and execute under multimodal Read). Inspection of `.ipynb` is limited to inventory metadata (path, size, sha256) and to grep-based pattern scans in Phase 2 — agents may grep for code-execution / network / credential patterns inside `.ipynb` files (text-only), but the I7 contract still forbids byte-dump readers (`head -c`, `cat`, `wc`) on this extension
+- Jupyter notebooks: `*.ipynb` (output cells contain images/HTML that the `Read` tool may render multimodally into context). Inspection of `.ipynb` is limited to inventory metadata (`stat`/`wc -c` size, sha256) and to grep-based pattern scans in Phase 2 — agents may grep for code-execution / network / credential patterns inside `.ipynb` files (text-only), while raw content dumps (`Read`, `head -c`, `cat`) remain forbidden on this extension under I7
 - Office documents: `*.docx`, `*.xlsx`, `*.pptx`, `*.odt`, `*.ods`, `*.odp`
 - Audio / video: `*.mp3`, `*.wav`, `*.ogg`, `*.flac`, `*.mp4`, `*.mov`, `*.webm`, `*.mkv`
 - Archives (extraction is itself an exec-equivalent risk): `*.zip`, `*.tar`, `*.tar.gz`, `*.tgz`, `*.tar.bz2`, `*.tar.xz`, `*.7z`, `*.rar`, `*.jar`, `*.aar`, `*.whl`, `*.egg`, `*.deb`, `*.dmg`, `*.iso`
 - Native binaries / compiled code: `*.node`, `*.so`, `*.dylib`, `*.dll`, `*.exe`, `*.wasm`, `*.bin`, `*.pyc`, `*.pyo`, `*.class`
-- SVG: do not Read (SVG can contain `<script>` and Read may render it). Inspection is limited to inventory metadata and `grep`-based pattern scans (text-only); the I7 contract forbids byte-dump readers (`head -c`, `cat`, `wc`) on this extension.
+- SVG: do not open with `Read` (SVG can contain `<script>` or embedded payloads that multimodal `Read` may render). Inspection is limited to inventory metadata (`stat`/`wc -c` size) and `grep`-based pattern scans (text-only); raw content dumps (`Read`, `head -c`, `cat`) remain forbidden on this extension under I7.
 
 ### I4 — Symlink-escape invariant
 Before ANY `Read` or grep against ANY file inside `SCAN_DIR` (manifests, orientation files, source files, `.git/*`, everything), resolve the real path and confirm it lies inside `SCAN_DIR`. If it escapes (`..`, absolute symlink to `/etc/...`, etc.), record a finding (category: **symlink escape**, severity: **HIGH**) and skip the read. Use `realpath "$path"` to get `RP_PATH` and `realpath "$SCAN_DIR"` to get `RP_SCAN_DIR`. **Containment check is exact, not string-prefix**: the path is inside `SCAN_DIR` if and only if `RP_PATH == RP_SCAN_DIR` OR `RP_PATH` starts with `RP_SCAN_DIR + "/"` (a bare prefix check would let `/safe/dir2/file` match `/safe/dir`). Shell equivalent: `case "$RP_PATH/" in "$RP_SCAN_DIR/"*) ok;; *) reject;; esac` (note the trailing `/` on both sides). Paths inside `SCAN_DIR` always start with `/`, so the BSD `realpath` `-`-prefix ambiguity does not apply.
@@ -461,7 +461,9 @@ For every URL built in this phase:
 
 ### Per-dependency checks
 
-For each direct dep `{name}@{version}` (already validated and URL-encoded per the rules above; the placeholders below assume safe values):
+**Rate-limit and latency bound:** Cap live `WebFetch` checks at **at most 25 direct dependencies** per scan (prioritizing newly added, unpinned, or unfamiliar packages) so large manifests do not stall the scan or exhaust GitHub's 60 req/hr unauthenticated rate limit. Record any remaining unfetched dependencies as `INCOMPLETE — rate-limit budget reached; run npm/pip/cargo audit in an isolated environment`.
+
+For each direct dep `{name}@{version}` within that budget (already validated and URL-encoded per the rules above; the placeholders below assume safe values):
 
 1. **Existence + metadata**: `WebFetch` the registry endpoint
    - npm: `https://registry.npmjs.org/{name}`, then `https://api.npmjs.org/downloads/point/last-week/{name}` for the weekly download count

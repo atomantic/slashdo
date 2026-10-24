@@ -151,8 +151,8 @@ Using agent results, classify every open `PLAN_LABEL` issue. Staleness is measur
 | Status | Criteria | Action |
 |--------|----------|--------|
 | `confirmed-done` | Git commit + code exists + tests pass | Close the issue |
-| `likely-done` | Strong evidence but not 100% certain | Close the issue |
-| `stale` | No commits, no code, no recent discussion; item is >30 days old with zero progress | Close the issue |
+| `likely-done` | Strong evidence but not 100% certain | **Never auto-close in Default mode** — comment evidence + label `likely-done` (offer to close in `--interactive`) |
+| `stale` | No commits, no code, no recent discussion; item is >30 days old with zero progress | **Never auto-close in Default mode** — comment last-activity date + label `stale` (offer to close in `--interactive`) |
 | `drifted` | Agent 5 flagged `drift-conflict` or `drift-unclear` | **Never auto-close** — surface to human (replan / examine / close) |
 | `still-pending` | No evidence of completion and no drift | Keep open |
 
@@ -253,16 +253,21 @@ label. Only file when nothing existing covers it.
 Apply the triage decisions as issue operations (GitHub `gh`; glab in parens; Jira
 per [lib/tracker-jira.md](../../lib/tracker-jira.md) "`/do:replan` on Jira", which
 files through its "File one issue" block and closes by transition) —
-**except for `drifted` items, which are never auto-closed**:
+**only `confirmed-done` and `epic-done` are auto-closed in Default mode; `likely-done`, `stale`, and `drifted` items are never auto-closed without human confirmation**:
 
-- `confirmed-done` / `likely-done` → **close** with an evidence comment:
+- `confirmed-done` → **close** with an evidence comment:
   `gh issue close <n> --comment "Closed by /do:replan — <evidence>"`
   (glab: `glab issue note <n> -m "<evidence>"` then `glab issue close <n>`).
 - **epic mapped to `confirmed-done`** (state `epic-done`) → **close** listing the
   closed children: `gh issue close <n> --comment "All children closed (#a, #b, …) and wrap-up complete — closing epic. (/do:replan)"`.
   An `epic-wrapup`/`epic-open` epic is never closed here (when `epic-wrapup`,
   optionally comment that only the epic's own wrap-up remains).
-- `stale` → close with a stale-reason comment (note the last-activity date).
+- `likely-done` → **never auto-close in Default mode.** Post the completion evidence
+  as a comment and apply a `likely-done` label (`gh label create likely-done --color 0E8A16 2>/dev/null || true` first, then
+  `gh issue edit <n> --add-label likely-done`; glab: `glab label create --name likely-done --color "#0E8A16" 2>/dev/null || true` first, then `glab issue note <n> -m "<evidence>"` + `glab issue update <n> --label likely-done`).
+- `stale` → **never auto-close in Default mode.** Post a stale-reason comment (noting the last-activity date)
+  and apply a `stale` label (`gh label create stale --color D4C5F9 2>/dev/null || true` first, then
+  `gh issue edit <n> --add-label stale`; glab: `glab label create --name stale --color "#D4C5F9" 2>/dev/null || true` first, then `glab issue note <n> -m "<stale-reason>"` + `glab issue update <n> --label stale`).
 - new suggestions **and every pending PLAN.md item being migrated** → dedup against
   `EXISTING_ISSUES` (below), then **create**:
   `gh issue create --title "<title>" --body "<body incl. any ## Decision>" --label <PLAN_LABEL>`
@@ -273,17 +278,18 @@ files through its "File one issue" block and closes by transition) —
   and apply a `drift` label (`gh label create drift --color E8A33D 2>/dev/null || true` first, then
   `gh issue edit <n> --add-label drift`; glab: `glab label create --name drift --color "#E8A33D" 2>/dev/null || true` first, then `glab issue note <n> -m "<drift>"` + `glab issue update <n> --label drift`).
 
-The audit trail is the issue's close event + comment — **not** git log. Then print a
+The audit trail is the issue's close/comment event — **not** git log. Then print a
 brief summary (list the actual numbers):
 
 ```
 Replan complete (label: {PLAN_LABEL}):
-- Closed {N} completed issue(s): #a, #b, …
-- Closed {S} stale issue(s): #c, …
-- Created {P} new issue(s): #d, …  ({Mg} migrated from PLAN.md, {Op} from the opportunity scan)
+- Closed {N} confirmed-done issue(s): #a, #b, …
+- Flagged {M} likely-done issue(s) (labeled `likely-done`, re-run with --interactive to close): #c, …
+- Flagged {S} stale issue(s) (labeled `stale`, re-run with --interactive to close): #d, …
+- Created {P} new issue(s): #e, …  ({Mg} migrated from PLAN.md, {Op} from the opportunity scan)
 - {any GOALS.md boundary fixes}
 
-⚠️ {D} drifted issue(s) require human review — commented + labeled `drift`: #e, …
+⚠️ {D} drifted issue(s) require human review — commented + labeled `drift`: #f, …
    Re-run with --interactive to resolve (replan / examine / close).
 
 ⏸️ {Q} item(s) deferred — need a decision before they can be filed:

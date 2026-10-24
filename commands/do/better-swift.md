@@ -53,7 +53,7 @@ Execute the canonical phases in order. Read each partial when its phase applies;
 
 !read lib/better-test-enhancement.md
 
-5. Create the Swift category PRs, bump the Swift version through the supplied procedure, and verify CI.
+5. Create the Swift category PRs and verify CI.
 
 !read lib/better-pr-and-ci.md
 

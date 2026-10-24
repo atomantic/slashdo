@@ -456,8 +456,8 @@ wants one.
 - **Backlog** — "List issues" with `STATE_JQL="statusCategory != Done"` and
   `"$PLAN_LABEL"`; `created` dates drift, `updated` measures staleness.
   `EXISTING_ISSUES` is the same call with no labels.
-- **Close** (`confirmed-done`, `likely-done`, `stale`, `epic-done`) —
-  `issue_close_note <KEY> "Closed by /do:replan — <evidence>"`. A failed transition is
+- **Close** (`confirmed-done`, `epic-done`, or `likely-done`/`stale` when confirmed in `--interactive`) —
+  `issue_close_note <KEY> "Closed by /do:replan — <evidence>"`. In Default mode, `likely-done` and `stale` are commented with `issue_comment` and labeled (`label_add <KEY> likely-done` / `label_add <KEY> stale`) rather than auto-closed. A failed transition is
   reported with the key and left open, never retried under another status name.
 - **Drift** — `issue_comment <KEY> "⚠️ DRIFT: …"`, then `label_add <KEY> drift`; a
   migrated item's open question adds `needs-decision` the same way.
