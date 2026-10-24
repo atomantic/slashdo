@@ -40,6 +40,12 @@ Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`.
 
 Print: `PR flow: {current_branch} → {default_branch}`
 
+## Resume the delivery before any local reviewer
+
+Read the durable pre-PR lifecycle procedure before initializing or dispatching local review. Apply its resume gate now and its completion/publication writes at the steps below. Local reviewers run once before opening this delivery's PR/MR; feedback/CI pushes and resumed shipping continue the PR-side workflow. Explicit user-requested re-review remains possible.
+
+!read lib/pre-pr-review-lifecycle.md
+
 ## Commit and Push
 
 - Commit all changes to the current branch, following these conventions:
@@ -50,7 +56,7 @@ Print: `PR flow: {current_branch} → {default_branch}`
   - **Default-branch movement alone is not a reason to rebase.** A ready branch that is conflict-free keeps its HEAD, and with it the validation and reviews already recorded against that HEAD; do not rewrite it or restart CI/review just because the base advanced. Where the host permits merging a branch that is behind, publish and merge it as it is.
   - **Update the branch only for a concrete reason:** (1) it actually conflicts with the default branch (`git merge-tree --write-tree {REVIEW_BASE} HEAD` exits non-zero — git ≥ 2.38, otherwise trial-merge and abort — or the host reports the PR as conflicting); (2) the host enforces an up-to-date branch (strict required status checks / "require branches to be up to date" — the host refuses to merge a branch that is behind); or (3) there is evidenced integration risk, i.e. semantic overlap: base-only commits (`git diff --name-only HEAD...{REVIEW_BASE}`) touch files, symbols, or generated artifacts this branch also changes (`git diff --name-only {REVIEW_BASE}...HEAD`) in a way a textual merge would not flag.
   - To update the branch, `git rebase {REVIEW_BASE}`. If the rebase hits conflicts, **resolve them and continue the rebase**. Do not abort or stop merely because conflicts exist. Follow [lib/rebase-conflict-resolution.md](../../lib/rebase-conflict-resolution.md): inspect the replayed commit and both sides, resolve human-authored sources semantically, regenerate generated artifacts from their canonical inputs, run the focused checks, stage the resolution, and repeat `git rebase --continue` until complete. Only the playbook's last-resort, evidence-backed ambiguity may abort the rebase; a generated-file conflict alone never qualifies.
-  - **A changed HEAD invalidates head-bound results.** After any rebase that changes HEAD, rerun the affected validation, the required reviews, and the required checks on the new HEAD before merging; a clean rebase does not carry old verdicts forward.
+  - **A changed HEAD invalidates head-bound results.** After any rebase that changes HEAD, rerun affected validation, required hosted reviews and checks on the new HEAD before merging; preserve a completed pre-PR local phase for this delivery; a clean rebase does not carry old verdicts forward.
 - Push the branch — use `--force-with-lease` (never a bare `--force`) only if a rebase above rewrote already-pushed history, otherwise the plain form below:
 
 !read lib/upstream-push.md
@@ -95,7 +101,7 @@ Partition `REVIEW_AGENTS` into two ordered sublists, preserving relative order:
 - `LOCAL_AGENTS` — every entry that is neither `copilot` nor an `@<login>`: `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, `ollama[…]`, `cmd[<invocation>]`. These review the working tree locally and need no PR.
 - `PR_SIDE_AGENTS` — `copilot` plus every `@<login>` entry; these review the PR cloud-side and need it to exist.
 
-**If `LOCAL_AGENTS` is non-empty**, run the multi-reviewer loop now, **before the PR is created**, over `LOCAL_AGENTS` only, so every local reviewer's fixes land before the PR opens. Pass `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`, and `{REVIEW_MODELS}` (the saved per-agent default models — every local reviewer but `cmd` reads it). Record the result as `LOCAL_OVERALL_STATUS`.
+**Only when the lifecycle resume gate did not restore a completed phase and `LOCAL_AGENTS` is non-empty**, run the multi-reviewer loop now, **before the PR is created**, over `LOCAL_AGENTS` only, so every local reviewer's fixes land before the PR opens. Pass `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`, and `{REVIEW_MODELS}` (the saved per-agent default models — every local reviewer but `cmd` reads it). Record the result as `LOCAL_OVERALL_STATUS`.
 
 - If `LOCAL_OVERALL_STATUS` is `dirty` (broken build / test failure / rejected), **abort before creating the PR** — print the proximate failure and stop.
 - Any other status (`clean`, `partial`, `inconclusive`) allows proceeding — a non-clean local pass is a signal to the user, not a hard block on PR creation.
@@ -103,6 +109,8 @@ Partition `REVIEW_AGENTS` into two ordered sublists, preserving relative order:
 **If `LOCAL_AGENTS` is empty**, skip this section.
 
 This phase hands off to the **multi-reviewer wrapper** (under "Reviewer loop bodies" below) over `LOCAL_AGENTS` — its own gated `!read`s are the dispatch for every local-agent slug, `cmd` included.
+
+After this phase, persist its status and original reviewed head using **Record the completed phase** in the lifecycle procedure. Do not overwrite a restored receipt. An incomplete reviewer attempt is not successful completion.
 
 ## Open the PR
 
@@ -129,11 +137,11 @@ This phase hands off to the **multi-reviewer wrapper** (under "Reviewer loop bod
   The `"$PUSH_REMOTE" = "."` guard is load-bearing: on a local upstream `@{u}` resolves, so the no-upstream carve-out never fires, and an unguarded push runs `git push . HEAD:refs/heads/main` — which silently fast-forwards the *local* default branch, exits 0, leaves `@{u}..HEAD` empty, and opens a PR for a branch never pushed to any remote.
 
   See [lib/upstream-push.md](../../lib/upstream-push.md) for why the destination must be config-derived — never a bare `git push`, never `git push origin {current_branch}`. On a non-fast-forward, retry once behind `git pull --rebase --autostash`. If that rebase conflicts, **resolve it through [lib/rebase-conflict-resolution.md](../../lib/rebase-conflict-resolution.md), continue until the rebase completes, rerun the focused checks affected by the resolution, then retry the same upstream-derived push**. Do not classify an active rebase conflict as a push failure and do not stop merely to ask the user to resolve it — `/do:pr` is invoked programmatically by `/do:next` and `/do:pr-better`, so leave the expected branch checked out and fully rebased. **If the push still fails after that one retry, do NOT create the PR** — print the unpushed SHAs and the push error and stop. Skip the check only when the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1` fails — detached HEAD or no origin); a *local* upstream resolves, so the check runs and the `"."` guard stops it. `git status` is not a substitute — a clean tree says nothing about committed-but-unpushed commits.
-- Create a PR / merge request from `{current_branch}` to `{default_branch}`:
+- If the exact PR/MR already exists, adopt its URL/number and preserve its local receipt and original attribution; do not create another PR or repeat local review. Otherwise create a PR / merge request from `{current_branch}` to `{default_branch}`:
   - GitHub: `gh pr create --base {default_branch} --head {current_branch} --title "..." --body "..."`
   - GitLab: `glab mr create --source-branch {current_branch} --target-branch {default_branch} --title "..." --description "..."` (add `--yes` to skip the interactive prompt; `--remove-source-branch` if the project deletes merged branches)
 - Create a rich PR/MR description
-- Capture the resulting PR/MR URL to report at the end
+- Capture the resulting PR/MR URL to report at the end, then run **Bind publication once** from the lifecycle procedure. A create retry reuses completed review; binding failure blocks merge until repaired without another reviewer call.
 
 ## Run the PR-side Reviews
 
@@ -146,8 +154,8 @@ Execution order is always local phase, then PR-side phase, however the user inte
   2. Every `PR_SIDE_AGENTS` entry must appear *after* every `LOCAL_AGENTS` entry in the original `--review-with` order (e.g. `codex,copilot` or `codex,agy,@octocat`, not `@octocat,codex` or `copilot,agy`).
   If either fails, run `PR_SIDE_AGENTS` in full.
 - When both hold, check whether the local phase already satisfied `{REVIEW_STOP_MODE}`. Track `LOCAL_PHASE_START_SHA` (the commit before the local phase ran): `LOCAL_OVERALL_STATUS=clean` alone is ambiguous — it covers both "found nothing" and "found something, fixed it, re-review confirmed clean" — and the per-pass stop-mode table treats those oppositely:
-  - `REVIEW_STOP_MODE=on-clean`: skip `PR_SIDE_AGENTS` only if `LOCAL_OVERALL_STATUS` is `partial` (the local wrapper's own stop-mode already fired on a zero-change clean pass), **or** `LOCAL_OVERALL_STATUS` is `clean` AND **zero commits** were added between `LOCAL_PHASE_START_SHA` and HEAD. If `clean` but commits WERE added, do **not** skip — per the per-pass on-clean rule ("clean AND made zero changes" is required to stop) the next reviewer in the ordered list — a `PR_SIDE_AGENTS` entry — must still run. When the skip applies, set `PR_SIDE_OVERALL_STATUS=clean` (skipped — already satisfied by the local phase) and continue to "Compute OVERALL_STATUS".
-  - `REVIEW_STOP_MODE=on-findings`: skip `PR_SIDE_AGENTS` the same way if `LOCAL_OVERALL_STATUS` is `partial`, OR at least one commit was added between `LOCAL_PHASE_START_SHA` and HEAD.
+  - `REVIEW_STOP_MODE=on-clean`: skip `PR_SIDE_AGENTS` only if `LOCAL_OVERALL_STATUS` is `partial` (the local wrapper's own stop-mode already fired on a zero-change clean pass), **or** `LOCAL_OVERALL_STATUS` is `clean` AND **zero commits** were recorded as `LOCAL_PHASE_COMMITS` in the completed receipt. If `clean` but commits WERE added, do **not** skip — per the per-pass on-clean rule ("clean AND made zero changes" is required to stop) the next reviewer in the ordered list — a `PR_SIDE_AGENTS` entry — must still run. When the skip applies, set `PR_SIDE_OVERALL_STATUS=clean` (skipped — already satisfied by the local phase) and continue to "Compute OVERALL_STATUS".
+  - `REVIEW_STOP_MODE=on-findings`: skip `PR_SIDE_AGENTS` the same way if `LOCAL_OVERALL_STATUS` is `partial`, OR at least one commit was recorded as `LOCAL_PHASE_COMMITS` in the completed receipt.
 - `REVIEW_STOP_MODE=all` (default): no cross-phase skip — always run `PR_SIDE_AGENTS` when non-empty.
 
 **On GitHub, when `PR_SIDE_AGENTS` is non-empty**, read the shared host helper before dispatching any PR-side reviewer. The VCS preflight has already seeded `{GH_HOST}` from the checkout; the helper preserves that value, applies its fallbacks when needed, and confirms authentication.
