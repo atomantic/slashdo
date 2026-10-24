@@ -1,6 +1,6 @@
 ## Better pipeline — Verification & Internal Code Review (Phases 4 / 4b)
 
-**Placeholder substitution, for this and every later `better-*` partial:** an empty value alone on its line drops that line entirely (no blank line, stray indent, or empty bullet); an empty value inside a line vanishes in place, collapsing the doubled space — never drop a whole instruction because one token in it is empty. A value landing in an indented list carries that list's indentation on every line.
+**Placeholder substitution:** omit any line whose sole token is empty, collapse extra spaces when an inline token is empty, and preserve list indentation on multi-line values.
 
 ## Phase 4: Verification
 

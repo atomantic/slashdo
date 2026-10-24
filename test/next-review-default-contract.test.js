@@ -18,6 +18,17 @@ const { readCommandDocs } = require('./helpers/command-docs');
 // gate keys off whether /do:pr reported an OVERALL_STATUS.
 const next = readCommandDocs('next.md', { eager: false });
 
+describe('focused local validation and hosted proof (#476)', () => {
+  it('keeps broad local runs opt-in without substituting focused results for hosted checks', () => {
+    const pr = readCommandDocs('pr.md', { eager: false });
+    assert.match(next, /focused tests for the changed behavior/);
+    assert.match(next, /Required hosted CI and configured reviews still gate merging/);
+    assert.match(pr, /broad local validation is explicit opt-in unless the repository requires it/);
+    assert.match(pr, /focused pass is never full-suite proof and must never attest an unrun CI suite/);
+    assert.match(pr, /current-head pins and repository current-base\/merge safety gates still apply/);
+  });
+});
+
 describe('/do:next review defaults (#289)', () => {
   it('never tells the model to invent or pick a "sensible" reviewer', () => {
     assert.doesNotMatch(next, /sensible reviewer/i);

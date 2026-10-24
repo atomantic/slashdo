@@ -77,22 +77,21 @@ Only when `CODE_HOST=gitlab`, read the GitLab verbs:
 
    **Thread-count tracking**: report the total unresolved threads upfront (e.g., "Found 7 unresolved review threads") and, after resolution, addressed vs. remaining (e.g., "Resolved 5/7 threads, 2 left unaddressed"), so partial sessions don't go unnoticed across context resets.
 
-4. **Spawn parallel sub-agents to address feedback**:
+4. **Spawn sub-agents to address feedback without file-write collisions**:
    - For small PRs (1-3 unresolved threads), handle fixes inline instead of spawning agents — the independent code quality review below still runs, as its own inline pass rather than a spawned agent.
-   - For larger PRs, spawn one `Agent` call (general-purpose type) per review thread (or group closely related threads on the same file into one agent)
-   - Spawn one additional `Agent` call for an **independent code quality review** of all files changed in the {CR_NOUN} (GitHub: `gh pr diff --name-only`; GitLab: `git fetch origin <target_branch>` then `git diff --name-only FETCH_HEAD...HEAD`)
-   - Launch all Agent calls **in parallel** (multiple tool calls in a single response) and wait for all to return
+   - For larger PRs, **group unresolved threads by file** so each modified file has at most one thread-fixing `Agent` call (general-purpose type); never spawn two parallel agents that edit the same file.
+   - Launch the per-file thread-fixing `Agent` calls **in parallel** (multiple tool calls in a single response) and wait for all to return.
+   - After all thread-fixing agents return, run one additional `Agent` call (or inline pass) for an **independent code quality review** of all files changed in the {CR_NOUN} (GitHub: `gh pr diff --name-only`; GitLab: `git fetch origin <target_branch>` then `git diff --name-only FETCH_HEAD...HEAD`) so it inspects the post-thread-fix state and never races with thread-fixing agents on the same files.
    - **Model selection**: run all sub-agents at the **`medium` tier**; escalate a thread to **`heavy`** only for genuinely complex architectural reasoning. Resolve tiers against the host per [lib/model-tiers.md](../../lib/model-tiers.md) (`heavy` = this host's strongest model by alias — `model: "opus"` on Claude Code — never a pinned version ID).
    - Each thread-fixing agent should:
-     - Read the file and understand the context of the feedback
+     - Read its assigned file(s) and understand the context of every thread on those files
      - Make the requested code changes if they are accurate and warranted
      - **Identify the root cause** of why the issue landed and apply the smallest matching action **in the same change**, per `~/.claude/lib/review-fix-conventions.md`; defer big refactors and cross-cutting patterns to the end-of-loop Convention Encoding phase.
-     - Return what was changed, the thread ID that was addressed, and the root-cause action taken (or "none — one-off")
-   - The code quality reviewer is **one additional agent that reviews all changed files for logic defects the threads missed (no style nits)** — a real bug, a missing error-handling path, a broken contract, a security issue — under the same `~/.claude/lib/finding-disposition.md` rules the thread agents use. It should:
+     - Return what was changed, the thread ID(s) that were addressed, and the root-cause action taken (or "none — one-off")
+   - The code quality reviewer is **one additional pass that reviews all changed files after thread fixes complete for logic defects the threads missed (no style nits)** — a real bug, a missing error-handling path, a broken contract, a security issue — under the same `~/.claude/lib/finding-disposition.md` rules the thread agents use. It should:
      - Read all changed files in the PR
      - For each issue found, also apply the smallest root-cause action per `~/.claude/lib/review-fix-conventions.md`
      - Apply fixes directly and return what was changed plus the root-cause actions taken
-   - After all agents return, review their changes for conflicts or overlapping edits
 
 5. **Convention encoding**: after all thread fixes and the independent code quality review return, run the end-of-cycle phase from `~/.claude/lib/review-fix-conventions.md` against the issues addressed this round. Apply encoded actions on the checked-out PR branch before testing or delivery so they ship with the fixes.
 
@@ -267,5 +266,5 @@ The review is "complete" when a new `copilot review:` event fires. If no event a
 ## Notes
 
 - If feedback is unclear or incorrect, leave a reply in the thread (the `reply-thread` verb) instead of resolving
-- **Never dismiss findings as "out of scope" or "not modified in this PR."** If a review identifies a real issue, fix it — regardless of whether the current PR touched that code.
-- **Default to fixing findings in this PR; defer to a tracker issue only when a fix is genuinely large/architectural or too risky to land here.** See the "Finding Disposition" guidance loaded above for the fix-now / reply / defer decision.
+- **Never silently ignore a real finding.** If a review identifies a real issue in files touched by this PR (or directly broken by this PR's contract changes), fix it in this PR; if it is a confirmed pre-existing issue in an untouched, unrelated file, defer and file it as a tracker issue rather than expanding the PR's diff into unrelated modules.
+- **Default to fixing in-scope findings in this PR; defer to a tracker issue when a fix is in an unrelated untouched file, genuinely large/architectural, or too risky to land here.** See the "Finding Disposition" guidance loaded above for the fix-now / reply / defer decision.

@@ -32,10 +32,16 @@ assigned to another agent is skipped and reported, not made.
 
 <commit_strategy>
 Each commit builds independently and contains one logical group of related
-fixes. Use conventional prefixes (fix:, refactor:, feat:, security:). Stage
-specific files only — never `git add -A` or `git add .`. Run {BUILD_CMD} in
-{WORKTREE_DIR} before committing. No co-author annotations or version bumps.
-Leave no uncommitted work.
+fixes. Use conventional prefixes (fix:, refactor:, feat:, security:). Because
+sibling workers share {WORKTREE_DIR} concurrently, never run `git add -A`,
+`git add .`, or an unscoped `git commit`. First register newly created owned
+files with `git add -- <new-owned-files>` (explicit paths only), then commit
+only your owned files atomically with `git commit --only -m "<subject>" -- <owned-files>` (retry once
+if `.git/index.lock` is transiently held). If {BUILD_CMD} fails solely due to a
+sibling worker's in-progress edit to a file outside your ownership, commit your
+verified owned files and report the external build noise for Phase 4's full-tree
+verification. No co-author annotations or version bumps. Leave no uncommitted
+work.
 </commit_strategy>
 
 <report>
