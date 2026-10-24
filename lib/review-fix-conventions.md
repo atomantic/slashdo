@@ -18,9 +18,9 @@ After applying the direct fix, ask: **"What was the contributor missing that all
 
 ## End of cycle
 
-After a review-and-fix cycle completes (`/do:review`, `/do:rpr`, a Copilot loop), scan the findings for patterns that recurred, or were deferred above as too large for one finding. A pattern earns encoding only when it's preventable by knowing a convention, not obvious from the code alone, and likely to recur (many similar entry points, or it's shown up before) — never for a one-off.
+After a review-and-fix cycle completes (`/do:review`, `/do:rpr`, a Copilot loop), scan the findings for systemic patterns that recurred across **2+ findings** or were deferred above as cross-cutting. **Default to `No conventions encoded`** — most review rounds fix self-contained bugs and need no documentation edits. A pattern earns encoding only when it recurred (or spans multiple entry points), is not obvious from the code/types/tests after the fix, and represents a repo-wide architectural trap — never for a single isolated finding.
 
-Pick the smallest action that makes the convention self-evident, same priority order as above, plus a brief addition to an existing in-tree `docs/<area>.md`/`AGENTS.md` when it spans 2-5 files. **CLAUDE.md / AGENTS.md is the fallback**, used only when the convention spans the whole codebase with no single enforcement site. One action per pattern, not per finding. Land encoding actions in the same branch/commit as the review fixes.
+Pick the smallest action that makes the convention self-evident, same priority order as above, plus a brief addition to an existing in-tree `docs/<area>.md` only when a recurring pattern spans 3+ files. **CLAUDE.md / AGENTS.md is a last-resort fallback**, reserved strictly for recurring repo-wide architectural invariants with no code or lint enforcement site — never append one-off bug lessons to `CLAUDE.md` or `AGENTS.md`. One action per pattern, not per finding. Land encoding actions in the same branch/commit as the review fixes.
 
 ## Output
 

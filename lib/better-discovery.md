@@ -21,8 +21,6 @@ Only on a Jira tracker (`TRACKER=jira`), whose Pre-flight is the gate (pass = av
 ### 0b: Project Type Detection
 Record the primary manifest's ecosystem as `PROJECT_TYPE`, and `HAS_UI=true`/`false` (whether the project ships web, desktop, mobile, or server-rendered UI; it gates the `ux` scope).
 
-Record version ownership for Phase 5b: `HAS_VERSION_BUMP=true` with `VERSION_BUMP_CMD` = the ecosystem only when its own version source declares a version (the manifest for `npm`/`cargo`/`python`/`java`/`dotnet`; for `ruby`, a `VERSION` constant in `lib/**/version.rb`, else the gemspec's `version =`). Otherwise — Go (versions by VCS tag), no discoverable version, or no manifest — record `HAS_VERSION_BUMP=false`; never invent a version convention.
-
 ### 0c: Build & Test Command Detection
 Record `BUILD_CMD` and `TEST_CMD`, preferring commands the project documents (manifest scripts, CI config, README/CONTRIBUTING.md) over ecosystem conventions.
 

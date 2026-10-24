@@ -58,9 +58,6 @@ doesn't re-teach them on every run:
 - `{COMPAT_SHIM}` / `{COMPAT_HOST}` — the stack's backward-compatible shim for
   a symbol moved between branches (`re-export`/`module` for JS/TS,
   `typealias`/`file` for Swift).
-- `{VERSION_BUMP_SECTION}` — name of the section the calling command defines
-  inline that performs the actual version bump; mechanics are stack-specific
-  (`npm version` vs `agvtool`), the surrounding Phase 5b policy is not.
 - `{PR_BODY_SUMMARY_EXTRA}` / `{PR_BODY_EXTRA_SECTIONS}` — extra PR-body lines
   or `###` sections, or empty (e.g. "Platforms verified: {PLATFORMS}", a
   "Platform Impact" section).

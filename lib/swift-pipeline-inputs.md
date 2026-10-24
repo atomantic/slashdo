@@ -11,7 +11,6 @@ Phases 3–7 use the shared `better-*` pipeline partials. Resolve these values b
 - `{VERIFY_FAILURE_COMMIT_SLOT}` = `{platform} ` — the failing platform is required in the commit subject
 - `{VERIFY_STATUS_CLAUSE}` = `All {PLATFORMS} platforms build and test successfully. `
 - `{REVIEW_CHECKLIST}` = `Swift Code Review Checklist` (the section below)
-- `{VERSION_BUMP_SECTION}` = `Version Bump Procedure` (the section below)
 - `{SIMPLIFY_ONLY}` = `false` — this caller rejects simplify-only and strict modes before discovery
 - `{COMPAT_SHIM}` = `typealias`, `{COMPAT_HOST}` = `file`
 - `{MULTI_CATEGORY_FILE_EXAMPLE}` = ``ContentView.swift`` with both platform and architecture changes
@@ -55,7 +54,7 @@ Determine platforms and deployment targets from the detected system:
 
 Record `PLATFORMS`, `DEPLOYMENT_TARGETS`, `SCHEME`, and `WORKSPACE_OR_PROJECT`. Detect and carry forward SwiftUI versus UIKit/AppKit, Core Data or SwiftData, Combine, Swift concurrency, widgets, App Intents, CloudKit, iCloud entitlements, localization, StoreKit, TestFlight CI, and code-signing characteristics. Route CloudKit to the bugs/performance worker, iCloud and localization and StoreKit and TestFlight to the platform worker, and code-signing to the CloudKit eager-initialization check.
 
-Set `PROJECT_TYPE=SwiftUI`, `HAS_UI=true`, and `HAS_VERSION_BUMP=true`. Preserve these values across compaction together with `BUILD_SYSTEM`, `SCHEME`, `WORKSPACE_OR_PROJECT`, `PLATFORMS`, and `DEPLOYMENT_TARGETS`.
+Set `PROJECT_TYPE=SwiftUI` and `HAS_UI=true`. Preserve these values across compaction together with `BUILD_SYSTEM`, `SCHEME`, `WORKSPACE_OR_PROJECT`, `PLATFORMS`, and `DEPLOYMENT_TARGETS`.
 
 ### Build and test commands
 
@@ -188,17 +187,6 @@ The shared phase must run `{TEST_CMD}` in `{WORKTREE_DIR}` after the agent, reco
 Read `lib/swift-review-checklist.md` at Phase 4b, after the shared build and before PR creation. It is not needed for `--scan-only`.
 
 !read lib/swift-review-checklist.md
-
-## Version Bump Procedure
-
-On `better-swift/{FIRST_CATEGORY}`, bump the aggregate `{LEVEL}` only after every category branch builds. For an SPM package, update a documented `VERSION` file or README version. For an Xcode project:
-
-```bash
-agvtool new-marketing-version {NEW_VERSION}
-agvtool next-version -all
-git diff --name-only -z -- '*.plist' '*.pbxproj' | xargs -0 git add
-git commit -m "chore: bump version to {NEW_VERSION}"
-```
 
 ## Final Summary Table
 

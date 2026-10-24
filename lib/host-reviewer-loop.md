@@ -126,9 +126,12 @@ the moment a review returns zero unresolved comments:
      finding, but do not run `resolve-thread` for it.
    For each unresolved thread:
    - Read the referenced file and understand the feedback.
-   - Evaluate if the finding is a real issue — if it is, fix it regardless of
-     whether the current {CR_NOUN} modified that code. Never dismiss findings as
-     "out of scope" or "pre-existing."
+   - Evaluate if the finding is a real issue — if it is in a file touched by the
+     current {CR_NOUN} (or a direct caller/callee whose contract this {CR_NOUN}
+     changed), fix it now; if it is a confirmed pre-existing issue in an untouched,
+     unrelated file, defer it to a tracker issue (or note that it is pre-existing
+     outside the {CR_NOUN}'s blast radius) and reply in the thread rather than
+     polluting the {CR_NOUN} diff.
    - A real issue is a logic/behavior bug, security hole, broken contract, or
      missing-coverage gap that the project's linter/type-checker/formatter/build
      does not catch. Resolve a tooling-covered style nit or a bare

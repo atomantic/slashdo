@@ -286,12 +286,13 @@ Libraries where the cost of owning the code is clearly lower than the supply cha
 - We use a single function that's <50 lines to implement
 - The library wraps a built-in API with minimal added value
 - The library is unmaintained with known vulnerabilities
-- The library's functionality is now available natively (e.g., `node:fs/promises` replacing `fs-extra` for most use cases, `structuredClone` replacing `lodash.cloneDeep`, `Array.prototype.flat` replacing `array-flatten`)
+- The library's functionality is now available natively (e.g., `node:fs/promises` replacing `fs-extra` for most use cases, `structuredClone` replacing `lodash.cloneDeep`, `Array.prototype.flat` replacing `array-flatten`, `node:util` `parseArgs` replacing simple CLI flag libraries, `fs.glob` on Node 22+ replacing `glob`, `process.loadEnvFile` / `--env-file` replacing `dotenv`)
 - Color/string utilities where we use 1-2 functions (e.g., using `chalk` just for `chalk.red()` when a 10-line ANSI wrapper suffices)
 - UUID generation when `crypto.randomUUID()` is available
 - Deep merge/clone when `structuredClone` suffices
 - `dotenv` when the runtime supports `--env-file` natively
 - `is-odd`, `is-number`, `left-pad` tier micro-packages
+- **Default-mode restraint on complex parsers/validators:** in Default mode (`DEPFREE_MODE=default`), do **not** hand-roll replacements for complex schema validators, semver range engines, full-featured CLI/glob/date parsers (`zod`, `joi`, `semver`, `commander`, `yargs`, `minimatch`, `date-fns`, `dayjs`) unless a native runtime built-in (`node:util` `parseArgs`, `fs.glob`, native `Intl`/`Date`) directly covers the exact used surface within the 50-line budget; reserve hand-rolled parser/validator modules for `--heavy` and `--extreme`.
 
 **Heavy mode — Tier 3 expands significantly:**
 All of the above, PLUS:
@@ -468,23 +469,23 @@ Replacement strategy: {STRATEGY from Phase 2}
 Steps:
 1. Write the replacement code (utility function, inline replacement, or native API call)
 2. Update ALL import/require statements across the codebase to use the new code
-3. Run `{BUILD_CMD}` to verify compilation — the manifest still lists `{PACKAGE_NAME}` at this point, so the module resolves normally; that's expected
-4. Run `{TEST_CMD}` to verify tests pass
+3. Run `{BUILD_CMD}` to verify compilation — the manifest still lists `{PACKAGE_NAME}` at this point, so the module resolves normally; that's expected (if a sibling agent's concurrent edit in `{WORKTREE_DIR}` causes an unrelated failure outside your owned files, note it for Phase 4's full-tree check after all parallel agents finish)
+4. Run `{TEST_CMD}` to verify tests pass (scoping to your affected test files if concurrent edits are in flight; Phase 4 runs the authoritative full-tree test suite)
 5. If tests reference the removed package directly (mocking it, importing test helpers from it), update those tests too
-6. Commit your code changes. **Do NOT touch the manifest** ({package.json, Cargo.toml, pyproject.toml, go.mod, Gemfile, etc.) or any lock file — every agent in this batch runs in the same `{WORKTREE_DIR}` in parallel, so a shared manifest edited by more than one agent races (partial writes, lost edits, index.lock contention). The orchestrator removes all replaced packages from the manifest in one pass, in Phase 3c, after every agent here has finished
+6. Commit your code changes atomically using `git commit --only -m "refactor: replace {package} with owned {utility/code}" -- <owned-files>` so you never sweep in another parallel agent's staged files. **Do NOT touch the manifest** ({package.json, Cargo.toml, pyproject.toml, go.mod, Gemfile, etc.) or any lock file — every agent in this batch runs in the same `{WORKTREE_DIR}` in parallel, so a shared manifest edited by more than one agent races (partial writes, lost edits, index.lock contention). The orchestrator removes all replaced packages from the manifest in one pass, in Phase 3c, after every agent here has finished
 </task>
 
 <guardrails>
 - The replacement must preserve behavior for all currently-used call sites and documented invariants
 - You may omit handling for input shapes or edge cases that are provably unreachable based on {USAGE_DETAILS}, but do not narrow behavior for any actual call site
 - Do NOT introduce new dependencies to replace old ones
-- Do NOT use `git add -A` or `git add .` — stage specific files only
+- Do NOT use `git add -A`, `git add .`, or unscoped `git commit` — commit only your owned files via `git commit --only -m "..." -- <owned-files>`
 - Do NOT edit the manifest or lock file — see step 6 above
 - Keep replacement code minimal
 - If replacement is more complex than estimated (>2x the estimated lines), report back and skip — do not force a bad replacement. In `HEAVY_MODE`, use the raised ceiling from Heavy Mode above (300 lines) instead of the 2x estimate — only skip if replacement requires deep domain expertise (crypto primitives, binary protocol parsers, codec implementations) or exceeds that ceiling. In `EXTREME_MODE` there is no size ceiling: the only skip is an Extreme Mode rule 1 class, and a skip must come back with a design sketch (what the owned module would be, what blocks it) rather than a size
 - `EXTREME_MODE` parity gate (Extreme Mode rules 2–3): for a Complex-or-larger replacement, write the replacement design FIRST (used surface, owned API, parity test plan, reachable vs. provably-unreachable edge cases, risk) and put it in the commit body or `docs/deps/{PACKAGE_NAME}.md`; then write the parity tests so they FAIL against a stub and PASS against the owned code before switching any call site; the replacement is done only when every call site's behavior has such a test. Work extra hard here — reread the library's source for the behaviors your call sites depend on (option defaults, error shapes, ordering guarantees, encoding edge cases) instead of guessing from its README
 - Place shared utility replacements in a sensible location (e.g., `src/utils/`, `lib/`, `internal/`) following existing project conventions; under `EXTREME_MODE`, in the module boundary Phase 2 recorded for this package's group
-- Commit each replacement independently: `refactor: replace {package} with owned {utility/code}`. If `git commit` fails on a transient `index.lock` (another agent committing at the same instant), wait briefly and retry once before reporting failure
+- Commit each replacement independently with `git commit --only -m "refactor: replace {package} with owned {utility/code}" -- <owned-files>`. If `git commit` fails on a transient `index.lock` (another agent committing at the same instant), wait briefly and retry once before reporting failure
 </guardrails>
 ```
 
