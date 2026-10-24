@@ -383,7 +383,7 @@ Skip unless `--plan` is set. When present, don't touch code yet:
 
 ## Phase 4: Implement
 
-Write the code, tests, and docs the item requires, following the **target repo's** `CLAUDE.md` conventions. Run the relevant test suite as you go.
+Write the code, tests, and docs the item requires, following the **target repo's** `CLAUDE.md` conventions. Run focused tests for the changed behavior as you go. Honor the target repository's local validation policy; do not add broad local CI runs before each push or review correction. Required hosted CI and configured reviews still gate merging, and focused local results never attest unrun suites.
 
 **Claimed an `epic-wrapup` epic** (Phase 1 step 3)? The work unit is the epic's own remaining wrap-up tasks. Do them, then **tick the corresponding `- [ ]` boxes in the epic body** with `issue_body --set "$ISSUE_NUM" <updated-body>`. The Phase 6 PR's `Closes #<epic>` closes it on merge.
 
