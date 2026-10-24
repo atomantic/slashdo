@@ -4,6 +4,8 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
+const { execFileSync } = require('node:child_process');
 
 const root = path.join(__dirname, '..');
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8');
@@ -22,6 +24,41 @@ describe('SOTA skill contracts (#478-#483)', () => {
     assert.match(rpr, /group unresolved threads by file/);
     assert.match(rpr, /never spawn two parallel agents that edit the same file/);
     assert.match(rpr, /After all thread-fixing agents return, run one additional `Agent` call \(or inline pass\) for an \*\*independent code quality review\*\*/);
+  });
+
+  it('registers new owned files before path-scoped commits while preserving sibling staging', () => {
+    for (const parts of [
+      ['lib', 'remediation-agent-template.md'],
+      ['lib', 'better-remediation.md'],
+      ['commands', 'do', 'depfree.md'],
+    ]) {
+      const instructions = read(...parts);
+      const stage = instructions.indexOf('git add -- <new-owned-files>');
+      const commit = instructions.indexOf('git commit --only');
+      assert.ok(stage >= 0 && stage < commit, `${parts.join('/')} must register new files first`);
+    }
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-owned-commit-'));
+    const git = (...args) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], {
+      cwd: dir, encoding: 'utf8',
+    }).trim();
+    try {
+      git('init', '--quiet');
+      git('config', 'user.name', 'Regression test');
+      git('config', 'user.email', 'test@example.invalid');
+      fs.writeFileSync(path.join(dir, 'sibling.txt'), 'baseline\n');
+      git('add', '--', 'sibling.txt');
+      git('commit', '--quiet', '-m', 'baseline');
+      fs.writeFileSync(path.join(dir, 'sibling.txt'), 'sibling work\n');
+      git('add', '--', 'sibling.txt');
+      fs.writeFileSync(path.join(dir, 'owned.txt'), 'new owned utility\n');
+      git('add', '--', 'owned.txt');
+      git('commit', '--only', '--quiet', '-m', 'owned fix', '--', 'owned.txt');
+      assert.equal(git('show', '--format=', '--name-only', 'HEAD'), 'owned.txt');
+      assert.equal(git('diff', '--cached', '--name-only'), 'sibling.txt');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('preserves Phase 3b Foundation files on per-category branches and removes audit version bumps (#479)', () => {
