@@ -3,6 +3,8 @@ description: Deep code review of changed files against software engineering best
 argument-hint: "[--strict|--nuclear] [--draft] [--approve|--no-approve] [--apply|--no-apply] [--merge|--merge=<method>] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues-label <name>] [PR-URL | MR-URL | base-branch]"
 ---
 
+An explicit invocation of `/do:review` requests a fresh review, even for a PR whose automatic pre-PR local phase already completed. Do not invoke it automatically from host-feedback/CI recovery to restart that phase. Keep any new verdict/model attribution distinct from the original pre-PR execution.
+
 ## Parse Arguments
 
 Parse `$ARGUMENTS` for:
