@@ -55,6 +55,10 @@ Print: `PR flow: {current_branch} → {default_branch}`
 
 !read lib/upstream-push.md
 
+## Local validation policy
+
+Follow the target repository's declared local gate before each push: lint/format checks, fast structural invariants and focused tests for changed behavior. Do not turn that gate into broad transitive server, browser, database, build or smoke validation by default; broad local validation is explicit opt-in unless the repository requires it. Batch bounded review corrections before rerunning the affected focused checks. Report exactly what ran and what remains for hosted CI: a focused pass is never full-suite proof and must never attest an unrun CI suite. Required hosted checks, configured reviews, current-head pins and repository current-base/merge safety gates still apply. Base movement alone does not require a rebase or restart of head validation.
+
 ## Local Code Review (REQUIRED GATE)
 
 <review_gate>
@@ -67,7 +71,7 @@ Print: `PR flow: {current_branch} → {default_branch}`
    c. For each finding, quote the specific code line and explain why it's a problem
 4. After reviewing all files, verify: does the code actually deliver what the commits claim?
 5. Print a review summary table: | finding | file | line | severity | fixable |
-6. Fix any issues, run tests, verify tests cover the changed code paths, then **commit and push those fixes** — using "Open the PR"'s upstream-derived push below (see [lib/upstream-push.md](../../lib/upstream-push.md) for why), never a bare `git push` and never a destination built from the local branch name. Leaving the fixes uncommitted is invisible to that section's assertion, which compares against the upstream ref and so only ever sees *committed* work
+6. Fix any issues, run the repository local gate and focused tests for the changed code paths (following Local validation policy above), then **commit and push those fixes** — using "Open the PR"'s upstream-derived push below (see [lib/upstream-push.md](../../lib/upstream-push.md) for why), never a bare `git push` and never a destination built from the local branch name. Leaving the fixes uncommitted is invisible to that section's assertion, which compares against the upstream ref and so only ever sees *committed* work
 7. Only after printing the review summary may you proceed to "Pre-PR Local Reviews"
 
 If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.
