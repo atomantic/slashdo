@@ -91,6 +91,7 @@ describe('lib/merge-gate.md — the shared merge procedure (#335)', () => {
     assert.match(gate, /Do not merge on the report alone/);
     assert.match(gate, /branches\/\{BASE\}\/protection\/required_status_checks/);
     assert.match(gate, /rules\/branches\/\{BASE\}/);
+    assert.match(gate, /verified absence of classic requirements, not a failure/);
     assert.match(gate, /\*\*The forge requires status checks, but none have registered for this head yet\*\*/);
     assert.match(gate, /Keep polling[\s\S]*for up to 30 minutes, and do not merge/);
     assert.match(gate, /leave the PR open, report the wait as incomplete/);
