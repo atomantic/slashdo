@@ -27,6 +27,15 @@ describe('focused local validation and hosted proof (#476)', () => {
     assert.match(pr, /focused pass is never full-suite proof and must never attest an unrun CI suite/);
     assert.match(pr, /current-head pins and repository current-base\/merge safety gates still apply/);
   });
+
+  it('requires the repo documented focused pre-push gate and keeps the broad plan opt-in (#499)', () => {
+    assert.match(next, /when the repo documents a focused pre-push command/);
+    assert.match(next, /that command is the local validation policy, not an optional extra/);
+    assert.match(next, /hosted CI must not be the first execution of its always-run guards/);
+    assert.match(next, /if it cannot be run, say so/);
+    assert.match(next, /do not escalate to the repo's broad plan[^.]*unless that policy says the change needs it/);
+    assert.doesNotMatch(next, /do not add broad local CI runs before each push/);
+  });
 });
 
 describe('/do:next review defaults (#289)', () => {
