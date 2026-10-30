@@ -28,7 +28,8 @@ test('required entries get binary, login, isolation-flag and PR-side checks', ()
   assert.match(preflight, /\*\*Binary\/alias\*\*[\s\S]*`unavailable: CLI not installed`/);
   assert.match(preflight, /\*\*Login\*\*[\s\S]*`codex login status`, `claude auth status`[\s\S]*`unavailable: not authenticated`/);
   assert.match(preflight, /A CLI with no such subcommand passes on its binary alone/);
-  assert.match(preflight, /\*\*Isolation flags\*\*[\s\S]*Pi's documented `--no-tools` flags[\s\S]*never an invitation to drop the flags/);
+  assert.match(preflight, /\*\*Isolation flags\*\* — not a preflight gate[\s\S]*optional[\s\S]*never makes a reviewer `unavailable`/);
+  assert.doesNotMatch(preflight, /never an invitation to drop the flags/);
   assert.match(preflight, /\*\*PR-side reviewers\*\*[\s\S]*Never create a probe PR/);
 });
 
