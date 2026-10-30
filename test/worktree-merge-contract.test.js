@@ -92,6 +92,7 @@ describe('lib/merge-gate.md — the shared merge procedure (#335)', () => {
     assert.match(gate, /gh api --hostname "\{GH_HOST\}" repos\/\{owner\}\/\{repo\}\/branches/);
     assert.match(gate, /gh api --hostname "\{GH_HOST\}" repos\/\{owner\}\/\{repo\}\/rules/);
     assert.match(gate, /branches\/\{BASE\}\/protection\/required_status_checks/);
+    assert.match(gate, /rules\/branches\/\{BASE\}` with `--paginate`, reading every page/);
     assert.match(gate, /rules\/branches\/\{BASE\}/);
     assert.match(gate, /verified absence of classic requirements, not a failure/);
     assert.match(gate, /\*\*The forge requires status checks, but none have registered for this head yet\*\*/);
