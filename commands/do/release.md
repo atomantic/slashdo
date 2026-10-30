@@ -578,8 +578,9 @@ that already succeeded remotely. Otherwise:
          | jq '{tagName: .tag_name, isDraft: false, isPrerelease: (.upcoming_release // false), publishedAt: .released_at}'
      fi
    }
+   # release_is_published: run as `RELEASE_JSON_IN="$JSON" release_is_published` (named variable; see the positional-parameter contract test).
    release_is_published() {
-     printf '%s\n' "$*" | jq -e \
+     printf '%s\n' "$RELEASE_JSON_IN" | jq -e \
        'type == "object" and .tagName == "v{version}" and .isDraft == false and .isPrerelease == false and (.publishedAt | type == "string") and (.publishedAt | length > 0)' >/dev/null 2>&1
    }
 
@@ -682,13 +683,13 @@ that already succeeded remotely. Otherwise:
    RELEASE_JSON=""
    for ATTEMPT in $(seq 1 30); do
      CANDIDATE_RELEASE_JSON="$(release_published_json)"
-     if release_is_published "$CANDIDATE_RELEASE_JSON"; then
+     if RELEASE_JSON_IN="$CANDIDATE_RELEASE_JSON" release_is_published; then
        RELEASE_JSON="$CANDIDATE_RELEASE_JSON"
        break
      fi
      [ "$ATTEMPT" -lt 30 ] && sleep 10
    done
-   if ! release_is_published "$RELEASE_JSON"; then
+   if ! RELEASE_JSON_IN="$RELEASE_JSON" release_is_published; then
      incomplete "GitHub Release" "no published release was found after the bounded wait."
    fi
    else

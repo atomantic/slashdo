@@ -1,10 +1,12 @@
 'use strict';
 
-// Claude Code treats `$0`, `$1`, ... in a slash-command body as positional-argument
-// placeholders, so `/do:next --swarm` rendered `awk ... substr($0, 1, 6)` as
-// `substr(--swarm, 1, 6)` (issue #454). Command bodies must carry no `$<digit>`
-// token; shell helpers use "$@"/"$*", and awk/field extraction uses cut/sed/grep.
-// lib/ partials are not argument-expanded, so they are out of scope.
+// Skill hosts expand `$0`-`$9` and `$*` in an injected skill body against the user's slash
+// arguments, so `/do:next --swarm 4 --merge` rendered `awk -v id="$1"` as `awk -v id="4"` and
+// `print $3` as `print --merge` (issues #454, #494). Shell blocks in commands/ and lib/ (lib/
+// partials are inlined into the installed skill) must use named variables instead.
+// KNOWN_LIB_DEBT is the ratchet for lib shell blocks that still read positional
+// parameters. It is empty: every helper takes its inputs in named variables.
+// The per-file count may only shrink. Do not add entries.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
@@ -22,23 +24,57 @@ function mdFiles(dir) {
   });
 }
 
-describe('command bodies carry no positional $<digit> tokens', () => {
+const libDir = path.join(__dirname, '..', 'lib');
+const KNOWN_LIB_DEBT = {};
+
+const POSITIONAL = /\$(?:[0-9*]|\{[0-9*])/;
+
+function shellBlockHits(file) {
+  const hits = [];
+  let inBlock = false;
+  let shell = false;
+  fs.readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
+    const fence = line.trim().match(/^```(\w*)/);
+    if (fence) {
+      inBlock = !inBlock;
+      shell = inBlock && /^(bash|sh|zsh|shell)$/.test(fence[1]);
+      return;
+    }
+    if (inBlock && shell && POSITIONAL.test(line)) hits.push(`${i + 1}: ${line.trim()}`);
+  });
+  return hits;
+}
+
+describe('command shell blocks carry no positional parameters', () => {
   for (const file of mdFiles(commandsDir)) {
     it(path.relative(commandsDir, file), () => {
-      const hits = fs.readFileSync(file, 'utf8').split('\n')
-        .map((line, i) => ({ line, n: i + 1 }))
-        .filter(({ line }) => /\$[0-9]/.test(line))
-        .map(({ line, n }) => `${n}: ${line.trim()}`);
-      assert.deepEqual(hits, [], 'rewrite with "$@" / "$*" or cut/sed/grep');
+      assert.deepEqual(shellBlockHits(file), [], 'use a named variable (e.g. CLAIM_ID) instead of $0-$9 / $*');
     });
   }
+});
+
+describe('lib shell blocks carry no new positional parameters', () => {
+  for (const file of mdFiles(libDir)) {
+    const name = path.relative(libDir, file);
+    it(name, () => {
+      const hits = shellBlockHits(file);
+      const allowed = KNOWN_LIB_DEBT[name] || 0;
+      assert.ok(hits.length <= allowed, `${hits.length} > ${allowed} allowed:\n${hits.join('\n')}`);
+    });
+  }
+});
+
+describe('GitHub host snippet and claim gates avoid positional parameters', () => {
+  it('lib/gh-host.md extracts the host with cut, not awk fields', () => {
+    assert.match(fs.readFileSync(path.join(libDir, 'gh-host.md'), 'utf8'), /cut -d\/ -f3/);
+  });
 });
 
 describe('in_flight() matcher (next.md), executed', () => {
   const next = fs.readFileSync(path.join(commandsDir, 'do', 'next.md'), 'utf8');
   const def = next.split('\n').find((line) => line.startsWith('in_flight() {'));
   const check = (refs, id) => execFileSync('sh', ['-c',
-    `IN_FLIGHT_REFS='${refs.join('\n')}'\n${def}\nin_flight '${id}' && echo HIT || echo MISS\n`],
+    `IN_FLIGHT_REFS='${refs.join('\n')}'\n${def}\nCLAIM_ID='${id}' in_flight && echo HIT || echo MISS\n`],
   { encoding: 'utf8' }).trim() === 'HIT';
 
   it('detects issue-12 but not issue-123, feature/12, or a Jira neighbor', () => {

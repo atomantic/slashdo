@@ -70,7 +70,7 @@ Preserve `EXIT_CODE`; cleanup success is not reviewer success. Use this same cle
 **Claude structured verdict** — Step 3 recipe rule for the subprocess path, after the runner's Verify and restore and before the strict verdict parser. Only a CLI JSON result (an object with `"type": "result"`) is converted; the in-process path writes the text verdict itself, and anything else that is not CLI JSON is left for the strict parser, which rejects it. Convert its `structured_output` into the text contract (newlines inside a field are collapsed so every block stays complete) and point `LOG_FILE` at that file; an error result, a missing or schema-invalid object, or a contradictory verdict (`NO FINDINGS` with findings, `FINDINGS` with none) is `STATUS=no-verdict`, never `clean`. Keep the raw JSON log for the report:
 
 ```bash
-claude_structured_verdict() {   # $1 = the CLI's JSON result; prints the text verdict contract, or fails
+claude_structured_verdict() {   # CLAUDE_RESULT_JSON = the CLI's JSON result; prints the text verdict contract, or fails
   jq -er '
     if type == "object" and .is_error == false and (.structured_output | type) == "object"
     then .structured_output else error("no structured output") end
@@ -85,11 +85,11 @@ claude_structured_verdict() {   # $1 = the CLI's JSON result; prints the text ve
             then "FINDING \($i + 1):\nfile: \(.file | gsub("[\r\n]+"; " "))\nline: \(.line)\nseverity: \(.severity)\ndescription: \(.description | gsub("[\r\n]+"; " "))\nfix: \(.fix | gsub("[\r\n]+"; " "))"
             else error("malformed finding") end ]
         | join("\n\n")
-      else error("contradictory verdict") end' "$1"
+      else error("contradictory verdict") end' "$CLAUDE_RESULT_JSON"
 }
 if [ "$REVIEW_AGENT" = claude ] && command -v jq >/dev/null 2>&1 &&
    jq -e 'type == "object" and .type == "result"' "$LOG_FILE" >/dev/null 2>&1; then
-  if CLAUDE_VERDICT_TEXT="$(claude_structured_verdict "$LOG_FILE" 2>/dev/null)"; then
+  if CLAUDE_VERDICT_TEXT="$(CLAUDE_RESULT_JSON="$LOG_FILE" claude_structured_verdict 2>/dev/null)"; then
     printf '%s\n' "$CLAUDE_VERDICT_TEXT" > "$LOG_FILE.verdict" && LOG_FILE="$LOG_FILE.verdict"
   else
     STATUS=no-verdict

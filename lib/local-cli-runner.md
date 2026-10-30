@@ -48,12 +48,12 @@ cp -p "$GIT_COMMON/config" "$GIT_META_BAK/config"
 { tar -cf "$GIT_META_BAK/hooks.tar" -C "$GIT_COMMON" hooks 2>/dev/null; } || : > "$GIT_META_BAK/hooks.tar"
 GIT_SEC_KEYS='^(core\.(hookspath|fsmonitor|pager|editor|sshcommand|askpass|gitproxy)|alias\..+|include\..+|includeif\..+|filter\..+|diff\..+|merge\..+\.driver|(diff|merge)tool\..+\.cmd|pager\..+|credential\..+|remote\..+\.(url|pushurl|uploadpack|receivepack|vcs|proxy)|http\..*proxy|core\.attributesfile|url\..+\.(insteadof|pushinsteadof)|gpg\.(.+\.)?program|sequence\.editor|interactive\.difffilter|trailer\..+\.(cmd|command)|core\.alternaterefscommand|uploadpack\.packobjectshook|submodule\..+\.(update|url)|browser\..+\.(cmd|path)|web\.browser)$'
 # `git config --file` reads only the named file, so no repo config (aliases, pager, fsmonitor) is consulted.
-git_sec_hash() {   # $1 = config file; git exit 1 means "no matching key", which is fine
+git_sec_hash() {   # GIT_SEC_FILE = config file; git exit 1 means "no matching key", which is fine
   # Sorted by key, so a restore that re-creates a section elsewhere still matches; each key's values
   # keep file order (credential.helper order matters).
   (set -o pipefail
-   { git config --file "$1" --null --name-only --get-regexp "$GIT_SEC_KEYS"; [ $? -le 1 ]; } | tr '\0' '\n' | LC_ALL=C sort -u |
-     while IFS= read -r k; do printf '%s\0' "$k"; git config --file "$1" --null --get-all -- "$k" || exit 1; done | shasum -a 256)
+   { git config --file "$GIT_SEC_FILE" --null --name-only --get-regexp "$GIT_SEC_KEYS"; [ $? -le 1 ]; } | tr '\0' '\n' | LC_ALL=C sort -u |
+     while IFS= read -r k; do printf '%s\0' "$k"; git config --file "$GIT_SEC_FILE" --null --get-all -- "$k" || exit 1; done | shasum -a 256)
 }
 git_hooks_hash() {
   if [ -d "$GIT_COMMON/hooks" ]; then
@@ -62,7 +62,7 @@ git_hooks_hash() {
     echo "no-hooks-dir"
   fi
 }
-GIT_CFG_BASELINE=$(git_sec_hash "$GIT_COMMON/config") && GIT_HOOKS_BASELINE=$(git_hooks_hash) || {
+GIT_CFG_BASELINE=$(GIT_SEC_FILE="$GIT_COMMON/config" git_sec_hash) && GIT_HOOKS_BASELINE=$(git_hooks_hash) || {
   echo "cannot fingerprint git metadata" >&2
   exit 1
 }
@@ -125,8 +125,8 @@ git_sec_hash() {
   # Sorted by key, so a restore that re-creates a section elsewhere still matches; each key's values
   # keep file order (credential.helper order matters).
   (set -o pipefail
-   { git config --file "$1" --null --name-only --get-regexp "$GIT_SEC_KEYS"; [ $? -le 1 ]; } | tr '\0' '\n' | LC_ALL=C sort -u |
-     while IFS= read -r k; do printf '%s\0' "$k"; git config --file "$1" --null --get-all -- "$k" || exit 1; done | shasum -a 256)
+   { git config --file "$GIT_SEC_FILE" --null --name-only --get-regexp "$GIT_SEC_KEYS"; [ $? -le 1 ]; } | tr '\0' '\n' | LC_ALL=C sort -u |
+     while IFS= read -r k; do printf '%s\0' "$k"; git config --file "$GIT_SEC_FILE" --null --get-all -- "$k" || exit 1; done | shasum -a 256)
 }
 git_hooks_hash() {
   if [ -d "$GIT_COMMON/hooks" ]; then
@@ -135,7 +135,7 @@ git_hooks_hash() {
     echo "no-hooks-dir"
   fi
 }
-GIT_CFG_CURRENT=$(git_sec_hash "$GIT_COMMON/config") && GIT_HOOKS_CURRENT=$(git_hooks_hash) || {
+GIT_CFG_CURRENT=$(GIT_SEC_FILE="$GIT_COMMON/config" git_sec_hash) && GIT_HOOKS_CURRENT=$(git_hooks_hash) || {
   echo "cannot inspect git metadata; stop before running Git" >&2
   exit 1
 }
@@ -152,7 +152,7 @@ if [ "$GIT_CFG_CURRENT" != "$GIT_CFG_BASELINE" ]; then
       *) echo "cannot restore valueless config key ${rec}; stop before running Git" >&2; exit 1 ;;
     esac
   done < <(git config --file "$GIT_META_BAK/config" --null --get-regexp "$GIT_SEC_KEYS")
-  GIT_CFG_CURRENT=$(git_sec_hash "$GIT_COMMON/config") || exit 1
+  GIT_CFG_CURRENT=$(GIT_SEC_FILE="$GIT_COMMON/config" git_sec_hash) || exit 1
   if [ "$GIT_CFG_CURRENT" != "$GIT_CFG_BASELINE" ]; then
     echo "git config restore failed; stop before running Git" >&2
     exit 1

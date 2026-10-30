@@ -388,6 +388,25 @@ describe('/do:release source branch admission', () => {
     }
   });
 
+  it('stops the sync block itself when the forge query fails', () => {
+    const blocks = [...gate.matchAll(/```bash\n([\s\S]*?)\n```/g)];
+    const sync = blocks.at(-1)[1].replace(/\{source\}/g, 'main').replace(/<GATE_PR_NUMBER>/g, '1');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-source-sync-fail-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+      // A positional incomplete already in scope (release.md's helper, and the
+      // success-path stub above) must not swallow the named-variable call.
+      const r = spawnSync('bash', ['-c', 'incomplete() { printf "POSITIONAL %s\\n" "$*"; exit 1; }\n' + sync], {
+        cwd: dir, env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CLI_TOOL: 'gh' }, encoding: 'utf8',
+      });
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.match(r.stdout, /INCOMPLETE — Source gate merge is unverified; the forge state query failed\./);
+      assert.doesNotMatch(r.stdout, /POSITIONAL/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('fails closed when the rules cannot be read or parsed', () => {
     const failed = probe({ rules: '[]', branch: unprotected, fail: '1' });
     assert.equal(failed.status, 1);

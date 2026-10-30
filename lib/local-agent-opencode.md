@@ -22,7 +22,7 @@ if [ -n "$OPENCODE_RAW_MODEL" ]; then
 fi
 ```
 
-**Isolation.** Run headless via `opencode run --pure` (disables external plugins) with stdin from `/dev/null`. Use the tool-free fallback unless a verified, invocation-local tool allowlist disables shell, write, web and MCP tools.
+**Isolation.** Run headless via `opencode run --pure` (disables external plugins) with stdin from `/dev/null`. Use a verified, invocation-local tool allowlist that disables shell, write, web and MCP tools when the installed CLI offers one; otherwise run the normal headless recipe (tool-free mode is optional).
 
 `{INVOCATION}`:
 

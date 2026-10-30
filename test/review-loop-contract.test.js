@@ -450,7 +450,7 @@ describe('review-loop parse contracts', () => {
     assert.doesNotMatch(snapshot, /tar -cf - -C "\$GIT_COMMON" config/, 'the whole config file must not be fingerprinted (#447)');
     assert.match(snapshot, /git ls-files --others --exclude-standard -z \| tar --null -T - -cf - \| shasum -a 256/);
     assert.doesNotMatch(snapshot, /git ls-files --others --exclude-standard \| sort/);
-    assert.match(snapshot, /GIT_CFG_BASELINE=\$\(git_sec_hash "\$GIT_COMMON\/config"\)/);
+    assert.match(snapshot, /GIT_CFG_BASELINE=\$\(GIT_SEC_FILE="\$GIT_COMMON\/config" git_sec_hash\)/);
     assert.match(snapshot, /GIT_HOOKS_BASELINE=\$\(git_hooks_hash\)/);
     assert.match(snapshot, /MTIME_STAMP=/);
 
@@ -459,7 +459,7 @@ describe('review-loop parse contracts', () => {
     const metadataEnd = restore.indexOf('\n```', metadataStart);
     const metadataCode = restore.slice(metadataStart, metadataEnd);
     assert.doesNotMatch(metadataCode, /\bgit\s+(?:rev-parse|write-tree|diff|ls-files|hash-object|clean|restore|reset|read-tree)\b/);
-    assert.match(metadataCode, /GIT_CFG_CURRENT=\$\(git_sec_hash "\$GIT_COMMON\/config"\)/);
+    assert.match(metadataCode, /GIT_CFG_CURRENT=\$\(GIT_SEC_FILE="\$GIT_COMMON\/config" git_sec_hash\)/);
     assert.match(metadataCode, /GIT_HOOKS_CURRENT=\$\(git_hooks_hash\)/);
     assert.match(metadataCode, /--unset-all/);
     assert.doesNotMatch(metadataCode, /cp -p "\$GIT_META_BAK\/config" "\$GIT_COMMON\/config"/, 'must not overwrite the shared config wholesale (#447)');
@@ -1251,8 +1251,8 @@ describe('review-loop parse contracts', () => {
 
     // The snapshot+revert that lets those reviewers run must cover .git/ too —
     // write-tree/stash/ls-files never see a planted hook or a core.hooksPath edit.
-    assert.match(runner, /GIT_CFG_BASELINE=\$\(git_sec_hash/);
-    assert.match(runner, /GIT_CFG_CURRENT=\$\(git_sec_hash/);
+    assert.match(runner, /GIT_CFG_BASELINE=\$\(GIT_SEC_FILE=/);
+    assert.match(runner, /GIT_CFG_CURRENT=\$\(GIT_SEC_FILE=/);
     assert.match(runner, /untracked_manifest_hash\s+# vs \$UNTRACKED_BASELINE/);
     // ...and parallel mode, which runs only Step 2 per reviewer, must take that
     // snapshot once before the fan-out and compare once after the barrier.

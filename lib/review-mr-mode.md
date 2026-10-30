@@ -117,11 +117,12 @@ fork MR, the target project otherwise):
 ```bash
 MR_DIR=/tmp/do-review-pr-{PR_NUM}-mr
 # Prints true only for a readable project where we hold Developer (30) or higher.
+# PROJECT_ID is the GitLab project to probe.
 can_push() {
-  glab api --hostname {GL_HOST} "projects/$1" > "$MR_DIR/project-$1.json" 2>/dev/null || { echo false; return; }
-  jq -r '([.permissions.project_access.access_level, .permissions.group_access.access_level] | map(select(. != null)) | max // 0) >= 30' "$MR_DIR/project-$1.json" 2>/dev/null | grep -qx true && echo true || echo false
+  glab api --hostname {GL_HOST} "projects/$PROJECT_ID" > "$MR_DIR/project-$PROJECT_ID.json" 2>/dev/null || { echo false; return; }
+  jq -r '([.permissions.project_access.access_level, .permissions.group_access.access_level] | map(select(. != null)) | max // 0) >= 30' "$MR_DIR/project-$PROJECT_ID.json" 2>/dev/null | grep -qx true && echo true || echo false
 }
-HEAD_PUSH=$(can_push {SOURCE_PROJECT_ID}); BASE_PUSH=$(can_push {TARGET_PROJECT_ID})
+HEAD_PUSH=$(PROJECT_ID="{SOURCE_PROJECT_ID}" can_push); BASE_PUSH=$(PROJECT_ID="{TARGET_PROJECT_ID}" can_push)
 echo "HEAD_PUSH=$HEAD_PUSH BASE_PUSH=$BASE_PUSH"
 ```
 

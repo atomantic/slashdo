@@ -86,15 +86,43 @@ describe('lib/merge-gate.md — the shared merge procedure (#335)', () => {
     }
   });
 
-  it('treats "no required checks reported" as vacuously satisfied after one re-watch', () => {
+  it('distinguishes late-registering required checks from a truly empty required set', () => {
     assert.match(gate, /\*\*`no required checks reported`\*\*: `gh pr checks` exits non-zero even in this case/);
-    assert.match(gate, /re-run the watch once/);
-    assert.match(gate, /vacuously satisfied: run `gh pr merge \{PR\} --\{MERGE_METHOD\}` alone/);
+    assert.match(gate, /Do not merge on the report alone/);
+    assert.match(gate, /gh api --hostname "\{GH_HOST\}" repos\/\{owner\}\/\{repo\}\/branches/);
+    assert.match(gate, /gh api --hostname "\{GH_HOST\}" repos\/\{owner\}\/\{repo\}\/rules/);
+    assert.match(gate, /branches\/\{BASE\}\/protection\/required_status_checks/);
+    assert.match(gate, /rules\/branches\/\{BASE\}` with `--paginate`, reading every page/);
+    assert.match(gate, /rules\/branches\/\{BASE\}/);
+    assert.match(gate, /verified absence of classic requirements, not a failure/);
+    assert.match(gate, /\*\*The forge requires status checks, but none have registered for this head yet\*\*/);
+    assert.match(gate, /Keep polling[\s\S]*for up to 30 minutes, and do not merge/);
+    assert.match(gate, /leave the PR open, report the wait as incomplete/);
+    assert.match(gate, /Never change branch protection or bypass it as an admin/);
+    assert.match(gate, /\*\*The forge requires no status checks\*\*[\s\S]*vacuously satisfied\. Run `gh pr merge \{PR\} --\{MERGE_METHOD\}` alone/);
+    assert.doesNotMatch(gate, /re-run the watch once/);
+  });
+
+  it('host-github defers the empty-report decision to the merge gate', () => {
+    const host = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'host-github.md'), 'utf8');
+    assert.doesNotMatch(host, /Treat that case as vacuously green/);
+    assert.match(host, /not proof of an empty required set/);
   });
 
   it('owns the CI flake read and continues every merge path to the read-back', () => {
     assert.match(gate, /^!read lib\/ci-flake-handling\.md$/m);
     assert.match(gate, /Every path that ran `gh pr merge` continues to step 5\./);
+  });
+
+  it('reads the failed job log before spending the one CI rerun', () => {
+    const flake = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'ci-flake-handling.md'), 'utf8');
+    const read = flake.indexOf('Read the failed job');
+    const rerun = flake.indexOf('gh run rerun <run-id> --failed');
+    assert.ok(read !== -1 && rerun !== -1 && read < rerun, 'log read must precede the rerun');
+    assert.match(flake, /aggregator[^\n]*selected job/);
+    assert.match(flake, /do not re-run\.\*\*/);
+    assert.match(flake, /shaped like infrastructure/);
+    assert.match(flake, /Do \*\*not\*\* re-run a second time/);
   });
 
   it('never hardcodes the merge method', () => {
