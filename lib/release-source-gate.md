@@ -14,34 +14,35 @@ for the preparation (the exact subject, so the prepared-release detection in
 for fixes. Run as **one** shell invocation from the checkout whose `HEAD` holds the unlanded commits:
 
 ```bash
+# INCOMPLETE_WHAT names the step; INCOMPLETE_DETAIL is the reason.
 incomplete() {
-  echo "INCOMPLETE — $1 is unverified; $2 Preserve the prepared release state and retry."
+  echo "INCOMPLETE — $INCOMPLETE_WHAT is unverified; $INCOMPLETE_DETAIL Preserve the prepared release state and retry."
   exit 1
 }
 GATE_BRANCH="release-prep/v{version}"
 GATE_TITLE="chore: release v{version}"
 GATE_SHA="$(git rev-parse HEAD)"
 git push -u origin "HEAD:refs/heads/$GATE_BRANCH"
-REMOTE_GATE_SHA="$(git ls-remote --heads origin "refs/heads/$GATE_BRANCH" | awk 'NF { print $1; exit }')"
+REMOTE_GATE_SHA="$(git ls-remote --heads origin "refs/heads/$GATE_BRANCH" | grep . | head -n1 | cut -f1)"
 if ! printf '%s\n' "$REMOTE_GATE_SHA" | grep -Eq '^[0-9a-f]{40}$' || [ "$REMOTE_GATE_SHA" != "$GATE_SHA" ]; then
-  incomplete "Source gate push" "expected $GATE_SHA, got ${REMOTE_GATE_SHA:-empty}."
+  INCOMPLETE_WHAT="Source gate push" INCOMPLETE_DETAIL="expected $GATE_SHA, got ${REMOTE_GATE_SHA:-empty}." incomplete
 fi
 if [ "$CLI_TOOL" = gh ]; then
-  GATE_PRS_JSON="$(gh pr list --state all --base "{source}" --head "$GATE_BRANCH" --limit 100 --json number,state,headRefOid,url)" || incomplete "Source gate PR" "the forge query failed."
+  GATE_PRS_JSON="$(gh pr list --state all --base "{source}" --head "$GATE_BRANCH" --limit 100 --json number,state,headRefOid,url)" || INCOMPLETE_WHAT="Source gate PR" INCOMPLETE_DETAIL="the forge query failed." incomplete
 else
-  GATE_PRS_RESPONSE="$(glab api --paginate "projects/:id/merge_requests?source_branch=$GATE_BRANCH&target_branch={source}&state=all&per_page=100")" || incomplete "Source gate MR" "the forge query failed."
-  GATE_PRS_JSON="$(printf '%s\n' "$GATE_PRS_RESPONSE" | jq -s 'if length == 0 then error("expected JSON document") elif (all(.[]; type == "array") | not) then error("expected array pages") else add | [.[] | {number: .iid, state: (.state | ascii_upcase | if . == "OPENED" then "OPEN" else . end), headRefOid: .sha, url: .web_url}] end')" || incomplete "Source gate MR" "the forge response was malformed."
+  GATE_PRS_RESPONSE="$(glab api --paginate "projects/:id/merge_requests?source_branch=$GATE_BRANCH&target_branch={source}&state=all&per_page=100")" || INCOMPLETE_WHAT="Source gate MR" INCOMPLETE_DETAIL="the forge query failed." incomplete
+  GATE_PRS_JSON="$(printf '%s\n' "$GATE_PRS_RESPONSE" | jq -s 'if length == 0 then error("expected JSON document") elif (all(.[]; type == "array") | not) then error("expected array pages") else add | [.[] | {number: .iid, state: (.state | ascii_upcase | if . == "OPENED" then "OPEN" else . end), headRefOid: .sha, url: .web_url}] end')" || INCOMPLETE_WHAT="Source gate MR" INCOMPLETE_DETAIL="the forge response was malformed." incomplete
 fi
 if ! printf '%s\n' "$GATE_PRS_JSON" | jq -e 'type == "array"' >/dev/null; then
-  incomplete "Source gate {CR_NOUN}" "the forge returned empty or malformed data."
+  INCOMPLETE_WHAT="Source gate {CR_NOUN}" INCOMPLETE_DETAIL="the forge returned empty or malformed data." incomplete
 fi
 MATCHING_GATE_PRS="$(printf '%s\n' "$GATE_PRS_JSON" | jq -c --arg sha "$GATE_SHA" '[.[] | select(.headRefOid == $sha and (.state == "OPEN" or .state == "MERGED"))]')"
 case "$(printf '%s\n' "$MATCHING_GATE_PRS" | jq 'length')" in
   0)
     if [ "$CLI_TOOL" = gh ]; then
-      GATE_PR_URL="$(gh pr create --base "{source}" --head "$GATE_BRANCH" --title "$GATE_TITLE" --body "Admission PR so the required checks run on this exact head before it lands on {source}; the {source} → {target} release PR follows.")" || incomplete "Source gate PR" "creation failed; retry without creating another PR."
+      GATE_PR_URL="$(gh pr create --base "{source}" --head "$GATE_BRANCH" --title "$GATE_TITLE" --body "Admission PR so the required checks run on this exact head before it lands on {source}; the {source} → {target} release PR follows.")" || INCOMPLETE_WHAT="Source gate PR" INCOMPLETE_DETAIL="creation failed; retry without creating another PR." incomplete
     else
-      GATE_PR_URL="$(glab mr create --source-branch "$GATE_BRANCH" --target-branch "{source}" --title "$GATE_TITLE" --description "Admission MR so the required pipeline runs on this exact head before it lands on {source}." --yes)" || incomplete "Source gate MR" "creation failed; retry without creating another MR."
+      GATE_PR_URL="$(glab mr create --source-branch "$GATE_BRANCH" --target-branch "{source}" --title "$GATE_TITLE" --description "Admission MR so the required pipeline runs on this exact head before it lands on {source}." --yes)" || INCOMPLETE_WHAT="Source gate MR" INCOMPLETE_DETAIL="creation failed; retry without creating another MR." incomplete
     fi
     GATE_PR_NUMBER="${GATE_PR_URL##*/}"
     GATE_PR_STATE=OPEN
@@ -51,10 +52,10 @@ case "$(printf '%s\n' "$MATCHING_GATE_PRS" | jq 'length')" in
     GATE_PR_URL="$(printf '%s\n' "$MATCHING_GATE_PRS" | jq -r '.[0].url')"
     GATE_PR_STATE="$(printf '%s\n' "$MATCHING_GATE_PRS" | jq -r '.[0].state')"
     ;;
-  *) incomplete "Source gate {CR_NOUN}" "more than one open or merged {CR_NOUN} matches $GATE_SHA; investigate the ambiguity." ;;
+  *) INCOMPLETE_WHAT="Source gate {CR_NOUN}" INCOMPLETE_DETAIL="more than one open or merged {CR_NOUN} matches $GATE_SHA; investigate the ambiguity." incomplete ;;
 esac
 if ! printf '%s\n' "$GATE_PR_NUMBER" | grep -Eq '^[0-9]+$'; then
-  incomplete "Source gate {CR_NOUN}" "creation returned empty or malformed data."
+  INCOMPLETE_WHAT="Source gate {CR_NOUN}" INCOMPLETE_DETAIL="creation returned empty or malformed data." incomplete
 fi
 printf 'SOURCE_GATE_HANDOFF\tGATE_BRANCH=%s\tGATE_SHA=%s\tGATE_PR_NUMBER=%s\tGATE_PR_URL=%s\tGATE_PR_STATE=%s\n' "$GATE_BRANCH" "$GATE_SHA" "$GATE_PR_NUMBER" "$GATE_PR_URL" "$GATE_PR_STATE"
 ```
@@ -83,21 +84,25 @@ new head is verified, never merge an unverified commit. Read the result back —
 from the exit status — and sync the local `{source}` to the landed commit:
 
 ```bash
+incomplete() {
+  echo "INCOMPLETE — $INCOMPLETE_WHAT is unverified; $INCOMPLETE_DETAIL Preserve the prepared release state and retry."
+  exit 1
+}
 if [ "$CLI_TOOL" = gh ]; then
-  GATE_JSON="$(gh pr view "<GATE_PR_NUMBER>" --json state,mergedAt,mergeCommit)" || incomplete "Source gate merge" "the forge state query failed."
+  GATE_JSON="$(gh pr view "<GATE_PR_NUMBER>" --json state,mergedAt,mergeCommit)" || INCOMPLETE_WHAT="Source gate merge" INCOMPLETE_DETAIL="the forge state query failed." incomplete
   GATE_MERGE_OID="$(printf '%s\n' "$GATE_JSON" | jq -er 'select(.state == "MERGED" and (.mergedAt | type == "string" and length > 0)) | .mergeCommit.oid | select(type == "string" and length > 0)')" \
-    || incomplete "Source gate merge" "the PR is not merged with a merge commit."
+    || INCOMPLETE_WHAT="Source gate merge" INCOMPLETE_DETAIL="the PR is not merged with a merge commit." incomplete
 else
-  GATE_JSON="$(glab api "projects/:id/merge_requests/<GATE_PR_NUMBER>")" || incomplete "Source gate merge" "the forge state query failed."
+  GATE_JSON="$(glab api "projects/:id/merge_requests/<GATE_PR_NUMBER>")" || INCOMPLETE_WHAT="Source gate merge" INCOMPLETE_DETAIL="the forge state query failed." incomplete
   GATE_MERGE_OID="$(printf '%s\n' "$GATE_JSON" | jq -er 'select(.state == "merged") | (.merge_commit_sha // .squash_commit_sha) | select(type == "string" and length > 0)')" \
-    || incomplete "Source gate merge" "the MR is not merged with a landed commit."
+    || INCOMPLETE_WHAT="Source gate merge" INCOMPLETE_DETAIL="the MR is not merged with a landed commit." incomplete
 fi
-git fetch origin "refs/heads/{source}:refs/remotes/origin/{source}" || incomplete "Source gate merge" "origin/{source} could not be fetched."
-git merge-base --is-ancestor "$GATE_MERGE_OID" "origin/{source}" || incomplete "Source gate merge" "origin/{source} does not contain the merge commit."
-git checkout "{source}" || incomplete "Source gate merge" "the local {source} could not be checked out."
+git fetch origin "refs/heads/{source}:refs/remotes/origin/{source}" || INCOMPLETE_WHAT="Source gate merge" INCOMPLETE_DETAIL="origin/{source} could not be fetched." incomplete
+git merge-base --is-ancestor "$GATE_MERGE_OID" "origin/{source}" || INCOMPLETE_WHAT="Source gate merge" INCOMPLETE_DETAIL="origin/{source} does not contain the merge commit." incomplete
+git checkout "{source}" || INCOMPLETE_WHAT="Source gate merge" INCOMPLETE_DETAIL="the local {source} could not be checked out." incomplete
 if ! git merge --ff-only "origin/{source}"; then
   # A squash/rebase merge rewrites the commit: accept only when the trees are identical.
-  git diff --quiet HEAD "origin/{source}" || incomplete "Source gate merge" "the local {source} differs from the landed origin/{source}."
+  git diff --quiet HEAD "origin/{source}" || INCOMPLETE_WHAT="Source gate merge" INCOMPLETE_DETAIL="the local {source} differs from the landed origin/{source}." incomplete
   git reset --hard "origin/{source}"
 fi
 git branch --set-upstream-to "origin/{source}"

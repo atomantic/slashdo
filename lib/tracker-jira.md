@@ -106,7 +106,7 @@ would otherwise prompt.
   `gh issue list` / `glab issue list` calls each command already inlines.
 - `issue_search <keywords>` — dedup before filing; use the "Search Jira issues safely" block below.
   GitHub/GitLab: `gh issue list --search` / `glab issue list --search`.
-- `issue_children <KEY>` — `issue_children "<KEY>"` (the paginating helper below). It
+- `issue_children <KEY>` — `CHILD_KEY="<KEY>" issue_children` (the paginating helper below). It
   prints one `KEY<TAB>OPEN|CLOSED` row per child in every state, epic children and
   sub-tasks alike, using the status *category* because status names are per-workflow.
   GitHub/GitLab: `epic-children.md`.
@@ -198,8 +198,8 @@ CLI's documented empty-result response as an empty page, and fails closed on any
 other API or JSON error:
 
 ```bash
-issue_children() {
-  _key="$1"; _offset=0
+issue_children() {   # CHILD_KEY = the parent issue key
+  _key="$CHILD_KEY"; _offset=0
   while :; do
     _err="$(mktemp)"
     if _page="$(jira issue list -p "$JIRA_PROJECT" -q "parent = $_key" --paginate "$_offset:100" --raw 2>"$_err")"; then
@@ -427,7 +427,9 @@ title as a POSIX single-quoted shell literal, replacing each internal apostrophe
 lines then remain title data.
 Labels are the filing partial's set — `PLAN_LABEL`, the category, `severity:<level>`,
 and any dispatch hint, built with `LABEL_SEP` (`:`) — one argument each; a label with
-whitespace aborts the filing rather than being rewritten. `PARENT` files an epic child
+whitespace aborts the filing rather than being rewritten. The label words arrive on
+the positional list and are copied to a file before argv is rebuilt as `-l` flags;
+a label that passed the whitespace check is one line. `PARENT` files an epic child
 or sub-task:
 
 ```bash
@@ -435,12 +437,17 @@ TITLE=<title>; BODY_FILE=<body-file>; PARENT="<parent-KEY, or empty>"
 set -- <label>...
 case "$PARENT" in ''|"<"*) PARENT="" ;; *)
   printf '%s\n' "$PARENT" | grep -Eq '^[A-Z][A-Z0-9_]+-[1-9][0-9]*$' || { echo "\"$PARENT\" is not a Jira issue key."; exit 1; } ;; esac
-N=$#
-while [ "$N" -gt 0 ]; do
-  L="$1"; shift; N=$((N - 1))
-  case "$L" in ''|*[[:space:]]*) echo "Jira labels cannot contain spaces (got: $L)"; exit 1 ;; esac
-  set -- "$@" -l "$L"
+LABEL_FILE="$(mktemp)" || exit 1
+: > "$LABEL_FILE"
+for L in "$@"; do
+  case "$L" in ''|*[[:space:]]*) echo "Jira labels cannot contain spaces (got: $L)"; rm -f "$LABEL_FILE"; exit 1 ;; esac
+  printf '%s\n' "$L" >> "$LABEL_FILE"
 done
+set --
+while IFS= read -r L; do
+  set -- "$@" -l "$L"
+done < "$LABEL_FILE"
+rm -f "$LABEL_FILE"
 [ -z "$PARENT" ] || set -- "$@" -P "$PARENT"
 J="$(jira issue create -p "$JIRA_PROJECT" -t "$JIRA_ISSUE_TYPE" -s "$TITLE" --template "$BODY_FILE" "$@" --no-input --raw)" \
   && KEY="$(printf '%s' "$J" | jq -er .key)" && [ -n "$KEY" ] \

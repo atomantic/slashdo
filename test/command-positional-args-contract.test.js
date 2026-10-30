@@ -4,8 +4,9 @@
 // arguments, so `/do:next --swarm 4 --merge` rendered `awk -v id="$1"` as `awk -v id="4"` and
 // `print $3` as `print --merge` (issues #454, #494). Shell blocks in commands/ and lib/ (lib/
 // partials are inlined into the installed skill) must use named variables instead.
-// KNOWN_LIB_DEBT lists lib files whose helper functions still read their own positional
-// parameters; the per-file count may only shrink. Do not add entries.
+// KNOWN_LIB_DEBT is the ratchet for lib shell blocks that still read positional
+// parameters. It is empty: every helper takes its inputs in named variables.
+// The per-file count may only shrink. Do not add entries.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
@@ -24,14 +25,7 @@ function mdFiles(dir) {
 }
 
 const libDir = path.join(__dirname, '..', 'lib');
-const KNOWN_LIB_DEBT = {
-  'local-agent-claude.md': 2,
-  'local-cli-runner.md': 5,
-  'release-source-gate.md': 2,
-  'review-mr-mode.md': 2,
-  'tracker-jira.md': 2,
-  'vcs-host.md': 1,
-};
+const KNOWN_LIB_DEBT = {};
 
 const POSITIONAL = /\$(?:[0-9*]|\{[0-9*])/;
 
