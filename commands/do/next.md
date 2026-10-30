@@ -385,7 +385,7 @@ Skip unless `--plan` is set. When present, don't touch code yet:
 
 ## Phase 4: Implement
 
-Write the code, tests, and docs the item requires, following the **target repo's** `CLAUDE.md` conventions. Run focused tests for the changed behavior as you go. Honor the target repository's local validation policy; do not add broad local CI runs before each push or review correction. Required hosted CI and configured reviews still gate merging, and focused local results never attest unrun suites.
+Write the code, tests, and docs the item requires, following the **target repo's** `CLAUDE.md` conventions. Run focused tests for the changed behavior as you go. Honor the target repository's local validation policy in two separate parts. First, when the repo documents a focused pre-push command (e.g. a `pregate`/`prepush` script covering lint, always-run structural guards, and tests for changed files), run it before every push — that command is the local validation policy, not an optional extra, and hosted CI must not be the first execution of its always-run guards; if it cannot be run, say so instead of treating hosted CI as the first run. Second, do not escalate to the repo's broad plan (a `--full` mode, browser, database, or boot-smoke suites) before each push or review correction unless that policy says the change needs it. Required hosted CI and configured reviews still gate merging, and focused local results never attest unrun suites.
 
 **Claimed an `epic-wrapup` epic** (Phase 1 step 3)? The work unit is the epic's own remaining wrap-up tasks. Do them, then **tick the corresponding `- [ ]` boxes in the epic body** with `issue_body --set "$ISSUE_NUM" <updated-body>`. The Phase 6 PR's `Closes #<epic>` closes it on merge.
 
