@@ -84,6 +84,10 @@ new head is verified, never merge an unverified commit. Read the result back —
 from the exit status — and sync the local `{source}` to the landed commit:
 
 ```bash
+incomplete() {
+  echo "INCOMPLETE — $INCOMPLETE_WHAT is unverified; $INCOMPLETE_DETAIL Preserve the prepared release state and retry."
+  exit 1
+}
 if [ "$CLI_TOOL" = gh ]; then
   GATE_JSON="$(gh pr view "<GATE_PR_NUMBER>" --json state,mergedAt,mergeCommit)" || INCOMPLETE_WHAT="Source gate merge" INCOMPLETE_DETAIL="the forge state query failed." incomplete
   GATE_MERGE_OID="$(printf '%s\n' "$GATE_JSON" | jq -er 'select(.state == "MERGED" and (.mergedAt | type == "string" and length > 0)) | .mergeCommit.oid | select(type == "string" and length > 0)')" \
