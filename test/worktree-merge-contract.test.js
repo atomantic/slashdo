@@ -97,6 +97,17 @@ describe('lib/merge-gate.md — the shared merge procedure (#335)', () => {
     assert.match(gate, /Every path that ran `gh pr merge` continues to step 5\./);
   });
 
+  it('reads the failed job log before spending the one CI rerun', () => {
+    const flake = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'ci-flake-handling.md'), 'utf8');
+    const read = flake.indexOf('Read the failed job');
+    const rerun = flake.indexOf('gh run rerun <run-id> --failed');
+    assert.ok(read !== -1 && rerun !== -1 && read < rerun, 'log read must precede the rerun');
+    assert.match(flake, /aggregator[^\n]*selected job/);
+    assert.match(flake, /do not re-run\.\*\*/);
+    assert.match(flake, /shaped like infrastructure/);
+    assert.match(flake, /Do \*\*not\*\* re-run a second time/);
+  });
+
   it('never hardcodes the merge method', () => {
     // `--merge` means a merge commit, which a squash- or rebase-only repo rejects.
     for (const line of fencedLines(gate).filter((l) => /gh pr merge /.test(l))) {
