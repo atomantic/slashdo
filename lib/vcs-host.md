@@ -7,8 +7,9 @@ Credentials never select or switch the forge, only gate access. Run both blocks
 
 ```bash
 ORIGIN_HOST="$(git remote get-url origin 2>/dev/null | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')"
-saved() { for _f in ~/.claude/.slashdo-config.json "$(git rev-parse --show-toplevel 2>/dev/null)/.slashdo.json"; do [ -f "$_f" ] && { tr -d '\n' < "$_f"; echo; } | sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'; done | tail -1 | tr A-Z a-z; }
-CODE_HOST="$(saved code-host)"
+# SAVED_KEY is the defaults key to read (code-host, tracker).
+saved() { for _f in ~/.claude/.slashdo-config.json "$(git rev-parse --show-toplevel 2>/dev/null)/.slashdo.json"; do [ -f "$_f" ] && { tr -d '\n' < "$_f"; echo; } | sed -n 's/.*"'"$SAVED_KEY"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'; done | tail -1 | tr A-Z a-z; }
+CODE_HOST="$(SAVED_KEY=code-host saved)"
 [ -n "$CODE_HOST" ] || case "$(printf '%s' "$ORIGIN_HOST" | tr A-Z a-z)" in
   *gitlab*) CODE_HOST=gitlab ;;
   *bitbucket*|*codeberg*|*gitea*|*forgejo*|*gogs*|*sr.ht|*dev.azure.com|*visualstudio.com) CODE_HOST="$ORIGIN_HOST" ;;
@@ -24,7 +25,7 @@ case "$CODE_HOST" in
   *) echo "{COMMAND}: unsupported code host '$CODE_HOST' (supported: github, gitlab; see /do:config --code-host)"; exit 1 ;;
 esac
 VCS_HOST="$CODE_HOST"
-TRACKER="$(saved tracker)"; TRACKER="${TRACKER:-$CODE_HOST}"
+TRACKER="$(SAVED_KEY=tracker saved)"; TRACKER="${TRACKER:-$CODE_HOST}"
 [ "$TRACKER" = "$CODE_HOST" ] && TRACKER_CLI="$CLI_TOOL" || TRACKER_CLI=""
 ```
 
