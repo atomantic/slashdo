@@ -89,6 +89,8 @@ describe('lib/merge-gate.md — the shared merge procedure (#335)', () => {
   it('distinguishes late-registering required checks from a truly empty required set', () => {
     assert.match(gate, /\*\*`no required checks reported`\*\*: `gh pr checks` exits non-zero even in this case/);
     assert.match(gate, /Do not merge on the report alone/);
+    assert.match(gate, /gh api --hostname "\{GH_HOST\}" repos\/\{owner\}\/\{repo\}\/branches/);
+    assert.match(gate, /gh api --hostname "\{GH_HOST\}" repos\/\{owner\}\/\{repo\}\/rules/);
     assert.match(gate, /branches\/\{BASE\}\/protection\/required_status_checks/);
     assert.match(gate, /rules\/branches\/\{BASE\}/);
     assert.match(gate, /verified absence of classic requirements, not a failure/);
