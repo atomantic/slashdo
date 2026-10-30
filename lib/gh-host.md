@@ -9,7 +9,7 @@ the PR URL's in PR mode; an ambient login never selects it — and keep an alrea
 ```bash
 [ -n "$GH_HOST" ] || GH_HOST=$(git remote get-url origin 2>/dev/null \
   | sed -E 's#^[a-z]+://##; s#^[^@/]+@##; s#[:/].*$##')
-[ -n "$GH_HOST" ] || GH_HOST=$(gh repo view --json url --jq '.url' 2>/dev/null | awk -F/ '{print $3}')
+[ -n "$GH_HOST" ] || GH_HOST=$(gh repo view --json url --jq '.url' 2>/dev/null | cut -d/ -f3)
 [ -n "$GH_HOST" ] || GH_HOST=github.com
 gh auth token --hostname "$GH_HOST" >/dev/null 2>&1 \
   || { echo "gh is not authenticated to $GH_HOST. Run: gh auth login --hostname $GH_HOST"; exit 1; }

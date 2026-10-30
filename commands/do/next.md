@@ -135,23 +135,25 @@ refresh_in_flight() {
   IN_FLIGHT_REFS="$(printf '%s\n%s' "$LOCAL_REFS" "$OPEN_REFS")"
 }
 refresh_in_flight || { echo "Could not verify complete claim evidence — aborting."; exit 1; }
-# in_flight <ID>: some ref has a `/`-segment that is exactly `issue-<ID>` (ID = issue number or Jira key)
-in_flight() { printf '%s\n' "$IN_FLIGHT_REFS" | tr '/' '\n' | grep -qixF -- "issue-$*"; }
+# in_flight: some ref has a `/`-segment that is exactly `issue-$CLAIM_ID` (CLAIM_ID = issue number or Jira key).
+# The ID travels in the named variable CLAIM_ID, never a positional parameter, because skill hosts expand positional parameters in this text.
+in_flight() { printf '%s\n' "$IN_FLIGHT_REFS" | tr '/' '\n' | grep -qixF -- "issue-${CLAIM_ID}"; }
 
+# fresh_claim_check: run as `CLAIM_ID=<ID> fresh_claim_check`.
 fresh_claim_check() {
-  in_flight "$*" && return 1
-  CLAIM_STATE="$(issue_state "$*")" || return 1
+  in_flight && return 1
+  CLAIM_STATE="$(issue_state "$CLAIM_ID")" || return 1
   case "$CLAIM_STATE" in OPEN|open|opened) ;; *) return 1 ;; esac
-  CLAIM_ASSIGNEES="$(issue_assignees "$*")" || return 1
+  CLAIM_ASSIGNEES="$(issue_assignees "$CLAIM_ID")" || return 1
   [ -z "$CLAIM_ASSIGNEES" ] || return 1
-  CLAIM_LABELS="$(issue_labels "$*")" || return 1
+  CLAIM_LABELS="$(issue_labels "$CLAIM_ID")" || return 1
   printf '%s' "$CLAIM_LABELS" | jq -e '
     type == "array" and all(.[]; type == "string")
     and (index("in-progress") == null)' >/dev/null
 }
 ```
 
-Every ref's `/`-segments and GitHub's synthetic segments form the in-flight set, and `in_flight <ID>` is an exact segment match (a Jira project compares case-insensitively): `issue-12` never matches `feature/12` or `issue-123`, and `issue-PROJ-12` never matches `PROJ-123`. `fresh_claim_check <ID>` adds live assignee and `in-progress` checks, including same-login assignment, and refuses metadata errors. On Jira retain its native In Progress transition/status gate as well (see its Claim procedure). Use this same gate for explicit targets, auto-pick, epic children and both swarm paths. Shell state does not persist: redefine the collector and these functions, and refresh evidence, in each Bash call that checks ownership.
+Every ref's `/`-segments and GitHub's synthetic segments form the in-flight set, and `CLAIM_ID=<ID> in_flight` is an exact segment match (a Jira project compares case-insensitively): `issue-12` never matches `feature/12` or `issue-123`, and `issue-PROJ-12` never matches `PROJ-123`. `CLAIM_ID=<ID> fresh_claim_check` adds live assignee and `in-progress` checks, including same-login assignment, and refuses metadata errors. On Jira retain its native In Progress transition/status gate as well (see its Claim procedure). Use this same gate for explicit targets, auto-pick, epic children and both swarm paths. Shell state does not persist: redefine the collector and these functions, and refresh evidence, in each Bash call that checks ownership.
 
 ### Phase 1 — issue queue
 
@@ -246,7 +248,7 @@ Then:
    `PRIORITY_SORT` (Conventions) with the two `map(select(…))` clauses above prepended.
    **GitLab ($LABEL_SEP is `::`)** — the same worked example against `glab issue list`, same two clauses without `.name`: see [lib/next-gitlab.md](../../lib/next-gitlab.md) "Phase 1 — candidate list".
    Omit the `map` for an inactive axis entirely rather than emitting `select(true)`. **This filter runs before every other skip**, so an excluded issue is never considered for the parking-label / dependency / epic checks — and exclusion here means "not what you asked for," not "not workable." Report it that way in step 7: if the filter emptied a queue that had eligible work, say which filter did it, **writing the flags space-separated, exactly as they'd be typed** (`no eligible issue matching --model light --effort max — 14 open issues carry no dispatch hint; add `none` to include them`) — comma-joined they'd read as one axis's OR-list.
-2. **Determine in-flight issues.** Issue `N` is in flight if EITHER `in_flight N` succeeds, OR the issue **already has any assignee** or carries `in-progress` (the Phase 2 markers — a local-only branch on a sibling machine is invisible here, but its markers are not). Require `fresh_claim_check N` before selecting it; same-login assignment stays in flight. A failed evidence read is unresolved and stops fresh claims.
+2. **Determine in-flight issues.** Issue `N` is in flight if EITHER `CLAIM_ID=N in_flight` succeeds, OR the issue **already has any assignee** or carries `in-progress` (the Phase 2 markers — a local-only branch on a sibling machine is invisible here, but its markers are not). Require `fresh_claim_check N` before selecting it; same-login assignment stays in flight. A failed evidence read is unresolved and stops fresh claims.
 3. **Resolve epics before picking (child-aware).** An epic (umbrella issue) is **not** a single claimable unit — its done-ness depends on its children. For any candidate that is an epic (carries `epic`/a repo umbrella label, has native sub-issues, or whose body — fetched per candidate, see step 4 — task-lists other issues), classify it with the shared epic logic (a Jira epic: `Epic` type or sub-tasks, per its "Jira" section) — read it only when a candidate is an epic:
 
 !read lib/epic-children.md
@@ -281,7 +283,7 @@ The worktree is a **sibling directory** (`../next-issue-<num>`) on branch `next/
 # evidence immediately before creating anything (also for epic children/workers).
 ISSUE_NUM="<picked-issue-number>"
 refresh_in_flight || { echo "Claim evidence unresolved — aborting."; exit 1; }
-fresh_claim_check "$ISSUE_NUM" || { echo "Issue #$ISSUE_NUM is claimed or ownership is unresolved — stopping."; exit 1; }
+CLAIM_ID="$ISSUE_NUM" fresh_claim_check || { echo "Issue #$ISSUE_NUM is claimed or ownership is unresolved — stopping."; exit 1; }
 REPO_ROOT="$(git rev-parse --show-toplevel)" && \
 SLUG="issue-${ISSUE_NUM}" && \
 # Abort if origin already has the claim branch.
