@@ -139,7 +139,7 @@ const issue = (key, { labels = [], created = '2026-01-01', status = 'To Do', cat
 describe('in-flight segment match (next.md), executed', () => {
   const inFlight = next.split('\n').find((line) => line.startsWith('in_flight() {'));
   const check = (refs, id) => {
-    const script = `IN_FLIGHT_REFS='${refs.join('\n')}'\n${inFlight}\nin_flight '${id}' && echo HIT || echo MISS\n`;
+    const script = `IN_FLIGHT_REFS='${refs.join('\n')}'\n${inFlight}\nCLAIM_ID='${id}' in_flight && echo HIT || echo MISS\n`;
     const out = execFileSync('sh', ['-c', script], { encoding: 'utf8' }).trim();
     return out === 'HIT';
   };
@@ -148,7 +148,7 @@ describe('in-flight segment match (next.md), executed', () => {
     assert.ok(inFlight, 'next.md must define in_flight() as a shell function');
     assert.match(next, /LOCAL_REFS="\$\(git branch -a --no-color --format='%\(refname:short\)'\)" \|\| return 1/);
     assert.match(next, /OPEN_REFS="\$\(open_refs\)" \|\| return 1/);
-    assert.match(next, /Issue `N` is in flight if EITHER `in_flight N` succeeds/);
+    assert.match(next, /Issue `N` is in flight if EITHER `CLAIM_ID=N in_flight` succeeds/);
   });
 
   it('accepts issue-PROJ-123 for PROJ-123 on any ref, with a case-insensitive project', () => {

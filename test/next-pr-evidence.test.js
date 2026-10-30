@@ -79,7 +79,7 @@ describe('GitHub open PR claim evidence, executed without network', () => {
   for (const trailer of ['Closes #466', 'Fixes #466', 'Fixes: #466', 'rEsOlVeS #466', 'Closed #466']) {
     it(`blocks an arbitrary PR branch with ${trailer}`, (t) => {
       const result = run(t, fixture([pr(7, trailer)]), {
-        tail: 'fresh_claim_check 466 && echo AVAILABLE || echo CLAIMED',
+        tail: 'CLAIM_ID=466 fresh_claim_check && echo AVAILABLE || echo CLAIMED',
       });
       assert.equal(result.status, 0, result.stderr);
       assert.equal(result.stdout.trim(), 'CLAIMED');
@@ -94,7 +94,7 @@ describe('GitHub open PR claim evidence, executed without network', () => {
       responses[`${base}/7/commits?per_page=100`] = [
         [{ sha: sha(99), commit: { message } }], [commit(p)],
       ];
-      const result = run(t, responses, { tail: 'in_flight 466 && echo CLAIMED' });
+      const result = run(t, responses, { tail: 'CLAIM_ID=466 in_flight && echo CLAIMED' });
       assert.equal(result.status, 0, result.stderr);
       assert.equal(result.stdout.trim(), 'CLAIMED');
     });
@@ -105,7 +105,7 @@ describe('GitHub open PR claim evidence, executed without network', () => {
     pulls[500].body = 'Closes #466';
     const responses = fixture(pulls);
     responses[list] = Array.from({ length: 6 }, (_, i) => pulls.slice(i * 100, (i + 1) * 100));
-    const result = run(t, responses, { tail: 'in_flight 466 && echo CLAIMED' });
+    const result = run(t, responses, { tail: 'CLAIM_ID=466 in_flight && echo CLAIMED' });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), 'CLAIMED');
     assert.match(result.calls, /pulls\/501\/commits\?per_page=100/);
@@ -118,7 +118,7 @@ describe('GitHub open PR claim evidence, executed without network', () => {
       Array.from({ length: 100 }, (_, i) => ({ sha: sha(i + 100), commit: { message: 'unrelated' } })),
       [commit(p, 'fix: final part (#466)')],
     ];
-    const result = run(t, responses, { tail: 'in_flight 466 && echo CLAIMED' });
+    const result = run(t, responses, { tail: 'CLAIM_ID=466 in_flight && echo CLAIMED' });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), 'CLAIMED');
   });
@@ -126,7 +126,7 @@ describe('GitHub open PR claim evidence, executed without network', () => {
   it('keeps claim branches and exact issue/Jira segments without numeric false positives', (t) => {
     const result = run(t, fixture([pr(7, 'Refs #466; Closes #4660')], { 7: '[issue-4660] (#4661)' }), {
       LOCAL_TEST_REFS: 'origin/claim/issue-12\ncos/task/issue-PROJ-42/worker\nfeature/466',
-      tail: 'in_flight 12 && in_flight proj-42 && ! in_flight 466 && fresh_claim_check 466 && echo AVAILABLE',
+      tail: 'CLAIM_ID=12 in_flight && CLAIM_ID=proj-42 in_flight && ! CLAIM_ID=466 in_flight && CLAIM_ID=466 fresh_claim_check && echo AVAILABLE',
     });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), 'AVAILABLE');
@@ -141,7 +141,7 @@ describe('GitHub open PR claim evidence, executed without network', () => {
   });
 
   it('accepts a valid empty PR list', (t) => {
-    const result = run(t, fixture(), { tail: 'fresh_claim_check 466 && echo AVAILABLE' });
+    const result = run(t, fixture(), { tail: 'CLAIM_ID=466 fresh_claim_check && echo AVAILABLE' });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), 'AVAILABLE');
   });
@@ -193,7 +193,7 @@ describe('fresh ownership checks shared by explicit, auto-pick and swarm', () =>
   ]) {
     it(`refuses ${name}`, (t) => {
       const result = run(t, fixture(), { ...options,
-        tail: 'fresh_claim_check 466 && echo CLAIM_MUTATION',
+        tail: 'CLAIM_ID=466 fresh_claim_check && echo CLAIM_MUTATION',
       });
       assert.notEqual(result.status, 0);
       assert.equal(result.stdout, '');
@@ -210,12 +210,12 @@ describe('fresh ownership checks shared by explicit, auto-pick and swarm', () =>
 
   it('rechecks just before creation and keeps continuation proof separate from login', () => {
     const creation = next.indexOf('git worktree add -b');
-    assert.ok(next.lastIndexOf('fresh_claim_check "$ISSUE_NUM"', creation) > next.indexOf('## Phase 2'));
+    assert.ok(next.lastIndexOf('CLAIM_ID="$ISSUE_NUM" fresh_claim_check', creation) > next.indexOf('## Phase 2'));
     assert.match(next, /Only a continuation with a trusted, recorded same-run ownership record/);
     assert.match(next, /skip fresh selection\/creation/);
     assert.match(next, /A fresh run never adopts an existing branch or PR/);
     assert.match(next, /explicit targets, auto-pick, epic children and both swarm paths/);
-    assert.match(read('lib/next-swarm.md'), /Require `next.md`'s shared `fresh_claim_check <N>`/);
+    assert.match(read('lib/next-swarm.md'), /Require `next.md`'s shared `CLAIM_ID=<N> fresh_claim_check`/);
     assert.match(read('lib/next-gitlab.md'), /`open_refs` — `glab mr list/);
     assert.match(read('lib/tracker-jira.md'), /`issue_labels <KEY>`[\s\S]*?\.fields\.labels/);
   });
