@@ -20,7 +20,7 @@ On GitLab, dispatch hints are written as `model::light` / `effort::high` / `prio
 
 ## Epics are child-aware
 
-An `epic` (umbrella) issue — identified by the `epic` label, native GitHub sub-issues, or a body that task-lists other issues — is judged by its **children**, not by code evidence. `/do:next` skips an epic while any child is open; once every child closes it claims the epic's remaining wrap-up tasks (or closes the epic outright if nothing remains). After shipping a child, `/do:next` re-checks the parent and closes it when that child was the last. `/do:replan` applies the same rule during triage.
+An `epic` (umbrella) issue — identified by the `epic` label, native GitHub sub-issues, or a body that task-lists other issues — is judged by its **children**, not by code evidence. `/do:next` skips an epic while any child is open; once every child closes it claims the epic's remaining wrap-up tasks (or closes the epic outright if nothing remains). After shipping a child, `/do:next` re-checks the parent and closes it when that child was the last. `/do:replan` applies the same rule during triage. Children are resolved from native sub-issues **and** the `Part of #N` / epic-body task-list convention together, so an epic that mixes the two is never judged by half its children; a child filed under an epic on GitHub gets both links.
 
 ## Swarm scheduling
 

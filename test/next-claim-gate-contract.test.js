@@ -223,8 +223,24 @@ describe('GitHub native epic child pagination', () => {
   it('fails closed when the GraphQL fallback cannot prove the full child set', () => {
     assert.match(epicChildren, /subIssues\(first:100\)\{nodes\{number state\} pageInfo\{hasNextPage\}\}/);
     assert.match(epicChildren, /if \(\.nodes\|type\) != "array" or \(\.pageInfo\.hasNextPage\|type\) != "boolean" then error\("incomplete sub-issue response"\) elif \.pageInfo\.hasNextPage then "__INCOMPLETE_PAGINATION__"/);
-    assert.match(epicChildren, /mark child resolution \*\*unresolved\*\* and do not fall back or close the epic/);
-    assert.match(epicChildren, /A valid empty result \/ `404` \/ `410` means "fall back"/);
+    assert.match(epicChildren, /mark child\s+resolution\s+\*\*unresolved\*\* and do not close the epic on the convention set\s+alone/);
+    assert.match(epicChildren, /A valid empty result \/ `404` \/ `410`[\s\S]*?is an empty native set,\s+\*\*not\*\* "zero children"/);
+  });
+
+  it("unions native sub-issues with the convention links instead of trusting either alone", () => {
+    assert.match(epicChildren, /resolve both and union them/);
+    assert.match(epicChildren, /\*\*Convention links\*\* \(GitHub and GitLab, always\)/);
+    assert.match(epicChildren, /\*\*Union\*\* the task-list refs, the back-references, and the native set/);
+    assert.doesNotMatch(epicChildren, /skip the\s+convention scan/);
+    assert.match(epicChildren, /elif grep -Eq 'HTTP \(404\|410\)' "\$ERR"; then NATIVE=""\s+else NATIVE="__UNRESOLVED__"; fi/);
+  });
+
+  it("files epic children with both the convention back-reference and a native link", () => {
+    const filing = epicChildren.slice(epicChildren.indexOf("## Filing a child of epic #N"), epicChildren.indexOf("## Closing an epic"));
+    assert.match(filing, /`Part of #N` — \*\*never\*\*\s+`Closes #N`/);
+    assert.match(filing, /repos\/\$OWNER\/\$REPO\/issues\/\$M" --jq \.id/);
+    assert.match(filing, /-X POST "repos\/\$OWNER\/\$REPO\/issues\/\$N\/sub_issues"[\s\S]*?-F sub_issue_id="\$CHILD_ID"/);
+    assert.match(filing, /Never pass `replace_parent`/);
   });
 });
 

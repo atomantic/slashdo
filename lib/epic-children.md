@@ -2,8 +2,9 @@
 
 Shared logic for resolving an **epic** (umbrella issue) to its child issues,
 deciding when the epic is complete, and closing it. Consumed by `/do:next`
-(claim/skip an epic, close a parent after its last child ships) and
-`/do:replan` (triage an epic by its children, not by code evidence).
+(claim/skip an epic, close a parent after its last child ships),
+`/do:replan` (triage an epic by its children, not by code evidence), and any
+command that files a child under an epic.
 
 **GitHub or GitLab.** Reuse `$CLI_TOOL` (`gh`/`glab`) if the calling command
 already detected it in its own discovery phase. GitHub exposes a native,
@@ -11,10 +12,10 @@ project-scoped **sub-issues** API that resolves an epic's children directly.
 GitLab has no project-scoped equivalent — its closest analog, group-level
 Epics, is a different, tier-gated feature with different scope (an epic there
 belongs to a *group*, not the project an issue lives in), so this file doesn't
-attempt to map it. On GitLab the **convention fallback** below (body
-task-lists + back-references) is therefore the *primary* path, not a
-last resort — and it's host-agnostic by construction, so every command in it
-is given both a `gh` and a `glab` form. A Jira tracker skips all of that and uses
+attempt to map it. The **convention links** below (body task-lists +
+back-references) are therefore GitLab's only path and GitHub's complement to
+native links — and they're host-agnostic by construction, so every command in
+them is given both a `gh` and a `glab` form. A Jira tracker skips all of that and uses
 the last section, **Jira**.
 
 On GitHub, set `OWNER`/`REPO` once per run:
@@ -40,28 +41,42 @@ Treat issue `#N` as an epic (umbrella) if **any** hold:
 
 An issue that matches none of these is an ordinary issue — handle it normally.
 
-## Resolving the children of epic #N — native first, convention fallback
+## Resolving the children of epic #N — native and convention, unioned
 
-1. **Native sub-issues (GitHub only, preferred when available).**
+An epic's children can be linked two ways: GitHub's native sub-issues, and the
+text convention (an epic-body task-list plus `Part of #N` back-references). A
+single epic often mixes them — a human links one child in the GitHub UI while an
+agent files the rest with `Part of #N`, or an older epic predates native links —
+so **resolve both and union them**. Trusting whichever source answers first
+would hide the other set, and the epic would look `epic-done` when its last
+*visible* child closed.
+
+1. **Native sub-issues (GitHub only).** Distinguish "no native links" from "the
+   lookup failed":
    ```bash
-   gh api --hostname "$GH_HOST" "repos/$OWNER/$REPO/issues/$N/sub_issues" --paginate \
-     --jq '.[] | "\(.number)\t\(.state)"' 2>/dev/null
+   ERR="$(mktemp)"
+   if NATIVE="$(gh api --hostname "$GH_HOST" "repos/$OWNER/$REPO/issues/$N/sub_issues" --paginate \
+       --jq '.[] | "\(.number)\t\(.state)"' 2>"$ERR")"; then :
+   elif grep -Eq 'HTTP (404|410)' "$ERR"; then NATIVE=""
+   else NATIVE="__UNRESOLVED__"; fi
+   rm -f "$ERR"
    ```
    GraphQL equivalent when REST is unavailable:
    ```bash
    gh api --hostname "$GH_HOST" graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){subIssues(first:100){nodes{number state} pageInfo{hasNextPage}}}}}' \
      -F o="$OWNER" -F r="$REPO" -F n="$N" --jq '.data.repository.issue.subIssues | if (.nodes|type) != "array" or (.pageInfo.hasNextPage|type) != "boolean" then error("incomplete sub-issue response") elif .pageInfo.hasNextPage then "__INCOMPLETE_PAGINATION__" else (.nodes[] | "\(.number)\t\(.state|ascii_downcase)") end' 2>/dev/null
    ```
-   If either returns rows, **those are the children** — use them and skip the
-   convention scan. The GraphQL query requests only 100 children: if it prints
-   `__INCOMPLETE_PAGINATION__`, or fails because the response is malformed,
-   mark child resolution **unresolved** and do not fall back or close the epic.
-   A valid empty result / `404` / `410` means "fall back" (feature not enabled,
-   older GHES, or no sub-issues) — it does **not** mean "zero children." **On
-   GitLab (`$CLI_TOOL = glab`), skip this step entirely** and go straight to the
-   convention fallback — there is no project-scoped equivalent to probe.
+   The rows are the **native set**. A valid empty result / `404` / `410`
+   (feature not enabled, older GHES, or no sub-issues) is an empty native set,
+   **not** "zero children" — the convention scan still runs. If the lookup
+   fails any other way, the GraphQL query prints `__INCOMPLETE_PAGINATION__`
+   (it requests only 100 children), or the response is malformed, mark child
+   resolution **unresolved** and do not close the epic on the convention set
+   alone: a natively-linked child may be missing from it. **On GitLab
+   (`$CLI_TOOL = glab`), skip this step entirely** — there is no
+   project-scoped equivalent to probe.
 
-2. **Convention fallback** (GitHub: only when native returned nothing; GitLab: always):
+2. **Convention links** (GitHub and GitLab, always):
    - **Body task-list issue refs.** Read the epic body:
      - GitHub: `gh issue view "$N" --json body -q .body`
      - GitLab: `glab issue view "$N" --output json --jq .description`
@@ -71,7 +86,8 @@ An issue that matches none of these is an ordinary issue — handle it normally.
      - GitLab: `glab issue list --all --search "Part of #$N" --in description --output json --per-page 100 --jq '.[] | {number: .iid, state: .state}'`
        (`--all` includes closed issues, matching `--state all`; `--in description` scopes the search the way GitHub's `in:body` does — GitLab's default `--in` also matches the title, which is broader than needed here.)
      Also accept `Parent: #$N` and `Epic: #$N`. Exclude `#N` itself.
-   - **Union** both sets, dedupe by number; fetch state for any unknown:
+   - **Union** the task-list refs, the back-references, and the native set, dedupe
+     by number (a child in several sets is one child); fetch state for any unknown:
      - GitHub: `gh issue view <m> --json state -q .state`
      - GitLab: `glab issue view <m> --output json --jq .state`
 
@@ -98,7 +114,31 @@ Given the resolved children and `WRAPUP_TASKS`:
 | `epic-open` | ≥1 child OPEN | Not done — never close. |
 | `epic-wrapup` | all children CLOSED, `WRAPUP_TASKS` non-empty | Children done; the epic still has its own work. |
 | `epic-done` | all children CLOSED, `WRAPUP_TASKS` empty | Ready to close. |
-| `epic-empty` | no children resolved by either method | Not really an umbrella — treat as an ordinary issue. |
+| `epic-empty` | no children resolved by any method | Not really an umbrella — treat as an ordinary issue. |
+
+## Filing a child of epic #N
+
+Any command (or caller) that files a new issue as a child of epic `#N` writes
+**both** link forms, so every resolver above — native, convention, GitHub,
+GitLab — finds it:
+
+1. **Convention (always).** End the child's body with `Part of #N` — **never**
+   `Closes #N`, which would close the whole epic when the first child merges —
+   and add `- [ ] #M — <title>` for it to the epic's own body checklist.
+2. **Native sub-issue (GitHub only, best effort).** Capture `M` from the URL
+   `gh issue create` prints, then link it. The API takes the child's REST `id`,
+   not its number:
+   ```bash
+   CHILD_ID="$(gh api --hostname "$GH_HOST" "repos/$OWNER/$REPO/issues/$M" --jq .id)" &&
+     gh api --hostname "$GH_HOST" -X POST "repos/$OWNER/$REPO/issues/$N/sub_issues" \
+       -F sub_issue_id="$CHILD_ID" >/dev/null
+   ```
+   A failure (`404`/`410` where sub-issues are unavailable, `422` when the child
+   already has a parent or the epic is at GitHub's sub-issue limit) is reported
+   in the run summary and does not undo the filing — the convention links from
+   step 1 still resolve the child. Never pass `replace_parent`: it would silently
+   move a child out of another epic. Skip this step on GitLab and Jira (Jira
+   links children with `parent`; see **Jira**).
 
 ## Closing an epic
 
