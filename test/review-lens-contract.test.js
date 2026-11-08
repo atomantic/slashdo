@@ -76,7 +76,7 @@ describe('shared review preferences', () => {
   it('is what /do:pr, /do:fpr, /do:release, and the better pipeline load', () => {
     for (const file of ['commands/do/pr.md', 'commands/do/fpr.md']) {
       const body = read(file);
-      assert.match(body, /^!`cat ~\/\.claude\/lib\/review-preferences\.md`$/m, file);
+      assert.match(body, /^!`cat ~\/\.claude\/lib\/review-preferences\.md[^`]*`$/m, file);
       assert.doesNotMatch(body, /Tiers? [1-4]/, `${file} still cites checklist tiers`);
     }
     const release = read('commands/do/release.md');

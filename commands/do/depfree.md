@@ -20,13 +20,13 @@ Parse `$ARGUMENTS` for:
 
 The `--review-with`, `--review-stop-on-findings`/`--review-stop-on-clean`, `--review-mode`, `--reviewer-applies`, and `--review-iterations` grammar governing the Phase 5c review loop on the PR — entry syntax, per-reviewer `~opt`/`~max=`/`~effort=` suffixes, dedupe rules, and model-bracket forwarding — is owned by the shared partial below; do not restate it here:
 
-!`cat ~/.claude/lib/review-flags.md`
+!`cat ~/.claude/lib/review-flags.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/depfree.md)")/../../lib/review-flags.md"`
 
 After parsing the review flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the review flags **and** `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
 
-!`cat ~/.claude/lib/review-config-defaults.md`
+!`cat ~/.claude/lib/review-config-defaults.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/depfree.md)")/../../lib/review-config-defaults.md"`
 
-!`cat ~/.claude/lib/config-defaults-issues-merge.md`
+!`cat ~/.claude/lib/config-defaults-issues-merge.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/depfree.md)")/../../lib/config-defaults-issues-merge.md"`
 
 - **`--issues-label <name>`**: the label on the GitHub/GitLab issues deferred removals are filed as (see Phase 2). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan`. A saved `issues` key is ignored.
 - **`--issues`**: deprecated no-op; print once: `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.`
@@ -139,7 +139,7 @@ Only on a Jira tracker (`TRACKER=jira`), read the Jira backend and run its Pre-f
 
 **GitHub only — skip the snippet below entirely on GitLab**, whose `glab` calls resolve the host from the remote themselves and where its `gh auth` precheck would abort the run.
 
-!`cat ~/.claude/lib/gh-host.md`
+!`cat ~/.claude/lib/gh-host.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/depfree.md)")/../../lib/gh-host.md"`
 
 ### 0b: Project Type Detection
 Check for project manifests to determine the tech stack:

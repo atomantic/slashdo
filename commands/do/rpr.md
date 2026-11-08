@@ -13,7 +13,7 @@ Address the latest review feedback on the current branch's PR (GitHub) or merge 
 
 ## Parse Arguments
 
-!`cat ~/.claude/lib/review-flags.md`
+!`cat ~/.claude/lib/review-flags.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/rpr.md)")/../../lib/review-flags.md"`
 
 rpr-only consequences of the grammar above:
 - `{ENTRY_MAX}` is forwarded as `{MAX_ITERATIONS}` and `{ENTRY_EFFORT}` as `{REVIEW_EFFORT}` / `{OLLAMA_EFFORT}` to the **local-agent** and **Ollama** loops it dispatches (the same loops `/do:pr` uses); neither reaches rpr's `copilot` entry, which runs rpr's own bespoke request/monitor flow, not the shared multi-reviewer loop. rpr does not support `--review-iterations`; use the per-entry `~max=<n>` suffix instead. `--review-mode` and the `--review-stop-on-*` flags likewise have no effect — rpr dispatches each listed reviewer directly rather than through the shared wrapper.
@@ -21,7 +21,7 @@ rpr-only consequences of the grammar above:
 
 After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to `review-with` / `reviewer-applies` / `issues-label` the user did not pass. Precedence: explicit flag (or `--review-with none`) > saved `review-with` default > `REVIEW_AGENTS=[]` (see step 2 and step 8). rpr ignores saved `review-iterations` / `review-stop-mode` (it does not support those flags):
 
-!`cat ~/.claude/lib/review-config-defaults.md`
+!`cat ~/.claude/lib/review-config-defaults.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/rpr.md)")/../../lib/review-config-defaults.md"`
 
 Parse `$ARGUMENTS` for `--issues-label <name>`: a **deferred** finding (see Finding Disposition) is filed as a tracker issue — GitHub, GitLab, or Jira (`/do:config --tracker`). Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan` (a saved `issues` key is ignored). `--issues` is a deprecated no-op: print once `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.` `--no-issues` aborts with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only in the project's issue tracker.`
 
@@ -120,7 +120,7 @@ Only when `CODE_HOST=gitlab`, read the GitLab verbs:
 
 10. **Report summary**: Print a table of all threads addressed with file, line, and a brief description of the fix. Include a final count line: "Resolved X/Y threads." If any threads remain unresolved, list them with reasons (unclear feedback, disagreement, requires user input). List deferred findings with their issue numbers (keys on Jira), or as unfiled per `plan-issue-setup.md`'s no-tracker rule. Append the `## Conventions Encoded` section produced by step 5, after the verified commit and push.
 
-!`cat ~/.claude/lib/finding-disposition.md`
+!`cat ~/.claude/lib/finding-disposition.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/rpr.md)")/../../lib/finding-disposition.md"`
 
 Only when a finding is being deferred:
 
@@ -128,7 +128,7 @@ Only when a finding is being deferred:
 !read lib/plan-issue-setup.md
 !read lib/plan-issue-filing.md
 
-!`cat ~/.claude/lib/review-fix-conventions.md`
+!`cat ~/.claude/lib/review-fix-conventions.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/rpr.md)")/../../lib/review-fix-conventions.md"`
 
 ## Local-Agent Review Loop (for `--review-with codex|agy|claude|grok|pi|cursor|opencode|cmd[<invocation>]`)
 

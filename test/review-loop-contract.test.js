@@ -446,7 +446,8 @@ describe('review-loop parse contracts', () => {
     assert.match(snapshot, /tar -cf "\$GIT_META_BAK\/hooks\.tar" -C "\$GIT_COMMON" hooks/);
     assert.match(snapshot, /git_sec_hash\(\) \{/);
     assert.match(snapshot, /git_hooks_hash\(\) \{/);
-    assert.match(snapshot, /tar -cf - -C "\$GIT_COMMON" hooks \| shasum -a 256/);
+    assert.match(snapshot, /find hooks -print0 \| LC_ALL=C sort -z/);
+    assert.doesNotMatch(snapshot, /tar -cf - -C "\$GIT_COMMON" hooks/, 'hooks fingerprint must not hash tar metadata (#507)');
     assert.doesNotMatch(snapshot, /tar -cf - -C "\$GIT_COMMON" config/, 'the whole config file must not be fingerprinted (#447)');
     assert.match(snapshot, /git ls-files --others --exclude-standard -z \| tar --null -T - -cf - \| shasum -a 256/);
     assert.doesNotMatch(snapshot, /git ls-files --others --exclude-standard \| sort/);
@@ -1159,9 +1160,9 @@ describe('review-loop parse contracts', () => {
     assert.match(runner, /run the identical launch block in the foreground/, 'the no-background fallback must reuse the same stdin-aware block');
     assert.match(loop, /Set `PROMPT_ON_STDIN="\$LOCAL_PROMPT"` for `cmd`[^\n]*`PROMPT_ON_STDIN=""` for every other reviewer/);
 
-    // Tar includes symlink targets and hook modes; the untracked manifest keeps
+    // The hooks fingerprint lists type/exec-bit/content (symlink targets too); the untracked manifest keeps
     // newline-containing paths and their contents intact through NUL separators.
-    assert.match(runner, /tar -cf - -C "\$GIT_COMMON" hooks \| shasum -a 256/);
+    assert.match(runner, /find hooks -print0 \| LC_ALL=C sort -z/);
     assert.match(runner, /tar --null -T - -cf - \| shasum -a 256/);
 
     // The restore may run in another shell; missing saved paths fail closed, and
@@ -1414,8 +1415,8 @@ describe('review-loop parse contracts', () => {
     assert.match(partial, /gh repo view --json url --jq '\.url'/);
     assert.match(partial, /\|\| GH_HOST=github\.com/);
 
-    const GH_HOST_INCLUDE = /!`cat ~\/\.claude\/lib\/gh-host\.md`|!read lib\/gh-host\.md/;
-    const CAT_INCLUDE = /!`cat ~\/\.claude\/lib\/([A-Za-z0-9._-]+\.md)`/g;
+    const GH_HOST_INCLUDE = /!`cat ~\/\.claude\/lib\/gh-host\.md[^`]*`|!read lib\/gh-host\.md/;
+    const CAT_INCLUDE = /!`cat ~\/\.claude\/lib\/([A-Za-z0-9._-]+\.md)[^`]*`/g;
     const HOSTNAME_USE = /gh api --hostname/;
 
     // A file needs GH_HOST if it calls `gh api --hostname` itself or inlines a lib
@@ -1512,7 +1513,7 @@ describe('shared review-flag parse partial (#311)', () => {
   it('pr.md and release.md include lib/review-flags.md instead of restating the grammar', () => {
     for (const name of ['pr.md', 'release.md']) {
       const body = raw(name);
-      assert.match(body, /!`cat ~\/\.claude\/lib\/review-flags\.md`/, `${name} must include the shared partial`);
+      assert.match(body, /!`cat ~\/\.claude\/lib\/review-flags\.md[^`]*`/, `${name} must include the shared partial`);
       assert.doesNotMatch(body, /Accepted values per slot/, `${name} must not carry its own copy of the --review-with grammar`);
     }
     assert.match(readLib('review-flags.md'), /Accepted values per slot/);
@@ -1529,7 +1530,7 @@ describe('shared review-flag parse partial (#311)', () => {
   it('review.md and rpr.md also include lib/review-flags.md instead of restating the grammar (#332)', () => {
     for (const name of ['review.md', 'rpr.md']) {
       const body = raw(name);
-      assert.match(body, /!`cat ~\/\.claude\/lib\/review-flags\.md`/, `${name} must include the shared partial`);
+      assert.match(body, /!`cat ~\/\.claude\/lib\/review-flags\.md[^`]*`/, `${name} must include the shared partial`);
       assert.doesNotMatch(body, /Accepted values per slot/, `${name} must not carry its own copy of the --review-with grammar`);
       assert.doesNotMatch(body, /Accepted slugs: `codex`, `agy`/, `${name} must not carry a hand-copied slug list`);
     }

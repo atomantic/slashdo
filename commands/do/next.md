@@ -169,7 +169,7 @@ Run the shared issue setup — it reuses the `CLI_TOOL` the Pre-flight detected 
 
 **GitHub only — the VCS preflight has already seeded `GH_HOST` from the checkout origin. Read the shared snippet below before the `collaborators` verb runs: it preserves that value, continues from the fallbacks when needed, and runs the per-host auth precheck.** (GitLab: skip — the GitLab form resolves the host from the remote itself.)
 
-!`cat ~/.claude/lib/gh-host.md`
+!`cat ~/.claude/lib/gh-host.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/next.md)")/../../lib/gh-host.md"`
 
 ```bash
 ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"

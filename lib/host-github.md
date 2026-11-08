@@ -101,14 +101,16 @@ Re-read `cr-state` and retry.
 `gh pr checks {PR_NUMBER} --required --watch --fail-fast` blocks until the
 checks pass (exit 0) or one fails. When no required checks are reported, it also
 exits non-zero. That report is not proof of an empty required set: a required
-check can be registered late. Follow `merge-gate.md`, which separates a forge
+check can be registered late. Follow `lib/merge-gate.md`, which separates a forge
 that requires status checks (keep polling, never merge early) from a branch that
 requires none (vacuously green).
 
 ### `merge`
 
-Merge only through `merge-gate.md` (its GitHub section). It owns method
-resolution, queueing, and the merged read-back.
+Merge only through the shared merge gate (its GitHub section). It owns method
+resolution, queueing, and the merged read-back. Read it at the merge step only:
+
+!read lib/merge-gate.md
 
 ### Login grammar
 

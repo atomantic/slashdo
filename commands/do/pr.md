@@ -5,7 +5,7 @@ argument-hint: "[--review-with <agent>[,<agent>...]] [--review-iterations <n>] [
 
 ## Parse Arguments
 
-!`cat ~/.claude/lib/review-flags.md`
+!`cat ~/.claude/lib/review-flags.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/pr.md)")/../../lib/review-flags.md"`
 
 Parse `$ARGUMENTS` for the merge flags (auto-merge is opt-in; by default the command opens the PR and stops):
 - `--merge` — once the review loop returns a mergeable status **and** CI is green, auto-merge the PR. Record `MERGE_ENABLED=true`.
@@ -16,9 +16,9 @@ Parse `$ARGUMENTS` for the merge flags (auto-merge is opt-in; by default the com
 
 Then apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass — an explicit flag, or `--review-with none`, always overrides a saved default. `/do:pr` additionally reads the `merge` and `merge-method` keys here. A method supplied via `--merge=<method>` counts as typing `merge-method`: if `MERGE_METHOD` is already set from it, skip the saved `merge-method` default (injecting it would override the explicit choice or trip the conflict abort above):
 
-!`cat ~/.claude/lib/review-config-defaults.md`
+!`cat ~/.claude/lib/review-config-defaults.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/pr.md)")/../../lib/review-config-defaults.md"`
 
-!`cat ~/.claude/lib/config-defaults-issues-merge.md`
+!`cat ~/.claude/lib/config-defaults-issues-merge.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/pr.md)")/../../lib/config-defaults-issues-merge.md"`
 
 ## Detect VCS Host
 
@@ -50,7 +50,7 @@ Read the durable pre-PR lifecycle procedure before initializing or dispatching l
 
 - Commit all changes to the current branch, following these conventions:
 
-!`cat ~/.claude/lib/commit-conventions.md`
+!`cat ~/.claude/lib/commit-conventions.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/pr.md)")/../../lib/commit-conventions.md"`
 
 - **Fetch the default branch and review against the remote-tracking ref — do not rebase by default.** Run `git fetch origin {default_branch}` (never `git fetch origin {default_branch}:{default_branch}`: it rewrites the user's local default branch and fails in a linked worktree whose parent repo has it checked out). **Record `origin/{default_branch}` as `{REVIEW_BASE}`** and pass it to the review loops as their `{BASE_BRANCH}` input; that is the only name they read. `git diff {REVIEW_BASE}...HEAD` is anchored on the merge-base, so it already excludes commits that landed only on the default branch — a branch that is merely behind needs no rebase for its diff to contain only its own changes.
   - **Default-branch movement alone is not a reason to rebase.** A ready branch that is conflict-free keeps its HEAD, and with it the validation and reviews already recorded against that HEAD; do not rewrite it or restart CI/review just because the base advanced. Where the host permits merging a branch that is behind, publish and merge it as it is.
@@ -86,7 +86,7 @@ If the diff touches more than 15 files, delegate later batches to a subagent to 
 
 Review preferences to apply to each file:
 
-!`cat ~/.claude/lib/review-preferences.md`
+!`cat ~/.claude/lib/review-preferences.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/pr.md)")/../../lib/review-preferences.md"`
 
 Verification — confirm before proceeding:
 - [ ] Read every changed file in full (not just diffs)
