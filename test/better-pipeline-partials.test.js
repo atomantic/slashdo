@@ -194,7 +194,7 @@ describe('lib includes resolve', () => {
 
     for (const [dir, file] of files) {
       const body = fs.readFileSync(path.join(root, dir, file), 'utf8');
-      for (const [, target] of body.matchAll(/!`cat ~\/\.claude\/lib\/(.+?)`/g)) {
+      for (const [, target] of body.matchAll(/!`cat ~\/\.claude\/lib\/([^`\s]+)[^`]*`/g)) {
         assert.ok(
           fs.existsSync(path.join(root, 'lib', target)),
           `${dir}/${file} includes lib/${target}, which does not exist`,

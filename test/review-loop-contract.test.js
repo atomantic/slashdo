@@ -1414,8 +1414,8 @@ describe('review-loop parse contracts', () => {
     assert.match(partial, /gh repo view --json url --jq '\.url'/);
     assert.match(partial, /\|\| GH_HOST=github\.com/);
 
-    const GH_HOST_INCLUDE = /!`cat ~\/\.claude\/lib\/gh-host\.md`|!read lib\/gh-host\.md/;
-    const CAT_INCLUDE = /!`cat ~\/\.claude\/lib\/([A-Za-z0-9._-]+\.md)`/g;
+    const GH_HOST_INCLUDE = /!`cat ~\/\.claude\/lib\/gh-host\.md[^`]*`|!read lib\/gh-host\.md/;
+    const CAT_INCLUDE = /!`cat ~\/\.claude\/lib\/([A-Za-z0-9._-]+\.md)[^`]*`/g;
     const HOSTNAME_USE = /gh api --hostname/;
 
     // A file needs GH_HOST if it calls `gh api --hostname` itself or inlines a lib
@@ -1512,7 +1512,7 @@ describe('shared review-flag parse partial (#311)', () => {
   it('pr.md and release.md include lib/review-flags.md instead of restating the grammar', () => {
     for (const name of ['pr.md', 'release.md']) {
       const body = raw(name);
-      assert.match(body, /!`cat ~\/\.claude\/lib\/review-flags\.md`/, `${name} must include the shared partial`);
+      assert.match(body, /!`cat ~\/\.claude\/lib\/review-flags\.md[^`]*`/, `${name} must include the shared partial`);
       assert.doesNotMatch(body, /Accepted values per slot/, `${name} must not carry its own copy of the --review-with grammar`);
     }
     assert.match(readLib('review-flags.md'), /Accepted values per slot/);
@@ -1529,7 +1529,7 @@ describe('shared review-flag parse partial (#311)', () => {
   it('review.md and rpr.md also include lib/review-flags.md instead of restating the grammar (#332)', () => {
     for (const name of ['review.md', 'rpr.md']) {
       const body = raw(name);
-      assert.match(body, /!`cat ~\/\.claude\/lib\/review-flags\.md`/, `${name} must include the shared partial`);
+      assert.match(body, /!`cat ~\/\.claude\/lib\/review-flags\.md[^`]*`/, `${name} must include the shared partial`);
       assert.doesNotMatch(body, /Accepted values per slot/, `${name} must not carry its own copy of the --review-with grammar`);
       assert.doesNotMatch(body, /Accepted slugs: `codex`, `agy`/, `${name} must not carry a hand-copied slug list`);
     }

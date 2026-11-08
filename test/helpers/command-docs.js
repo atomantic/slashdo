@@ -12,7 +12,7 @@ function readCommandDocs(name, { eager = false } = {}) {
     if (seen.has(file)) return '';
     seen.add(file);
     const body = fs.readFileSync(path.join(root, file), 'utf8');
-    return body.replace(/^!read (lib\/[\w.-]+\.md)$|!`cat ~\/\.claude\/lib\/([\w.-]+\.md)`/gm,
+    return body.replace(/^!read (lib\/[\w.-]+\.md)$|!`cat ~\/\.claude\/lib\/([\w.-]+\.md)[^`\n]*`/gm,
       (directive, required, included) => {
         if (!required && !eager) return directive;
         return `${directive}\n${visit(required || `lib/${included}`)}`;

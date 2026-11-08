@@ -89,7 +89,7 @@ Before committing, ensure the fork is up to date with upstream:
 
 3. **Commit** following these conventions (and write no changelog entry — upstream controls that):
 
-!`cat ~/.claude/lib/commit-conventions.md`
+!`cat ~/.claude/lib/commit-conventions.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/fpr.md)")/../../lib/commit-conventions.md"`
 
 4. **Push to fork**:
    ```bash
@@ -128,7 +128,7 @@ If the diff touches more than 15 files, delegate later batches to a subagent to 
 
 Review preferences to apply to each file:
 
-!`cat ~/.claude/lib/review-preferences.md`
+!`cat ~/.claude/lib/review-preferences.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/fpr.md)")/../../lib/review-preferences.md"`
 
 Verification — confirm before proceeding:
 - [ ] Read every changed file in full (not just diffs)
