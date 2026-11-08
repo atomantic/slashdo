@@ -155,8 +155,11 @@ of required checks.
 
 ### `merge`
 
-Merge only through `merge-gate.md` (its GitLab section). It owns the
-merge-when-pipeline-succeeds path and the merged read-back.
+Merge only through the shared merge gate (its GitLab section). It owns the
+merge-when-pipeline-succeeds path and the merged read-back. Read it at the merge
+step only:
+
+!read lib/merge-gate.md
 
 ### Targeting an MR outside the checkout
 
