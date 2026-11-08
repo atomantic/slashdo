@@ -17,7 +17,7 @@ function bashBlock(heading) {
   return rest.slice(start, rest.indexOf('\n```', start));
 }
 
-function run(mutate, setup = '') {
+function run(mutate, setup = '', after = '') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-meta-'));
   try {
     const sh = (cmd, cwd) => spawnSync('bash', ['-c', cmd], { cwd, encoding: 'utf8' });
@@ -29,6 +29,7 @@ function run(mutate, setup = '') {
       bashBlock('### Snapshot'),
       mutate,
       bashBlock('### Verify and restore'),
+      after,
       'echo RESTORE_OK',
       'cat "$GIT_COMMON/config"',
       'echo HOOKS:; ls "$GIT_COMMON/hooks" 2>/dev/null',
@@ -88,5 +89,37 @@ describe('local-cli-runner git metadata verify/restore (#447)', () => {
     const r = run('mkdir -p "$GIT_COMMON/hooks" && echo x > "$GIT_COMMON/hooks/planted-hook"');
     assert.match(r.stdout, /RESTORE_OK/, r.stderr);
     assert.doesNotMatch(r.stdout, /planted-hook/);
+  });
+
+  // #507: the hooks fingerprint is path/type/exec-bit/content, not tar metadata.
+  const seed = 'mkdir -p "$GIT_COMMON/hooks/sub" && printf "#!/bin/sh\\n" > "$GIT_COMMON/hooks/pre-commit" && chmod 755 "$GIT_COMMON/hooks/pre-commit" && echo d > "$GIT_COMMON/hooks/sub/f" && ln -s pre-commit "$GIT_COMMON/hooks/link"';
+
+  it('restores a hook whose content was modified', () => {
+    const r = run('echo evil >> "$GIT_COMMON/hooks/pre-commit"', seed);
+    assert.match(r.stdout, /RESTORE_OK/, r.stderr);
+    assert.doesNotMatch(r.stdout, /evil/);
+  });
+
+  it('restores a removed hook', () => {
+    const r = run('rm "$GIT_COMMON/hooks/pre-commit"', seed);
+    assert.match(r.stdout, /RESTORE_OK/, r.stderr);
+    assert.match(r.stdout, /pre-commit/);
+  });
+
+  it('detects and restores an executable-bit change', () => {
+    const r = run('chmod 644 "$GIT_COMMON/hooks/pre-commit"', seed, '[ -x "$GIT_COMMON/hooks/pre-commit" ] && echo EXEC_RESTORED');
+    assert.match(r.stdout, /RESTORE_OK/, r.stderr);
+    assert.match(r.stdout, /EXEC_RESTORED/, 'mode change must be reverted to executable');
+  });
+
+  it('detects and restores a changed symlink target', () => {
+    const r = run('ln -sfn /bin/evil "$GIT_COMMON/hooks/link"', seed, 'echo TARGET=$(readlink "$GIT_COMMON/hooks/link")');
+    assert.match(r.stdout, /RESTORE_OK/, r.stderr);
+    assert.match(r.stdout, /TARGET=pre-commit/);
+  });
+
+  it('verifies clean when only mtimes change', () => {
+    const r = run('touch -t 200001010000 "$GIT_COMMON/hooks" "$GIT_COMMON/hooks/pre-commit" "$GIT_COMMON/hooks/sub"', seed);
+    assert.match(r.stdout, /RESTORE_OK/, r.stderr);
   });
 });
