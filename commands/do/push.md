@@ -39,7 +39,7 @@ Commit and push all work from this session, updating documentation as needed.
 4. **Commit and push**:
    - Stage all changed files by name, including any changelog or tracking file step 2 or 3 touched, and commit following these conventions:
 
-!`cat ~/.claude/lib/commit-conventions.md`
+!`cat ~/.claude/lib/commit-conventions.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/push.md)")/../../lib/commit-conventions.md"`
 
 5. **Push the changes** to the branch's own upstream — never a bare `git push`, which under `push.default=matching` fans out to every same-named branch:
    ```bash

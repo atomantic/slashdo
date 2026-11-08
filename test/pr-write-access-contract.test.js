@@ -45,7 +45,7 @@ describe('PR write-access disposition', () => {
   it('routes /do:review between pushing fixes and commenting, and never merges by default', () => {
     const command = readCommand('review.md');
 
-    assert.match(command, /!`cat ~\/\.claude\/lib\/pr-write-access\.md`/);
+    assert.match(command, /!`cat ~\/\.claude\/lib\/pr-write-access\.md[^`]*`/);
     assert.match(command, /PR_DISPOSITION/);
     assert.match(command, /--apply and --no-apply cannot be combined/);
 

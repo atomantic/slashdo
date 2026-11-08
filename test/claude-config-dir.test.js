@@ -38,7 +38,7 @@ function assertInstalledDocsUseCustomRoot(configDir, { completePaths = false } =
   const expectedPath = completePaths
     ? shellQuote(path.join(configDir, 'lib', 'gh-host.md'))
     : `${quotedRoot}/lib/gh-host.md`;
-  assert.ok(command.includes(`!\`cat ${expectedPath}\``));
+  assert.ok(command.includes(`!\`cat ${expectedPath}`));
 }
 
 function assertRegisteredCommandsRun(configDir, env) {

@@ -88,7 +88,9 @@ function rewriteVersionPath(body, env) {
 }
 
 // Canonical includes plus the citation forms used by command and library docs.
-const LIB_CAT_RE = /!`cat ~\/\.claude\/lib\/(.+?)`/g;
+// The expansion may carry a bundled-install fallback after the global path (see
+// commands/do/push.md); the captured group is the library filename only.
+const LIB_CAT_RE = /!`cat ~\/\.claude\/lib\/([^`\s]+)[^`]*`/g;
 const LIB_PROSE_RE = /~\/\.claude\/lib\/([A-Za-z0-9._-]+\.md)/g;
 const LIB_MD_LINK_RE = /\[[^\]]*\]\((?:\.\.\/)+lib\/([A-Za-z0-9._-]+\.md)\)/g;
 // Sibling and backticked paths can also refer to non-slashdo docs. Resolve only

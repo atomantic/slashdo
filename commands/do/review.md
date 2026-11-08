@@ -14,13 +14,13 @@ Parse `$ARGUMENTS` for:
 - **`--apply` / `--no-apply`** (mutually exclusive, PR mode only): how verified findings are delivered. Default `PR_APPLY=auto` — **commit the fixes onto the PR's head branch when we can push to it, post inline review comments when we can't** (see "Determine write access"). `--no-apply` forces review-only; `--apply` forces fix-and-push and aborts with `--apply was requested but the PR head branch is not writable ({reason}) — rerun without --apply to post an inline review instead.` when `CAN_PUSH_HEAD=false`. Abort with `--apply and --no-apply cannot be combined` if both appear.
 - **`--merge` / `--merge=<method>`** (optional, PR mode only): after the review finishes **clean**, merge the PR. Off by default — without this flag `/do:review` never merges anything. `<method>` ∈ {`squash`, `rebase`, `merge`}; abort on anything else with `--merge=<method> must be one of squash, rebase, merge (got: {value}).` Record `MERGE_ENABLED=true` and, when given, `MERGE_METHOD`. Every gate in "Merge the PR" must pass — the flag requests a merge, it does not authorize one.
 
-!`cat ~/.claude/lib/review-flags.md`
+!`cat ~/.claude/lib/review-flags.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/review.md)")/../../lib/review-flags.md"`
 
 After parsing the flags above, apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass (the delegated-review flags **and** `--issues-label`) — an explicit flag, or `--review-with none`, always overrides a saved default:
 
-!`cat ~/.claude/lib/review-config-defaults.md`
+!`cat ~/.claude/lib/review-config-defaults.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/review.md)")/../../lib/review-config-defaults.md"`
 
-!`cat ~/.claude/lib/config-defaults-issues-merge.md`
+!`cat ~/.claude/lib/config-defaults-issues-merge.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/review.md)")/../../lib/config-defaults-issues-merge.md"`
 
 - **`--issues-label <name>`** (optional): a **deferred** finding (local-branch mode only — see Finding Disposition) is filed as a GitHub/GitLab issue with this label. Set `PLAN_LABEL` from `--issues-label`, else the saved `issues-label` default, else `plan` (a saved `issues` key is ignored). No effect in PR mode. `--issues` is a deprecated no-op: print once `--issues is now the default (PLAN.md mode was removed); the flag can be dropped.` `--no-issues` aborts with `--no-issues is no longer supported: PLAN.md mode was removed. slashdo records work only in the project's issue tracker.`
 - **PR reference** — any non-flag token that looks like a pull-request reference. **Match on URL *shape*, never on the hostname** — a self-managed GitHub Enterprise host often carries no `github` substring; the host-independent `/pull/{number}` path segment is what identifies a GitHub-flavored PR. A token matches if **any** of the following holds:
@@ -51,7 +51,7 @@ If there are no changes, inform the user and stop.
 
 **Local branch mode only.** PR mode (below) takes `{GH_HOST}` from the **PR URL**, not from `origin` — do not re-derive it from the remote there.
 
-!`cat ~/.claude/lib/gh-host.md`
+!`cat ~/.claude/lib/gh-host.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/review.md)")/../../lib/gh-host.md"`
 
 ### PR / MR mode (`PR_MODE=true`)
 
@@ -111,7 +111,7 @@ The host orchestrator does the full review itself even when no focused agent is 
 
 ### Select the review lenses
 
-!`cat ~/.claude/lib/review-agent-selection.md`
+!`cat ~/.claude/lib/review-agent-selection.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/review.md)")/../../lib/review-agent-selection.md"`
 
 <surface_scan_agent>
 
@@ -229,7 +229,7 @@ Verification here is reading code, not running it — a build/test pass over unf
 
 When `PR_MODE=true` and `PR_DISPOSITION=apply`, first follow the loaded partial's branch-checkout step ("Fix Issues — PR-branch checkout" on GitHub, "Fix Issues — MR-branch checkout" on GitLab). It checks out the change's branch and sets the commit-attribution convention. Then run this section against that branch instead of the local one, then continue to the partial's push step ("Push fixes to the PR branch" / "Push fixes to the MR branch").
 
-!`cat ~/.claude/lib/finding-disposition.md`
+!`cat ~/.claude/lib/finding-disposition.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/review.md)")/../../lib/finding-disposition.md"`
 
 Only when a finding is being deferred:
 

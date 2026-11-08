@@ -7,11 +7,11 @@ argument-hint: "[--interactive] [--review-with <agent>[,<agent>...]] [--review-i
 
 ## Parse Arguments
 
-!`cat ~/.claude/lib/review-flags.md`
+!`cat ~/.claude/lib/review-flags.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/release.md)")/../../lib/review-flags.md"`
 
 Then apply any **saved defaults** (set via `/do:config`) to the flags the user did NOT pass — an explicit flag, or `--review-with none`, always overrides a saved default:
 
-!`cat ~/.claude/lib/review-config-defaults.md`
+!`cat ~/.claude/lib/review-config-defaults.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/release.md)")/../../lib/review-config-defaults.md"`
 
 ## Select the Project Release Procedure
 
@@ -84,7 +84,7 @@ The {CR_NOUN} direction is `{source}` → `{target}` (e.g., `main` → `release`
 
 **GitHub only** — the shared `{GH_HOST}` derivation in step 1 refers to:
 
-!`cat ~/.claude/lib/gh-host.md`
+!`cat ~/.claude/lib/gh-host.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/release.md)")/../../lib/gh-host.md"`
 
 ## Pre-Release Checks
 
