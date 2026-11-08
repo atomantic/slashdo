@@ -56,8 +56,22 @@ git_sec_hash() {   # GIT_SEC_FILE = config file; git exit 1 means "no matching k
      while IFS= read -r k; do printf '%s\0' "$k"; git config --file "$GIT_SEC_FILE" --null --get-all -- "$k" || exit 1; done | shasum -a 256)
 }
 git_hooks_hash() {
+  # Fingerprint what can execute, never archive metadata: a sorted, NUL-delimited listing of every
+  # path with its type, executable bit (`-x`, the same access(X_OK) test Git applies), and content hash (symlink target for links). mtimes, owners and
+  # tar headers are deliberately excluded, so a restore that only changes timestamps verifies clean.
+  # Uses only POSIX find/sort -z/readlink/shasum, which GNU and BSD userlands share.
   if [ -d "$GIT_COMMON/hooks" ]; then
-    (set -o pipefail; tar -cf - -C "$GIT_COMMON" hooks | shasum -a 256)
+    (set -o pipefail; cd "$GIT_COMMON" || exit 1
+     find hooks -print0 | LC_ALL=C sort -z |
+       while IFS= read -r -d '' p; do
+         if [ -L "$p" ]; then printf 'l\0%s\0%s\0' "$p" "$(readlink "$p")"
+         elif [ -d "$p" ]; then printf 'd\0%s\0' "$p"
+         elif [ -f "$p" ]; then
+           if [ -x "$p" ]; then x=x; else x=n; fi
+           h=$(shasum -a 256 < "$p") || exit 1
+           printf 'f\0%s\0%s\0%s\0' "$p" "$x" "$h"
+         else printf 'o\0%s\0' "$p"; fi
+       done | shasum -a 256)
   else
     echo "no-hooks-dir"
   fi
@@ -129,8 +143,22 @@ git_sec_hash() {
      while IFS= read -r k; do printf '%s\0' "$k"; git config --file "$GIT_SEC_FILE" --null --get-all -- "$k" || exit 1; done | shasum -a 256)
 }
 git_hooks_hash() {
+  # Fingerprint what can execute, never archive metadata: a sorted, NUL-delimited listing of every
+  # path with its type, executable bit (`-x`, the same access(X_OK) test Git applies), and content hash (symlink target for links). mtimes, owners and
+  # tar headers are deliberately excluded, so a restore that only changes timestamps verifies clean.
+  # Uses only POSIX find/sort -z/readlink/shasum, which GNU and BSD userlands share.
   if [ -d "$GIT_COMMON/hooks" ]; then
-    (set -o pipefail; tar -cf - -C "$GIT_COMMON" hooks | shasum -a 256)
+    (set -o pipefail; cd "$GIT_COMMON" || exit 1
+     find hooks -print0 | LC_ALL=C sort -z |
+       while IFS= read -r -d '' p; do
+         if [ -L "$p" ]; then printf 'l\0%s\0%s\0' "$p" "$(readlink "$p")"
+         elif [ -d "$p" ]; then printf 'd\0%s\0' "$p"
+         elif [ -f "$p" ]; then
+           if [ -x "$p" ]; then x=x; else x=n; fi
+           h=$(shasum -a 256 < "$p") || exit 1
+           printf 'f\0%s\0%s\0%s\0' "$p" "$x" "$h"
+         else printf 'o\0%s\0' "$p"; fi
+       done | shasum -a 256)
   else
     echo "no-hooks-dir"
   fi

@@ -446,7 +446,8 @@ describe('review-loop parse contracts', () => {
     assert.match(snapshot, /tar -cf "\$GIT_META_BAK\/hooks\.tar" -C "\$GIT_COMMON" hooks/);
     assert.match(snapshot, /git_sec_hash\(\) \{/);
     assert.match(snapshot, /git_hooks_hash\(\) \{/);
-    assert.match(snapshot, /tar -cf - -C "\$GIT_COMMON" hooks \| shasum -a 256/);
+    assert.match(snapshot, /find hooks -print0 \| LC_ALL=C sort -z/);
+    assert.doesNotMatch(snapshot, /tar -cf - -C "\$GIT_COMMON" hooks/, 'hooks fingerprint must not hash tar metadata (#507)');
     assert.doesNotMatch(snapshot, /tar -cf - -C "\$GIT_COMMON" config/, 'the whole config file must not be fingerprinted (#447)');
     assert.match(snapshot, /git ls-files --others --exclude-standard -z \| tar --null -T - -cf - \| shasum -a 256/);
     assert.doesNotMatch(snapshot, /git ls-files --others --exclude-standard \| sort/);
@@ -1159,9 +1160,9 @@ describe('review-loop parse contracts', () => {
     assert.match(runner, /run the identical launch block in the foreground/, 'the no-background fallback must reuse the same stdin-aware block');
     assert.match(loop, /Set `PROMPT_ON_STDIN="\$LOCAL_PROMPT"` for `cmd`[^\n]*`PROMPT_ON_STDIN=""` for every other reviewer/);
 
-    // Tar includes symlink targets and hook modes; the untracked manifest keeps
+    // The hooks fingerprint lists type/exec-bit/content (symlink targets too); the untracked manifest keeps
     // newline-containing paths and their contents intact through NUL separators.
-    assert.match(runner, /tar -cf - -C "\$GIT_COMMON" hooks \| shasum -a 256/);
+    assert.match(runner, /find hooks -print0 \| LC_ALL=C sort -z/);
     assert.match(runner, /tar --null -T - -cf - \| shasum -a 256/);
 
     // The restore may run in another shell; missing saved paths fail closed, and
