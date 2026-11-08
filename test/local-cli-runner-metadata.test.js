@@ -118,8 +118,13 @@ describe('local-cli-runner git metadata verify/restore (#447)', () => {
     assert.match(r.stdout, /TARGET=pre-commit/);
   });
 
-  it('verifies clean when only mtimes change', () => {
-    const r = run('touch -t 200001010000 "$GIT_COMMON/hooks" "$GIT_COMMON/hooks/pre-commit" "$GIT_COMMON/hooks/sub"', seed);
+  it('verifies clean when only mtimes change (no restore is triggered)', () => {
+    // Poison the backup: if the fingerprint reacted to the timestamp change it would restore this
+    // tar over hooks/, so a surviving seeded hook and no "poison" file prove no restore ran.
+    const poison = 'echo poisoned > "$GIT_META_BAK/poison" && rm -f "$GIT_META_BAK/hooks.tar" && tar -cf "$GIT_META_BAK/hooks.tar" -C "$GIT_META_BAK" poison';
+    const r = run(poison + '; touch -t 200001010000 "$GIT_COMMON/hooks" "$GIT_COMMON/hooks/pre-commit" "$GIT_COMMON/hooks/sub"', seed);
     assert.match(r.stdout, /RESTORE_OK/, r.stderr);
+    assert.match(r.stdout, /pre-commit/);
+    assert.doesNotMatch(r.stdout, /poison/);
   });
 });
