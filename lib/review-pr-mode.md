@@ -47,7 +47,7 @@ If the PR has no changed files, inform the user and stop.
 
 Probe whether the PR's head branch accepts our push:
 
-!`cat ~/.claude/lib/pr-write-access.md`
+!`cat ~/.claude/lib/pr-write-access.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/review.md)")/../../lib/pr-write-access.md"`
 
 The disposition table in `review.md` resolves `PR_DISPOSITION` from `PR_APPLY` and this
 probe's `CAN_PUSH_HEAD`.
