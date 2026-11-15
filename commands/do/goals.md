@@ -16,10 +16,12 @@ Scan the codebase to infer the project's goals, purpose, and direction, then gen
 Parse `$ARGUMENTS` for:
 - **`--prd`**: generate `PRD.md` instead of `GOALS.md`
 - **`--interactive`**: pause after synthesis for user validation and refinement
-- **`--refresh`**: re-scan and update the existing target document (`GOALS.md`, or `PRD.md` with `--prd`) rather than creating from scratch
+- **`--refresh`**: re-scan and update the existing target document (`GOALS.md`, or `PRD.md` with `--prd`) in place — see [Refresh Mode](#refresh-mode---refresh)
 - **Focus hints**: e.g., "focus on API goals", "just the CLI"
 
-`--prd --refresh` re-scans and updates an existing `PRD.md`.
+**An existing document is never overwritten without `--refresh`.** Before Phase 1, check whether the target document exists at the repo root:
+- It exists and `--refresh` was not passed: do not regenerate it. Default mode stops here, before any scanning, and tells the user the file exists and that `--refresh` updates it in place. In `--interactive` mode, ask whether to continue as a refresh, and stop if the answer is no.
+- It does not exist and `--refresh` was passed: there is nothing to refresh, so create it from scratch and say so in the summary.
 
 ## Boundary Rule: GOALS.md vs PRD.md vs Issue Tracker
 
@@ -29,32 +31,31 @@ Parse `$ARGUMENTS` for:
 - PRD.md answers: *What exactly must the product do, and not do? Who is it for? What counts as "it works"?*
 - The issue tracker answers: *What are we building next? What's the backlog? What's done?*
 
-**GOALS.md must NEVER contain:**
-- Checkbox task lists (`- [ ] Add feature X`)
-- Implementation details or subtasks
-- Specific file paths, function names, or technical steps
-- "Current State" progress tables (that's the issue tracker's job)
-- Prioritized next-action lists
+Neither document holds tactical work. This is the one statement of that rule; the templates below are the spec for what each document does contain.
 
-The [GOALS.md Structure](#goalsmd-structure-default) template below is the full spec for what it should contain.
+**GOALS.md does not contain:**
+- Checkbox task lists (`- [ ] Add feature X`), subtasks, or prioritized next-action lists
+- Specific file paths, function names, or technical steps
+- "Current State" progress tables or "Direction" sections — if the user asks for one, add a one- or two-sentence summary that points to the tracker
 
 Milestones describe what "done" looks like in outcome-oriented prose:
-- GOOD: "v1.0 means daily entry takes under 30 seconds and APY calculations are auditable across all edge cases"
-- BAD: "- [ ] Add date range buttons above charts / - [ ] Filter chart data to selected range"
+- Good: "v1.0 means daily entry takes under 30 seconds and APY calculations are auditable across all edge cases"
+- Not this: "- [ ] Add date range buttons above charts / - [ ] Filter chart data to selected range"
 
-**PRD.md must NEVER contain:**
-- Checkbox task lists or sprint/iteration planning — that's the issue tracker's job
+**PRD.md does not contain:**
+- Checkbox task lists or sprint/iteration planning
 - Specific file paths, function names, or line-level implementation detail
 - Vague, untestable statements ("the system should be fast") without a concrete acceptance criterion
 - Fabricated numeric targets the codebase doesn't evidence — an unverifiable KPI belongs in Open Questions
-
-The [PRD.md Structure](#prdmd-structure---prd) template below is the full spec for what it should contain.
+- An unsupported inference presented as an observed requirement — give it an evidence note and confidence, or put it in Risks & Open Questions
 
 Requirement statements use RFC-2119-style keywords — **MUST/SHALL** (mandatory), **SHOULD** (recommended), **MAY** (optional) — e.g. "The system MUST reject uploads over 25MB" rather than "uploads should be limited."
 
+Tactical items never go to a `PLAN.md` either; this command does not create or write one.
+
 ## Phase 1: Discovery
 
-Gather signals about the project's purpose and intent. Launch these as parallel Explore agents:
+Gather signals about the project's purpose and intent. Run the scans below as parallel read-only sub-agents if your harness can spawn them; otherwise work through them yourself in order.
 
 ### Agent 1: Identity & Purpose
 Scan README, package manifest (`package.json`/`Cargo.toml`/`pyproject.toml`/`go.mod`), `CLAUDE.md`, `LICENSE`, and community files (`CONTRIBUTING.md`, `.github/FUNDING.yml`, `CODE_OF_CONDUCT.md`) for stated purpose, audience, and licensing/community intent.
@@ -78,7 +79,7 @@ Scan test suites, input validation/error handling/guard clauses, auth/authz and 
 
 Extract: candidate functional, non-functional, and negative requirements (with source evidence), and contradictions between documented intent and observed behavior. Maintain a private evidence ledger mapping each candidate to one or more concrete signals (documentation, a passing test, an observed interface contract, validation/error path, or merged change) and its confidence — every requirement must carry evidence or be flagged an inference before it reaches the document.
 
-Wait for all agents to complete (3 in default mode, 4 in `--prd` mode).
+Collect all results (3 scans in default mode, 4 in `--prd` mode) before synthesizing.
 
 ## Phase 2: Synthesis
 
@@ -99,7 +100,7 @@ Skip user clarification — every `3a`-`3j` subsection below is interactive-only
 
 ### Interactive Mode (`--interactive`)
 
-Present the draft to the user and ask targeted questions to resolve uncertainty. Use `AskUserQuestion` for each area that needs input.
+Present the draft to the user and ask targeted questions to resolve uncertainty, one area at a time.
 
 #### 3a: Purpose Validation
 Show the inferred one-paragraph purpose statement. Ask if it's accurate or needs refinement.
@@ -133,7 +134,7 @@ For every KPI Discovery could not evidence with a concrete number, ask the user 
 
 #### 3j (`--prd` mode): Risks & Open Questions
 Walk the user through every item in Risks & Open Questions and try to close it out:
-- **Judgment calls and missing information** (scope, risk tolerance, product direction — anything only the user can decide) — ask with `AskUserQuestion`. A resolving answer is folded into the relevant PRD section (a KPI target into Success Metrics, a scope call into Out of Scope or Assumptions & Constraints, etc.) and dropped from Risks & Open Questions; otherwise keep it there, refined with whatever context they gave.
+- **Judgment calls and missing information** (scope, risk tolerance, product direction — anything only the user can decide) — ask the user. A resolving answer is folded into the relevant PRD section (a KPI target into Success Metrics, a scope call into Out of Scope or Assumptions & Constraints, etc.) and dropped from Risks & Open Questions; otherwise keep it there, refined with whatever context they gave.
 - **Purely factual items** verifiable from `gh`/`glab`, git history, or the filesystem (e.g. "is issue #N still open?") — check directly; ask only if the check is inconclusive.
 
 #### 3k (`--prd` mode): Boundary Walkthrough
@@ -172,7 +173,7 @@ Generate the target document at the repo root.
 ### v1.0 - {Milestone Name}
 
 {Outcome-oriented prose describing what this milestone means. What does "done" look like?
-Write 3-5 bullet points as outcome descriptions, NOT checkbox task lists.
+Write 3-5 bullet points as outcome descriptions, not tasks.
 Example: "Engine correctness — every fund type produces accurate calculations across all edge cases."}
 
 - **{Outcome area}** - {What success looks like in this area}
@@ -201,8 +202,6 @@ Example: "Engine correctness — every fund type produces accurate calculations 
 
 For the tactical backlog and current work items, see the repository's open issues.
 ```
-
-The template intentionally omits "Current State" tables and "Direction" sections — those belong in the issue tracker. If the user asks for them, add a brief (1-2 sentence) summary that points to the tracker rather than duplicating the detail.
 
 ### PRD.md Structure (`--prd`)
 
@@ -301,7 +300,7 @@ The template intentionally omits "Current State" tables and "Direction" sections
 {Footer: link to [GOALS.md](./GOALS.md) if it exists, and the repository's open issues for the tactical backlog.}
 ```
 
-Requirement IDs (`FR-`, `NFR-`, `NR-`) are assigned sequentially at generation time and are **stable across `--refresh` runs** — an existing ID must never be reassigned to a different requirement. New requirements append the next unused number per prefix; a requirement that no longer holds retires its number rather than having it reused.
+Requirement IDs (`FR-`, `NFR-`, `NR-`) are assigned sequentially at generation time and are **stable across `--refresh` runs** — an existing ID is never reassigned to a different requirement. New requirements append the next unused number per prefix; a requirement that no longer holds retires its number rather than having it reused.
 
 ### Refresh Mode (`--refresh`)
 
@@ -311,15 +310,16 @@ If `--refresh` was passed and the target document already exists:
 3. Identify items whose status has changed (new progress, completed, abandoned — or, in `--prd` mode, requirements that no longer hold, or new behavior not yet captured)
 4. **Default mode**: update in-place, preserving user-written content and stable requirement IDs where possible; print a summary of what changed and which evidence caused each change.
    **Interactive mode (`--interactive`)**: present changes for confirmation before updating.
-5. **GOALS.md mode**: remove any checkbox task lists found in the existing GOALS.md and file each item as a tracker issue automatically (default) or after confirmation (interactive): detect the host from the `origin` remote per [lib/vcs-host.md](../../lib/vcs-host.md) (an empty `TRACKER_CLI` from its tracker gate means no tracker), skip items that duplicate an open issue title, and label each with the saved `issues-label` default (or `plan`) — `gh issue create --title "<item>" --body "<context>" --label <label>` (glab: `glab issue create --title "<item>" --description "<context>" --label <label>`). **On a Jira tracker** (`TRACKER=jira`), read [lib/tracker-jira.md](../../lib/tracker-jira.md) and run its Pre-flight (`{COMMAND}` = `/do:goals`) in place of the tracker gate, then dedup each item with `issue_search` and file it into `JIRA_PROJECT` with its "File one issue" block (label: the same one, which must be a single word), reporting keys (`PROJ-123`); a failed Pre-flight means no tracker. If no authenticated `gh`/`glab` (or passing Jira Pre-flight) can reach the repo's tracker, list the items in the Phase 5 summary under "Tactical items (not filed — no issue tracker available)" instead. Never write them to PLAN.md.
+5. **GOALS.md mode**: an existing GOALS.md may still carry checkbox task lists. Remove them from the document and list every removed item verbatim in the Phase 5 summary under "Tactical items removed from GOALS.md", so nothing is lost. Filing them as tracker issues writes to a shared system, so it happens only when the user agrees:
+   - **Default mode**: do not file anything. End the summary by offering to file the listed items as tracker issues.
+   - **Interactive mode, or the user accepts that offer**: confirm the list, then file each item. Detect the host from the `origin` remote per [lib/vcs-host.md](../../lib/vcs-host.md) (an empty `TRACKER_CLI` from its tracker gate means no tracker), skip items that duplicate an open issue title, and label each with the saved `issues-label` default (or `plan`) — `gh issue create --title "<item>" --body "<context>" --label <label>` (glab: `glab issue create --title "<item>" --description "<context>" --label <label>`). **On a Jira tracker** (`TRACKER=jira`), read [lib/tracker-jira.md](../../lib/tracker-jira.md) and run its Pre-flight (`{COMMAND}` = `/do:goals`) in place of the tracker gate, then dedup each item with `issue_search` and file it into `JIRA_PROJECT` with its "File one issue" block (label: the same one, which must be a single word), reporting keys (`PROJ-123`); a failed Pre-flight means no tracker. If no authenticated `gh`/`glab` (or passing Jira Pre-flight) can reach the repo's tracker, say so and leave the items listed in the summary.
 6. **PRD.md mode**: preserve existing `FR-`/`NFR-`/`NR-` IDs for requirements that still hold; assign the next unused ID (per prefix) to new ones. If a requirement no longer appears to hold, mark it `(status: removed — verify)` in place rather than deleting it, and call it out in the change summary.
 7. **PRD.md mode**: do not replace a user-authored requirement with a semantically different inference merely because current code is incomplete. Mark the conflict in the evidence notes and Risks & Open Questions, retaining the baseline wording until resolved.
 
 ## Phase 5: Finalize
 
 1. Write the target document (`GOALS.md`, or `PRD.md` in `--prd` mode) to the repo root
-2. **GOALS.md mode**: if checkbox task lists were moved out of GOALS.md during `--refresh`, list the issues filed for them (or the unfiled items) in the summary
-3. Print a summary — checkbox migration under `--refresh` already happened per Refresh Mode step 5, so this just reports the result:
+2. Print a summary. In GOALS.md mode after a `--refresh` that removed checkbox items, add the list from Refresh Mode step 5 (and the issues filed for them, if any):
 
    GOALS.md mode:
    ```
@@ -337,14 +337,10 @@ If `--refresh` was passed and the target document already exists:
    - {K} negative requirements
    - {J} open questions
    ```
-4. Do NOT commit — let the user review and commit when ready (suggest `/do:push`)
+3. Do not commit — let the user review and commit when ready (suggest `/do:push`)
 
 ## Notes
 
-- Project-agnostic — reads whatever project signals exist
-- `/do:prd` is shorthand for `/do:goals --prd`
 - Preserve the user's voice — if they provide rephrased goals or requirements, use their wording verbatim
 - If the project is brand new with minimal code, lean more heavily on user input and less on codebase inference
-- If `gh`/`glab` is not authenticated, skip issue/PR scanning gracefully — don't halt
-- **Never put checkbox task lists in GOALS.md or PRD.md** — tactical items belong in the issue tracker; never create or write PLAN.md
-- **In `--prd` mode, never present an unsupported inference as an observed requirement** — include the evidence note and confidence, or place it in Risks & Open Questions
+- If `gh`/`glab` is not authenticated, skip issue/PR scanning and carry on with the remaining signals
