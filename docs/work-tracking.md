@@ -4,7 +4,7 @@ This expands on the [Work tracking](../README.md#work-tracking) section of the R
 
 ## Dispatch hints (`model:` + `effort:`)
 
-Issues filed by slashdo can carry a recommendation for *how to run the work*, on two independent axes: `model:light|medium|heavy` (how much capability the task needs) and `effort:low|medium|high|xhigh|max` (how much reasoning budget per step). They're deliberately not a size estimate — the off-diagonal combinations are the useful ones. `model:light` + `effort:max` is a mechanical change across forty call sites, where no insight is needed but a silent miss is easy.
+Issues filed by slashdo can carry a recommendation for *how to run the work*, on two independent axes: `model:light|medium|heavy` (how much capability the task needs) and `effort:low|medium|high|xhigh|max` (how hard each step is to reason through). They're deliberately not a size estimate. A mechanical change across forty call sites is `model:light` + `effort:low` with the sites enumerated in the body: thoroughness comes from the checklist, not from more thinking per step. `model:heavy` + `effort:high` is a small change that hinges on a subtle argument.
 
 `/do:plan-task` infers both from what it found in the code and shows them at the approval gate (override with `--model`/`--effort`, or suppress an axis with `none`). The other commands that file issues — `/do:better`, `/do:next`, `/do:replan` — may add a hint when the work they just did justifies one, but never stamp one on speculatively: `/do:replan` in particular is barred from labelling migrated backlog items in bulk, since a hint guessed from a one-line entry is noise that makes the deliberate ones unreadable.
 

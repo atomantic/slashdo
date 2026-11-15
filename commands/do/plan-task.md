@@ -234,18 +234,17 @@ Recommend **how to run the work** on the two axes defined in
 [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) ("The dispatch hint"),
 judged from what Phase 1 actually found, not the request's wording — an approach
 you could write out line-by-line is `model:light` however long it is; genuine
-uncertainty between two designs is `model:heavy`; `effort` tracks surface area and
-blast radius (call-site count, how easy a silent miss is, whether a wrong move
-corrupts data or breaks a public contract), independent of `model`. Set the axes
-independently — landing both on the middle value every time is a size estimate, not
-a dispatch recommendation. A typed `--model`/`--effort` wins outright for that axis
+uncertainty between two designs is `model:heavy`; `effort` is how hard each step is
+to reason through, independent of `model` and of how much work there is. Breadth and
+blast radius call for an enumerated checklist and verification in the body, not a
+higher `effort`. A typed `--model`/`--effort` wins outright for that axis
 (don't re-raise it at the gate); `--model none`/`--effort none` suppress it; leave an
 axis off rather than guess when you can't justify a value. If the repo already uses
 its **own** sizing/dispatch taxonomy (`size/M`, story points, `complexity:*` —
 visible in `EXISTING_LABELS`), prefer it and skip these — say which you used.
 
 State the hint with a one-line justification in the Phase 5 gate (e.g. `model:light +
-effort:max — mechanical, but it touches 40 call sites and a miss is silent`).
+effort:low — mechanical; the 40 call sites are listed in the body`).
 
 ## Phase 5 — Confirm, then create
 

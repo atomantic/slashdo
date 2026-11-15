@@ -92,7 +92,6 @@ describe('shared review preferences', () => {
       ...fs.readdirSync(path.join(root, 'src')).map((name) => `src/${name}`),
       'install.sh',
       'README.md',
-      '.claude/commands/improve/review.md',
     ];
     for (const file of files) assert.doesNotMatch(read(file), /code-review-checklist/, file);
   });

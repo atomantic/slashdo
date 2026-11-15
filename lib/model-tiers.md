@@ -24,10 +24,13 @@ tier → model mapping**. A command that hardcodes a slug is a bug; fix it here.
 ## Reasoning effort
 
 Five advisory levels: `low`, `medium`, `high`, `xhigh`, `max`. The level mainly
-*describes the work*, so it works on every host as metadata. Setting it on a dispatch
-is optional, only where the dispatch API has an effort control, **clamped to the nearest level the host
-has** (a three-level host runs `xhigh`/`max` at its highest). Never report its absence
+*describes the work*, so it works on every host as metadata. Set it on a dispatch
+only where the API has an effort control, **clamped to the host's nearest level**
+(a three-level host runs `xhigh`/`max` at its highest). Never report its absence
 as a degraded run, and never trade one axis for the other.
+
+Effort is thinking per step: match how hard a step is, not how many there are.
+`medium` is normal; keep `xhigh`/`max` for reasoning that is the whole difficulty.
 
 ## Degrade, never abort
 
