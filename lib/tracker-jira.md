@@ -19,7 +19,7 @@ config, and one page of the project.
 
 ```bash
 JIRA_PROJECT="$(for _f in ~/.claude/.slashdo-config.json "$(git rev-parse --show-toplevel 2>/dev/null)/.slashdo.json"; do [ -f "$_f" ] && { tr -d '\n' < "$_f"; echo; } | sed -n 's/.*"jira-project"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'; done | tail -1 | tr a-z A-Z)"
-JIRA_ISSUE_TYPE="Task"; JIRA_START_STATUS="In Progress"; JIRA_DONE_STATUS="Done"
+JIRA_ISSUE_TYPE="${JIRA_ISSUE_TYPE:-Task}"; JIRA_START_STATUS="${JIRA_START_STATUS:-In Progress}"; JIRA_DONE_STATUS="${JIRA_DONE_STATUS:-Done}"
 [ -n "$JIRA_PROJECT" ] || {
   echo "{COMMAND}: the tracker is jira but no Jira project is set. Run: /do:config --project --jira-project <KEY>"; exit 1; }
 printf '%s\n' "$JIRA_PROJECT" | grep -Eq '^[A-Z][A-Z0-9_]+$' || {
@@ -34,18 +34,32 @@ JIRA_ERR="$(jira issue list -p "$JIRA_PROJECT" --paginate 0:1 --plain --no-heade
   || case "$JIRA_ERR" in *"No result found"*) ;; *)
   echo "{COMMAND}: jira cannot read project $JIRA_PROJECT (not authenticated, or no such project): $(printf '%s' "$JIRA_ERR" | head -1)"; exit 1 ;; esac
 TRACKER_CLI=jira; LABEL_SEP=":"
+jira_list_all() {   # JIRA_JQL = the query; JIRA_CAP = stop at this many rows (empty: no cap). Prints one JSON array, oldest first.
+  _all="[]"; _from=0; _err="$(mktemp)"
+  while [ -z "$JIRA_CAP" ] || [ "$_from" -lt "$JIRA_CAP" ]; do
+    if _page="$(jira issue list -p "$JIRA_PROJECT" -q "$JIRA_JQL" --order-by created --reverse --paginate "$_from:100" --raw 2>"$_err")"; then :
+    elif grep -q 'No result found' "$_err"; then _page="[]"
+    else cat "$_err" >&2; rm -f "$_err"; return 1; fi
+    _all="$(printf '%s\n%s\n' "$_all" "$_page" | jq -cs 'if all(.[]; type == "array") then add else error("expected an array") end')" || { rm -f "$_err"; return 1; }
+    [ "$(printf '%s' "$_page" | jq length)" -eq 100 ] || break
+    _from=$((_from + 100))
+  done
+  rm -f "$_err"; printf '%s\n' "$_all"
+}
 ```
 
 `jira me` only proves `jira init` ran (it prints the configured login without an API
 call); the one-page project read proves the token works and the project exists. Print
-`Tracker: jira (project {JIRA_PROJECT}, as {JIRA_ME})`, and carry `TRACKER_CLI`,
-`LABEL_SEP`, `JIRA_PROJECT`, `JIRA_ME`, and the three workflow names through later
-phases — shell variables do not survive between tool calls, so re-run this block (it
-only reads) wherever a later step needs them.
+`Tracker: jira (project {JIRA_PROJECT}, as {JIRA_ME})`. Later steps need `TRACKER_CLI`,
+`LABEL_SEP`, `JIRA_PROJECT`, `JIRA_ME`, the three workflow names and `jira_list_all`
+(the one paging loop every list below uses), and shell state does not survive between
+tool calls, so re-run this block (it only reads) wherever a later step needs them.
 
-The workflow names above are the jira-cli defaults. A project whose workflow names
-them differently fails the transition verb loudly; never skip or substitute a
-transition.
+The workflow names default to jira-cli's (`Task`, `In Progress`, `Done`). A project
+whose workflow names them differently sets `JIRA_ISSUE_TYPE`, `JIRA_START_STATUS` or
+`JIRA_DONE_STATUS` in the environment the harness runs in (a shell profile, for
+example); the block keeps a value that is already set. A name the workflow does not
+have fails the transition verb loudly; never skip a transition or guess another status.
 
 ## Keys, fields, and labels
 
@@ -99,11 +113,11 @@ behavior; a failed verb is a failure, never a no-op. Every call carries
 `-p "$JIRA_PROJECT"` where the subcommand takes it, and `--no-input` on writes that
 would otherwise prompt.
 
-- `issue_list <JQL>` — `jira issue list -p "$JIRA_PROJECT" -q "<JQL>" --order-by created --reverse --paginate <from>:100 --raw`
-  (oldest first; 100 per page, page with `<from>` = 0, 100, …). Open issues are
-  `statusCategory != Done`; narrow with `AND labels = "<label>"`,
-  `AND reporter = currentUser()`, `AND parent = <KEY>`. GitHub/GitLab: the
-  `gh issue list` / `glab issue list` calls each command already inlines.
+- `issue_list <JQL>` — `JIRA_JQL="<JQL>" JIRA_CAP=<max rows> jira_list_all` (the Pre-flight's
+  paging helper: oldest first, 100 per page, `No result found` as an empty page, any
+  other error a failure). Open issues are `statusCategory != Done`; narrow with
+  `AND labels = "<label>"`, `AND reporter = currentUser()`, `AND parent = <KEY>`.
+  GitHub/GitLab: the `gh issue list` / `glab issue list` calls each command already inlines.
 - `issue_search <keywords>` — dedup before filing; use the "Search Jira issues safely" block below.
   GitHub/GitLab: `gh issue list --search` / `glab issue list --search`.
 - `issue_children <KEY>` — `CHILD_KEY="<KEY>" issue_children` (the paginating helper below). It
@@ -117,8 +131,8 @@ would otherwise prompt.
 - `issue_author <KEY>` — `J="$(jira issue view <KEY> --raw)" && printf '%s' "$J" | jq -er '.fields.reporter.displayName'`
 - `issue_assignees <KEY>` — `J="$(jira issue view <KEY> --raw)" && printf '%s' "$J" | jq -r '.fields.assignee.displayName // ""'`
 - `issue_labels <KEY>` — `J="$(jira issue view <KEY> --raw)" && printf '%s' "$J" | jq -c '.fields.labels'`
-- `issue_is_mine <KEY>` — `jira issue list -p "$JIRA_PROJECT" -q "key = <KEY> AND assignee = currentUser()" --plain --no-headers --columns key`
-  under the empty-result rule: a line = `yes`, empty = `no`. The lease read-back.
+- `issue_is_mine <KEY>` — `ISSUE_NUM=<KEY> jira_lease` ("Lease helper" below): prints
+  `yes`, `no`, or `error`. The lease read-back.
 - `issue_comment <KEY> <text>` — `jira issue comment add <KEY> <text> --no-input`
   (a multi-line body: `--template <body-file>` in place of `<text>`)
 - `issue_start <KEY>` — `jira issue move <KEY> "$JIRA_START_STATUS"` (the claim's
@@ -171,7 +185,7 @@ not register as a claim.
 | `next.md` says | On Jira |
 |---|---|
 | target `#123` | a key: `PROJ-123`, `#PROJ-123`, or `proj-123`; a bare number is rejected |
-| prefix `[issue-<num>]` (commits, PR title, changelog) | `[PROJ-123]` — Jira links development work by key |
+| fallback prefix `[issue-<num>]` (commits, PR title, changelog) | `[PROJ-123]`, under the same rule: the project's own convention wins. The branch name already carries the key Jira links development work by |
 | PR body `Closes #<num>` | `Jira: PROJ-123` and **no** `Closes #…` line (on the code host it would close an unrelated `#123`) |
 | `in-progress` label | the `issue_start` transition (claim below); nothing to remove at close |
 | auto-close on merge | the close step below, only after the merge gate reads back **merged** |
@@ -193,28 +207,13 @@ echo "TARGET=$KEY"
 
 ### Child listing helper
 
-Define this helper before checking Jira epics. It fetches every page, treats the
-CLI's documented empty-result response as an empty page, and fails closed on any
-other API or JSON error:
+Define this helper before checking Jira epics. It lists every page through the
+Pre-flight's `jira_list_all` and fails closed on any API or JSON error:
 
 ```bash
 issue_children() {   # CHILD_KEY = the parent issue key
-  _key="$CHILD_KEY"; _offset=0
-  while :; do
-    _err="$(mktemp)"
-    if _page="$(jira issue list -p "$JIRA_PROJECT" -q "parent = $_key" --paginate "$_offset:100" --raw 2>"$_err")"; then
-      :
-    elif grep -q 'No result found' "$_err"; then
-      _page='[]'
-    else
-      cat "$_err" >&2; rm -f "$_err"; return 1
-    fi
-    rm -f "$_err"
-    _count="$(printf '%s' "$_page" | jq -er 'if type == "array" then length else error("expected array") end')" || return 1
-    printf '%s' "$_page" | jq -r '.[] | "\(.key)\t\(if .fields.status.statusCategory.key == "done" then "CLOSED" else "OPEN" end)"' || return 1
-    [ "$_count" -lt 100 ] && return 0
-    _offset=$((_offset + 100))
-  done
+  _rows="$(JIRA_JQL="parent = $CHILD_KEY" JIRA_CAP="" jira_list_all)" || return 1
+  printf '%s' "$_rows" | jq -r '.[] | "\(.key)\t\(if .fields.status.statusCategory.key == "done" then "CLOSED" else "OPEN" end)"'
 }
 ```
 
@@ -240,15 +239,7 @@ case "$LABEL_FILTER" in *[[:space:]\"\\]*) echo "Jira labels cannot contain spac
 JQL="statusCategory != Done"
 [ -n "$LABEL_FILTER" ] && JQL="$JQL AND labels = \"$LABEL_FILTER\""
 [ "$SELF_MODE" = "true" ] && JQL="$JQL AND reporter = currentUser()"
-ALL="[]"; FROM=0; JIRA_ERR_FILE="$(mktemp)"
-while [ "$FROM" -lt 500 ]; do
-  if PAGE="$(jira issue list -p "$JIRA_PROJECT" -q "$JQL" --order-by created --reverse --paginate "$FROM:100" --raw 2>"$JIRA_ERR_FILE")"; then :
-  elif grep -q 'No result found' "$JIRA_ERR_FILE"; then PAGE="[]"
-  else cat "$JIRA_ERR_FILE"; echo "Could not list $JIRA_PROJECT issues — aborting."; exit 1; fi
-  ALL="$(printf '%s\n%s\n' "$ALL" "$PAGE" | jq -cs 'add')" || { echo "Could not parse jira --raw output — aborting."; exit 1; }
-  [ "$(printf '%s' "$PAGE" | jq length)" -eq 100 ] || break
-  FROM=$((FROM + 100))
-done
+ALL="$(JIRA_JQL="$JQL" JIRA_CAP=500 jira_list_all)" || { echo "Could not list $JIRA_PROJECT issues — aborting."; exit 1; }
 printf '%s' "$ALL" | jq -c "PRIORITY_SORT | .[] | {key, summary: .fields.summary, type: .fields.issuetype.name, subtasks: (.fields.subtasks | length), labels: .fields.labels, assignee: .fields.assignee.displayName, reporter: .fields.reporter.displayName, created: .fields.created}"
 ```
 
@@ -322,9 +313,9 @@ fi
 echo "PRE_CLAIM_STATUS=$PRE_CLAIM_STATUS"
 ```
 
-A failed transition fails the claim rather than leaving a lease with no status: the
-workflow names are fixed (Pre-flight), so fix the project's workflow, never substitute
-a transition.
+A failed transition fails the claim rather than leaving a lease with no status. If the
+project's workflow uses another name for that status, set `JIRA_START_STATUS`
+(Pre-flight); do not try other transitions.
 
 ### `release_marker`
 
@@ -405,15 +396,7 @@ for L in "$@"; do
   case "$L" in ''|*[[:space:]\"\\]*) echo "Jira labels cannot contain spaces or quotes (got: $L)"; exit 1 ;; esac
   JQL="$JQL AND labels = \"$L\""
 done
-ALL="[]"; FROM=0; JIRA_ERR_FILE="$(mktemp)"
-while [ "$FROM" -lt 1000 ]; do
-  if PAGE="$(jira issue list -p "$JIRA_PROJECT" -q "$JQL" --order-by created --reverse --paginate "$FROM:100" --raw 2>"$JIRA_ERR_FILE")"; then :
-  elif grep -q 'No result found' "$JIRA_ERR_FILE"; then PAGE="[]"
-  else cat "$JIRA_ERR_FILE"; echo "Could not list $JIRA_PROJECT issues — aborting."; exit 1; fi
-  ALL="$(printf '%s\n%s\n' "$ALL" "$PAGE" | jq -cs 'add')" || { echo "Could not parse jira --raw output — aborting."; exit 1; }
-  [ "$(printf '%s' "$PAGE" | jq length)" -eq 100 ] || break
-  FROM=$((FROM + 100))
-done
+ALL="$(JIRA_JQL="$JQL" JIRA_CAP=1000 jira_list_all)" || { echo "Could not list $JIRA_PROJECT issues — aborting."; exit 1; }
 printf '%s' "$ALL" | jq -c '.[] | {key, summary: .fields.summary, labels: .fields.labels, type: .fields.issuetype.name, status: .fields.status.name, created: .fields.created, updated: .fields.updated}'
 ```
 
@@ -427,27 +410,21 @@ title as a POSIX single-quoted shell literal, replacing each internal apostrophe
 lines then remain title data.
 Labels are the filing partial's set — `PLAN_LABEL`, the category, `severity:<level>`,
 and any dispatch hint, built with `LABEL_SEP` (`:`) — one argument each; a label with
-whitespace aborts the filing rather than being rewritten. The label words arrive on
-the positional list and are copied to a file before argv is rebuilt as `-l` flags;
-a label that passed the whitespace check is one line. `PARENT` files an epic child
-or sub-task:
+whitespace aborts the filing rather than being rewritten. The loop appends a `-l` flag
+per label to the argument list and then drops the original words. `PARENT` files an
+epic child or sub-task:
 
 ```bash
 TITLE=<title>; BODY_FILE=<body-file>; PARENT="<parent-KEY, or empty>"
 set -- <label>...
 case "$PARENT" in ''|"<"*) PARENT="" ;; *)
   printf '%s\n' "$PARENT" | grep -Eq '^[A-Z][A-Z0-9_]+-[1-9][0-9]*$' || { echo "\"$PARENT\" is not a Jira issue key."; exit 1; } ;; esac
-LABEL_FILE="$(mktemp)" || exit 1
-: > "$LABEL_FILE"
+LABEL_COUNT=$#
 for L in "$@"; do
-  case "$L" in ''|*[[:space:]]*) echo "Jira labels cannot contain spaces (got: $L)"; rm -f "$LABEL_FILE"; exit 1 ;; esac
-  printf '%s\n' "$L" >> "$LABEL_FILE"
-done
-set --
-while IFS= read -r L; do
+  case "$L" in ''|*[[:space:]]*) echo "Jira labels cannot contain spaces (got: $L)"; exit 1 ;; esac
   set -- "$@" -l "$L"
-done < "$LABEL_FILE"
-rm -f "$LABEL_FILE"
+done
+shift "$LABEL_COUNT"
 [ -z "$PARENT" ] || set -- "$@" -P "$PARENT"
 J="$(jira issue create -p "$JIRA_PROJECT" -t "$JIRA_ISSUE_TYPE" -s "$TITLE" --template "$BODY_FILE" "$@" --no-input --raw)" \
   && KEY="$(printf '%s' "$J" | jq -er .key)" && [ -n "$KEY" ] \
