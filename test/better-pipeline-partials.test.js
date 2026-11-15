@@ -63,6 +63,9 @@ describe('shared better-* pipeline partials', () => {
     // the partial reads it, and one of the two pipelines runs with a hole in it.
     const [a, b] = AUDIT_COMMANDS.map((name) => inputTokens(readCommand(name)));
     assert.deepEqual([...a].sort(), [...b].sort());
+    // An empty set on both sides would pass every check here vacuously (a renamed
+    // heading, say), so the comparison has to be over real tokens.
+    assert.ok(a.has('BRANCH_PREFIX'), 'no caller inputs were parsed from better.md');
   });
 
   it('has every token its partials substitute defined by both commands', () => {

@@ -5,18 +5,18 @@ Only CRITICAL, HIGH, and MEDIUM findings are remediated. LOW findings are filed 
 ### 3a: Setup
 
 - If `IS_DIRTY` is true, stash first: `git stash --include-untracked -m "{BRANCH_PREFIX}: pre-scan stash"`.
-- Reuse the `DATE` recorded in [0d](./better-discovery.md), suffix included — never recompute it here. The staging worktree is `WORKTREE_DIR=../{BRANCH_PREFIX}-{DATE}` on a new branch `{BRANCH_PREFIX}/{DATE}`.
+- Reuse the `DATE` recorded in [0d](./better-discovery.md), suffix included — never recompute it here. The staging worktree is the directory `{BRANCH_PREFIX}-{DATE}` beside `{REPO_DIR}`, on a new branch `{BRANCH_PREFIX}/{DATE}`. Record `WORKTREE_DIR` as its absolute path, because sub-agents do not share your working directory and a relative path would resolve somewhere else for them.
 
 ### 3b: Foundation Utilities
 
 Skip when Phase 2 identified no Foundation work. Otherwise you (the orchestrator), not an agent, create every Foundation utility before any worker spawns. On exit:
-- Code extracted from an existing module leaves a backward-compatible re-export at its original location.
+- Code extracted from an existing module has its importers updated in the same commit. Keep a re-export at the old location only where it is public API that code outside the repository may import.
 - `{BUILD_CMD}` passes in `{WORKTREE_DIR}`.
-- The utilities are committed with only their specific files staged: `refactor: add shared utilities for {purpose}`.
+- The utilities are committed with only their specific files staged (fallback subject `refactor: add shared utilities for {purpose}`).
 
 ### 3c: Parallel Remediation
 
-One worker per actionable category in the caller's Phase 2 map, batched to the host's available slots (cap concurrency, not coverage). Resolve `REMEDIATION_MODEL_TIER` per the model-tier guidance and pass it as each agent's `model`. <!-- if:teams -->Use `TeamCreate` named `{BRANCH_PREFIX}-{DATE}` with one `TaskCreate` per category; each teammate marks its task complete via `TaskUpdate`.<!-- else -->Spawn them as parallel general-purpose `Agent` calls and wait for all to return.<!-- /if:teams -->
+One worker per actionable category in the caller's Phase 2 map, batched to the host's available slots (cap concurrency, not coverage). Resolve `REMEDIATION_MODEL_TIER` per the model-tier guidance for each worker. <!-- if:teams -->Use `TeamCreate` named `{BRANCH_PREFIX}-{DATE}` with one `TaskCreate` per category; each teammate marks its task complete via `TaskUpdate`.<!-- else -->Spawn them as parallel sub-agents and wait for all to return.<!-- /if:teams -->
 
 Category rules (a caller with a narrower roster supplies its own):
 - Dependency Freedom — write the replacement, update every import, remove the package from the manifest, and regenerate the lock file; no source file may still reference it.
