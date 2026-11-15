@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
+const { parseFrontmatter } = require('../src/transformer');
+
 const dir = path.join(__dirname, '..', 'commands', 'do');
 
 // A command file is front matter (--- … ---) followed by the body. A spliced-in copy of
@@ -24,6 +26,13 @@ describe('command file structure', () => {
   it('finds the command files', () => {
     assert.ok(files.length > 10, `expected the do/ command set, got ${files.length}`);
   });
+
+  for (const name of files) {
+    it(`${name} parses a non-empty description from its front matter`, () => {
+      const { frontmatter } = parseFrontmatter(fs.readFileSync(path.join(dir, name), 'utf8'));
+      assert.ok(frontmatter.description, `missing description in ${name}`);
+    });
+  }
 
   for (const name of files) {
     it(`${name} carries exactly one front-matter block`, () => {

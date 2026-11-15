@@ -50,12 +50,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Validate package
+      - name: Run test suite
         if: steps.release-check.outputs.exists == 'false'
-        run: |
-          node bin/cli.js --help
-          node -e "require('./src/environments'); require('./src/transformer'); require('./src/installer'); console.log('All modules load successfully')"
-          node bin/cli.js --list --env claude
+        run: npm test
 
       - name: Check if version exists on npm
         id: npm-check
