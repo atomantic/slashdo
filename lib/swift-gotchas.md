@@ -17,7 +17,7 @@
 | # | Failure mode | In scope when | Typical severity |
 |---|---|---|---|
 | 1 | `CKContainer` eager-init crash in unsigned test builds | CloudKit, and CI or tests build with `CODE_SIGNING_ALLOWED=NO` | CRITICAL |
-| 2 | SwiftData `loadIssueModelContainer` from a relationship with no inverse | `@Model` classes with relationships | CRITICAL |
+| 2 | SwiftData `loadIssueModelContainer` from a relationship with no inverse | `@Model` classes with relationships, synced through CloudKit | CRITICAL |
 | 3 | SwiftData cannot sync across Apple IDs | `cloudKitDatabase: .automatic` plus household/team/family/share features | Surface to the user |
 | 4 | iCloud ubiquity container URL is non-nil but unusable | `url(forUbiquityContainerIdentifier:)` | HIGH |
 | 5 | Dehydrated iCloud placeholder files read as empty | Code mirrors content into `~/Library/Mobile Documents/` | CRITICAL (data loss) |
@@ -57,19 +57,20 @@ final class CloudKitSync {
 
 ## 2. SwiftData `loadIssueModelContainer` from a relationship with no inverse
 
-**Detect.** `ModelContainer(for:configurations:)` throws `SwiftDataError._Error.loadIssueModelContainer`, usually just after a new `@Model` gained a relationship to an existing one. The error does not name the model or relationship.
+**Detect.** In an app that syncs through CloudKit, `ModelContainer(for:configurations:)` throws `SwiftDataError._Error.loadIssueModelContainer`, usually just after a new `@Model` gained a relationship to an existing one. `localizedDescription` is generic, but `print(error)` shows the underlying `NSCocoaErrorDomain Code=134060` with `CloudKit integration requires that all relationships have an inverse, the following do not: <Model>: <property>`.
 
-**Diagnostic flow.** Reproduce with `ModelConfiguration(isStoredInMemoryOnly: true)`. If the in-memory container also fails, it is not a migration problem (nothing to migrate) and not a CloudKit problem (in-memory stores do not sync): it is a schema definition problem. Check every relationship on both sides, and use `git log` to find the commit that added the model.
+**Diagnostic flow.** Reproduce in memory with `cloudKitDatabase: .private("<container id>")` and again with `.none`. The CloudKit schema check runs even for an in-memory store and (at least on macOS) without the iCloud entitlement; the default `.automatic` skips it when the process has no entitlement, so an unsigned test with the default configuration passes. Failing only with CloudKit means a CloudKit schema rule; failing with `.none` too means a different schema or migration problem. Without CloudKit, a one-sided relationship loads and saves normally, so it is not the cause there.
 
-**Cause and fix.** The usual cause is a relationship declared on one model with no matching property on the target. Add the missing side (for example `@Relationship(deleteRule: .cascade) var barnNotes: [BarnNote]? = nil` on the target). With `cloudKitDatabase: .automatic` every relationship must have an inverse and be optional. A store created under the broken schema may need the app deleted from the simulator before the fix shows.
+**Cause and fix.** CloudKit requires every relationship to have an inverse and be optional. Add the missing side on the target (for example `var barn: Barn?`) and name it with `@Relationship(inverse:)` on the other side. A store created under the broken schema may need the app deleted from the simulator before the fix shows.
 
-**Guard.** Add a test that builds the container in memory with every `@Model` type, so a schema error fails in CI rather than at launch:
+**Guard.** Add a test that builds the container in memory with every `@Model` type and the app's CloudKit setting, so a schema error fails in CI rather than at launch:
 
 ```swift
 func testModelContainerSchemaIsValid() throws {
     _ = try ModelContainer(
         for: ModelA.self, ModelB.self, // every @Model type
-        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true,
+                                           cloudKitDatabase: .private("iCloud.foo.bar"))
     )
 }
 ```
@@ -213,7 +214,7 @@ These validations run at Apple after the upload, so the local build and archive 
 
 **Detect.** `Invalid bundle. The "UIInterfaceOrientationPortrait" orientations were provided ... you need to include all of the ... orientations to support iPad multitasking.` In code: `UISupportedInterfaceOrientations` (or its `~ipad` variant) lists fewer than four orientations for an app that can run on iPad.
 
-**Fix.** Declare all four orientations for iPad (`INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad` in build settings). Older projects opt out with `UIRequiresFullScreen`; Apple has deprecated that key, so prefer declaring the orientations.
+**Fix.** Declare all four orientations for iPad (`INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad` in build settings). Do not opt out with `UIRequiresFullScreen`: it is deprecated since iOS/iPadOS 26, and apps built with the iOS 27 SDK are resized regardless of it (Apple TN3192).
 
 ### 8.2 Missing document configuration (warning 90737)
 
@@ -250,7 +251,7 @@ gh run view --job=<JOB_ID> --log 2>&1 | grep -i -E '(UPLOAD FAILED|product-error
 - A screen that offers purchases has no visible Restore Purchases control. App Review rejects this under guideline 3.1.1; the control calls `AppStore.sync()` and then refreshes entitlements.
 - A purchase button shows a hardcoded fallback price (`Text(price ?? "$0.99")`) before products load. A reviewer can tap it and get a failed purchase. Show progress until the product resolves, and enable the button only then.
 
-**Not a code bug.** Products that have never been approved can load and display prices in TestFlight's sandbox and still fail at `product.purchase()` with "Unable to Complete Request". Do not chase this in code. A `.storekit` configuration file referenced from the scheme exercises the purchase flow locally in debug runs; archived and TestFlight builds use the real sandbox.
+**Probably not a code bug.** Products that have never been approved have been reported to load and display prices in TestFlight's sandbox and still fail at `product.purchase()` with "Unable to Complete Request". This is field experience, not documented: Apple's sandbox guide asks only for product metadata (reference name, product ID, localized name, price). Check that metadata in App Store Connect before chasing it in code. A `.storekit` configuration file referenced from the scheme exercises the purchase flow locally in debug runs; archived and TestFlight builds use the real sandbox.
 
 **Surface to the user.** First-time products must be submitted together with the app version in App Store Connect, and a rejected product's metadata has to be edited there before it can be resubmitted. Tell the user this is required; an agent cannot do it.
 
