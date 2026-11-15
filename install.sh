@@ -309,10 +309,14 @@ install_claude() {
     fi
   done
 
+  local writer
   for file in "${LIBS[@]}"; do
     printf "    lib/%-20s" "$file"
+    # Markdown gets the path rewrite. Anything else (the local CLI runner script)
+    # is an executable asset, copied verbatim so no sed pass alters its code.
+    case "$file" in *.md) writer=rewrite_for_claude ;; *) writer="cp" ;; esac
     if fetch_file "lib/$file" "$CLAUDE_STAGE_DIR/lib-$file" &&
-        atomic_write "$target_lib/$file" rewrite_for_claude "$CLAUDE_STAGE_DIR/lib-$file"; then
+        atomic_write "$target_lib/$file" "$writer" "$CLAUDE_STAGE_DIR/lib-$file"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
@@ -430,10 +434,12 @@ install_opencode() {
     fi
   done
 
+  local writer
   for file in "${LIBS[@]}"; do
     printf "    lib/%-20s" "$file"
+    case "$file" in *.md) writer=rewrite_for_opencode ;; *) writer="cp" ;; esac
     if fetch_file "lib/$file" "$STAGE_DIR/lib-$file"; then
-      if ! atomic_write "$target_lib/$file" rewrite_for_opencode "$STAGE_DIR/lib-$file"; then
+      if ! atomic_write "$target_lib/$file" "$writer" "$STAGE_DIR/lib-$file"; then
         return 1
       fi
       printf "${GREEN}ok${RESET}\n"

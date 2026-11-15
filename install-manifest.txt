@@ -68,6 +68,7 @@ local-agent-cursor.md
 local-agent-opencode.md
 local-agent-review-loop.md
 local-cli-runner.md
+local-cli-runner.sh
 merge-gate.md
 model-tiers.md
 multi-reviewer-loop.md

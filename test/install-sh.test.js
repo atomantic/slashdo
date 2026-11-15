@@ -47,6 +47,9 @@ function mdNames(...segments) {
 
 const COMMANDS = mdNames('commands', 'do');
 const LIBS = mdNames('lib');
+// Non-markdown lib files (the local CLI runner script) install byte for byte:
+// no environment rewrite may touch code that runs.
+const LIB_ASSETS = fs.readdirSync(path.join(REPO_ROOT, 'lib')).filter((f) => !f.endsWith('.md')).sort();
 const HOOKS = fs
   .readdirSync(path.join(REPO_ROOT, 'hooks'))
   .filter((f) => f.endsWith('.js'))
@@ -326,6 +329,14 @@ suite('install.sh — Claude Code fresh install', () => {
     }
   });
 
+  it('installs the lib assets verbatim', async () => {
+    assert.ok(LIB_ASSETS.includes('local-cli-runner.sh'), 'the runner script is a lib asset');
+    for (const asset of LIB_ASSETS) {
+      const file = path.join(home, '.claude', 'lib', asset);
+      assert.equal(fs.readFileSync(file, 'utf8'), readRepo('lib', asset), `${asset} content`);
+    }
+  });
+
   it('installs the hook files verbatim', async () => {
     for (const hook of HOOKS) {
       const file = path.join(home, '.claude', 'hooks', `${hook}.js`);
@@ -381,6 +392,10 @@ suite('install.sh — OpenCode fresh install', () => {
       const file = path.join(home, '.config', 'opencode', 'lib', `${lib}.md`);
       assert.ok(fs.existsSync(file), `${lib}.md should be installed`);
       assert.equal(fs.readFileSync(file, 'utf8'), rewriteForOpencode(readRepo('lib', `${lib}.md`)), `${lib}.md content`);
+    }
+    for (const asset of LIB_ASSETS) {
+      assert.equal(fs.readFileSync(path.join(home, '.config', 'opencode', 'lib', asset), 'utf8'),
+        readRepo('lib', asset), `opencode lib/${asset} is copied verbatim`);
     }
     assert.ok(
       COMMANDS.some((c) => fs.readFileSync(
@@ -447,6 +462,12 @@ suite('install.sh — remote mode', () => {
         rewriteForOpencode(readRepo('lib', `${lib}.md`)),
         `opencode lib/${lib}.md should be fetched and rewritten`
       );
+    }
+    for (const asset of LIB_ASSETS) {
+      for (const root of [['.claude'], ['.config', 'opencode']]) {
+        assert.equal(fs.readFileSync(path.join(home, ...root, 'lib', asset), 'utf8'), readRepo('lib', asset),
+          `${root.join('/')}/lib/${asset} should be fetched intact`);
+      }
     }
     for (const hook of HOOKS) {
       assert.equal(
@@ -1041,6 +1062,10 @@ suite('uninstall.sh — Claude Code', () => {
     for (const lib of LIBS) {
       assert.ok(!fs.existsSync(path.join(home, '.claude', 'lib', `${lib}.md`)), `${lib}.md should be gone`);
     }
+    for (const asset of LIB_ASSETS) {
+      assert.ok(!fs.existsSync(path.join(home, '.claude', 'lib', asset)), `${asset} should be gone`);
+    }
+    assert.ok(!fs.existsSync(path.join(home, '.claude', '.slashdo-install-manifest.txt')), 'the manifest copy should be gone');
     for (const hook of HOOKS) {
       assert.ok(!fs.existsSync(path.join(home, '.claude', 'hooks', `${hook}.js`)), `${hook}.js should be gone`);
     }
@@ -1214,6 +1239,9 @@ suite('uninstall.sh — OpenCode', () => {
     }
     for (const lib of LIBS) {
       assert.ok(!fs.existsSync(path.join(home, '.config', 'opencode', 'lib', `${lib}.md`)), `${lib}.md should be gone`);
+    }
+    for (const asset of LIB_ASSETS) {
+      assert.ok(!fs.existsSync(path.join(home, '.config', 'opencode', 'lib', asset)), `opencode lib/${asset} should be gone`);
     }
   });
 });

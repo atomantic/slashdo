@@ -24,6 +24,10 @@ const LIB_DIR = path.join(ROOT, 'lib');
 const COMMAND_DIR = path.join(ROOT, 'commands', 'do');
 const libExists = (name) => fs.existsSync(path.join(LIB_DIR, name));
 const NAME = '[A-Za-z0-9._-]+\\.md';
+// An executable lib asset (a shell script) is cited only by its installed path and
+// always ships as a file; it has no references of its own to follow.
+const ASSET = '[A-Za-z0-9._-]+\\.sh';
+const ASSET_PREFIX = '/installed/skill/lib/';
 
 // Each reference form, and whether it inlines the lib (an eager `!cat` of a lib
 // that is not on a conditional path) or delivers it as a bundled file. The
@@ -33,6 +37,7 @@ const FORMS = [
   { re: /!`cat ~\/\.claude\/lib\/([^`\s]+)[^`]*`/g, kind: (name) => (DEFERRED_LIBS.has(name) ? 'file' : 'inline') },
   { re: /^[ \t]*!read lib\/(\S+)[ \t]*\r?$/gm, kind: () => 'file' },
   { re: new RegExp(`~/\\.claude/lib/(${NAME})`, 'g'), kind: () => 'file' },
+  { re: new RegExp(`~/\\.claude/lib/(${ASSET})(?![A-Za-z0-9._-])`, 'g'), kind: () => 'file' },
   { re: new RegExp(`\\[[^\\]]*\\]\\((?:\\.\\./)+lib/(${NAME})\\)`, 'g'), kind: () => 'file' },
   { re: new RegExp(`\\[[^\\]]*\\]\\(\\./(${NAME})\\)`, 'g'), kind: () => 'file', ifExists: true },
   { re: new RegExp(`\`lib/(${NAME})\``, 'g'), kind: () => 'file', ifExists: true },
@@ -61,7 +66,7 @@ function closure(body, teams, label) {
       assert.ok(libExists(name), `${from} references lib/${name}, which does not exist`);
       if (!reached.has(name)) {
         reached.set(name, new Set());
-        queue.push([fs.readFileSync(path.join(LIB_DIR, name), 'utf8'), `lib/${name}`]);
+        if (name.endsWith('.md')) queue.push([fs.readFileSync(path.join(LIB_DIR, name), 'utf8'), `lib/${name}`]);
       }
       reached.get(name).add(kind);
     }
@@ -79,7 +84,7 @@ describe('every command bundle is the closure of its references', () => {
       it(`${command} (teams: ${teams})`, () => {
         const { body } = parseFrontmatter(fs.readFileSync(path.join(COMMAND_DIR, command), 'utf8'));
         const reached = closure(body, teams, `commands/do/${command}`);
-        const bundle = buildPromptBundle(body, LIB_DIR, { teams, defer: true });
+        const bundle = buildPromptBundle(body, LIB_DIR, { teams, defer: true, assetPathPrefix: ASSET_PREFIX });
         const files = new Set(Object.keys(bundle.files));
         const inlined = [...reached].filter(([, kinds]) => kinds.has('inline')).map(([name]) => name);
 
@@ -105,6 +110,20 @@ describe('every command bundle is the closure of its references', () => {
         ];
         assert.deepEqual([...new Set(emitted)].filter((name) => !files.has(name)), [],
           `${command} emits references to files its bundle does not ship`);
+
+        // An asset is cited at the host-supplied prefix, shipped byte for byte, and
+        // never left behind as an unresolved ~/.claude path.
+        const texts = [bundle.body, ...Object.values(bundle.files)];
+        for (const text of texts) assert.doesNotMatch(text, new RegExp(`~/\\.claude/lib/${ASSET}`));
+        const assetRefs = texts.flatMap((text) =>
+          [...text.matchAll(new RegExp(`${ASSET_PREFIX.replace(/\//g, '\\/')}(${ASSET})`, 'g'))].map((m) => m[1]));
+        for (const name of assetRefs) {
+          assert.ok(files.has(name), `${command} cites asset ${name} without shipping it`);
+          assert.equal(bundle.files[name], fs.readFileSync(path.join(LIB_DIR, name), 'utf8'), `${name} ships verbatim`);
+        }
+        for (const name of [...files].filter((file) => file.endsWith('.sh'))) {
+          assert.ok(assetRefs.includes(name), `${command} ships asset ${name} nothing cites`);
+        }
       });
     }
   }
