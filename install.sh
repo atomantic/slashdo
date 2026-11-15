@@ -35,6 +35,8 @@ fi
 # Private staging area for the OpenCode rewrite step. Fixed /tmp names race
 # under concurrent installs and are pre-creatable by any other local user, so
 # every temp path this script touches is randomized and cleaned up on exit.
+# Staged files are left for that one exit-time `rm -rf` instead of being
+# removed one `rm` process per file.
 STAGE_DIR=""
 # Scratch area for Claude files. Keeping downloads out of the final tree means
 # a failed transfer never publishes raw or partial content before rewriting.
@@ -74,6 +76,13 @@ allocate_temp() {
   return "$status"
 }
 
+# mktemp creates files 0600; atomic_write restores the mode a plain create would
+# have produced under the user's umask, so staging neither loosens nor tightens
+# what curl -o / cp used to write directly. The umask never changes while this
+# script runs, so the mode is derived once here rather than in two subshells
+# per installed file.
+FILE_MODE="$(printf '%04o' "$(( 0666 & ~0$(umask) ))")"
+
 # Run a writer command against a temp file in the destination directory, then
 # rename it into place. Writing straight to the final path (curl -o "$dest",
 # sed > "$dest") truncates it up front, so a failed or interrupted transfer
@@ -83,14 +92,10 @@ allocate_temp() {
 atomic_write() {
   local dest="$1"
   shift
-  local tmp mode
+  local tmp
   allocate_temp ACTIVE_TMP "$(dirname "$dest")/.slashdo-tmp.XXXXXX" || return 1
   tmp="$ACTIVE_TMP"
-  # mktemp creates the file 0600; restore the mode a plain create would have
-  # produced under the user's umask, so staging neither loosens nor tightens
-  # what curl -o / cp used to write directly.
-  mode="$(printf '%04o' "$(( 0666 & ~0$(umask) ))")"
-  if "$@" "$tmp" && chmod "$mode" "$tmp" && mv -f "$tmp" "$dest"; then
+  if "$@" "$tmp" && chmod "$FILE_MODE" "$tmp" && mv -f "$tmp" "$dest"; then
     ACTIVE_TMP=""
     return 0
   fi
@@ -262,7 +267,6 @@ install_claude() {
     else
       printf "failed\n"
     fi
-    rm -f "$CLAUDE_STAGE_DIR/command-$cmd.md"
   done
 
   for lib in "${LIBS[@]}"; do
@@ -273,7 +277,6 @@ install_claude() {
     else
       printf "failed\n"
     fi
-    rm -f "$CLAUDE_STAGE_DIR/lib-$lib.md"
   done
 
   for hook in "${HOOKS[@]}"; do
@@ -285,7 +288,6 @@ install_claude() {
       printf "failed\n"
       hooks_ready=false
     fi
-    rm -f "$CLAUDE_STAGE_DIR/hook-$hook.js"
   done
 
   for old in "${OLD_COMMANDS[@]}"; do
@@ -368,28 +370,24 @@ install_opencode() {
     printf "    /do-%-20s" "$cmd"
     if fetch_file "commands/do/$cmd.md" "$STAGE_DIR/$cmd.md"; then
       if ! atomic_write "$target_cmd/do-$cmd.md" rewrite_for_opencode "$STAGE_DIR/$cmd.md"; then
-        rm -f "$STAGE_DIR/$cmd.md"
         return 1
       fi
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
     fi
-    rm -f "$STAGE_DIR/$cmd.md"
   done
 
   for lib in "${LIBS[@]}"; do
     printf "    lib/%-20s" "$lib.md"
     if fetch_file "lib/$lib.md" "$STAGE_DIR/lib-$lib.md"; then
       if ! atomic_write "$target_lib/$lib.md" rewrite_for_opencode "$STAGE_DIR/lib-$lib.md"; then
-        rm -f "$STAGE_DIR/lib-$lib.md"
         return 1
       fi
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
     fi
-    rm -f "$STAGE_DIR/lib-$lib.md"
   done
 
   for old in "${OLD_COMMANDS[@]}"; do
