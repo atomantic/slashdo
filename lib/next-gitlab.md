@@ -1,10 +1,8 @@
 # GitLab specifics for `/do:next`
 
-GitLab-only behavior for `/do:next`, read once — in the Pre-flight, before the first
-plain `glab api` call — so every later phase can just point back here by heading
-instead of re-explaining `glab`/`jq` quirks inline. **A GitHub run never reads this
-file.** The Phase 6 merge (for GitHub and GitLab) is in
-[merge-gate.md](./merge-gate.md).
+GitLab-only behavior for `/do:next`, read once in the Pre-flight, before the first
+plain `glab api` call; later phases point back here by heading. A GitHub run never
+reads this file. The Phase 6 merge (for both hosts) is in [merge-gate.md](./merge-gate.md).
 
 Field names and shapes differ from GitHub's REST/GraphQL payloads, not just the
 binary — every jq expression in `next.md` and this file is built from this mapping:
@@ -46,9 +44,7 @@ The host verbs defined in [next.md](../commands/do/next.md)'s Conventions resolv
 - `label_rm <N> <label>` — `glab issue update <N> --unlabel <label>`
 - `issue_create <title> <body> <label>...` — `glab issue create --title <title> --description <body> --label <label>...`
 - `pr_title <PR> <title>` — `glab mr update <PR> --title <title>`
-- `ci_wait_merge <PR> <method>` — `git push "$UP_REMOTE" "HEAD:$UP_REF" && glab ci status --wait --branch "${UP_REF#refs/heads/}" && glab mr merge <PR> --yes --remove-source-branch`
-
-`ci_wait_merge` intentionally keeps `--remove-source-branch` on GitLab: the shared gate owns server-side head cleanup there, and Phase 7's remote delete is an already-gone-safe check.
+- `ci_wait_merge` — the merge gate's wait-mode command, written out in [merge-gate.md](./merge-gate.md). Its GitLab merge passes `--remove-source-branch`, so the gate owns server-side head cleanup and Phase 7's remote delete finds the branch already gone.
 
 ## The `glab api` capture rule
 
@@ -61,9 +57,8 @@ VALUE="$(printf '%s' "$RESULT_JSON" | jq -er '.field')" || { <fail-closed handle
 
 ## Pre-flight — jq probe
 
-`glab api` — unlike the `glab issue`/`glab mr` subcommands — has no built-in `--jq`
-flag, so Phase 1 and Phase 2 pipe it to the **standalone** jq binary instead. Probe
-once, in the Pre-flight, before any claim:
+Phase 1 and Phase 2 pipe `glab api` output to the standalone jq binary (the capture
+rule above), so probe for it once, before any claim:
 
 ```bash
 command -v jq >/dev/null 2>&1 || {
@@ -117,15 +112,6 @@ GitLab's `--per-page` maxes out at 100 with no "give me everything" pagination f
 plain open-issue list — same "note the cap" guidance `next.md` gives `gh issue list`,
 at a lower threshold; `--issues-label` keeps a busy GitLab tracker under it.
 
-**Dispatch-hint filter worked example** (`--model light,none --effort max`,
-`$LABEL_SEP` is `::`) — the GitLab twin of `next.md`'s GitHub worked example, same two
-clauses without `.name`:
-
-```bash
-glab issue list "${LIST_ARGS[@]}" --per-page 100 \
-  --jq "map(select(any(.labels[]; . == \"model${LABEL_SEP}light\")
-                or ([.labels[] | select(startswith(\"model${LABEL_SEP}\"))] | length == 0)))
-      | map(select(any(.labels[]; . == \"effort${LABEL_SEP}max\")))
-      | PRIORITY_SORT | .[] | {iid,title,labels,assignees,author,created_at}"
-```
-`PRIORITY_SORT` (Conventions, in next.md) with the two filter clauses above prepended.
+**Dispatch-hint filter.** Prepend the clauses from `next.md`'s "Dispatch-hint filter"
+to that `--jq` program, ahead of `PRIORITY_SORT`, without the `.name` (labels are
+plain strings here); `$LABEL_SEP` is `::`.
