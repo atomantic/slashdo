@@ -239,4 +239,16 @@ describe('local CLI runner and review fix tail are single-owner partials (#349)'
       assert.ok(!enhanceFiles.includes(lib), `enhance-loop.md must not bundle ${lib}`);
     }
   });
+
+  it('keeps the inlined push-target guard identical to the tested one in upstream-push.md', () => {
+    // The fix tail (loaded without the wrapper under /do:rpr) and the wrapper (loaded without
+    // the tail on a host-only run) each have to carry the guard that keeps a branch with
+    // inherited base tracking off the default branch. test/upstream-push-base-guard-contract
+    // executes the copy in upstream-push.md; this keeps the two inlined copies from drifting.
+    const guard = readLib('upstream-push.md').match(/```bash\n(BR=[\s\S]*?)```/)[1].trim();
+    for (const name of ['review-fix-tail.md', 'multi-reviewer-loop.md']) {
+      const dedented = readLib(name).split('\n').map((line) => line.replace(/^ {3}/, '')).join('\n');
+      assert.ok(dedented.includes(guard), `${name} push-target guard drifted from lib/upstream-push.md`);
+    }
+  });
 });

@@ -21,9 +21,9 @@ elif command -v agent >/dev/null 2>&1; then
 fi
 ```
 
-If `REVIEW_BIN` is still empty, the Cursor CLI is missing — take pre-flight step 3's missing-binary branch. Otherwise store the resolved name as `{REVIEW_BIN}`.
+If `REVIEW_BIN` is still empty, the Cursor CLI is missing — take pre-flight step 3's missing-binary branch. Otherwise remember the resolved name as `{REVIEW_BIN}` and assign `REVIEW_BIN` to it in each launch command.
 
-**Effort carrier** — run right after the shared-inputs block, in the same shell. Effort is a model-variant parameter: a model string that already carries `effort=` is left alone, and effort with no model stays prompt-advisory (nothing to attach the variant to):
+**Effort carrier** — part of the launch command, right after the shared-inputs block. Effort is a model-variant parameter: a model string that already carries `effort=` is left alone, and effort with no model stays prompt-advisory (nothing to attach the variant to):
 
 ```bash
 if [ -n "$REVIEW_EFFORT" ] && [ -n "$REVIEW_MODEL" ]; then
