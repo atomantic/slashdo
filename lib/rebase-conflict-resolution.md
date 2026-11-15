@@ -1,64 +1,39 @@
 # Autonomous Rebase Conflict Resolution
 
-Use this playbook whenever a required `git rebase` or `git pull --rebase` stops
-with conflicts. A conflict is a resolution step in the PR workflow, not by itself
-a reason to abort, stop, or ask the user to take over.
+Use this whenever a required `git rebase` or `git pull --rebase` stops with conflicts.
+A conflict is a step to work through in the PR workflow, not a reason to abort or hand
+the branch back to the user.
 
-## Required posture
+## Posture
 
-- **Resolve and continue by default.** Do not abort merely because Git reports
-  conflicts. Preserve both the latest base branch contract and the intent of the
-  commit being replayed.
-- Keep the resolution scoped to the conflicted paths and any source-of-truth files
-  that must change with them. Preserve unrelated user changes and commits.
-- Never blanket-select `--ours` or `--theirs`, never hard-reset the branch, and
-  never use a bare `--force`. During a rebase those labels describe Git's replay
-  mechanics, not "the user's work" versus "upstream," so choosing by label alone
-  can silently discard the feature.
-- A generated-file conflict alone is never an ambiguity that needs user input.
-  Regenerate it from the resolved canonical sources.
+- **Resolve and continue.** Keep both the current base branch's contract and the
+  intent of the commit being replayed, and keep the resolution scoped to the conflicted
+  paths plus any source-of-truth files that must change with them.
+- **Do not choose a side by label.** During a rebase `--ours` is the base being
+  replayed onto and `--theirs` is your own commit, the reverse of a merge, so a blanket
+  `--ours`/`--theirs` can silently discard the feature. For the same reason do not
+  hard-reset the branch or use a bare `--force`.
+- **A generated file is regenerated, not hand-merged**, and its conflict alone is never
+  an ambiguity that needs the user.
 
-## Resolution loop
+## At each stop
 
-Repeat these steps for every commit at which the rebase stops:
-
-1. **Inspect the replay context before editing.** Run:
-
-   ```bash
-   git status --short
-   git diff --name-only --diff-filter=U
-   git rebase --show-current-patch
-   ```
-
-   Read every conflicted file in full plus the related callers, tests, schemas, and
-   recent history. When useful, inspect the index stages with `git show :1:<path>`,
-   `git show :2:<path>`, and `git show :3:<path>`; interpret them in the context of
-   the current patch rather than trusting the ours/theirs labels.
-
-2. **Resolve human-authored sources semantically.** Incorporate upstream's current
-   API, schema, or structure while retaining the behavior the replayed commit was
-   adding. Trace renamed/moved files and producer-consumer contracts instead of
-   resolving only the marker lines. Use tests and call sites to decide the combined
-   result.
-
-3. **Regenerate generated artifacts; do not hand-merge them.** For a path identified
-   by a generated header, filename, repository docs, or adjacent tooling (for
-   example `server/lib/apiRouteCatalog.generated.json`):
-
-   - Locate its canonical inputs and generator using nearby docs, package scripts,
-     build scripts, and repository search.
-   - Resolve the human-authored inputs first.
-   - If the generator needs the output to be parseable, temporarily replace the
-     conflicted output with either complete index stage only as a seed. That choice
-     is not the resolution.
-   - Run the repository's canonical generator and use its complete output as the
-     resolution. Run the corresponding generated-drift, schema, or catalog check.
-   - If no generator exists, reconstruct the output from the canonical sources and
-     validate it with the repository's existing checks. Do not guess from conflict
-     markers alone.
-
-4. **Stage and continue only when the stop is fully resolved.** Stage only the
-   files resolved for the current replayed commit, then run:
+1. **Look at what is being replayed** before editing: `git status --short`,
+   `git diff --name-only --diff-filter=U`, and `git rebase --show-current-patch`. Read
+   the conflicted files with their callers and tests; `git show :1:<path>` / `:2:` /
+   `:3:` show the common ancestor, the new base's version, and the replayed commit's
+   version.
+2. **Resolve human-authored sources by meaning**: take upstream's current API, schema or
+   structure and keep the behavior the replayed commit adds. Follow renames and moves
+   rather than resolving only the marker lines.
+3. **Regenerate generated artifacts** (a path marked by a generated header, a
+   `*.generated.*` name, the project's docs, or adjacent tooling). Resolve their
+   human-authored inputs first, then run the project's own generator and take its whole
+   output, followed by its drift or schema check. If the generator needs a parseable
+   file to start from, seed it with either index stage; the seed is not the resolution.
+   With no generator, rebuild the output from the canonical sources and validate it with
+   the project's existing checks.
+4. **Stage only what you resolved for this commit, then continue:**
 
    ```bash
    test -z "$(git diff --name-only --diff-filter=U)"
@@ -67,23 +42,20 @@ Repeat these steps for every commit at which the rebase stops:
    GIT_EDITOR=true git rebase --continue
    ```
 
-   If Git stops again, return to step 1. If a replayed commit becomes empty, verify
-   from the current patch, history, and tests that its full intent is already on the
-   new base; only then use `git rebase --skip`.
+   `GIT_EDITOR=true` keeps the continue from opening an editor. If a replayed commit
+   becomes empty, use `git rebase --skip` only after confirming from the patch and the
+   new base that its whole intent is already there.
 
-5. **Verify the completed rebase.** Confirm Git is no longer mid-rebase, the expected
-   feature branch is checked out, and there are no unmerged paths. Run the focused
-   generator/schema checks and tests for every resolution, then the caller's normal
-   build/test gate. Continue the push, review, and PR-creation workflow from the
-   step that encountered the conflict; a resolved rebase is not a terminal status.
+When the rebase finishes, confirm Git is no longer mid-rebase, the expected branch is
+checked out and nothing is unmerged; run the checks for whatever you resolved and then
+the caller's normal build/test gate; and carry on with the push, review or PR step that
+hit the conflict. A resolved rebase is not a stopping point.
 
 ## Last-resort abort
 
-Abort only after the inspection above exposes a genuine, material ambiguity that
-cannot be answered from the replayed commit, canonical sources, generator, callers,
-tests, or repository history, or after required resolution tooling remains
-unavailable with no deterministic fallback. Before reporting that blocker, run
-`git rebase --abort`, verify the original branch/commit and clean state were
-restored, and report the exact incompatible choices or missing tool plus the checks
-performed. Never stop with only "rebase conflict" or "generated file conflict" as
-the reason.
+Abort only for a genuine, material ambiguity that the replayed commit, the canonical
+sources, the generator, callers, tests and history cannot answer, or when required
+tooling is unavailable with no deterministic fallback. Then run `git rebase --abort`,
+verify the original branch, commit and clean state are restored, and report the exact
+incompatible choices or the missing tool, plus what you checked. "Rebase conflict" or
+"generated file conflict" alone is never the reason.
