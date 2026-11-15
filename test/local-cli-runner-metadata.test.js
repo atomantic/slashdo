@@ -130,3 +130,89 @@ describe('local-cli-runner git metadata verify/restore (#447)', () => {
     assert.doesNotMatch(r.stdout, /POISON_RESTORED/);
   });
 });
+
+// Snapshot and Verify run as separate tool calls in a harness that starts a fresh shell for each,
+// so nothing may depend on shell variables surviving: Verify gets only the two printed values.
+describe('local-cli-runner snapshot state survives a fresh shell', () => {
+  const sh = (script, cwd) => spawnSync('bash', ['-c', script], { cwd, encoding: 'utf8' });
+
+  function fixture(t) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-state-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const setup = sh([
+      'git init -q r && cd r && git config user.email a@b && git config user.name n',
+      'mkdir sub && echo tracked > sub/tracked.txt && echo other > other.txt && echo ignored.log > .gitignore',
+      'git add . && git commit -q -m i',
+      'echo dirty >> other.txt',                                  // pre-existing unstaged edit
+      'echo staged > staged.txt && git add staged.txt',           // pre-existing staged file
+      "printf 'mine\\n' > 'un tracked.txt'",                        // pre-existing untracked file
+    ].join(' && '), dir);
+    assert.equal(setup.status, 0, setup.stderr);
+    const repo = path.join(dir, 'r');
+    // Snapshot from a subdirectory: the artifacts must still cover the whole repository.
+    const snap = sh(bashBlock('### Snapshot'), path.join(repo, 'sub'));
+    assert.equal(snap.status, 0, snap.stderr);
+    const [, stateDir, sum] = snap.stdout.match(/RUN_STATE_DIR=(\S+) RUN_STATE_SUM=([0-9a-f]{64})/);
+    t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+    const verify = (overrides = {}) => sh(
+      `RUN_STATE_DIR='${overrides.stateDir ?? stateDir}'\nRUN_STATE_SUM='${overrides.sum ?? sum}'\n${bashBlock('### Verify and restore')}\necho VERIFY_DONE`,
+      repo,
+    );
+    return { repo, stateDir, verify, sh: (script) => sh(script, repo) };
+  }
+
+  it('reports a clean tree from a new shell given only the printed values', (t) => {
+    const { verify } = fixture(t);
+    const r = verify();
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /TREE_STATE=clean\nVERIFY_DONE/);
+  });
+
+  it('restores HEAD, index, tracked, and untracked state wholesale and keeps the caller\'s own dirty work', (t) => {
+    const { repo, verify, sh: inRepo } = fixture(t);
+    const mutate = inRepo([
+      'echo hacked > sub/tracked.txt',
+      'echo more >> other.txt',
+      "echo theirs > 'un tracked.txt'",
+      'echo new > planted.txt',
+      'git rm -q --cached staged.txt',
+      'git add sub/tracked.txt && git commit -q -m "reviewer commit"',
+      'git config alias.x "!sh"',
+    ].join(' && '));
+    assert.equal(mutate.status, 0, mutate.stderr);
+    const r = verify();
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /TREE_STATE=restored\nVERIFY_DONE/);
+    const read = (name) => fs.readFileSync(path.join(repo, name), 'utf8');
+    assert.equal(read('sub/tracked.txt'), 'tracked\n');
+    assert.equal(read('other.txt'), 'other\ndirty\n');
+    assert.equal(read('un tracked.txt'), 'mine\n');
+    assert.equal(fs.existsSync(path.join(repo, 'planted.txt')), false);
+    assert.equal(inRepo('git log --format=%s').stdout.trim(), 'i');
+    assert.equal(inRepo('git diff --cached --name-only').stdout.trim(), 'staged.txt');
+    assert.equal(inRepo('git config --get alias.x').status, 1);
+    assert.match(verify().stdout, /TREE_STATE=clean/, 'a second verify sees the restored baseline');
+  });
+
+  it('names a gitignored file modified during the pass without touching it', (t) => {
+    const { repo, verify } = fixture(t);
+    const later = new Date(Date.now() + 5000);
+    fs.writeFileSync(path.join(repo, 'ignored.log'), 'secret');
+    fs.utimesSync(path.join(repo, 'ignored.log'), later, later);
+    const r = verify();
+    assert.match(r.stdout, /modified gitignored file[^\n]*ignored\.log/);
+    assert.match(r.stdout, /TREE_STATE=clean/);
+    assert.equal(fs.readFileSync(path.join(repo, 'ignored.log'), 'utf8'), 'secret');
+  });
+
+  it('refuses a state file altered after the snapshot, and missing state, without sourcing it', (t) => {
+    const { repo, stateDir, verify } = fixture(t);
+    fs.appendFileSync(path.join(stateDir, 'state.sh'), '\ntouch "$REPO_ROOT/STATE_SOURCED"\n');
+    for (const r of [verify(), verify({ sum: '' }), verify({ stateDir: path.join(stateDir, 'absent') })]) {
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /snapshot state is missing or was altered/);
+      assert.doesNotMatch(r.stdout, /VERIFY_DONE/);
+    }
+    assert.equal(fs.existsSync(path.join(repo, 'STATE_SOURCED')), false);
+  });
+});

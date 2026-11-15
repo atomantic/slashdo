@@ -41,16 +41,16 @@ Only when `{REVIEW_AGENT}` is `cmd`:
 
 ### Pre-flight
 
-1. Selected via `--review-with codex|agy|claude|grok|pi|cursor|opencode|cmd[<invocation>]`; abort with a usage error on anything else. Normalize aliases: `gemini` and `antigravity` → `agy`, `cursor-agent` normalizes to `cursor`, and `zen` and `opencode-zen` normalize to `opencode`. Treat `{REVIEW_AGENT}` as the normalized value from here on.
+1. `{REVIEW_AGENT}` is the normalized base slug the caller parsed from `--review-with` (`codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, or `cmd`); abort with a usage error on anything else.
 2. Read the agent's recipe (above), if it has one. Resolve `{REVIEW_BIN}` from the table.
 3. Confirm the binary is installed: `command -v {REVIEW_BIN}` (`cmd` has none to probe; its recipe covers a missing executable). If missing:
-   - **Default mode**: print `{REVIEW_AGENT} CLI not installed — recording as skipped`, set `STATUS=skipped`, and return to the caller **without falling back to Copilot** — the executed reviewer set must only contain reviewers the user requested. The caller's aggregate treats `skipped` as `inconclusive` (not eligible to merge). The multi-reviewer wrapper normally pre-empts this in its own pre-flight; this branch is the safety net for direct callers such as `/do:rpr`.
-   - **Interactive mode (`--interactive`)**: ask whether to install or skip; on skip record `STATUS=skipped`. Never offer a Copilot fallback.
+   - **Default mode**: print `{REVIEW_AGENT} CLI not installed — recording as skipped`, set `STATUS=skipped` (inconclusive), and return to the caller without falling back to Copilot or any other reviewer: the executed reviewer set only contains reviewers the user requested. The multi-reviewer wrapper normally catches this in its own pre-flight; this branch covers direct callers such as `/do:rpr`.
+   - **Interactive mode (`--interactive`)**: ask whether to install or skip; on skip record `STATUS=skipped`.
 4. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`.
 5. Record `{REVIEWER_APPLIES}` — boolean, default `false`; `true` when the orchestrating command was invoked with `--reviewer-applies`. `false`: the orchestrator applies fixes from the CLI's findings log. `true`: the headless CLI applies fixes in the working tree and the orchestrator only verifies.
-6. Record `{REVIEW_MODEL}` — resolved by the caller (explicit `<agent>[<model>]` bracket → saved `review-models[slug]` default → empty). **May be empty**: the CLI then uses its built-in default with no `--model` flag (agy and opencode resolve theirs in their recipes). When set, it is passed as `--model` (or the in-process `Agent` tool's `model`). The value is free-form (names churn and may contain spaces/parens, e.g. `Gemini 3.8 Flash (High)`); pass it verbatim.
-7. Record `{MAX_ITERATIONS}` — how many review → fix → re-review cycles this reviewer may run, resolved by the caller (per-entry `~max=<n>` suffix → this loop's built-in default of `3`). `0` means **unlimited**, bounded by the 10-iteration safety guardrail in Step 6. Also record `{MAX_EXPLICIT}` — `true` only when the cap came from a `~max=<n>` the user typed or saved. Step 6 uses it to report an exhausted cap as `capped` (user-chosen budget, clean-equivalent for the merge gate) or `guardrail` (built-in ceiling, inconclusive). The `--review-iterations` flag never reaches this loop.
-8. Record `{REVIEW_EFFORT}` — optional reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`), resolved by the caller (`~effort=<level>` suffix → empty). **Defaults to empty.** When set, it is appended as advisory effort to the prompt *and* passed to the CLI through that agent's carrier in the table above.
+6. Record `{REVIEW_MODEL}` — resolved by the caller (explicit `<agent>[<model>]` bracket → saved `review-models[slug]` default → empty). It may be empty: the CLI then uses its built-in default with no `--model` flag (agy and opencode resolve theirs in their recipes). When set, it is passed as `--model` (or as the model of an in-process sub-agent, per the claude recipe). The value is free-form (names churn and may contain spaces and parentheses); pass it verbatim.
+7. Record `{MAX_ITERATIONS}` and `{MAX_EXPLICIT}` — this reviewer's cap on review → fix → re-review cycles and whether the user set it, resolved by the caller from a `~max=<n>` suffix. Without one they are `3` and `false`. The fix tail's step 6 applies them; `--review-iterations` never reaches this loop.
+8. Record `{REVIEW_EFFORT}` — optional reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`), resolved by the caller (`~effort=<level>` suffix → empty). When set, it is appended as advisory effort to the prompt and passed to the CLI through that agent's carrier in the table above.
 9. Resolve the enforced reviewer permissions below BEFORE building prompts. For public-forge input, or any prompt-driven reviewer, set `REVIEWER_APPLIES=false` and use the feedback verdict contract. A prompt-driven reviewer with no tool-restriction mechanism at all **still runs, via the tool-free fallback** — the user explicitly requested it, so the loop's own snapshot + revert (Steps 1/3) is the enforcement, not a CLI flag that doesn't exist. `STATUS=no-verdict` without invoking is reserved for a CLI that can't be driven headlessly at all.
 
 ### Editing mode
@@ -64,16 +64,16 @@ Review-only keeps the edit author and the verifier in the same session and avoid
 
 ### Headless invocation
 
-The orchestrator runs the chosen CLI via Bash and captures output to a log file (the claude recipe may replace this with an in-process sub-agent). The **verification** step (Step 4) is always performed by the main thread, never a sub-agent.
+The orchestrator runs the chosen CLI from a shell and captures output to a log file (the claude recipe may replace this with an in-process sub-agent). The verification step (Step 4) is always performed by the main thread, never a sub-agent.
 
 A prompt-driven reviewer gets `$LOCAL_PROMPT`, never slashdo's `/do:review` skill: that skill fans out to parallel sub-agents, which a headless print-mode CLI (or an in-process sub-agent) cannot wait on, so the run times out with zero findings. The prompt asks for an inline single-session review and carries the mode-specific output contract itself.
 
 The invocations run **non-interactively** through each CLI's documented unattended profile. The flags select the narrowest supported permissions and never grant blanket approval, write access, or bypass controls; where a CLI requires a non-interactive approval setting, combine it with the enforced restrictions below.
 
-The shared local-CLI runner owns the timeout wrapper, the Step 1 snapshot, the Step 2 launch and wait, and the Step 3 verify-and-restore. Read it now and run its timeout wrapper block:
+The shared local-CLI runner owns the timeout wrapper, the Step 1 snapshot, the Step 2 launch and wait, the Step 3 verify-and-restore, and the rule for what survives between tool calls. Read it now:
 !read lib/local-cli-runner.md
 
-Then, in the same shell, compute the shared inputs once before invoking any local agent. Run the block verbatim:
+The block below computes the shared inputs. It is part of every launch command (the runner's "one command per launch"), after the timeout wrapper. Assign `REVIEW_AGENT`, `BASE_BRANCH`, `BRANCH_NAME`, `REVIEW_MODEL`, `REVIEW_EFFORT` and `REVIEWER_APPLIES` from pre-flight at its top, then use it verbatim:
 
 ```bash
 REVIEW_TITLE=$(git log -1 --format=%s HEAD)
@@ -125,7 +125,7 @@ if [ -n "$REVIEW_EFFORT" ]; then
 fi
 ```
 
-Then run the recipe's pre-flight block, if it has one, in the same shell.
+The recipe's pre-flight block, if it has one, follows it in the launch command.
 
 **Codex invocations** (after isolated-config verification):
 - Review-only: `codex ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"} --sandbox read-only review --base "$BASE_BRANCH" --title "$REVIEW_TITLE"`
@@ -145,7 +145,7 @@ Do not forward configured resource flags or approve project files. Verify these 
 grok --prompt-file "$GROK_REVIEW_INPUT" --verbatim --output-format streaming-messages-json --permission-mode plan --sandbox read-only --disable-web-search --no-subagents --tools read_file,grep,list_dir --disallowed-tools run_terminal_cmd,search_replace,write,web_search,web_fetch,Agent,search_tool,use_tool ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} ${EFFORT_FLAG[@]+"${EFFORT_FLAG[@]}"}
 ```
 
-**Grok prompt file** — the Step 2 pre-launch step for `grok`. Run it in the invocation's shell on **every** pass, after the diff payload is appended to `LOCAL_PROMPT`, so the file never carries a stale patch. Like the claude stdin transport it accepts at most **8 MiB (8,388,608 bytes)**; a missing/empty payload, a failed write/count, or a larger input is `STATUS=no-verdict` without launching:
+**Grok prompt file** — the Step 2 pre-launch step for `grok`. Run it in the launch command on every pass, after the diff payload is appended to `LOCAL_PROMPT`, so the file never carries a stale patch. Like the claude stdin transport it accepts at most **8 MiB (8,388,608 bytes)**; a missing/empty payload, a failed write/count, or a larger input is `STATUS=no-verdict` without launching:
 
 ```bash
 GROK_REVIEW_INPUT=""
@@ -163,7 +163,7 @@ if [ "$REVIEW_AGENT" = grok ]; then
 fi
 ```
 
-`mktemp` creates the file with owner-only permissions outside the repository. Keep it until the reviewer exits, including in the background. **Grok post-launch** — the Step 2 post-launch cleanup for `grok`, run after reading the exit code and before handling any result. It deletes the prompt file (do that alone when a launch is abandoned after preparation) and, only on a zero exit, replaces `$LOG_FILE` with the final message, keeping the raw stream as the reported log. A non-zero exit leaves `$LOG_FILE` as the raw stream, so the `cli-error` dump still shows an error grok wrote to stdout:
+`mktemp` creates the file with owner-only permissions outside the repository. Keep it until the reviewer exits, including in the background, and print its path if a later call has to delete it. **Grok post-launch** — the Step 2 post-launch cleanup for `grok`, run after reading the exit code and before handling any result. It deletes the prompt file (do that alone when a launch is abandoned after preparation) and, only on a zero exit, replaces `$LOG_FILE` with the final message, keeping the raw stream as the reported log. A non-zero exit leaves `$LOG_FILE` as the raw stream, so the `cli-error` dump still shows an error grok wrote to stdout:
 
 ```bash
 if [ "$REVIEW_AGENT" = grok ]; then
@@ -204,14 +204,14 @@ Verify prompt size before invocation: Linux caps a single argv string at 128 KiB
 
 ### Loop
 
-Initialize `ITERATION=0`, `STATUS=""`, `REVIEW_DIAGNOSTIC=""`, `REVIEW_REMEDY=""`, and `REPORT_LOG_FILE=""`, plus `MAX_ITERATIONS` / `MAX_EXPLICIT` from Pre-flight step 7 (`MAX_ITERATIONS=3`, `MAX_EXPLICIT=false` when the caller passed nothing). When `MAX_ITERATIONS=0` (unlimited), the effective ceiling is the 10-iteration safety guardrail.
+Initialize `ITERATION=0`, `STATUS=""`, `REVIEW_DIAGNOSTIC=""`, `REVIEW_REMEDY=""`, and `REPORT_LOG_FILE=""`, plus `MAX_ITERATIONS` / `MAX_EXPLICIT` from Pre-flight step 7. These are the loop's bookkeeping; track them yourself across tool calls rather than relying on shell variables.
 
 Every pass ends in the shared fix tail, which holds the apply rules and steps 4–6 (verify, push, re-loop) plus the report closing. Read it now:
 !read lib/review-fix-tail.md
 
-1. **Capture baseline**: `LOOP_START_SHA=$(git rev-parse HEAD)`
+1. **Capture baseline**: record `git rev-parse HEAD` as `LOOP_START_SHA`.
 
-   **When `REVIEWER_APPLIES=false`, also take the runner's Snapshot** (all five artifacts). This is defense in depth on top of enforced isolation, never a replacement for it. Skip it when `REVIEWER_APPLIES=true`, where writes are the expected outcome.
+   When `REVIEWER_APPLIES=false`, also take the runner's Snapshot and keep the `RUN_STATE_DIR` and `RUN_STATE_SUM` it prints. This is defense in depth on top of enforced isolation, never a replacement for it. Skip it when `REVIEWER_APPLIES=true`, where writes are the expected outcome.
 
 2. **Invoke the chosen reviewer**, capturing its output to a log so context stays clean. If the recipe replaces this Bash launch (claude under Claude Code), follow the recipe and go to Step 3. Run any recipe pre-launch step first (claude: stdin preparation; grok: its prompt file), and stop this pass if it set `STATUS=no-verdict`.
 
@@ -229,11 +229,11 @@ Every pass ends in the shared fix tail, which holds the apply rules and steps 4�
    ```
 
    **When `REVIEWER_APPLIES=false` (default — orchestrator applies)**:
-   - **Enforce the read-only contract before reading the findings.** Run the runner's **Verify and restore**. A mismatch is an isolation failure, not permission to continue. If the restore failed, **stop the loop** with `STATUS=cli-error` and a loud warning naming the log. If it succeeded, print `{REVIEW_AGENT} modified the working tree during a review-only pass — reverted; findings kept` and **continue with the findings**. A reviewer's product is its findings list, which stays useful even if the reviewer also (wrongly) tried to apply them, and the orchestrator re-derives every fix in this session regardless.
+   - **Enforce the read-only contract before reading the findings.** Run the runner's **Verify and restore**. If it exits non-zero or prints `TREE_STATE=restore-failed`, stop the loop with `STATUS=cli-error` and a warning naming the log. On `TREE_STATE=restored`, print `{REVIEW_AGENT} modified the working tree during a review-only pass — reverted; findings kept` and continue with the findings. A reviewer's product is its findings list, which stays useful even if the reviewer also (wrongly) tried to apply them, and the orchestrator re-derives every fix in this session regardless.
    - Apply any recipe Step-3 rule now (opencode: a flagged provider-admission denial returns `no-verdict` here; cursor: a flagged workspace-trust refusal returns `skipped`; claude: its subprocess structured verdict is converted to the text contract here, and a missing or invalid one returns `no-verdict`).
    - Read `$LOG_FILE` and extract the findings. **For a prompt-driven reviewer, parse a verdict before considering the findings:** after stripping blank lines, the result must be either exactly `NO FINDINGS`, or only one or more complete `FINDING <N>:` blocks. Every block must contain non-empty `file`, numeric `line`, `severity` (`CRITICAL`, `IMPROVEMENT`, or `NIT`), `description`, and `fix` fields. Treat a missing, malformed, or contradictory result (for example, a prose response, an incomplete block, or both `NO FINDINGS` and a finding) as `STATUS=no-verdict`, print the log path, and exit the loop. **Never infer a clean result from prose or an empty log.**
 
-     `no-verdict` is **inconclusive, not a hard error**. The reviewer ran and the tree is fine; it either didn't answer in the contract's format or was denied provider admission. It must not be `cli-error`: a hard error fires the wrapper's short-circuit, skipping every remaining reviewer over one chatty CLI, and `~opt` promises to excuse `no-verdict` from the merge gate while never excusing a hard error. A required reviewer's `no-verdict` still blocks the merge as inconclusive; an `~opt` one doesn't.
+     `no-verdict` is inconclusive, not a hard error: the reviewer ran and the tree is fine. Do not report it as `cli-error`, which would stop every remaining reviewer over one chatty CLI and could not be excused by `~opt`.
    - For a prompt-driven reviewer, set `STATUS=clean` only for the exact `NO FINDINGS` sentinel; otherwise hand the validated finding blocks to the orchestrator.
    - For `codex`, retain its native severity-tagged output handling: a native clean verdict (`NO FINDINGS` or `no issues`) is `STATUS=clean`; otherwise hand its actionable findings to the orchestrator. This Codex-specific fallback must not be used for prompt-driven reviewers.
    - Otherwise, apply the findings per the shared tail's **Apply** section, with `{FIX_LABEL}` set to `$REVIEW_AGENT`. For `cmd`, use its `cmd:<first token>` label, never the raw slug or invocation.
@@ -241,7 +241,7 @@ Every pass ends in the shared fix tail, which holds the apply rules and steps 4�
    **When `REVIEWER_APPLIES=true` (reviewer applies)**:
    - The reviewer is expected to edit the working tree but leave its changes uncommitted; the prompt above forbids it from committing or pushing. The orchestrator owns the commit.
    - If `NEW_COMMITS > 0`, the reviewer committed despite that contract. This is an anomaly: run `git reset --soft "$LOOP_START_SHA"` so the changes remain available without the reviewer's commit, then recompute both counts.
-   - If `UNCOMMITTED > 0`, print the diff, stage the explicitly listed files (not `git add -A`), and commit them as `address review ($REVIEW_AGENT): <summary>`. Then recompute both counts and continue to verification. This is the normal reviewer-applies path; do not ask the user to approve the expected commit.
+   - If `UNCOMMITTED > 0`, print the diff, stage the explicitly listed files (not `git add -A`), and commit them per the shared tail's commit rule (fallback subject `address review ($REVIEW_AGENT): <summary>`). Then recompute both counts and continue to verification. This is the normal reviewer-applies path; do not ask the user to approve the expected commit.
    - If `NEW_COMMITS == 0` and `UNCOMMITTED == 0`, the reviewer found nothing to fix. Set `STATUS=clean` and exit the loop.
    - After the orchestrator commit, continue to verification; the orchestrator's attributed commit has replaced any reviewer-created commit.
 
@@ -261,7 +261,7 @@ Print:
 Agent: {REVIEW_AGENT}    # for cmd, print the cmd:<first token> label, not the raw "cmd" slug
 Branch: {BRANCH_NAME}
 Status: {STATUS}    # clean / capped / no-verdict / guardrail / cli-error / broken-build / test-failed / rejected / skipped
-Iterations: {ITERATION}/{MAX_ITERATIONS}    # denominator renders as ∞ when MAX_ITERATIONS=0; `capped` means this budget was spent, `guardrail` means a built-in ceiling cut the loop off
+Iterations: {ITERATION}/{MAX_ITERATIONS}    # denominator renders as ∞ when MAX_ITERATIONS=0
 Commits added: {N}
 Files modified: {file list}
 Diagnostic: {REVIEW_DIAGNOSTIC or none}

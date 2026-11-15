@@ -23,9 +23,10 @@ Copilot-specific rules:
   `error`.
 - If the request itself fails and no qualifying current-head review appears,
   report `error`, not the shared template's `not-requestable` status.
-- Commit fixes as `address review (copilot): <summary>`.
+- The reviewer name in commit messages is `copilot` (fallback subject
+  `address review (copilot): <summary>`).
 
 Return one of `clean`, `capped`, `timeout`, `error`, `guardrail`, or
 `too-large`. Definitions come from the shared template except `too-large`, which
-means the PR exceeded Copilot's 20,000-line limit and is clean-equivalent for the
-caller's merge gate. This sub-agent never merges the PR.
+means the PR exceeded Copilot's 20,000-line limit; the caller treats it as a
+verdict, like `clean`. This sub-agent never merges the PR.

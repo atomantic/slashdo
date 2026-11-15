@@ -4,7 +4,7 @@ Prompt-driven reviewer (the Antigravity CLI, successor to the Gemini CLI); alway
 
 ### Model pin (pre-flight)
 
-agy always pins a model, resolved against the **live** roster, never a remembered literal: its own default can be a heavy *Thinking* tier that emits nothing for 20–30 minutes and looks exactly like a hang, and its roster churns between releases, so a stale name is a launch failure (`model ... is not recognized`), not a verdict. `--model` takes one **leveled** entry exactly as `agy models` prints it — an id (`gemini-3.8-flash-high`) or a display name (`Gemini 3.8 Flash (High)`); a bare base (`Gemini 3.8 Flash`) is not a model. Precedence: `{REVIEW_MODEL}` (bracket or saved `review-models`) > `AGY_REVIEW_MODEL` env > roster default. Run right after the shared-inputs block, in the orchestrator's shell (never ask agy itself to run `agy models` — a nested agy inside a print session can stall):
+agy always pins a model, resolved against the **live** roster, never a remembered literal: its own default can be a heavy *Thinking* tier that emits nothing for 20–30 minutes and looks exactly like a hang, and its roster churns between releases, so a stale name is a launch failure (`model ... is not recognized`), not a verdict. `--model` takes one **leveled** entry exactly as `agy models` prints it — an id (`gemini-3.8-flash-high`) or a display name (`Gemini 3.8 Flash (High)`); a bare base (`Gemini 3.8 Flash`) is not a model. Precedence: `{REVIEW_MODEL}` (bracket or saved `review-models`) > `AGY_REVIEW_MODEL` env > roster default. Run this once, as its own command before the first launch, from the orchestrator's shell (never ask agy itself to run `agy models` — a nested agy inside a print session can stall):
 
 ```bash
 if [ "$REVIEW_AGENT" = agy ] && [ -z "$AGY_MODEL_RESOLVED" ]; then
@@ -22,7 +22,7 @@ fi
 - **Apply `{REVIEW_EFFORT}` within whichever family was picked above.** This step always runs — on an exact match and on the roster default, not only on a base completion — because agy's model *is* its effort setting: pick the family's entry at the requested level (agy offers only `low`/`medium`/`high`, so `~effort=xhigh`/`max` take High and you say so). With no effort requested, keep an exact match's own level; for a base-completion or roster-default family, use High. Report the resolution whenever the final pick differs from the literal request, e.g. `resolved agy[gemini-3.8-flash]~effort=low -> gemini-3.8-flash-low`.
 - If the family has no variants (e.g. a Claude *Thinking* entry) or `agy models` printed nothing (offline, not signed in), keep the resolved model as-is; effort stays prompt-advisory. Never invent a variant that wasn't listed.
 - **Never pass `--effort` alongside `--model`.** agy accepts the pair only when the level agrees with the pinned variant (`--model gemini-3.8-flash-high --effort low` is a hard `conflicts with --effort=low` exit) and a variant-less model rejects `--effort` outright; since this loop always pins a model, the flag is only ever redundant or fatal.
-- **Record the choice.** Set `AGY_REVIEW_MODEL` to the chosen entry, reuse it in every Step 2 invocation of this loop, and set `AGY_MODEL_RESOLVED=1` so later iterations do not re-fetch the roster.
+- **Record the choice.** Remember the chosen entry and assign it to `AGY_REVIEW_MODEL` at the top of every launch command in this loop (with `AGY_MODEL_RESOLVED=1`), so later iterations do not re-fetch the roster.
 
 ### Isolation and invocation
 

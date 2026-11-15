@@ -7,22 +7,22 @@ Unlike the `codex` / `agy` / `claude` / `grok` / `cursor` reviewers, **Ollama is
 1. **The diff is embedded in the prompt**, chunked per file to stay within local-model context limits.
 2. **It is always review-only.** The model emits findings; the *orchestrator* applies the fixes (the local-agent loop's `REVIEWER_APPLIES=false` flow). `--reviewer-applies` is a no-op here — the calling command should already have warned and continued, and this loop forces review-only regardless.
 
-When to use this:
-- You want a fully local, offline review with no API/cloud cost and no data leaving the machine
-- You have a capable coding model installed in Ollama (e.g. `qwen2.5-coder`, `deepseek-coder-v2`, `codestral`)
 
 **Logic-only focus.** A small local model reviewing one file's diff in isolation floods the review with style nits, "extract a helper", and confident "you deleted X, this breaks Y" claims about code that was merely moved to a file it cannot see — while syntax, lint, formatting, type, and build errors are already caught by the project's own tooling. The per-file prompt below therefore tells the model, in strong terms, to report ONLY logic bugs tied to a concrete wrong runtime behavior and to treat zero findings as the normal outcome. This is the biggest signal-to-noise lever for the local pass — keep it strong.
 
 ### Pre-flight
 
 1. Confirm the Ollama CLI is installed: `command -v ollama`. If missing:
-   - **Default mode**: print a warning (`ollama CLI not installed — recording as skipped`), set `STATUS=skipped`, and return to the caller **without falling back to another reviewer** — a missing reviewer must never be silently replaced. The caller's aggregate treats `skipped` as `inconclusive` (not eligible to merge). The multi-reviewer-loop wrapper normally pre-empts this by probing the binary in its own pre-flight.
+   - **Default mode**: print `ollama CLI not installed — recording as skipped`, set `STATUS=skipped` (inconclusive), and return to the caller without falling back to another reviewer. The multi-reviewer wrapper normally catches this in its own pre-flight.
    - **Interactive mode (`--interactive`)**: ask the user whether to install Ollama or skip. If skip, record `STATUS=skipped`.
 2. Confirm the Ollama server is reachable: `ollama list` must succeed. If it fails, in **default mode** set `STATUS=skipped` and print `ollama server not reachable — start it with \`ollama serve\` (recording as skipped)`; in **interactive mode** offer to start it.
 3. **Resolve `{OLLAMA_MODEL}`** (see "Model resolution" below). If resolution yields no usable model, set `STATUS=skipped` and return.
 4. Force review-only: set `REVIEWER_APPLIES=false` regardless of what the caller passed. If the caller passed `--reviewer-applies`, print: `--reviewer-applies has no effect on the ollama pass; Ollama is non-agentic, so the orchestrator always applies the fixes.`
-5. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`. Also record `{MAX_ITERATIONS}` — how many review → fix → re-review cycles this reviewer may run, resolved by the caller (multi-reviewer loop: per-entry `~max=<n>` suffix on the `--review-with` token → this loop's built-in default of `3`). `0` means **unlimited**, bounded by the 10-iteration safety guardrail in the Loop's step 6. Local models are the most common reason to want a small cap — `ollama~max=1` buys one review-and-fix pass without re-review rounds on slow hardware. Record `{MAX_EXPLICIT}` alongside it — `true` only when the cap came from a `~max=<n>` the user typed or saved — which step 6 uses to distinguish `capped` (a user-chosen budget, clean-equivalent for the merge gate) from `guardrail` (a built-in ceiling, inconclusive). The `--review-iterations` flag never reaches this loop; `~max` is the only way to move this cap. Also record `{OLLAMA_EFFORT}` — optional reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`), resolved by the caller (multi-reviewer loop: explicit `~effort=<level>` suffix → empty). Defaults to empty.
-6. **Resolve the per-file timeout wrapper.** Run it verbatim. Expand it, `OLLAMA_FLAGS`, and every other possibly-empty array only in the guarded form. An empty array (stock macOS) is a supported configuration, never a reviewer failure. See `~/.claude/lib/empty-array-expansion.md`:
+5. Record `{REPO_DIR}` (`git rev-parse --show-toplevel`), `{BRANCH_NAME}` (`git branch --show-current`), `{BASE_BRANCH}`, `{BUILD_CMD}`, and `{TEST_CMD}`. Also record `{MAX_ITERATIONS}` and `{MAX_EXPLICIT}` — this reviewer's cap on review → fix → re-review cycles and whether the user set it, resolved by the caller from a `~max=<n>` suffix (`ollama~max=1` buys one review-and-fix pass with no re-review rounds on slow hardware). Without one they are `3` and `false`; the fix tail's step 6 applies them, and `--review-iterations` never reaches this loop. Also record `{OLLAMA_EFFORT}` — optional reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`) from a `~effort=<level>` suffix, empty by default.
+
+Shell state may not survive between tool calls, so steps 6 and 7 and the whole Invocation section run as one command on every pass, with `BASE_BRANCH`, `OLLAMA_MODEL` and `OLLAMA_EFFORT` assigned at its top. End that command by printing the counters and both log paths; later steps read them from that output.
+
+6. **Resolve the per-file timeout wrapper.** Expand it, `OLLAMA_FLAGS`, and every other possibly-empty array only in the guarded form (`~/.claude/lib/empty-array-expansion.md`). An empty array (stock macOS) is a supported configuration, never a reviewer failure:
    ```bash
    TIMEOUT_CMD=()
    if command -v timeout >/dev/null 2>&1; then TIMEOUT_CMD=(timeout 600)
@@ -66,13 +66,11 @@ The caller passes `{OLLAMA_MODEL}` from the `--review-with` token: `ollama[<mode
   - **Default mode**: do NOT auto-pull (a multi-GB download). Set `STATUS=skipped` and print: `ollama: model '{OLLAMA_MODEL}' not installed — run \`ollama pull {OLLAMA_MODEL}\` (recording as skipped).` Return to the caller.
   - **Interactive mode (`--interactive`)**: ask whether to `ollama pull {OLLAMA_MODEL}` (then proceed) or skip (record `STATUS=skipped`).
 
-**Auto-select (`{OLLAMA_MODEL}` is empty)** — pick the most capable installed coding model:
-1. Parse `ollama list` into `{name, size}` rows (the `NAME` and `SIZE` columns). If the list is empty, set `STATUS=skipped` and print: `ollama: no models installed — run \`ollama pull qwen2.5-coder\` (recording as skipped).` Return.
-2. **Classify** each model as *coding-specialized* if its name (case-insensitive, ignoring the `:tag`) contains `coder`, `code`, or matches a known coding family: `qwen2.5-coder` / `qwen3-coder` / `codeqwen`, `deepseek-coder` / `deepseek-coder-v2`, `codestral`, `codellama` / `phind-codellama`, `codegemma`, `starcoder` / `starcoder2`, `granite-code`, `stable-code`, `wizardcoder`, `magicoder`, `opencoder`.
-3. **Rank within a tier by parameter size**, parsed from the model tag (`:32b` → 32, `:14b`, `:8b`, `:7b`, `:3b`, `:1.5b`; `b`=billions, `m`=millions of params). If a model has no parsable param tag, fall back to its `SIZE` column (on-disk GB) as a size proxy. Larger = more capable.
-4. **Prefer coding-specialized over general.** Choose the highest-ranked coding-specialized model. Break exact size ties by this family preference order: `qwen2.5-coder`/`qwen3-coder` > `deepseek-coder-v2`/`deepseek-coder` > `codestral` > `codellama` > `codegemma` > `starcoder2` > anything else.
-5. **Fallback**: if NO coding-specialized model is installed, pick the largest general-purpose instruct model (families `qwen`, `llama`, `deepseek`, `mistral`/`mixtral`, `gemma`, `phi`) by the same size ranking. Print a note that no dedicated coding model was found.
-6. Print the choice and the reason: `ollama: auto-selected {OLLAMA_MODEL} ({reason — e.g. "largest installed coding model"}).`
+**Auto-select (`{OLLAMA_MODEL}` is empty)** — pick from what `ollama list` reports, never from a remembered model name:
+1. If the list is empty, set `STATUS=skipped`, print `ollama: no models installed — pull a coding model with \`ollama pull <model>\` (recording as skipped).`, and return.
+2. Choose the largest installed coding-capable model: one whose name marks it as a code model (`coder`, `code`, or a family you recognize as code-specialized). Size is the parameter count in the tag (`:32b`, `:7b`), or the `SIZE` column when the tag has none.
+3. If no code model is installed, choose the largest general-purpose instruct model instead and say that no dedicated coding model was found. Skip embedding-only models.
+4. Print the choice and the reason: `ollama: auto-selected {OLLAMA_MODEL} ({reason — e.g. "largest installed coding model"}).`
 
 ### Invocation (per-file chunked review)
 
@@ -147,16 +145,16 @@ Then classify the pass:
 - **Total failure**: `REVIEWABLE > 0` and `REVIEW_ERRORS + PARSE_ERRORS >= REVIEWABLE`. No file yielded a usable verdict, so set `STATUS=cli-error` and exit. Print the last 80 lines of `$ERR_FILE`, and also the per-file `[ollama error reviewing …]` markers from `$LOG_FILE`, because in the exit-0 empty-response mode `$ERR_FILE` may hold only spinner noise. The check uses `>=`, not `==`, so it still fires if the counters overlap. The `REVIEWABLE > 0` guard keeps a rename-only diff, which has nothing to review, from reporting a hard error.
 - **Coverage gap**: otherwise, set `COVERAGE_GAP=true` when `REVIEW_ERRORS + PARSE_ERRORS + TRUNCATED > 0`, and `COVERAGE_GAP=false` when it is 0. A gap means the diff was only partially reviewed. Still process the findings from the parts that were reviewed.
 
-**Status override.** This is the loop's only coverage rule. Whenever this loop or the shared tail would set `STATUS=clean` or `STATUS=capped` while `COVERAGE_GAP=true`, set `STATUS=incomplete`, never `clean`. `incomplete` is inconclusive for the multi-reviewer aggregate and not eligible to merge, because part of the change was never reviewed. A `~max` budget never turns an unreviewed or unparseable diff into a merge-eligible pass.
+**Status override.** This is the loop's only coverage rule. Whenever this loop or the shared tail would set `STATUS=clean` or `STATUS=capped` while `COVERAGE_GAP=true`, set `STATUS=incomplete` instead. `incomplete` is inconclusive, because part of the change was never reviewed; a `~max` budget never turns an unreviewed or unparseable diff into a merge-eligible pass.
 
 ### Loop
 
-Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` from Pre-flight step 5 (`MAX_ITERATIONS=3`, `MAX_EXPLICIT=false` when the caller passed nothing). When `MAX_ITERATIONS=0` (unlimited), the effective ceiling is the 10-iteration safety guardrail.
+Initialize `ITERATION=0`, `STATUS=""`, and `MAX_ITERATIONS` / `MAX_EXPLICIT` from Pre-flight step 5.
 
 Every pass ends in the shared fix tail, which holds the apply rules and steps 4–6 (verify, push, re-loop) plus the report closing. Read it now:
 !read lib/review-fix-tail.md
 
-1. **Capture baseline**: `LOOP_START_SHA=$(git rev-parse HEAD)`.
+1. **Capture baseline**: record `git rev-parse HEAD` as `LOOP_START_SHA`.
 2. **Run the per-file chunked review** (above), collecting findings into `$LOG_FILE`. Re-run the Invocation block *in full* on every iteration. Re-derive the NUL-delimited `CHANGED_FILE` and `TOTAL_FILES` for the current HEAD, reset `REVIEWABLE_FILES=0`, `REVIEW_ERRORS=0`, `PARSE_ERRORS=0`, `TRUNCATED=0`, and `SKIPPED_EMPTY=0`, truncate `$LOG_FILE`/`$ERR_FILE` and `FILE_MAP`, and rebuild its numeric-ID/path pairs. `$ERR_FILE` is append-written with `2>>`, so a stale tail would otherwise dominate the "last 80 lines" printed on a later `cli-error`. The reset also stops a coverage gap from an earlier iteration from pinning `STATUS=incomplete` after a clean re-review of the new commits.
 3. **Parse, classify, and apply.** Run "Parsing and coverage" above; a total failure exits with `cli-error`. If there are no findings, set `STATUS=clean` (the status override applies) and exit the loop. Otherwise apply the findings per the shared tail's **Apply** section, with `{FIX_LABEL}` set to `ollama`. Local models hallucinate more than cloud agents, so be quick to drop a finding that is wrong, out of scope, or cites a line that doesn't exist.
 4. **Verify in the main thread**: the shared tail's step 4. Local models over-broaden fixes more than cloud agents, so its fix regression guard matters most here.
@@ -174,7 +172,7 @@ Model: {OLLAMA_MODEL}
 Branch: {BRANCH_NAME}
 Status: {STATUS}    # clean / capped / incomplete / guardrail / cli-error / broken-build / test-failed / rejected / skipped
 Coverage: {max(0, REVIEWABLE - REVIEW_ERRORS - PARSE_ERRORS - TRUNCATED)}/{REVIEWABLE} reviewable files fully reviewed ({REVIEW_ERRORS} invocation errors, {PARSE_ERRORS} parse errors, {TRUNCATED} truncated, {SKIPPED_EMPTY} skipped as empty-diff)    # any coverage gap → status `incomplete` (not eligible to merge); clamp the numerator at 0 — one file can be counted twice (e.g. a truncated diff whose response also fails to parse)
-Iterations: {ITERATION}/{MAX_ITERATIONS}    # denominator renders as ∞ when MAX_ITERATIONS=0; `capped` means this budget was spent, `guardrail` means a built-in ceiling cut the loop off
+Iterations: {ITERATION}/{MAX_ITERATIONS}    # denominator renders as ∞ when MAX_ITERATIONS=0
 Commits added: {N}
 Files modified: {file list}
 Truncated files: {any files whose diff exceeded the per-file budget, or "none"}
