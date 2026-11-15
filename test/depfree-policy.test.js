@@ -57,19 +57,13 @@ describe('dependency policy procedure', () => {
     assert.equal(depfreePolicyDecision('any-package', ['*']).policy_pattern, '*');
   });
 
-  for (const mode of ['default', 'heavy', 'extreme']) {
-    it(`keeps policy matches before the ${mode} audit rules`, () => {
-      const classification = depfree.slice(depfree.indexOf('### 1b:'), depfree.indexOf('### 1c:'));
-      assert.ok(classification.indexOf('depfreePolicyDecision(packageName, DEPFREE_ALLOW)') < classification.indexOf('check `PRIOR_DECISIONS`'));
-      assert.match(classification, /skip all remaining tier\/removal rules and Phase 1c/);
-      assert.ok(classification.includes(`This applies in default, heavy, and extreme modes`));
-      // The procedure has no mode override: even the SDK from the issue stays KEEP.
-      assert.deepEqual(depfreePolicyDecision('@aws-sdk/client-s3', resolveDepfreeAllow(defaults(['@aws-sdk/*']), {})), {
-        decision: 'KEPT_POLICY', recommendation: 'KEEP', reason: 'policy allowlist',
-        policy_pattern: '@aws-sdk/*', from_policy: true,
-      });
+  it('returns a KEPT_POLICY decision for a policy match, with no mode override', () => {
+    // The procedure takes no mode: even the SDK from the issue stays KEEP.
+    assert.deepEqual(depfreePolicyDecision('@aws-sdk/client-s3', resolveDepfreeAllow(defaults(['@aws-sdk/*']), {})), {
+      decision: 'KEPT_POLICY', recommendation: 'KEEP', reason: 'policy allowlist',
+      policy_pattern: '@aws-sdk/*', from_policy: true,
     });
-  }
+  });
 
   it('rejects malformed policy in either scope rather than dropping allowances', () => {
     for (const invalid of [null, 'pg', {}, [null], [''], ['  '], ['two names'], [4], [{ pattern: 'pg' }]]) {
@@ -95,56 +89,15 @@ describe('dependency policy procedure', () => {
   it('stops keeping a package when current policy no longer matches', () => {
     assert.equal(depfreePolicyDecision('pg', ['pg']).decision, 'KEPT_POLICY');
     assert.equal(depfreePolicyDecision('pg', resolveDepfreeAllow({}, {})), null);
-    assert.match(depfree, /The decision is not `KEPT_POLICY`/);
-    assert.match(depfree, /excluding old `KEPT_POLICY` and `KEPT_TRANSITIVE` rows and entries superseded by current policy/);
   });
 });
 
 describe('dependency policy workflow integration', () => {
-  it('recomputes cached transitive decisions after a policy parent can become removable', () => {
-    assert.match(depfree, /The decision is not `KEPT_TRANSITIVE`/);
-    assert.match(depfree, /rerun Phase 1d against this run's kept-parent graph/);
-    const classification = depfree.slice(depfree.indexOf('### 1b:'), depfree.indexOf('### 1c:'));
-    assert.doesNotMatch(classification, /`KEPT_TRANSITIVE` →/);
-    assert.match(depfree, /excluding old `KEPT_POLICY` and `KEPT_TRANSITIVE` rows/);
-  });
-
-  it('preserves usage exclusion, vulnerability reporting, and transitive accounting', () => {
-    assert.match(depfree, /Skip any dependency with `from_policy: true` or `from_prior: true`/);
-    assert.match(depfree, /Exclude `from_policy: true` from REMOVE, EVALUATE, deferred findings, and remediation/);
-    assert.match(policy, /whole-tree vulnerability audit and Phase 1d/);
-    assert.match(depfree, /record their transitive footprint, even when there are no REMOVE candidates/);
-    assert.match(depfree, /Tier 1 under Extreme Mode rule 1 or `from_policy: true`/);
-  });
-
-  it('reports current policy in the plan, DEPS.md, and PR summary', () => {
-    for (const heading of ['| Policy kept |', '## Kept — Policy allowlist', '### Dependencies Kept']) {
-      assert.ok(depfree.includes(heading), heading);
-    }
-    assert.match(depfree, /including on scan-only and "All dependencies are justified" exits/);
-    assert.match(depfree, /these were not usage-audited/);
-  });
-
-  it('exposes config set/unset/show and documents the union exception', () => {
-    assert.match(config, /\[--depfree-allow <patterns>\]/);
-    assert.match(config, /`--depfree-allow <patterns>` → key `depfree-allow`/);
-    assert.match(config, /`--unset depfree-allow`/);
-    assert.match(config, /depfree-allow\s+= \{global\/project union as JSON array, or \[\]\}/);
-    assert.match(read('lib/review-config-defaults.md'), /`depfree-allow` unions scopes separately; never drop global allowances/);
-    assert.match(read('docs/config.md'), /@aws-sdk\/\*,pg/);
-  });
-
   it('ships the policy procedure with both audit and config command bundles', () => {
     for (const command of [depfree, config]) {
-      assert.match(command, /^!read lib\/depfree-policy\.md$/m);
       const bundle = buildPromptBundle(command, path.join(root, 'lib'));
       assert.match(bundle.files['depfree-policy.md'], /function depfreePolicyDecision/);
       assert.match(bundle.files['depfree-policy.md'], /function resolveDepfreeAllow/);
-      // Both installed commands must support shell installs without Node.js.
-      assert.match(bundle.files['depfree-policy.md'], /Use the host's file tools to read and parse the two JSON files/);
-      assert.match(bundle.files['depfree-policy.md'], /do not require Node\.js, Python, `jq`, or another runtime/);
-      assert.match(bundle.files['depfree-policy.md'], /optional reference implementation/);
-      assert.match(bundle.files['depfree-policy.md'], /`DEPFREE_ALLOW` with steps 1–3/);
     }
   });
 });

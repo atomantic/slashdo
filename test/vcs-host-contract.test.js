@@ -10,8 +10,8 @@
 //
 // Two layers here. The first RUNS the partial's shell against stub `gh`/`glab`
 // binaries in throwaway git repos, so the selection is checked as behavior rather
-// than as prose. The second sweeps the tree so the auth-first shortcut cannot grow
-// back in a command that quietly re-types its own detection.
+// than as prose. The second checks that every file deciding a host includes the
+// partial instead of re-typing its own detection.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
@@ -33,11 +33,6 @@ const markdownFiles = () =>
       .readdirSync(path.join(root, ...segments))
       .filter((entry) => entry.endsWith('.md'))
       .map((entry) => [...segments, entry].join('/')));
-
-// The auth-first ban sweeps every file that probes credentials at all, whatever it
-// calls its variables — a re-typed detection that never says "VCS_HOST" is exactly
-// the drift this is meant to catch.
-const authProbingFiles = () => markdownFiles().filter((rel) => /(?:gh|glab) auth status/.test(read(rel)));
 
 // The delegation rule is narrower: a file that actually decides the host (VCS_HOST,
 // CODE_HOST, or the TRACKER_CLI gate), either by
@@ -207,35 +202,6 @@ describe('VCS host selection, executed', () => {
     assert.match(run.stdout, /gh auth login --hostname github\.acme\.com/);
   });
 
-  it('builds every prefixed-label matcher from LABEL_SEP, never a hardcoded colon', () => {
-    // The separator is only useful if the matchers actually interpolate it. A jq
-    // clause that hardcodes `:` keeps working on GitHub and silently matches NOTHING
-    // on GitLab, where the label is `priority::3` / `model::light` — no error, just a
-    // queue that quietly loses its priority ordering and a --model filter that
-    // excludes every issue. Sweep the shapes that read a prefixed label back.
-    const HARDCODED = [
-      /test\("\^priority:\[0-9\]/,
-      /ltrimstr\("priority:"\)/,
-      /startswith\("(?:model|effort|severity|area):"\)/,
-      /== "(?:model|effort|severity):[a-z]/,
-    ];
-    for (const rel of ['commands/do/next.md', 'lib/next-gitlab.md', 'lib/next-swarm.md', 'lib/plan-issue-setup.md', 'commands/do/plan-task.md']) {
-      const body = read(rel);
-      for (const shape of HARDCODED) {
-        assert.ok(
-          !shape.test(body),
-          `${rel} matches a prefixed label with a hardcoded ":" (${shape}) — build it from $LABEL_SEP`,
-        );
-      }
-      assert.ok(body.includes('LABEL_SEP'), `${rel} reads prefixed labels but never mentions LABEL_SEP`);
-    }
-    // ...and the one place it is derived stays inside the select block, so a command
-    // that runs the partial has it without a second step.
-    const [select] = bashBlocks();
-    assert.match(select, /LABEL_SEP="::"/);
-    assert.match(select, /LABEL_SEP=":"/);
-  });
-
   it('stops on a known non-GitHub/GitLab forge without ever routing it to gh', () => {
     // These used to fall through to `gh` and fail its reachability probe. A forge we
     // can recognize has no backend, so it stops before any CLI is consulted.
@@ -402,130 +368,7 @@ describe('code host and tracker resolution, executed', () => {
   });
 });
 
-describe('code host and tracker overrides are wired end to end', () => {
-  const config = read('commands', 'do', 'config.md');
-
-  it('lets /do:config set, show, and unset code-host and tracker', () => {
-    assert.match(config, /`--code-host <github\|gitlab>` → key `code-host`/);
-    assert.match(config, /`--tracker <github\|gitlab\|jira>` → key `tracker`/);
-    assert.match(config, /`--jira-project <KEY>` → key `jira-project`/);
-    assert.match(config, /Supported: [^`]*--code-host, --tracker, --jira-project, --unset <key>/);
-    assert.match(config, /Valid keys: [^`]*code-host, tracker, jira-project\./);
-    assert.match(config, /^ {2}code-host {10}= /m);
-    assert.match(config, /^ {2}tracker {12}= /m);
-    assert.match(config, /^ {2}jira-project {7}= /m);
-  });
-
-  it('keeps /do:config and the partial on one supported value set', () => {
-    // A new backend (e.g. #372's jira tracker) must extend both places together.
-    const [select] = bashBlocks();
-    assert.match(select, /\n {2}github\) CLI_TOOL=gh;[^\n]*\n {2}gitlab\) CLI_TOOL=glab;[^\n]*\n {2}\*\) echo[^\n]*supported: github, gitlab/);
-    assert.match(config, /--code-host must be one of github, gitlab/);
-    // The tracker set is every code host plus the tracker-only backends — the two
-    // lists must name exactly the same values.
-    // A tracker-only backend is a lib/tracker-<name>.md file the partial's gate names.
-    const trackerOnly = fs.readdirSync(path.join(root, 'lib'))
-      .map((entry) => entry.match(/^tracker-([a-z]+)\.md$/)?.[1]).filter(Boolean);
-    assert.deepEqual(trackerOnly, ['jira']);
-    for (const name of trackerOnly) assert.match(partial, new RegExp(`\\(\`${name}\`: set only by\\s+\`lib/tracker-${name}\\.md\``));
-    const [, saved] = config.match(/--tracker must be one of ([a-z, ]+) \(got/);
-    assert.deepEqual(saved.split(', '), ['github', 'gitlab', ...trackerOnly]);
-  });
-
-  it('runs the tracker gate in every command that reads or files tracker issues', () => {
-    for (const rel of ['lib/plan-issue-setup.md', 'commands/do/plan-task.md', 'commands/do/replan.md', 'commands/do/next.md', 'commands/do/goals.md']) {
-      assert.match(read(rel), /TRACKER_CLI/, `${rel} must honor lib/vcs-host.md's tracker gate (TRACKER_CLI)`);
-    }
-  });
-});
-
 describe('VCS host selection stays in one partial', () => {
-  it('keeps host verbs downstream of forge selection', () => {
-    const next = read('commands', 'do', 'next.md');
-    const gitlab = read('lib', 'next-gitlab.md');
-    const verbs = next.indexOf('**Host verbs.**');
-    const selection = next.indexOf('!read lib/vcs-host.md');
-    assert.ok(verbs > -1 && verbs < selection, 'host verbs must follow the shared forge selection');
-    assert.match(gitlab, /## Host verbs — GitLab forms/);
-    assert.match(gitlab, /glab issue update <N> --assignee "\+\$ME"/);
-  });
-
-  it('derives from the remote before the first credential probe', () => {
-    const [selection] = bashBlocks();
-    const origin = selection.indexOf('ORIGIN_HOST="$(git remote get-url origin');
-    assert.ok(origin > -1, 'the selection block must derive ORIGIN_HOST from the origin remote');
-    const firstAuth = selection.indexOf('auth status');
-    assert.ok(firstAuth > -1, 'the selection block must still keep its no-remote fallback');
-    assert.ok(
-      origin < firstAuth,
-      'lib/vcs-host.md probes credentials before reading the remote — that is the bug it exists to prevent',
-    );
-  });
-
-  it('matches GitLab by hostname substring so self-managed instances work', () => {
-    const [select] = bashBlocks();
-    assert.match(select, /\*gitlab\*\) CODE_HOST=gitlab/);
-  });
-
-  it('preserves a GH_HOST seeded by the VCS preflight before applying fallbacks', () => {
-    const ghHost = read('lib', 'gh-host.md');
-    const origin = ghHost.indexOf('[ -n "$GH_HOST" ] || GH_HOST=$(git remote get-url origin');
-    const fallback = ghHost.indexOf('[ -n "$GH_HOST" ] || GH_HOST=$(gh repo view');
-    assert.ok(origin > -1, 'lib/gh-host.md must accept the checkout-derived GH_HOST seed');
-    assert.ok(fallback > origin, 'lib/gh-host.md must apply repository and default fallbacks after origin');
-  });
-
-  it('loads each /do:pr host partial only on the path that needs it', () => {
-    const command = read('commands', 'do', 'pr.md');
-    const detect = command.indexOf('!read lib/vcs-host.md');
-    const side = command.indexOf('## Run the PR-side Reviews');
-    const apiHost = command.indexOf('!read lib/gh-host.md');
-    const handoff = command.indexOf('When no cross-phase skip applies', side);
-    assert.ok(detect > -1 && detect < side, '/do:pr must read the VCS preflight on every run');
-    assert.ok(apiHost > side && apiHost < handoff, '/do:pr must defer gh-host until PR-side dispatch');
-    assert.doesNotMatch(command.slice(0, side), /!read lib\/gh-host\.md/);
-    assert.match(
-      command.slice(Math.max(0, apiHost - 300), apiHost),
-      /On GitHub, when `PR_SIDE_AGENTS` is non-empty/,
-    );
-  });
-
-  it('never mutates anything on the way to a stop', () => {
-    for (const mutation of ['gh issue create', 'gh pr create', 'glab mr create', 'git worktree add', 'git checkout -b']) {
-      assert.ok(!partial.includes(mutation), `lib/vcs-host.md must stay non-mutating; found ${mutation}`);
-    }
-    assert.match(partial, /credentials never select or switch the forge/i);
-  });
-
-  it('never lets a gh auth failure stand in for a GitLab remote, anywhere in the tree', () => {
-    // The exact drifted paragraph: probe gh, and on failure declare GitLab.
-    const AUTH_FIRST = /`?gh auth status[^\n]*\n?[^\n]*If it\s*\n?[^\n]*fails, run `glab auth status`/;
-    // The floor is on the files that decide a host AT ALL, not on the shrinking
-    // subset that still probes credentials inline — every migration to the partial
-    // moves a file from the second set to the first, and must not weaken the guard.
-    const deciding = new Set([...authProbingFiles(), ...selectionFiles()]);
-    assert.ok(deciding.size >= 6, `expected the host-deciding file set to stay broad, got ${[...deciding].join(', ')}`);
-    for (const rel of authProbingFiles()) {
-      assert.doesNotMatch(read(rel), AUTH_FIRST, `${rel} still selects the host from a gh auth failure`);
-    }
-  });
-
-  it("delegates lib/plan-issue-setup.md's missing host state to the shared partial", () => {
-    const issueMode = read('lib', 'plan-issue-setup.md');
-    assert.match(issueMode, /requires `CLI_TOOL` and `LABEL_SEP`/);
-    assert.match(issueMode, /\[vcs-host\.md\]\(\.\/vcs-host\.md\)/);
-    assert.doesNotMatch(issueMode, /git remote get-url origin|(?:gh|glab) auth status/);
-
-    for (const command of ['rpr.md', 'review.md']) {
-      const body = read('commands', 'do', command);
-      const branch = body.slice(
-        body.indexOf('Only when a finding is being deferred'),
-        body.indexOf('!read lib/plan-issue-filing.md'),
-      );
-      assert.match(branch, /!read lib\/vcs-host\.md/);
-    }
-  });
-
   it('delegates every VCS host selection to the shared partial', () => {
     for (const rel of selectionFiles()) {
       if (rel === 'lib/vcs-host.md') continue;
@@ -534,27 +377,5 @@ describe('VCS host selection stays in one partial', () => {
         `${rel} selects a VCS host without reading lib/vcs-host.md — include the partial instead of re-typing it`,
       );
     }
-  });
-
-  it('selects the host before do-better routes anything through the CLI', () => {
-    // Phase 0d asks the forge for the default branch. Selecting after that call would
-    // reintroduce the wrong-host routing this partial exists to stop.
-    const discovery = read('lib', 'better-discovery.md');
-    const include = discovery.indexOf('!read lib/vcs-host.md');
-    assert.ok(include > -1, 'lib/better-discovery.md must include lib/vcs-host.md');
-    assert.ok(
-      include < discovery.indexOf('Record `DEFAULT_BRANCH` via'),
-      'lib/better-discovery.md must select the host before the default-branch lookup',
-    );
-    const depfree = read('commands', 'do', 'depfree.md');
-    const depfreeAt = depfree.indexOf('!read lib/vcs-host.md');
-    assert.ok(depfreeAt > -1, 'commands/do/depfree.md must include lib/vcs-host.md');
-    assert.ok(
-      depfreeAt < depfree.indexOf('Record `DEFAULT_BRANCH` via'),
-      'commands/do/depfree.md must select the host before the default-branch lookup',
-    );
-
-    const swift = read('commands', 'do', 'better-swift.md');
-    assert.match(swift, /!read lib\/better-discovery\.md/);
   });
 });

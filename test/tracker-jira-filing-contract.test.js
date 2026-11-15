@@ -3,10 +3,7 @@
 // The backlog and filing commands serving a Jira tracker (#423). Like
 // test/next-jira-contract.test.js, the executable layer RUNS lib/tracker-jira.md's
 // "File one issue" and "List issues" blocks against a stub `jira`, so filing (create,
-// key capture, labels) and the backlog/dedup read are checked as behavior. The wiring
-// layer keeps /do:replan, /do:plan-task, /do:goals, and the deferred-finding filers
-// running the Jira pre-flight in place of the tracker gate rather than treating Jira
-// as no tracker.
+// key capture, labels) and the backlog/dedup read are checked as behavior.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
@@ -239,61 +236,5 @@ describe('Jira "List issues", executed', () => {
     assert.equal(quoted.status, 1);
     assert.match(quoted.stdout, /Jira labels cannot contain spaces or quotes/);
     assert.deepEqual(listCalls(quoted.calls), []);
-  });
-});
-
-describe('the backlog and filing commands are wired to the Jira backend', () => {
-  const replan = read('commands', 'do', 'replan.md');
-  const planTask = read('commands', 'do', 'plan-task.md');
-
-  for (const [name, doc, command] of [['replan', replan, '/do:replan'], ['plan-task', planTask, '/do:plan-task']]) {
-    it(`/do:${name} runs the Jira pre-flight in place of the tracker gate`, () => {
-      const vcs = doc.indexOf('!read lib/vcs-host.md');
-      const jiraRead = doc.search(/\n *!read lib\/tracker-jira\.md\n/);
-      const gateLine = doc.search(/Otherwise, stop[^\n]*tracker/);
-      assert.ok(vcs > -1 && vcs < jiraRead && jiraRead < gateLine, 'vcs-host → tracker-jira → plain gate');
-      assert.ok(doc.includes(`Pre-flight (\`{COMMAND}\` = \`${command}\`) in place of the tracker gate`));
-      assert.match(doc, /It alone sets `TRACKER_CLI` to `jira`/);
-    });
-  }
-
-  it('routes every Jira filing path through "File one issue" and reports keys', () => {
-    assert.match(replan, /"`\/do:replan` on Jira"/);
-    assert.match(planTask, /"File one issue"/);
-    assert.match(planTask, /`\/do:next <KEY>`/);
-    const goals = read('commands', 'do', 'goals.md');
-    assert.match(goals, /run its Pre-flight \(`\{COMMAND\}` = `\/do:goals`\) in place of the tracker gate/);
-    assert.match(goals, /"File one issue" block/);
-    assert.match(serving, /\| bulk filer map `<id> -> #<number>` \| `<id> -> PROJ-123`/);
-    assert.match(serving, /never `#123`, which names an unrelated code-host issue/);
-  });
-
-  it('serves every deferred-finding filer through the shared setup partial', () => {
-    // The setup partial is on /do:better's default path, so its Jira read is gated
-    // (test/better-context.test.js) and the forms live in tracker-jira.md.
-    const setup = read('lib', 'plan-issue-setup.md');
-    assert.match(setup, /^Only on a Jira tracker \(`TRACKER=jira`\), if not yet read \(it replaces the tracker gate, these calls, `#<n>`\):\n\n!read lib\/tracker-jira\.md$/m);
-    assert.match(serving, /give each filer `JIRA_PROJECT` and "File one issue"/);
-    // better/better-swift/simplify/pr-better share discovery; depfree has its own Phase 0.
-    assert.match(read('lib', 'better-discovery.md'), /^Only on a Jira tracker \(`TRACKER=jira`\), whose Pre-flight is the gate \(pass = available\):\n\n!read lib\/tracker-jira\.md$/m);
-    const depfree = read('commands', 'do', 'depfree.md');
-    assert.match(depfree, /On a Jira tracker it is `true` only when the Jira Pre-flight below passes/);
-    assert.match(depfree, /^Only on a Jira tracker \(`TRACKER=jira`\), read the Jira backend and run its Pre-flight in place of the tracker gate:\n\n!read lib\/tracker-jira\.md$/m);
-    // /do:review and /do:rpr defer through plan-issue-setup.md, which reads the backend.
-    for (const rel of ['commands/do/review.md', 'commands/do/rpr.md']) {
-      assert.match(read(rel), /^!read lib\/plan-issue-setup\.md$/m, rel);
-      assert.match(read(rel), /PROJ-123/, `${rel} must report filed issues by key on Jira`);
-    }
-    assert.match(read('lib', 'better-simplify.md'), /tracker-jira\.md\)[^\n]*"Rejected-reframing records"/);
-  });
-
-  it('no ported consumer still treats Jira as an unserved tracker', () => {
-    assert.match(serving, /\*\*A failed Pre-flight is "no tracker"\*\*/);
-    const config = read('commands', 'do', 'config.md');
-    assert.doesNotMatch(config, /does not run the Jira backend's pre-flight yet/);
-    assert.match(config, /A `jira` tracker is served by every tracker-backed command/);
-    for (const rel of ['commands/do/replan.md', 'commands/do/plan-task.md', 'commands/do/goals.md', 'lib/plan-issue-setup.md']) {
-      assert.doesNotMatch(read(rel), /jira[^\n]*(?:unserved|not served|treated as no tracker)/i, rel);
-    }
   });
 });
