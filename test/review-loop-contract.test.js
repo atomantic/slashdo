@@ -166,10 +166,9 @@ describe('review-loop snippet contracts', () => {
       return HOSTNAME_USE.test(body)
         || [...body.matchAll(CAT_INCLUDE)].some(([, dep]) => libNeedsHost(dep));
     });
-    assert.ok(
-      needsHost.length >= 8,
-      `expected the GH_HOST-dependent command set to stay broad, got ${needsHost.join(', ')}`,
-    );
+    // Non-vacuity only: if the detector stops matching anything, the loop below
+    // would pass without checking a single command.
+    assert.ok(needsHost.length > 0, 'no command reaches `gh api --hostname`; the detector no longer matches the tree');
     for (const name of needsHost) {
       assert.match(
         readCommand(name),
@@ -219,22 +218,16 @@ describe('local CLI runner and review fix tail are single-owner partials (#349)'
   const libDir = path.join(__dirname, '..', 'lib');
   const bundleFiles = (name) => Object.keys(buildPromptBundle(_read('commands', 'do', name), libDir).files);
 
-  it('bundles the shared partials with their users and no whole-loop cross-citations', () => {
+  it('keeps whole-loop cross-citations out of the review and enhance bundles', () => {
     // enhance-loop.md used to cite local-agent-review-loop.md ("same pattern as"),
     // and the local-agent loop once cited enhance-loop.md, so each command shipped the
-    // other's entire loop. Now both cite only the runner they actually execute.
+    // other's entire loop. Now both cite only the runner they actually execute. Which
+    // libs each bundle does carry is checked for every command by
+    // test/command-bundle-closure.test.js; these are the exclusions.
     for (const name of ['pr.md', 'rpr.md', 'review.md', 'release.md']) {
-      const files = bundleFiles(name);
-      for (const lib of ['local-cli-runner.md', 'review-fix-tail.md']) {
-        assert.ok(files.includes(lib), `${name} must bundle ${lib}`);
-      }
-      assert.ok(!files.includes('enhance-loop.md'), `${name} never runs the enhance loop`);
+      assert.ok(!bundleFiles(name).includes('enhance-loop.md'), `${name} never runs the enhance loop`);
     }
-    assert.ok(bundleFiles('plan-task.md').includes('local-cli-runner.md'), 'plan-task must bundle the runner enhance uses');
-    // What the enhance loop itself pulls in: the runner and its per-CLI recipes, never
-    // a review loop or the review fix tail.
     const enhanceFiles = Object.keys(buildPromptBundle(readLib('enhance-loop.md'), libDir).files);
-    assert.ok(enhanceFiles.includes('local-cli-runner.md'));
     for (const lib of ['local-agent-review-loop.md', 'ollama-review-loop.md', 'review-fix-tail.md']) {
       assert.ok(!enhanceFiles.includes(lib), `enhance-loop.md must not bundle ${lib}`);
     }

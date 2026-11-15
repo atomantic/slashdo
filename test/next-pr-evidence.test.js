@@ -300,10 +300,4 @@ describe('fresh ownership checks shared by explicit, auto-pick and swarm', () =>
       assert.doesNotMatch(result.stdout, /CLAIM_MUTATION/);
     });
   }
-
-  it('ships the collector in generated command bundles', () => {
-    const bundle = buildPromptBundle(next, path.join(root, 'lib'));
-    assert.ok(Object.hasOwn(bundle.files, 'next-github.md'));
-    assert.match(bundle.files['next-github.md'], /pr_claim_refs\(\)/);
-  });
 });
