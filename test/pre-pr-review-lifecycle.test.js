@@ -8,8 +8,11 @@ const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const guide = fs.readFileSync(path.join(root, 'lib/pre-pr-review-lifecycle.md'), 'utf8');
 const blocks = [...guide.matchAll(/```bash\n([\s\S]*?)```/g)].map(m => m[1]);
+const [readNote, recordNote] = blocks;
 
-it('executes the installed lifecycle recipe across retries, feedback pushes and new deliveries', t => {
+it('executes the lifecycle note across a creation retry, a new commit and a new branch', t => {
+  assert.equal(blocks.length, 2, 'the partial carries one read block and one record block');
+  assert.doesNotMatch(blocks.join('\n'), /\bnode\b/, 'the lifecycle blocks must not need node in the target repo');
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-lifecycle-'));
   t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
   const git = (...args) => {
@@ -17,45 +20,35 @@ it('executes the installed lifecycle recipe across retries, feedback pushes and 
     assert.equal(run.status, 0, run.stderr);
     return run.stdout.trim();
   };
-  const run = (n, overrides = {}) => spawnSync('bash', ['-eu', '-c', blocks[n]], {
-    cwd, encoding: 'utf8', env: { ...process.env, DEFAULT_BRANCH: 'main', PR_URL: '', ...overrides },
-  });
-  const check = overrides => {
-    const result = run(0, overrides);
-    assert.equal(result.status, 0, result.stderr);
-    return JSON.parse(result.stdout);
+  const bash = script => {
+    const run = spawnSync('bash', ['-eu', '-c', script], { cwd, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    return run.stdout.trim();
   };
+  const read = () => bash(readNote);
+  const record = status => bash(recordNote.replace('{LOCAL_OVERALL_STATUS}', () => status));
   const commit = () => git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'change');
-  git('init', '-q', '-b', 'delivery');
-  git('remote', 'add', 'origin', 'https://github.com/example/repo.git');
+
+  git('init', '-q', '-b', 'feat/delivery.v1');
   commit();
-  const head = git('rev-parse', 'HEAD');
-  const legacy = check({ PR_URL: 'https://github.com/example/repo/pull/older' });
-  assert.equal(legacy.legacyPublished, true);
-  assert.equal(legacy.reuseLocalPhase, false);
-  assert.equal(legacy.receipt, null);
-  assert.equal(check().reuseLocalPhase, false);
-  const completed = { LOCAL_OVERALL_STATUS: 'clean', LOCAL_PHASE_START_SHA: head, LOCAL_PHASE_COMMITS: '0' };
-  assert.notEqual(run(1, { ...completed, LOCAL_OVERALL_STATUS: 'pending' }).status, 0);
-  assert.equal(check().reuseLocalPhase, false);
-  assert.equal(run(1, { ...completed, LOCAL_OVERALL_STATUS: 'inconclusive' }).status, 0);
-  assert.equal(check().reuseLocalPhase, false);
-  assert.equal(check().retryIncompleteLocalPhase, true);
-  assert.equal(run(1, completed).status, 0);
-  assert.equal(check().reuseLocalPhase, true); // PR creation retries
-  const PR_URL = 'https://github.com/example/repo/pull/1';
-  assert.equal(run(2, { PR_URL }).status, 0);
-  assert.equal(run(2, { PR_URL }).status, 0); // crash/restart binding retry
-  for (let n = 0; n < 2; n++) {
-    commit();
-    const resumed = check({ PR_URL });
-    assert.equal(resumed.reuseLocalPhase, true);
-    assert.equal(resumed.receipt.reviewedHead, head);
-    assert.notEqual(resumed.receipt.reviewedHead, git('rev-parse', 'HEAD'));
-  }
-  assert.notEqual(run(0, { PR_URL: PR_URL.replace('/1', '/2') }).status, 0);
-  assert.notEqual(run(0, { PR_URL, DEFAULT_BRANCH: 'other' }).status, 0);
-  git('checkout', '-qb', 'new-task');
-  assert.equal(check().reuseLocalPhase, false);
-  assert.notEqual(run(0, { PR_URL }).status, 0);
+  assert.equal(read(), 'no local review recorded for HEAD');
+
+  record('inconclusive');
+  assert.equal(read(), 'local review recorded for HEAD: inconclusive');
+  record('clean');
+  assert.equal(read(), 'local review recorded for HEAD: clean'); // PR creation retry reuses it
+  assert.equal(read(), 'local review recorded for HEAD: clean'); // and stays readable
+
+  commit(); // a rebase or new commit moves HEAD: the changed work is reviewed again
+  assert.equal(read(), 'no local review recorded for HEAD');
+  assert.match(git('config', '--get', 'branch.feat/delivery.v1.slashdo-local-review'), /^[a-f0-9]{40} clean$/);
+
+  git('checkout', '-qb', 'new-task'); // same HEAD, different delivery
+  assert.equal(read(), 'no local review recorded for HEAD');
+  record('partial');
+  assert.equal(read(), 'local review recorded for HEAD: partial');
+
+  git('checkout', '-q', 'feat/delivery.v1');
+  git('branch', '-qD', 'new-task'); // git drops the note with the branch
+  assert.equal(spawnSync('git', ['config', '--get', 'branch.new-task.slashdo-local-review'], { cwd }).status, 1);
 });

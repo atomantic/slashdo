@@ -73,21 +73,24 @@ Before committing, ensure the fork is up to date with upstream:
    ```bash
    git rebase --autostash upstream/{UPSTREAM_DEFAULT_BRANCH}
    ```
-   If rebase conflicts occur, abort and inform the user — do not auto-resolve.
+   If the rebase conflicts, resolve it and continue per [lib/rebase-conflict-resolution.md](../../lib/rebase-conflict-resolution.md); abort only under that playbook's last-resort rule, and then tell the user what was ambiguous.
+
+## Read Upstream's Contribution Rules
+
+Upstream's rules shape the branch, the commits and the PR, so read them before committing:
+
+- `CONTRIBUTING.md` (repo root, `.github/` or `docs/`) and any agent or developer guide it points to: branch naming, commit format, sign-off (DCO) or CLA requirements, required tests, changelog expectations.
+- The PR/MR template: `.github/PULL_REQUEST_TEMPLATE.md` or a file under `.github/PULL_REQUEST_TEMPLATE/` (also at the repo root or under `docs/`), or `.gitlab/merge_request_templates/` on GitLab.
+
+Follow what they say in the steps below; they take precedence over this command's defaults. If existing commits on the branch already break a rule you cannot fix without rewriting the user's history, tell the user rather than rewriting it.
 
 ## Commit and Push
 
-1. **If on the fork's default branch, create a feature branch first:**
-   - Check if `{CURRENT_BRANCH}` equals `{FORK_DEFAULT_BRANCH}`
-   - If so, create a feature branch named for the change (e.g. `git checkout -b fix/<short-description>`) so the PR doesn't tie up the fork's default branch
-   - Update `{CURRENT_BRANCH}` to the new branch name and print the new flow
+1. **If on the fork's default branch, create a feature branch first** (`{CURRENT_BRANCH}` equals `{FORK_DEFAULT_BRANCH}`), named per upstream's branch convention, else for the change (e.g. `git checkout -b fix/<short-description>`), so the PR doesn't tie up the fork's default branch. Update `{CURRENT_BRANCH}` and print the new flow.
 
-2. **Identify changes to commit**:
-   - Run `git status` and `git diff --stat` to see what changed
-   - If there are no changes, inform the user and stop
-   - Do NOT use `git add -A` or `git add .` — add specific files by name
+2. **Identify changes to commit**: run `git status` and `git diff --stat`. If there are no changes and no unpushed commits, tell the user and stop. Add files by name rather than `git add -A` / `git add .`, which sweep in unrelated files.
 
-3. **Commit** following these conventions (and write no changelog entry — upstream controls that):
+3. **Commit** following upstream's commit rules. Where upstream states none, these are the fallback (and write no changelog entry unless upstream asks contributors for one):
 
 !`cat ~/.claude/lib/commit-conventions.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/fpr.md)")/../../lib/commit-conventions.md"`
 
@@ -98,50 +101,26 @@ Before committing, ensure the fork is up to date with upstream:
 
 ## Local Code Review (REQUIRED GATE)
 
-Fork PRs go to upstream maintainers who can't easily ask for changes — getting it right the first time matters more here than on internal PRs.
+Upstream maintainers cannot easily ask a fork contributor for changes, so getting it right the first time matters more here than on an internal PR.
 
 <review_gate>
 
-1. Fetch upstream default branch for accurate diff:
-   ```bash
-   git fetch upstream {UPSTREAM_DEFAULT_BRANCH}
-   ```
-2. Run `git diff upstream/{UPSTREAM_DEFAULT_BRANCH}...{CURRENT_BRANCH}` to get the list of changed files
-3. For every changed file:
-   a. Read the entire file using the Read tool (not just diff hunks)
-   b. Review it under the review preferences below
-   c. For each finding, quote the specific code line and explain why it's a problem
-4. After reviewing all files, verify: does the code actually deliver what the commits claim?
+1. Fetch the upstream default branch for an accurate diff: `git fetch upstream {UPSTREAM_DEFAULT_BRANCH}`
+2. List the changed files with `git diff --name-only upstream/{UPSTREAM_DEFAULT_BRANCH}...{CURRENT_BRANCH}`
+3. For every changed file, read the whole file, not only the diff hunks, and review it under the review preferences below. Each finding quotes the specific line and names the concrete wrong outcome.
+4. Check that the code delivers what the commits claim.
 5. Print a review summary table: | finding | file | line | severity | fixable |
-6. **Worthiness check**: Classify all findings before acting on them:
-   - **Fix and recommit** any finding that touches correctness, security, logic, data integrity, or API contracts
-   - **Note but don't block** on pure style nitpicks, naming preferences, or "consider..." suggestions — if ALL findings are this type, proceed without fixing and mention them briefly in the PR description
-7. **Push fix commits** to the remote if any were made:
-   ```bash
-   git push -u origin {CURRENT_BRANCH}
-   ```
-8. Only after printing the review summary may you proceed to "Open the PR"
+6. Fix and recommit any finding that touches correctness, security, logic, data integrity or API contracts. Pure style or naming suggestions do not block: mention them briefly in the PR description instead.
+7. Push any fix commits: `git push -u origin {CURRENT_BRANCH}`
+8. Continue to "Open the {CR_NOUN}" only after printing the summary table.
 
-If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.
+If the diff touches more than 15 files, delegate later batches to a sub-agent to keep context clean.
 
 </review_gate>
 
 Review preferences to apply to each file:
 
 !`cat ~/.claude/lib/review-preferences.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/fpr.md)")/../../lib/review-preferences.md"`
-
-Verification — confirm before proceeding:
-- [ ] Read every changed file in full (not just diffs)
-- [ ] Every finding names a concrete wrong outcome, not a style preference
-- [ ] Quoted specific code for each finding
-- [ ] Printed a review summary table with findings
-
-## Check for Upstream Contributing Guidelines
-
-Before opening the PR, check if upstream has contribution guidelines:
-- Look for `CONTRIBUTING.md`, `.github/PULL_REQUEST_TEMPLATE.md`, or similar
-- If a PR template exists, use it for the PR body structure
-- If contribution guidelines mention branch naming, commit format, or other requirements, flag any violations to the user
 
 ## Open the {CR_NOUN}
 
@@ -174,11 +153,10 @@ glab mr create \
   --yes
 ```
 
-- Write a clear title and rich description
-- If a PR/MR template was found, follow its structure
-- Print the resulting {CR_NOUN} URL so the user can review it
+- Fill in upstream's PR/MR template when it has one (passing `--body`/`--description` bypasses it, so the CLI will not apply it for you) and follow its title rules; otherwise write a clear title and a description of what changed, why, and how it was verified.
+- Print the resulting {CR_NOUN} URL so the user can review it.
 
 ## Important
 
-- Do NOT merge the {CR_NOUN} — upstream maintainers handle that
-- If the fork is significantly behind upstream, warn the user about potential merge conflicts
+- Do not merge the {CR_NOUN}; upstream maintainers handle that.
+- If the fork is significantly behind upstream, warn the user about potential merge conflicts.

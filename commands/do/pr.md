@@ -30,69 +30,65 @@ Print: `VCS host: {VCS_HOST} (via {CLI_TOOL})`.
 
 ## Detect Branches
 
-1. **Detect the default branch**:
-   - GitHub: `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`
-   - GitLab: `glab repo view -F json 2>/dev/null` and read `.default_branch` (fallback: `git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@'`)
-   - This yields the repo's default branch (e.g., `main`, `master`, `develop`)
-2. **Determine the current branch** — use `git branch --show-current`
-3. If you're already on the default branch, commit to a new feature branch named after the work being done
-4. The PR (GitHub) / merge request (GitLab) will target the **default branch** as base
+1. **Default branch** — resolve it git-natively, the way `/do:next` does: it costs no API round-trip and still works during an auth hiccup. Ask the forge only when both git lookups come back empty (GitHub: `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`; GitLab: `glab repo view -F json`, reading `.default_branch`):
+   ```bash
+   DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)"
+   [ -n "$DEFAULT_BRANCH" ] || DEFAULT_BRANCH="$(git remote show origin 2>/dev/null | sed -n '/HEAD branch: (unknown)$/d; s/.*HEAD branch: //p')"
+   echo "DEFAULT_BRANCH=$DEFAULT_BRANCH"
+   ```
+2. **Current branch** — `git branch --show-current`. If it is the default branch, create a feature branch named for the work (following the project's branch-naming convention when it has one) before committing.
+3. The PR (GitHub) / merge request (GitLab) targets the default branch.
 
 Print: `PR flow: {current_branch} → {default_branch}`
 
-## Resume the delivery before any local reviewer
+## One local review per delivery
 
-Read the durable pre-PR lifecycle procedure before initializing or dispatching local review. Apply its resume gate now and its completion/publication writes at the steps below. Local reviewers run once before opening this delivery's PR/MR; feedback/CI pushes and resumed shipping continue the PR-side workflow. Explicit user-requested re-review remains possible.
+Local review runs once per delivery, before the PR/MR opens. Read the lifecycle rules now and apply check 1 (an open PR/MR already exists) before anything else; check 2 and the record step apply at the points named below.
 
 !read lib/pre-pr-review-lifecycle.md
 
 ## Commit and Push
 
-- Commit all changes to the current branch, following these conventions:
+- Commit all changes to the current branch. The project's own commit conventions (CLAUDE.md / AGENTS.md / CONTRIBUTING, or the style of its recent history) come first; these are the fallback:
 
 !`cat ~/.claude/lib/commit-conventions.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/pr.md)")/../../lib/commit-conventions.md"`
 
-- **Fetch the default branch and review against the remote-tracking ref — do not rebase by default.** Run `git fetch origin {default_branch}` (never `git fetch origin {default_branch}:{default_branch}`: it rewrites the user's local default branch and fails in a linked worktree whose parent repo has it checked out). **Record `origin/{default_branch}` as `{REVIEW_BASE}`** and pass it to the review loops as their `{BASE_BRANCH}` input; that is the only name they read. `git diff {REVIEW_BASE}...HEAD` is anchored on the merge-base, so it already excludes commits that landed only on the default branch — a branch that is merely behind needs no rebase for its diff to contain only its own changes.
-  - **Default-branch movement alone is not a reason to rebase.** A ready branch that is conflict-free keeps its HEAD, and with it the validation and reviews already recorded against that HEAD; do not rewrite it or restart CI/review just because the base advanced. Where the host permits merging a branch that is behind, publish and merge it as it is.
-  - **Update the branch only for a concrete reason:** (1) it actually conflicts with the default branch (`git merge-tree --write-tree {REVIEW_BASE} HEAD` exits non-zero — git ≥ 2.38, otherwise trial-merge and abort — or the host reports the PR as conflicting); (2) the host enforces an up-to-date branch (strict required status checks / "require branches to be up to date" — the host refuses to merge a branch that is behind); or (3) there is evidenced integration risk, i.e. semantic overlap: base-only commits (`git diff --name-only HEAD...{REVIEW_BASE}`) touch files, symbols, or generated artifacts this branch also changes (`git diff --name-only {REVIEW_BASE}...HEAD`) in a way a textual merge would not flag.
-  - To update the branch, `git rebase {REVIEW_BASE}`. If the rebase hits conflicts, **resolve them and continue the rebase**. Do not abort or stop merely because conflicts exist. Follow [lib/rebase-conflict-resolution.md](../../lib/rebase-conflict-resolution.md): inspect the replayed commit and both sides, resolve human-authored sources semantically, regenerate generated artifacts from their canonical inputs, run the focused checks, stage the resolution, and repeat `git rebase --continue` until complete. Only the playbook's last-resort, evidence-backed ambiguity may abort the rebase; a generated-file conflict alone never qualifies.
-  - **A changed HEAD invalidates head-bound results.** After any rebase that changes HEAD, rerun affected validation, required hosted reviews and checks on the new HEAD before merging; preserve a completed pre-PR local phase for this delivery; a clean rebase does not carry old verdicts forward.
-- Push the branch — use `--force-with-lease` (never a bare `--force`) only if a rebase above rewrote already-pushed history, otherwise the plain form below:
+- **Fetch the default branch and review against the remote-tracking ref; do not rebase by default.** Run `git fetch origin {default_branch}` (not `git fetch origin {default_branch}:{default_branch}`, which rewrites the user's local default branch and fails in a linked worktree whose parent repo has it checked out). Record `origin/{default_branch}` as `{REVIEW_BASE}` and pass it to the review loops as their `{BASE_BRANCH}`. `git diff {REVIEW_BASE}...HEAD` is anchored on the merge-base, so a branch that is merely behind already diffs to only its own changes.
+  - **Default-branch movement alone is not a reason to rebase.** A conflict-free branch keeps its HEAD, and with it the validation and reviews recorded against that HEAD. Where the host permits merging a branch that is behind, publish and merge it as it is.
+  - **Update the branch only for a concrete reason:** (1) it conflicts with the default branch (`git merge-tree --write-tree {REVIEW_BASE} HEAD` exits non-zero — git ≥ 2.38, otherwise trial-merge and abort — or the host reports the PR as conflicting); (2) the host enforces an up-to-date branch (strict required status checks); or (3) there is evidenced integration risk: base-only commits (`git diff --name-only HEAD...{REVIEW_BASE}`) touch files, symbols or generated artifacts this branch also changes (`git diff --name-only {REVIEW_BASE}...HEAD`) in a way a textual merge would not flag.
+  - To update the branch, `git rebase {REVIEW_BASE}`. A conflict is a step to resolve, not a reason to stop: follow [lib/rebase-conflict-resolution.md](../../lib/rebase-conflict-resolution.md) and continue the rebase until it completes. Only that playbook's last-resort, evidence-backed ambiguity may abort it.
+  - **A changed HEAD invalidates head-bound results.** After a rebase that changes HEAD, rerun the affected validation, required hosted reviews and checks on the new HEAD before merging. Before the PR exists, the lifecycle note no longer matches, so the local review covers the new head too; once the PR is open, a rebase does not restart the local phase.
+- Push the branch. Use `--force-with-lease` (never a bare `--force`) only if a rebase above rewrote already-pushed history:
 
 !read lib/upstream-push.md
 
+Now apply the lifecycle's check 2 (the local phase already finished on this HEAD).
+
 ## Local validation policy
 
-Follow the target repository's declared local gate before each push: lint/format checks, fast structural invariants and focused tests for changed behavior. Do not turn that gate into broad transitive server, browser, database, build or smoke validation by default; broad local validation is explicit opt-in unless the repository requires it. Batch bounded review corrections before rerunning the affected focused checks. Report exactly what ran and what remains for hosted CI: a focused pass is never full-suite proof and must never attest an unrun CI suite. Required hosted checks, configured reviews, current-head pins and repository current-base/merge safety gates still apply. Base movement alone does not require a rebase or restart of head validation.
+Follow the target repository's declared local gate before each push: lint/format checks, fast structural invariants and focused tests for changed behavior. Broad transitive validation (full server, browser, database, build or smoke suites) is opt-in unless the repository requires it locally. Batch bounded review corrections before rerunning the affected focused checks. Report exactly what ran and what is left to hosted CI: a focused pass is not full-suite proof and must not be reported as one. Required hosted checks, configured reviews and the repository's merge safety gates still apply.
 
 ## Local Code Review (REQUIRED GATE)
 
+This gate is required whenever the lifecycle checks did not skip it.
+
 <review_gate>
 
-1. Read commit messages to understand what this change claims to do
-2. Run `git diff {REVIEW_BASE}...{current_branch}` to get the list of changed files — the base resolved in "Commit and Push" (`origin/{default_branch}`, freshly fetched; the three-dot form starts at the merge-base, so base-only commits never appear)
-3. For every changed file:
-   a. Read the entire file using the Read tool (not just diff hunks)
-   b. Review it under the review preferences below
-   c. For each finding, quote the specific code line and explain why it's a problem
-4. After reviewing all files, verify: does the code actually deliver what the commits claim?
+1. Read the commit messages to understand what this change claims to do.
+2. List the changed files with `git diff --name-only {REVIEW_BASE}...{current_branch}` (the base resolved in "Commit and Push").
+3. For every changed file, read the whole file, not only the diff hunks, and review it under the review preferences below. Each finding quotes the specific line and names the concrete wrong outcome; a style preference is not a finding.
+4. Check that the code delivers what the commits claim.
 5. Print a review summary table: | finding | file | line | severity | fixable |
-6. Fix any issues, run the repository local gate and focused tests for the changed code paths (following Local validation policy above), then **commit and push those fixes** — using "Open the PR"'s upstream-derived push below (see [lib/upstream-push.md](../../lib/upstream-push.md) for why), never a bare `git push` and never a destination built from the local branch name. Leaving the fixes uncommitted is invisible to that section's assertion, which compares against the upstream ref and so only ever sees *committed* work
-7. Only after printing the review summary may you proceed to "Pre-PR Local Reviews"
+6. Fix the findings, run the local gate and focused tests for the changed paths (Local validation policy above), then commit and push the fixes with the upstream-push procedure above. Uncommitted fixes would not be in the PR.
+7. Continue to "Pre-PR Local Reviews" only after printing the summary table.
 
-If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.
+If the diff touches more than 15 files, delegate later batches to a sub-agent to keep context clean.
 
 </review_gate>
 
 Review preferences to apply to each file:
 
 !`cat ~/.claude/lib/review-preferences.md 2>/dev/null || cat "$(dirname "$(readlink -f .claude/commands/do/pr.md)")/../../lib/review-preferences.md"`
-
-Verification — confirm before proceeding:
-- [ ] Read every changed file in full (not just diffs)
-- [ ] Every finding names a concrete wrong outcome, not a style preference
-- [ ] Quoted specific code for each finding
-- [ ] Printed a review summary table with findings
 
 ## Pre-PR Local Reviews
 
@@ -101,97 +97,56 @@ Partition `REVIEW_AGENTS` into two ordered sublists, preserving relative order:
 - `LOCAL_AGENTS` — every entry that is neither `copilot` nor an `@<login>`: `codex`, `agy`, `claude`, `grok`, `pi`, `cursor`, `opencode`, `ollama[…]`, `cmd[<invocation>]`. These review the working tree locally and need no PR.
 - `PR_SIDE_AGENTS` — `copilot` plus every `@<login>` entry; these review the PR cloud-side and need it to exist.
 
-**Only when no PR/MR exists, the lifecycle resume gate did not restore a completed phase and `LOCAL_AGENTS` is non-empty**, run the multi-reviewer loop now, **before the PR is created**, over `LOCAL_AGENTS` only, so every local reviewer's fixes land before the PR opens. Pass `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`, and `{REVIEW_MODELS}` (the saved per-agent default models — every local reviewer but `cmd` reads it). Record the result as `LOCAL_OVERALL_STATUS`.
+Unless the lifecycle checks skipped this phase, and when `LOCAL_AGENTS` is non-empty, run the **multi-reviewer wrapper** (under "Reviewer loop bodies" below) over `LOCAL_AGENTS` now, before the PR is created, so every local reviewer's fixes land before the PR opens. Pass `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` and `{REVIEW_MODELS}` (the saved per-agent default models; every local reviewer but `cmd` reads it). Record the result as `LOCAL_OVERALL_STATUS` (`clean` when `LOCAL_AGENTS` is empty).
 
-- If `LOCAL_OVERALL_STATUS` is `dirty` (broken build / test failure / rejected), **abort before creating the PR** — print the proximate failure and stop.
-- Any other status (`clean`, `partial`, `inconclusive`) allows proceeding — a non-clean local pass is a signal to the user, not a hard block on PR creation.
+- `dirty` (broken build, test failure, rejected): stop before creating the PR and print the proximate failure.
+- `clean`, `partial` or `inconclusive`: proceed. A non-clean local pass is a signal to the user, not a block on PR creation.
 
-**If `LOCAL_AGENTS` is empty**, skip this section.
-
-This phase hands off to the **multi-reviewer wrapper** (under "Reviewer loop bodies" below) over `LOCAL_AGENTS` — its own gated `!read`s are the dispatch for every local-agent slug, `cmd` included.
-
-For a new delivery only, after this phase persist its status and original reviewed head using **Record the completed phase** in the lifecycle procedure. Do not overwrite a restored receipt. An incomplete reviewer attempt is not successful completion.
+Then record the finished phase per the lifecycle rules.
 
 ## Open the PR
 
-- **First, assert the branch's commits reached the remote.** The Local Code Review gate and every pre-PR local reviewer commit their fixes onto this branch; if a push step didn't run, `gh pr create` opens a PR missing those fixes. Confirm `git log --oneline @{u}..HEAD` is empty; if it isn't, push first — deriving the destination from the branch's upstream config the same way [lib/upstream-push.md](../../lib/upstream-push.md) does, as **one block** (shell variables do not persist across Bash calls). Unlike that shared rule's default, an unpublished branch here means an earlier push step didn't run — refuse rather than silently auto-publishing this late:
-
-  ```bash
-  BR="$(git branch --show-current)"
-  PUSH_REMOTE="$(git config --get "branch.$BR.remote")"
-  PUSH_BRANCH="$(git config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
-  # Inherited base tracking (a worktree cut from origin/main auto-tracks it) is not a publication
-  # target: treat it as unpublished so feature commits never reach the default branch.
-  BASE_BRANCH="$(git symbolic-ref --quiet --short "refs/remotes/$PUSH_REMOTE/HEAD" 2>/dev/null | sed "s@^$PUSH_REMOTE/@@")"
-  [ -n "$BASE_BRANCH" ] || BASE_BRANCH="$(git remote show "$PUSH_REMOTE" 2>/dev/null | sed -n '/HEAD branch: (unknown)$/d; s/.*HEAD branch: //p')"
-  if { [ "$PUSH_BRANCH" = "refs/heads/${BASE_BRANCH:-main}" ] || { [ -z "$BASE_BRANCH" ] && [ "$PUSH_BRANCH" = refs/heads/master ]; }; } && [ "$BR" != "${PUSH_BRANCH#refs/heads/}" ]; then PUSH_REMOTE=""; fi
-  if [ -z "$PUSH_REMOTE" ] || [ "$PUSH_REMOTE" = "." ]; then
-    # Upstream is a LOCAL branch (branch.<n>.remote=".", what `git branch
-    # --set-upstream-to=main` produces) or absent — there is no remote to push to.
-    echo "REFUSING TO CREATE THE PR — '$BR' tracks a local ref or only the inherited base branch, not its own remote ref; publish it first (git push -u origin $BR)"
-    exit 1
-  fi
-  git push "$PUSH_REMOTE" "HEAD:$PUSH_BRANCH"
-  ```
-
-  The `"$PUSH_REMOTE" = "."` guard is load-bearing: on a local upstream `@{u}` resolves, so the no-upstream carve-out never fires, and an unguarded push runs `git push . HEAD:refs/heads/main` — which silently fast-forwards the *local* default branch, exits 0, leaves `@{u}..HEAD` empty, and opens a PR for a branch never pushed to any remote.
-
-  See [lib/upstream-push.md](../../lib/upstream-push.md) for why the destination must be config-derived — never a bare `git push`, never `git push origin {current_branch}`. On a non-fast-forward, retry once behind `git pull --rebase --autostash`. If that rebase conflicts, **resolve it through [lib/rebase-conflict-resolution.md](../../lib/rebase-conflict-resolution.md), continue until the rebase completes, rerun the focused checks affected by the resolution, then retry the same upstream-derived push**. Do not classify an active rebase conflict as a push failure and do not stop merely to ask the user to resolve it — `/do:pr` is invoked programmatically by `/do:next` and `/do:pr-better`, so leave the expected branch checked out and fully rebased. **If the push still fails after that one retry, do NOT create the PR** — print the unpushed SHAs and the push error and stop. Skip the check only when the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1` fails — detached HEAD or no origin); a *local* upstream resolves, so the check runs and the `"."` guard stops it. `git status` is not a substitute — a clean tree says nothing about committed-but-unpushed commits.
-Before **first creation**, after all push/rebase retries, repeat the lifecycle resume check against the current HEAD: require the unpublished receipt's `reviewedHead` to equal HEAD. If commit/push/rebase preparation changed it after the entry check, review the changed work and persist the phase before creating the PR/MR. A published PR instead continues PR-side handling; later commits do not restart local review.
-
-- If the exact PR/MR already exists, adopt its URL/number and preserve its local receipt and original attribution; do not create another PR or repeat local review. Otherwise create a PR / merge request from `{current_branch}` to `{default_branch}`:
+- **Confirm the branch's commits reached the remote.** The review gate and the local reviewers commit fixes onto this branch; if a push step was missed, the PR opens without them, and a clean `git status` says nothing about committed-but-unpushed work. `git log --oneline @{u}..HEAD` must be empty. If it is not, or the branch has no upstream of its own yet, run the upstream-push procedure above again (it handles the unpublished, local-upstream and inherited-base cases and the one retry on a non-fast-forward), then re-check. If that retry rebased the branch, run the Local Code Review gate on what the rebase brought in before creating the PR. If commits are still unpushed, do not create the PR: print the unpushed SHAs and the push error and stop. `/do:pr` is also invoked by `/do:next` and `/do:pr-better`, so leave the expected branch checked out and fully rebased rather than stopping mid-rebase.
+- Create the PR / merge request from `{current_branch}` to `{default_branch}`:
   - GitHub: `gh pr create --base {default_branch} --head {current_branch} --title "..." --body "..."`
   - GitLab: `glab mr create --source-branch {current_branch} --target-branch {default_branch} --title "..." --description "..."` (add `--yes` to skip the interactive prompt; `--remove-source-branch` if the project deletes merged branches)
-- Create a rich PR/MR description
-- Capture the resulting PR/MR URL to report at the end, then run **Bind publication once** from the lifecycle procedure when a real local receipt exists (skip for legacy continuation). A create retry reuses completed review; binding failure blocks merge until repaired without another reviewer call.
+- **Title and description follow the project.** When the repository has a PR/MR template (`.github/PULL_REQUEST_TEMPLATE.md` or a file under `.github/PULL_REQUEST_TEMPLATE/`, the same names at the repo root or under `docs/`, or `.gitlab/merge_request_templates/` on GitLab), fill in its sections; passing `--body`/`--description` bypasses the template, so the CLI will not apply it for you. Follow any title or body rules in the project's CLAUDE.md / AGENTS.md / CONTRIBUTING. With neither, write what changed and why, how it was verified (what ran locally, what is left to CI), and a closing reference for any issue it completes.
+- Capture the PR/MR URL and number for the steps below and the final report. If creation fails, report the error and stop; a re-run finds the lifecycle note and retries only the creation.
 
 ## Run the PR-side Reviews
 
-**If `PR_SIDE_AGENTS` is empty**, skip this entire section: set `PR_SIDE_OVERALL_STATUS=clean` (skipped — no PR-side pass requested) and continue to "Compute OVERALL_STATUS".
+**If `PR_SIDE_AGENTS` is empty**, skip this section: set `PR_SIDE_OVERALL_STATUS=clean` (skipped — no PR-side pass requested) and continue to "Compute OVERALL_STATUS".
 
-Execution order is always local phase, then PR-side phase, however the user interleaved them. A stop-mode short-circuit may honor the user's whole ordered list across that boundary, but ONLY when it can't skip a reviewer the user listed earlier:
+Execution order is always the local phase, then the PR-side phase, however the user interleaved the list. A stop mode carries across that boundary only when all of these hold, so the skip can never drop the only reviewer looking at the current head or one the user listed earlier:
 
-- **Preconditions for any cross-phase skip — all must hold**:
-  1. `LOCAL_AGENTS` must be **non-empty and have actually run**. With an empty `LOCAL_AGENTS`, precondition 2 is vacuously true and `LOCAL_OVERALL_STATUS` defaults to `clean` with zero commits only because no local phase ran; treating that as a satisfied stop-mode would skip the *only* requested reviewer in a PR-side-only list (e.g. `--review-with @org-review-bot --review-stop-on-clean --merge`). `LOCAL_AGENTS` empty ⇒ no cross-phase skip, regardless of `{REVIEW_STOP_MODE}`.
-  2. Every `PR_SIDE_AGENTS` entry must appear *after* every `LOCAL_AGENTS` entry in the original `--review-with` order (e.g. `codex,copilot` or `codex,agy,@octocat`, not `@octocat,codex` or `copilot,agy`).
-  3. The current HEAD must equal the completed receipt's `reviewedHead`. A historical local verdict cannot justify skipping current-head hosted review after a feedback commit, CI fix or rebase. A mismatch runs `PR_SIDE_AGENTS` in full, without respawning local reviewers.
-  If any condition fails, run `PR_SIDE_AGENTS` in full.
-- When all three hold, check whether the local phase already satisfied `{REVIEW_STOP_MODE}`. Track `LOCAL_PHASE_START_SHA` (the commit before the local phase ran): `LOCAL_OVERALL_STATUS=clean` alone is ambiguous — it covers both "found nothing" and "found something, fixed it, re-review confirmed clean" — and the per-pass stop-mode table treats those oppositely:
-  - `REVIEW_STOP_MODE=on-clean`: skip `PR_SIDE_AGENTS` only if `LOCAL_OVERALL_STATUS` is `partial` (the local wrapper's own stop-mode already fired on a zero-change clean pass), **or** `LOCAL_OVERALL_STATUS` is `clean` AND **zero commits** were recorded as `LOCAL_PHASE_COMMITS` in the completed receipt. If `clean` but commits WERE added, do **not** skip — per the per-pass on-clean rule ("clean AND made zero changes" is required to stop) the next reviewer in the ordered list — a `PR_SIDE_AGENTS` entry — must still run. When the skip applies, set `PR_SIDE_OVERALL_STATUS=clean` (skipped — already satisfied by the local phase) and continue to "Compute OVERALL_STATUS".
-  - `REVIEW_STOP_MODE=on-findings`: skip `PR_SIDE_AGENTS` the same way if `LOCAL_OVERALL_STATUS` is `partial`, OR at least one commit was recorded as `LOCAL_PHASE_COMMITS` in the completed receipt.
-- `REVIEW_STOP_MODE=all` (default): no cross-phase skip — always run `PR_SIDE_AGENTS` when non-empty.
+- the local phase ran in this invocation with a non-empty `LOCAL_AGENTS` (not skipped or restored by the lifecycle checks);
+- every `PR_SIDE_AGENTS` entry comes after every `LOCAL_AGENTS` entry in the original `--review-with` order (`codex,copilot` or `codex,agy,@octocat`, not `@octocat,codex`);
+- the local phase satisfied `{REVIEW_STOP_MODE}`: the wrapper returned `partial` (its own stop mode already fired), or, with `on-clean`, it returned `clean` and its passes added no commits (a clean phase that made fixes has not satisfied on-clean: the next reviewer still has to check them), or, with `on-findings`, its passes added at least one commit.
 
-**On GitHub, when `PR_SIDE_AGENTS` is non-empty**, read the shared host helper before dispatching any PR-side reviewer. The VCS preflight has already seeded `{GH_HOST}` from the checkout; the helper preserves that value, applies its fallbacks when needed, and confirms authentication.
+When they do, set `PR_SIDE_OVERALL_STATUS=clean` (skipped — already satisfied by the local phase) and continue to "Compute OVERALL_STATUS". With `REVIEW_STOP_MODE=all` (the default) there is no cross-phase skip.
+
+**On GitHub**, read the shared host helper before dispatching any PR-side reviewer. The VCS preflight has already seeded `{GH_HOST}` from the checkout; the helper keeps that value, applies its fallbacks when needed, and confirms authentication.
 
 !read lib/gh-host.md
 
-When no cross-phase skip applies, hand off to the **multi-reviewer wrapper** (under "Reviewer loop bodies" below) over `PR_SIDE_AGENTS` with:
+Hand off to the **multi-reviewer wrapper** (under "Reviewer loop bodies" below) over `PR_SIDE_AGENTS` with:
 
 - `{PR_SIDE_AGENTS}` — `copilot` and/or `@<login>` entries, in order
-- `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (the copilot / `@<login>` cycle cap)
-- `{CODE_HOST}` and `{CR_NOUN}` — from "Detect VCS Host"; they select the host-side verbs (`gh` on GitHub, `glab` on GitLab) and name the PR/MR in messages
+- `{REVIEW_STOP_MODE}` (it still applies within this phase), `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (the copilot / `@<login>` cycle cap)
+- `{CODE_HOST}` and `{CR_NOUN}` — from "Detect VCS Host"; they select the host-side verbs and name the PR/MR in messages
 - `{PR_NUMBER}` — the PR number (GitHub) or MR iid (GitLab) from "Open the PR"
-- `{GH_HOST}` — from "Detect VCS Host", so the GitHub loops target the right GitHub host (unused on GitLab)
-- `{WAIT_SCHEDULE}` — the single schedule selected below for the current host-side entry
+- `{GH_HOST}` — from "Detect VCS Host" (unused on GitLab)
+- `{WAIT_SCHEDULE}` — one schedule per host-side entry, chosen by reviewer kind: `copilot` waits up to 5 minutes, polling every 5s at first and backing off to 15s; a login ending in `[bot]` waits up to 15 minutes, polling every 10s backing off to 30s; any other login is presumed human and waits up to 4 hours, polling every 30s for the first 5 minutes, then every 60s.
 
-For each host-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
-
-- `copilot` — use the previous Copilot review duration on this PR (default 60 seconds if none); max wait 3x that duration, minimum 90 seconds, maximum 5 minutes; poll every 5s, 5s, 10s, 10s, then 15s.
-- `@<login>` — a login ending in `[bot]` is an automated reviewer: expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s. Any other login is presumed human: max wait 4 hours; poll every 30s for the first 5 minutes, then every 60s.
-
-Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass both schedules.
-
-The stop-mode flags still apply **within** this wrapper invocation (e.g. stopping after the first of several `@<login>` entries that comes back clean); the cross-phase check only handles the boundary. Run the multi-reviewer wrapper over `PR_SIDE_AGENTS` — its own gated `!read`s (under "Reviewer loop bodies" below) are the dispatch for `copilot` and `@<login>` alike.
-
-**On GitLab**, `@<login>` entries run the same request → poll → fix → resolve flow against the MR through the GitLab verbs: `glab mr update --reviewer`, then MR discussions and approvals. `copilot` is GitHub's own reviewer, so the wrapper records a `copilot` entry on a GitLab MR as `skipped`. Unless it is `~opt`, that makes the phase `inconclusive`.
+**On GitLab**, `@<login>` entries run the same request → poll → fix → resolve flow against the MR through the GitLab verbs. `copilot` is GitHub's own reviewer, so the wrapper records a `copilot` entry on a GitLab MR as `skipped`, which makes the phase `inconclusive` unless the entry is `~opt`.
 
 Record the result as `PR_SIDE_OVERALL_STATUS`.
 
 ## Compute OVERALL_STATUS
 
-**If `REVIEW_AGENTS` was empty** (`REVIEW_AGENTS` resolved empty: no flag and no saved default, or `--review-with none`), skip the two review phases above and set `OVERALL_STATUS=clean` — the Local Code Review gate plus CI is the merge gate, exactly as `/do:release` treats it; there is no multi-reviewer aggregate to report.
+**If `REVIEW_AGENTS` resolved empty** (no flag and no saved default, or `--review-with none`), set `OVERALL_STATUS=clean`: the Local Code Review gate plus CI is the merge gate, as in `/do:release`, and there is no multi-reviewer aggregate to report.
 
-Otherwise combine `LOCAL_OVERALL_STATUS` (from "Pre-PR Local Reviews", or `clean` when `LOCAL_AGENTS` was empty) and `PR_SIDE_OVERALL_STATUS` (from "Run the PR-side Reviews", or `clean` when `PR_SIDE_AGENTS` was empty) into a single `OVERALL_STATUS` using this precedence — first matching rule wins:
+Otherwise combine `LOCAL_OVERALL_STATUS` and `PR_SIDE_OVERALL_STATUS` (each `clean` when its agent list was empty); the first matching rule wins:
 
 1. `dirty` — either phase is `dirty`
 2. `inconclusive` — either phase is `inconclusive`
@@ -200,36 +155,34 @@ Otherwise combine `LOCAL_OVERALL_STATUS` (from "Pre-PR Local Reviews", or `clean
 
 ## Merge the PR (only when merge mode is enabled)
 
-**If `MERGE_ENABLED` is not `true`, skip this section** — report the PR/MR URL plus the review summary and stop.
+**If `MERGE_ENABLED` is not `true`, skip this section**: report the PR/MR URL plus the review summary and stop.
 
-When `MERGE_ENABLED=true`, gate the merge on **all three** of the review result, the unpushed-commits check, and CI:
+When `MERGE_ENABLED=true`, the merge needs all three of the review result, the unpushed-commits check, and CI:
 
-1. **Review gate** — consume the review loop's `{OVERALL_STATUS}` exactly as `/do:release` does:
+1. **Review gate** — consume `{OVERALL_STATUS}` the way `/do:release` does:
    - `clean` — eligible (includes the no-reviewer path above, copilot `too-large`, and `capped` from any of the four loops — an explicitly configured cap, `~max=<n>` or `--review-iterations`, reached after applying every fix; a *built-in* cap is `guardrail`, which is inconclusive).
    - `partial` — eligible only when an explicit `--review-stop-on-findings`/`--review-stop-on-clean` flag was set.
-   - `inconclusive` or `dirty` — **do NOT merge.** Leave the PR open and report the proximate status + URL. A requested reviewer that never produced a verdict is not a clean review.
-2. **Unpushed-commits gate** — **refuse to merge while the local branch is ahead of its remote.** If PR-side reviewer or post-push fix commits never reached `origin`, the reviewed and CI-tested tree is not the tree the merge lands, and merging silently drops those fixes while every signal reads green:
+   - `inconclusive` or `dirty` — do not merge. Leave the PR open and report the proximate status and URL; a requested reviewer that never produced a verdict is not a clean review.
+2. **Unpushed-commits gate** — do not merge while the local branch is ahead of its remote. If reviewer or fix commits never reached the remote, the reviewed and CI-tested tree is not the tree the merge lands, and the merge silently drops those fixes while every signal reads green:
 
    ```bash
    if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
      UNPUSHED="$(git log --oneline @{u}..HEAD)"
      if [ -n "$UNPUSHED" ]; then
-       echo "REFUSING TO MERGE — these commits are not on the remote:"; echo "$UNPUSHED"
+       echo "Not merging: these commits are not on the remote:"; echo "$UNPUSHED"
        exit 1
      fi
    fi
    ```
 
-   The snippet fails closed on purpose. If it exits non-zero, **do not merge**: report the unpushed SHAs, leave the PR open, and say the branch has local work to push. Skip the gate when the branch has no upstream. It is independent of `{OVERALL_STATUS}`.
-3. **Merge through the shared merge gate.** Inputs: `{PR}` is the PR/MR number, `{GIT}` is `git`, `{MODE}` is `queue` (the merge lands once required checks pass, even after this session ends, and falls back to watching in this session when the host has auto-merge off), `{MERGE_METHOD}` comes from Parse Arguments (it may be unset), and `{LINKED_WORKTREE}` is unset, so the gate resolves it. When `LINKED_WORKTREE=1`, the gate's step 5 deletes the remote head after a confirmed merge. The gate reports whether the PR **merged**, is **queued**, or was **left open**:
+   If it exits non-zero, report the unpushed SHAs and leave the PR open. Skip the gate when the branch has no upstream. It is independent of `{OVERALL_STATUS}`.
+3. **Merge through the shared merge gate.** Inputs: `{PR}` is the PR/MR number, `{GIT}` is `git`, `{MODE}` is `queue` (the merge lands once required checks pass, even after this session ends, and falls back to watching in this session when the host has auto-merge off), `{MERGE_METHOD}` comes from Parse Arguments (it may be unset), and `{LINKED_WORKTREE}` is unset, so the gate resolves it. The gate reports whether the PR **merged**, is **queued**, or was **left open**:
 
 !read lib/merge-gate.md
 
-4. After a **completed** merge, sync the default branch locally with `git checkout {default_branch} && git pull --rebase --autostash`, **only when `LINKED_WORKTREE=0`.** In a linked worktree, that checkout fails for the same reason `--delete-branch` does: the parent repo already has `{default_branch}` checked out. Skip the sync, say so, and let the caller's cleanup phase sync the parent repo. When the merge is only **queued**, also skip the local sync and say so.
+4. After a **completed** merge, sync the default branch locally with `git checkout {default_branch} && git pull --rebase --autostash`, but only when `LINKED_WORKTREE=0`. In a linked worktree that checkout fails for the same reason `--delete-branch` does (the parent repo already has `{default_branch}` checked out): skip the sync, say so, and let the caller's cleanup sync the parent repo. When the merge is only **queued**, skip the sync too and say so.
 
-Never merge on `dirty`/`inconclusive`, never merge while the branch has unpushed commits, never merge before required checks pass, and never override branch protection — `--auto` respects it, and the in-session fallback waits on `gh pr checks`.
-
-**Report the final status** to the user including the PR/MR URL, the multi-reviewer aggregate report (per-pass status table plus overall status), and — when merge mode was enabled — whether the PR merged, is queued to auto-merge on green CI, or was left open (with why).
+**Report the final status**: the PR/MR URL, the multi-reviewer aggregate report (per-pass status table plus overall status), and — when merge mode was enabled — whether the PR merged, is queued to auto-merge on green CI, or was left open (with why).
 
 ## Reviewer loop bodies
 
