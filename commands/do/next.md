@@ -7,7 +7,7 @@ argument-hint: "[#<issue>|<JIRA-KEY> …] [--issues-label <name>] [--model <tier
 
 Claim the next open tracker issue (any label by default; `--issues-label` narrows to a curated queue), work it in an isolated worktree, run review, open a PR, merge, and clean up. `/do:replan`, `/do:better`, and `/do:depfree` populate the queue; `/do:next` drains it, one issue per run. Worktree `../next-issue-<num>`, branch `next/issue-<num>`; the PR closes the issue via `Closes #<num>`, and genuinely large discovered work becomes a new tracker issue. Commit subjects, PR titles and changelog entries follow the target project's own conventions; the `[issue-<num>]` forms below are fallbacks for a project that states none.
 
-**How the claim works.** Issue `N` (a number, or a key like `PROJ-123` on a Jira tracker) is **"in flight"** when `issue-N` appears as a `/`-separated segment in any local or remote branch (`git branch -a`) or any open PR head ref, or when the issue already has **any assignee** or an `in-progress` marker. On GitHub, an open PR body containing `Closes #N`, `Fixes #N`, `Fixes: #N`, or `Resolves #N`, or any head commit message containing `[issue-N]` / `(#N)`, also makes it in flight regardless of branch name. `/do:next` picks the first eligible open issue that is not in flight and creates a `next/issue-<num>` branch — that branch name *is* the claim — then adds a cross-machine marker (the assignee) in Phase 2.
+**How the claim works.** Issue `N` (a number, or a key like `PROJ-123` on a Jira tracker) is **"in flight"** when `issue-N` appears as a `/`-separated segment in any local or remote branch (`git branch -a`) or any open PR head ref, or when the issue already has **any assignee** or an `in-progress` marker. On GitHub, an open PR linked as closing `N`, or whose title, body or a head commit message contains `Closes #N`, `Fixes #N`, `Fixes: #N`, `Resolves #N`, `[issue-N]` or `(#N)`, also makes it in flight regardless of branch name. That evidence is read per candidate, and [lib/next-github.md](../../lib/next-github.md) lists the fork cases it cannot see. `/do:next` picks the first eligible open issue that is not in flight and creates a `next/issue-<num>` branch — that branch name *is* the claim — then adds a cross-machine marker (the assignee) in Phase 2.
 
 **Resuming your own stopped run.** A `--no-merge`, `dirty` or `inconclusive` stop leaves the claim in place so the work can be finished, and an in-flight issue is otherwise never claimed again: a fresh run does not adopt an existing branch or PR, and assignment to your own login is still a claim. The one exception is a single issue you name explicitly (never auto-pick, never a swarm member) whose claim is visibly this checkout's own: the sibling worktree `../next-issue-<num>` exists locally on branch `next/issue-<num>`, and the issue's only assignee is the authenticated account (Jira: `jira_lease` prints `yes`). In that case say that you are resuming, skip the Phase 2 claim, keep the existing worktree and branch, and continue from the first unfinished phase: uncommitted or unpushed work goes to Phase 4, and a branch that already has an open PR goes to Phase 6, where `/do:pr` finds that PR, pushes any new commits, skips its local review phase and continues with the PR-side reviews. The `--self` / `--collaborators` gates still apply. A matching login or branch name without that local worktree is not enough, because the work may live on another machine.
 
@@ -50,9 +50,10 @@ The **`--merge`** / **`--no-merge`** / **`--merge=<method>`** / **`--merge-metho
 
 Three shapes recur below and are defined once here, then invoked by name (a fourth — the GitLab-only `glab api` capture rule, a two-step capture never piped straight to jq — is defined in [lib/next-gitlab.md](../../lib/next-gitlab.md)).
 
-**Host verbs.** These names are the host-neutral operations used by the issue and PR phases below. A verb in a snippet is a dispatch instruction, not a literal shell function: run the selected host's form instead of re-inlining a `gh`/`glab` branch at a call site. The GitHub forms are canonical here; the GitLab forms and the two-step `glab api` rule live in [lib/next-gitlab.md](../../lib/next-gitlab.md). A failed verb remains a failure — do not substitute a host or turn an empty result into success. `assign_me` also leaves the authenticated login in `ME` for the assignee read-back. **The issue and label verbs follow the tracker, the rest the code host:** on a Jira tracker (`TRACKER_CLI` is `jira`) every `issue_*`, `label_*`, `assign_me`, and `unassign_me` runs its form in [lib/tracker-jira.md](../../lib/tracker-jira.md), while `open_refs`, `collaborators`, `pr_title`, and `ci_wait_merge` stay on `CLI_TOOL`.
+**Host verbs.** These names are the host-neutral operations used by the issue and PR phases below. A verb in a snippet is a dispatch instruction, not a literal shell function: run the selected host's form instead of re-inlining a `gh`/`glab` branch at a call site. The GitHub forms are canonical here; the GitLab forms and the two-step `glab api` rule live in [lib/next-gitlab.md](../../lib/next-gitlab.md). A failed verb remains a failure — do not substitute a host or turn an empty result into success. `assign_me` also leaves the authenticated login in `ME` for the assignee read-back. **The issue and label verbs follow the tracker, the rest the code host:** on a Jira tracker (`TRACKER_CLI` is `jira`) every `issue_*`, `label_*`, `assign_me`, and `unassign_me` runs its form in [lib/tracker-jira.md](../../lib/tracker-jira.md), while `open_refs`, `pr_claim_refs`, `collaborators`, `pr_title`, and `ci_wait_merge` stay on `CLI_TOOL`.
 
-- `open_refs` — the complete GitHub PR evidence collector in [lib/next-github.md](../../lib/next-github.md); emits head refs and synthetic `issue-N` segments, and fails closed on incomplete evidence.
+- `open_refs` — GitHub: `open_refs() { :; }` from [lib/next-github.md](../../lib/next-github.md), because GitHub has no repo-wide PR sweep.
+- `pr_claim_refs` — run as `CLAIM_ID=<N> pr_claim_refs`. GitHub: the per-issue PR evidence collector in [lib/next-github.md](../../lib/next-github.md); it emits the head refs of the open PRs it surfaced plus a synthetic `issue-N` segment, and fails closed on incomplete evidence. GitLab: `pr_claim_refs() { :; }`, because its `open_refs` already lists every open MR source branch.
 - `collaborators` — `gh api --hostname "$GH_HOST" repos/:owner/:repo/collaborators --paginate -q '.[].login'`
 - `issue_body <N>` — `gh issue view <N> --json body -q .body`
 - `issue_body --comments <N>` — `gh issue view <N> --comments`
@@ -113,8 +114,8 @@ Carry `CLI_TOOL`/`VCS_HOST`/`TRACKER` (and `GH_HOST` on GitHub) and `LABEL_SEP` 
 
 !read lib/next-gitlab.md
 
-**GitHub only — define `open_refs` from the shared `gh` collector now.** This follows
-the code host, including a Jira tracker on GitHub; GitLab keeps its own verb.
+**GitHub only — define `open_refs` and `pr_claim_refs` from the shared `gh` collector now.** This follows
+the code host, including a Jira tracker on GitHub; GitLab keeps its own `open_refs` and defines `pr_claim_refs() { :; }`.
 
 !read lib/next-github.md
 
@@ -143,11 +144,14 @@ fresh_claim_check() {
   CLAIM_LABELS="$(issue_labels "$CLAIM_ID")" || return 1
   printf '%s' "$CLAIM_LABELS" | jq -e '
     type == "array" and all(.[]; type == "string")
-    and (index("in-progress") == null)' >/dev/null
+    and (index("in-progress") == null)' >/dev/null || return 1
+  # PR evidence scoped to this candidate, read last so a skipped candidate costs no PR lookup.
+  CLAIM_PR_REFS="$(pr_claim_refs)" || return 1
+  ! printf '%s\n' "$CLAIM_PR_REFS" | tr '/' '\n' | grep -qixF -- "issue-${CLAIM_ID}"
 }
 ```
 
-Every ref's `/`-segments and GitHub's synthetic segments form the in-flight set, and `CLAIM_ID=<ID> in_flight` is an exact segment match (a Jira project compares case-insensitively): `issue-12` never matches `feature/12` or `issue-123`, and `issue-PROJ-12` never matches `PROJ-123`. `CLAIM_ID=<ID> fresh_claim_check` adds live assignee and `in-progress` checks, including same-login assignment, and refuses metadata errors. On Jira retain its native In Progress transition/status gate as well (see its Claim procedure). Use this same gate for explicit targets, auto-pick, epic children and both swarm paths. Shell state does not persist: redefine the collector and these functions, and refresh evidence, in each Bash call that checks ownership.
+Every ref's `/`-segments and GitHub's synthetic segments form the in-flight set, and `CLAIM_ID=<ID> in_flight` is an exact segment match (a Jira project compares case-insensitively): `issue-12` never matches `feature/12` or `issue-123`, and `issue-PROJ-12` never matches `PROJ-123`. `CLAIM_ID=<ID> fresh_claim_check` adds live assignee and `in-progress` checks, including same-login assignment, then the candidate's PR evidence from `pr_claim_refs` (the same exact segment match), and refuses metadata or evidence errors. Its API cost is per candidate checked, not per open PR. On Jira retain its native In Progress transition/status gate as well (see its Claim procedure). Use this same gate for explicit targets, auto-pick, epic children and both swarm paths. Shell state does not persist: redefine the collector and these functions, and refresh evidence, in each Bash call that checks ownership.
 
 ### Phase 1 — issue queue
 
@@ -227,7 +231,7 @@ Then:
          | PRIORITY_SORT | .[]"
    ```
    The filter runs before every other skip, and an issue it excludes is "not what you asked for", not "not workable". If it empties a queue that had eligible work, step 7 names it with the flags written as they would be typed (`no eligible issue matching --model light --effort max — 14 open issues carry no dispatch hint; add `none` to include them`).
-2. **Determine in-flight issues.** Issue `N` is in flight when `CLAIM_ID=N in_flight` succeeds, or when it already has any assignee or carries `in-progress` (the Phase 2 markers — a local-only branch on another machine is invisible here, but its markers are not). Require `CLAIM_ID=N fresh_claim_check` before selecting an issue; assignment to your own login is still in flight. A failed evidence read is unresolved and stops fresh claims.
+2. **Determine in-flight issues.** Issue `N` is in flight when `CLAIM_ID=N in_flight` succeeds, when `pr_claim_refs` finds an open PR for it, or when it already has any assignee or carries `in-progress` (the Phase 2 markers — a local-only branch on another machine is invisible here, but its markers are not). Require `CLAIM_ID=N fresh_claim_check` before selecting an issue; assignment to your own login is still in flight. A failed evidence read is unresolved and stops fresh claims.
 3. **Resolve epics before picking (child-aware).** An epic (umbrella issue) is **not** a single claimable unit — its done-ness depends on its children. For any candidate that is an epic (carries `epic`/a repo umbrella label, has native sub-issues, or whose body — fetched per candidate, see step 4 — task-lists other issues), classify it with the shared epic logic (a Jira epic: `Epic` type or sub-tasks, per its "Jira" section) — read it only when a candidate is an epic:
 
 !read lib/epic-children.md
