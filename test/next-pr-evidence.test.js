@@ -208,18 +208,6 @@ describe('fresh ownership checks shared by explicit, auto-pick and swarm', () =>
     });
   }
 
-  it('rechecks just before creation and keeps continuation proof separate from login', () => {
-    const creation = next.indexOf('git worktree add -b');
-    assert.ok(next.lastIndexOf('CLAIM_ID="$ISSUE_NUM" fresh_claim_check', creation) > next.indexOf('## Phase 2'));
-    assert.match(next, /Only a continuation with a trusted, recorded same-run ownership record/);
-    assert.match(next, /skip fresh selection\/creation/);
-    assert.match(next, /A fresh run never adopts an existing branch or PR/);
-    assert.match(next, /explicit targets, auto-pick, epic children and both swarm paths/);
-    assert.match(read('lib/next-swarm.md'), /Require `next.md`'s shared `CLAIM_ID=<N> fresh_claim_check`/);
-    assert.match(read('lib/next-gitlab.md'), /`open_refs` — `glab mr list/);
-    assert.match(read('lib/tracker-jira.md'), /`issue_labels <KEY>`[\s\S]*?\.fields\.labels/);
-  });
-
   it('ships the collector in generated command bundles', () => {
     const bundle = buildPromptBundle(next, path.join(root, 'lib'));
     assert.ok(Object.hasOwn(bundle.files, 'next-github.md'));

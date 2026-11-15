@@ -88,7 +88,7 @@ indentation on every line.
    - `node bin/cli.js --list` — confirm the command shows up correctly
    - `node bin/cli.js --dry-run` — preview what install would do
    - `npm test` — run the full test suite
-5. If your change affects behavior covered by an existing test, update it; if it adds new behavior worth locking in, add a test under `test/`.
+5. If your change affects behavior covered by an existing test, update it; if it adds new behavior worth locking in, add a test under `test/`. Tests cover the installer/transformer code (`src/`, `bin/`, `hooks/`, `install.sh`/`uninstall.sh`), shell or JS snippets extracted from the prompt files and actually executed, and structural invariants of the prompt files (includes resolve, installer allowlists match, frontmatter is valid). They do not pin prompt wording: a test that regex-matches the prose of a `commands/do/*.md` or `lib/*.md` file only freezes the text and says nothing about how a model behaves, so do not add one.
 
 ## Releasing
 
@@ -107,7 +107,7 @@ This is why commit subjects matter (below): a vague subject becomes a vague rele
 - Commit subjects are specific sentences, not vague tags — `fix: guard empty array expansion in review-loop bash 3.2 path`, not `fix bug`.
 - Conventional prefixes (`fix:`, `feat:`, `docs:`, `chore:`, `refactor:`) are used but not strictly enforced by tooling — match the style in `git log`.
 - Keep PRs scoped to one logical change. A doc fix and a behavior change should be separate PRs.
-- CI runs the full test suite, a `shellcheck` pass on `install.sh`/`uninstall.sh`, and validates every command's frontmatter across Node 18/20/22 — make sure it's green before requesting review.
+- CI runs the full test suite, a `shellcheck` pass on `install.sh`/`uninstall.sh`, and validates every command's frontmatter across Node 22, 24 and 26 — make sure it's green before requesting review.
 - No AI-attribution footers or co-author trailers in commits or PR descriptions, regardless of what tooling you used to help write the change.
 
 ## Embedding command prompts (integrator API)

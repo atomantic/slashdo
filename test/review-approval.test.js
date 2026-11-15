@@ -174,34 +174,3 @@ for (const [host, cli, file] of hosts) {
     });
   });
 }
-
-describe('approval workflow contract', () => {
-  it('resolves approval policy independently of merge and preserves the saved false opt-out', () => {
-    const review = read('commands/do/review.md');
-    const config = read('commands/do/config.md');
-    assert.match(review, /--approve and --no-approve cannot be combined/);
-    assert.match(review, /explicit flag → project → global → built-in `true`/);
-    assert.match(review, /saved `false` is an opt-out, not a missing value/);
-    assert.match(review, /approve must be a boolean/);
-    assert.match(config, /`--approve` → key `approve`, value `true`\. `--no-approve` → value `false`/);
-    assert.match(config, /Valid keys:[^\n]*\bapprove\b/);
-    assert.match(config, /approve\s+= \{merged value or "true/);
-    assert.match(review, /Local branch mode never approves/);
-  });
-
-  it('finishes review and inspects pushed fixes before approval, then re-reads merge gates', () => {
-    const review = read('commands/do/review.md');
-    assert.ok(review.indexOf('## Final PR/MR approval and merge') > review.indexOf('## Delegated Review Passes'));
-    assert.match(review, /inspect the complete final diff after the fixes/);
-    assert.match(review, /Only then set `HEAD_SHA` to that final reviewed commit/);
-    assert.match(review, /run the partial's merge gates \*\*after\*\* the approval attempt/);
-    for (const [, , file] of hosts) {
-      const body = read(file);
-      assert.doesNotMatch(body, /Never approve\.|Never `APPROVE` automatically/);
-      assert.ok(body.indexOf('## Approve the reviewed head') < body.indexOf('## Merge the '));
-      assert.match(body, /`REVIEW_COMPLETE=true` and zero CRITICAL findings remain/);
-    }
-    assert.match(read('lib/review-pr-mode.md'), /--match-head-commit \{HEAD_SHA\}/);
-    assert.match(read('lib/review-mr-mode.md'), /`not_approved`/);
-  });
-});

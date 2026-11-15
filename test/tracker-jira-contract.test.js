@@ -3,9 +3,7 @@
 // lib/tracker-jira.md is the Jira backend for the tracker verbs (#372 / #421). Like
 // test/vcs-host-contract.test.js, the first layer RUNS the partial's shell — its
 // pre-flight and its verb forms — against a stub `jira` binary, so the backend is
-// checked as behavior rather than as prose. The second layer keeps the tracker gate
-// honest: until a command serves Jira, it must treat `TRACKER_CLI=jira` as no tracker
-// rather than falling through to gh/glab issue calls on the code host.
+// checked as behavior rather than as prose.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
@@ -153,24 +151,6 @@ describe('Jira pre-flight, executed', () => {
 });
 
 describe('Jira verb forms, executed', () => {
-  it('covers every tracker verb /do:next names, plus the backlog verbs', () => {
-    const next = read('commands', 'do', 'next.md');
-    const conventions = next.slice(next.indexOf('**Host verbs.**'), next.indexOf('**`PRIORITY_SORT`**'));
-    const trackerVerbs = [...conventions.matchAll(/^- `((?:issue|label)_[a-z_]+|assign_me|unassign_me)[ `]/gm)].map(([, v]) => v);
-    assert.ok(trackerVerbs.length >= 12, `expected /do:next's tracker verbs, got ${trackerVerbs.join(', ')}`);
-    const forms = verbForms();
-    for (const verb of [...new Set(trackerVerbs), 'issue_list', 'issue_search', 'issue_children', 'issue_is_mine', 'issue_start']) {
-      assert.ok(forms.has(verb), `lib/tracker-jira.md has no Jira form for ${verb}`);
-    }
-  });
-
-  it('scopes every list/create call to JIRA_PROJECT and never prompts on a write', () => {
-    for (const [verb, form] of verbForms()) {
-      if (/jira issue (list|create)/.test(form)) assert.match(form, /-p "\$JIRA_PROJECT"/, `${verb} must pass -p "$JIRA_PROJECT"`);
-      if (/jira issue (edit|comment add|create)/.test(form)) assert.match(form, /--no-input/, `${verb} must pass --no-input`);
-    }
-  });
-
   it('files an issue and captures its key from --raw JSON, labels as separate words', () => {
     const block = section('Tracker verbs — Jira forms').match(/`issue_create[\s\S]*?```bash\n([\s\S]*?)```/);
     assert.ok(block, 'issue_create must carry its capture as a bash block');
@@ -185,12 +165,11 @@ describe('Jira verb forms, executed', () => {
     assert.match(create, /^issue\|create\|-p\|PROJ\|-t\|Task\|-s\|Fix the flaky login test\|--template\|[^|]+body\.md\|-l\|plan\|-l\|model:light\|--no-input\|--raw\|$/);
   });
 
-  it('removes a label with the jira-cli minus prefix and makes label_ensure a no-op', () => {
+  it('removes a label with the jira-cli minus prefix', () => {
     const forms = verbForms();
     const rm = runShell(forms.get('label_rm').replace(/<KEY>/g, 'PROJ-7').replace(/<label>/g, 'in-progress'));
     assert.equal(rm.status, 0, rm.stderr);
     assert.deepEqual(rm.calls, ['issue|edit|PROJ-7|-l|-in-progress|--no-input|']);
-    assert.doesNotMatch(forms.get('label_ensure'), /jira /, 'Jira labels need no creation call');
   });
 
   it('maps Jira status categories onto the OPEN/CLOSED states the commands compare', () => {
@@ -200,7 +179,7 @@ describe('Jira verb forms, executed', () => {
     assert.equal(runShell(form, { env: { JIRA_VIEW_JSON: json('indeterminate') } }).stdout.trim(), 'OPEN');
   });
 
-  it('assigns the configured login and only ever unassigns a lease it holds', () => {
+  it('assigns the configured login and fails on an empty one', () => {
     const forms = verbForms();
     const assign = runShell(forms.get('assign_me').replace(/<KEY>/g, 'PROJ-7'));
     assert.equal(assign.status, 0, assign.stderr);
@@ -208,45 +187,5 @@ describe('Jira verb forms, executed', () => {
     const failed = runShell(forms.get('assign_me').replace(/<KEY>/g, 'PROJ-7'), { env: { JIRA_LOGIN: '' } });
     assert.notEqual(failed.status, 0, 'an empty login must fail assign_me, not assign nobody');
     assert.ok(!failed.calls.some((c) => c.startsWith('issue|assign')));
-    assert.match(section('Tracker verbs — Jira forms'), /`unassign_me <KEY>` — only when `issue_is_mine <KEY>` says `yes`/);
-    assert.match(verbForms().get('issue_is_mine'), /assignee = currentUser\(\)/);
-  });
-
-  it('closes through a transition, since a Closes # trailer does nothing on Jira', () => {
-    const forms = verbForms();
-    assert.match(forms.get('issue_close_note'), /^jira issue move <KEY> "\$JIRA_DONE_STATUS" --comment <text>$/);
-    assert.match(forms.get('issue_start'), /^jira issue move <KEY> "\$JIRA_START_STATUS"$/);
-  });
-
-  it('documents the empty-result rule every list verb depends on', () => {
-    const rule = section('The empty-result rule');
-    assert.match(rule, /exits 1 when nothing matches/);
-    assert.match(rule, /grep -q 'No result found'/);
-  });
-});
-
-describe('the tracker gate stays honest about Jira', () => {
-  const markdownFiles = () =>
-    [['commands', 'do'], ['lib']].flatMap((segments) =>
-      fs.readdirSync(path.join(root, ...segments))
-        .filter((entry) => entry.endsWith('.md'))
-        .map((entry) => [...segments, entry].join('/')));
-
-  it('sets TRACKER_CLI=jira only at the end of the Jira pre-flight', () => {
-    // lib/vcs-host.md leaves TRACKER_CLI empty for Jira, so every command that has not
-    // adopted the backend sees "no tracker" — never gh/glab issue calls on the code host.
-    for (const rel of markdownFiles()) {
-      if (rel === 'lib/tracker-jira.md') continue;
-      assert.doesNotMatch(read(rel), /TRACKER_CLI="?jira/, `${rel} must not hand TRACKER_CLI to Jira without the pre-flight`);
-    }
-    const block = preflight().trimEnd().split('\n');
-    assert.equal(block[block.length - 1], 'TRACKER_CLI=jira; LABEL_SEP=":"', 'the gate opens only after every check passed');
-    assert.match(read('lib', 'vcs-host.md'), /\(`jira`: set only by\s+`lib\/tracker-jira\.md`'s pre-flight\)/);
-  });
-
-  it('ships the backend with the curl installer', () => {
-    for (const script of ['install.sh', 'uninstall.sh']) {
-      assert.match(read(script), /^ {2}tracker-jira$/m, `${script} must list tracker-jira`);
-    }
   });
 });

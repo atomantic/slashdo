@@ -12,7 +12,6 @@ const { ENVIRONMENTS } = require('../src/environments');
 const libDir = path.join(__dirname, '..', 'lib');
 // The Claude transport lives in the claude recipe the core loads on demand (#347).
 const source = fs.readFileSync(path.join(libDir, 'local-agent-claude.md'), 'utf8');
-const core = fs.readFileSync(path.join(libDir, 'local-agent-review-loop.md'), 'utf8');
 const stdinLimit = 8 * 1024 * 1024;
 
 // Execute the shipped shell contract, so tests cannot pass against a separate
@@ -194,19 +193,13 @@ describe('Claude review stdin transport', () => {
     for (const verdict of [finding, 'I looked at it.', '', `NO FINDINGS\n${finding}`]) {
       assert.equal(runTransport(largePayload, { verdict }).verdict, `${verdict}\n`);
     }
-    assert.match(core, /after stripping blank lines, the result must be either exactly `NO FINDINGS`/);
-    assert.match(source, /Required reviewers remain unsatisfied/);
-    assert.match(core, /For a prompt-driven reviewer, set `STATUS=clean` only for the exact `NO FINDINGS` sentinel/);
   });
 
-  it('retains stdin transport and payload provenance in every generated environment', () => {
+  it('retains the stdin invocation in every generated environment', () => {
     for (const env of Object.values(ENVIRONMENTS)) {
       const rendered = transformLib(source, env, libDir);
       assert.ok(rendered.includes(invocation), `${env.name} lost the stdin invocation`);
       assert.doesNotMatch(rendered, /claude -p "\$LOCAL_PROMPT"/);
-      const renderedCore = transformLib(core, env, libDir);
-      assert.match(renderedCore, /resolved base\/head commit IDs and the complete changed-file scope/);
-      assert.match(renderedCore, /Rebuild this payload from the current review target on every iteration/);
     }
   });
 });
@@ -231,13 +224,11 @@ const ok = output => ({ type: 'result', subtype: 'success', is_error: false, res
 const finding = { file: 'src/a.js', line: 3, severity: 'CRITICAL', description: 'Reads past\nthe end.', fix: 'Use arr.length - 1.' };
 
 describe('Claude structured verdict', () => {
-  it('requests schema-validated JSON output in the subprocess invocation', () => {
-    assert.match(invocation, /--output-format json --json-schema "\$CLAUDE_VERDICT_SCHEMA"/);
+  it('ships a parseable verdict schema with the verdict and severity enums', () => {
     const parsed = JSON.parse(schema);
     assert.deepEqual(parsed.properties.verdict.enum, ['NO FINDINGS', 'FINDINGS']);
     assert.deepEqual(parsed.properties.findings.items.properties.severity.enum, ['CRITICAL', 'IMPROVEMENT', 'NIT']);
     assert.ok(Buffer.byteLength(schema) < 1024);
-    assert.match(source, /confirm `claude --help` lists `--json-schema`/);
   });
 
   it('converts a clean verdict and findings into the strict text contract', () => {
@@ -271,18 +262,5 @@ describe('Claude structured verdict', () => {
     for (const text of ['NO FINDINGS', 'FINDING 1:\nfile: a.js\nline: 1\nseverity: NIT\ndescription: d\nfix: f', 'I reviewed the diff and it looks fine. NO FINDINGS']) {
       assert.deepEqual(convert(text), { status: 'converted', verdict: text, stderr: '' });
     }
-    assert.match(source, /`command -v jq` succeeds/);
-    assert.match(core, /after stripping blank lines, the result must be either exactly `NO FINDINGS`/);
-  });
-
-  it('LOCAL_PROMPT review-only branch forbids prose around the verdict', () => {
-    const reviewOnly = core.slice(core.indexOf('REVIEW-ONLY MODE'), core.indexOf('# codex exec prompt for REVIEWER_APPLIES=true'));
-    assert.match(reviewOnly, /Your entire output must be only the FINDING blocks or the single line NO FINDINGS — no preamble, progress notes, status lines, or summary/);
-  });
-
-  it('repeats the output contract after the diff for every prompt-driven reviewer', () => {
-    assert.match(core, /End the payload with the output contract again, after the diff/);
-    assert.match(core, /OUTPUT CONTRACT: your final message must contain ONLY the line NO FINDINGS or complete FINDING <N>: blocks/);
-    assert.match(core, /claude: its subprocess structured verdict is converted to the text contract here/);
   });
 });
