@@ -274,17 +274,11 @@ cd "${WORKTREE}" && \
 pwd && \
 # Publish the claim atomically: with an empty lease the push succeeds only while the remote ref does not exist.
 if ! git push --force-with-lease="refs/heads/next/${SLUG}:" -u origin "next/${SLUG}:refs/heads/next/${SLUG}"; then
-  # One read-back: a push that landed and then reported failure is still this run's claim.
-  REMOTE_SHA="$(git ls-remote origin "refs/heads/next/${SLUG}" | cut -f1)" || REMOTE_SHA=""
-  if [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" = "$(git rev-parse HEAD)" ]; then
-    echo "next/${SLUG} is on origin at the local commit — the claim is published."
-    { git fetch origin "next/${SLUG}" && git branch --set-upstream-to="origin/next/${SLUG}"; } >/dev/null 2>&1 || true
-  else
-    echo "Could not publish next/${SLUG} (another run claimed it, or the push failed) — removing the local worktree and branch. Re-run /do:next."
-    git -C "$REPO_ROOT" worktree remove --force "$WORKTREE" || echo "WARN: remove the worktree $WORKTREE manually."
-    git -C "$REPO_ROOT" branch -D "next/${SLUG}" || echo "WARN: remove the local branch next/${SLUG} manually."
-    exit 1
-  fi
+  echo "Could not publish next/${SLUG} (another run claimed it, or the push failed) — removing the local worktree and branch. Re-run /do:next."
+  echo "If next/${SLUG} exists on the remote and no other run is working the issue, delete that remote branch before re-running."
+  git -C "$REPO_ROOT" worktree remove --force "$WORKTREE" || echo "WARN: remove the worktree $WORKTREE manually."
+  git -C "$REPO_ROOT" branch -D "next/${SLUG}" || echo "WARN: remove the local branch next/${SLUG} manually."
+  exit 1
 fi
 ```
 
@@ -483,7 +477,7 @@ if ! git push origin --delete "next/${SLUG}"; then
 fi
 ```
 
-(Phase 2's marker-block abort and yield retract the remote branch inline and leave the local worktree and branch for this same teardown, run from the main repo. A claim push that failed and did not land has already removed them and published nothing.)
+(Phase 2's marker-block abort and yield retract the remote branch inline and leave the local worktree and branch for this same teardown, run from the main repo. A failed claim push has already removed them.)
 
 **Confirm closed, then clear the marker — but only for a PR that actually merged.** Anything other than `MERGED`/`merged` on the read-back means nothing shipped — leave the issue open with its `in-progress` label and assignee, and report the PR as queued/left-open. For a merged PR, `Closes #<num>` auto-closes the issue on merge to the **default branch**. Verify with `issue_state <num>`; if the result is not closed, run `issue_close_note <num> "Shipped in PR #<PR_NUM>."`. Then run `label_rm "$ISSUE_NUM" in-progress 2>/dev/null || true`. Leave the assignee — it records who shipped it. **On a Jira tracker, a merged PR runs [lib/tracker-jira.md](../../lib/tracker-jira.md) "Close after merge" in place of that verify-close-unlabel sequence** — the transition to Done with the PR URL; there is no label to remove, and a failed transition is reported, not retried.
 
