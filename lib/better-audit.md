@@ -27,7 +27,7 @@ Per-scope output rules:
 - **`deps` severity:** unmaintained with CVEs → CRITICAL, unmaintained without CVEs → HIGH, replaceable single-function usage → MEDIUM, suspect but complex replacement → LOW. Format: `**[SEVERITY]** {package} — {tier}. Uses: {functions}. Call sites: {N} in {M} files. Replacement: {complexity}. Reason: {why removable}`.
 - **`tests` tags:** prefix the severity with `[VACUOUS]` (asserts nothing that could fail), `[WEAK]` (verifies implementation details or passes on a no-op result), or `[MISSING]` (no coverage) — e.g. `**[HIGH][VACUOUS]**`.
 - **`ux`:** bump severity one tier when a finding affects initial-viewport content at common viewports.
-- **`structural`:** file pushed past 1000 lines, spaghetti growth, thin wrappers, boundary leaks, and canonical-helper duplication are always `[CRITICAL]`.
+- **`structural`:** spaghetti growth, thin wrappers, boundary leaks, and canonical-helper duplication are `[CRITICAL]`. A hand-written source file pushed past roughly 1000 lines is a strong signal of the same, but judge it: generated, vendored, data, and fixture files are large by nature and are not findings.
 
 Finding format — each worker spools it per [lib/better-issue-mode.md](./better-issue-mode.md) and returns only the index:
 ```

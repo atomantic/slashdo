@@ -1,32 +1,11 @@
 ## Shared Pipeline Inputs
 
-Phases 3–7 are shared with `/do:better-swift`; resolve these inputs before Phase 3
-(substitution rules are in `~/.claude/lib/better-verification.md`):
+Phases 3–7 are shared with `/do:better-swift`. The shared partials read four caller values:
 
-- `{BRANCH_PREFIX}` = `better`
-- `{PIPELINE_LABEL}` = `better audit`
+- `{BRANCH_PREFIX}` = `better` (staging branch `better/{DATE}`, category branches `better/{CATEGORY_SLUG}`)
 - `{PIPELINE_TITLE}` = `Better Audit`
-- `{VERIFY_SCOPE_SUFFIX}` = *(empty — single build target)*
-- `{VERIFY_SCOPE_NOTE}` = *(empty)*
-- `{VERIFY_FAILURE_SCOPE}` = *(empty)*
-- `{VERIFY_FAILURE_COMMIT_SLOT}` = *(empty)*
-- `{VERIFY_STATUS_CLAUSE}` = *(empty)*
 - `{REVIEW_CHECKLIST}` = `Review Preferences` (the section below)
-- `{SIMPLIFY_ONLY}` — `true` when `--simplify-only` / `--refactor-only` was passed, else `false`
-- `{COMPAT_SHIM}` = `re-export`, `{COMPAT_HOST}` = `module`
-- `{MULTI_CATEGORY_FILE_EXAMPLE}` = ``server/index.js`` with both security and stack-specific changes
-- `{CATEGORY_SLUGS}` = `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`, `ux` (UI projects only), `structural` (strict mode only), and `cognitive-load` (simplify-only mode)
-- `{CATEGORY_SLUG_RULE}` = **When `SIMPLIFY_ONLY=true`**, the only possible slugs are the [`SIMPLIFY_CATEGORIES`](./better-simplify.md) ones
-- `{COMMIT_PREFIX_RULE}` = **When `SIMPLIFY_ONLY=true`**, the per-category commit and its PR title take the `refactor:` prefix (build/review/CI fixes stay `fix:`)
-- `{PR_BODY_SUMMARY_EXTRA}` = *(empty)*
-- `{PR_BODY_EXTRA_SECTIONS}` = *(empty)*
-- `{CI_FAILURE_CAUSES_EXTRA}` = a single bullet, indented to match the ones above it:
-
-      - **Missing exports**: a module removed an export that other code still references. Fix by adding a re-export.
-
-- `{REVIEW_LOOP_EXTRA_INSTRUCTION}` = *(empty)*
-- `{REVIEW_STATUS_EXTRA}` = *(empty)*
-- `{SUMMARY_TABLE_ROWS}` / `{SUMMARY_TABLE_ROW_RULES}` / `{SUMMARY_TABLE_FOOTER}` = see the **Final Summary Table** section below
+- `{CATEGORY_SLUGS}` = `security`, `code-quality`, `dry`, `architecture`, `bugs-perf`, `stack-specific`, `deps`, `tests`, `ux` (UI projects only), `structural` (strict mode only), and `cognitive-load` (simplify-only mode). When `SIMPLIFY_ONLY=true`, only the [`SIMPLIFY_CATEGORIES`](./better-simplify.md) slugs exist.
 
 ### Review Preferences
 
@@ -36,8 +15,4 @@ The preferences Phase 4b reviews the remediation diff under:
 
 ### Final Summary Table
 
-`{SUMMARY_TABLE_ROWS}` is a table with columns `Category | Findings | Fixed | Skipped | PR | CI | Review`: one row per Phase 2 category, by short label, then a `TOTAL` row (`N PRs` in its PR column), printed at column 0.
-
-`{SUMMARY_TABLE_ROW_RULES}` (an instruction to you, never printed): omit the rows Phase 2 omits (UX, Structural, Cognitive Load by their conditions); when `SIMPLIFY_ONLY=true`, keep only the [`SIMPLIFY_CATEGORIES`](./better-simplify.md) rows and report every Test Enhancement stat as `— (skipped: --simplify-only)`.
-
-`{SUMMARY_TABLE_FOOTER}` is empty — this pipeline prints nothing under the table.
+Phase 7 prints a table with columns `Category | Findings | Fixed | Skipped | PR | CI | Review`: one row per Phase 2 category that ran, by short label, then a `TOTAL` row (`N PRs` in its PR column). Categories that shipped in one combined PR show the same PR number. Leave out the rows Phase 2 left out (UX, Structural, Cognitive Load by their conditions); when `SIMPLIFY_ONLY=true`, keep only the [`SIMPLIFY_CATEGORIES`](./better-simplify.md) rows and report every Test Enhancement stat as `— (skipped: --simplify-only)`.

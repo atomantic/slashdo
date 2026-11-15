@@ -30,5 +30,6 @@ Record `BUILD_CMD` and `TEST_CMD`, preferring commands the project documents (ma
 - Record `IS_DIRTY` via `git status --porcelain`
 - Record `CHANGELOG_TARGET` (empty when none) and `HAS_CHANGELOG` from the project's stated changelog convention (CLAUDE.md/AGENTS.md/CONTRIBUTING.md), else its existing changelog artifacts
 - Set `DATE` to today (`YYYY-MM-DD`) and check `git worktree list` for existing run paths. Resume only a proven matching task; otherwise select a unique run path and branch. Do not remove unrelated worktrees. Record any suffix in `DATE` so all later paths agree.
+- Record `PROJECT_CONVENTIONS`: the project's commit-message style (documented, else what `git log` shows), its PR/MR template if one exists, any required branch-name pattern, and its preferred merge method. These win. The commit subjects, PR body, branch names, and merge-method preference that later phases quote are slashdo's fallbacks for a project that states nothing; when a required branch pattern changes a branch name, record the name actually used.
 
 Under `SIMPLIFY_ONLY=true`, also collect the simplify contract's Phase 0e inputs.

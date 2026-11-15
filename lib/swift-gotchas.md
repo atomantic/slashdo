@@ -1,436 +1,175 @@
 <!--
-  swift-gotchas.md — Reference catalogue of real-world Swift / iOS / macOS failure modes
-  consumed by /do:better-swift audit and remediation agents.
+  swift-gotchas.md — failure modes in Swift / iOS / macOS projects that have shipped
+  and are hard to see in the code, read by /do:better-swift audit and remediation
+  agents. General Swift and SwiftUI practice is deliberately left out.
 
-  Each entry is self-contained: TRIGGER (how to detect it in code/CI),
-  ROOT CAUSE (why it happens), FIX (the verified remediation), and
-  VERIFY (how to confirm the fix works).
-
-  Audit agents: scan the project for the TRIGGER signals listed in each entry.
-  Remediation agents: when you encounter an issue matching one of these entries,
-  apply the FIX as written — do not improvise unless the code has diverged.
-
-  These are NOT speculative best practices. Every entry below is a bug that
-  shipped to production at least once and caused real damage. Treat them as
-  load-bearing checks, not style preferences.
+  Audit agents: look for an entry's "Detect" signals and cite the entry number in
+  the finding. Remediation agents: treat an entry's fix as the known-good starting
+  point and adapt it to the project's code. Entries marked "Surface to the user"
+  need an action in Xcode, App Store Connect, or the Apple Developer portal that an
+  agent cannot take: report them, do not attempt a code workaround.
 -->
 
 # Swift / iOS / macOS Gotcha Catalogue
 
 ## Quick index
 
-| # | Failure mode | Detect when |
-|---|---|---|
-| 1 | CKContainer eager-init crash in unsigned test builds | Project uses CloudKit AND CI runs `xcodebuild test ... CODE_SIGNING_ALLOWED=NO` |
-| 2 | SwiftData missing inverse relationship crash | Project has `@Model` classes with `@Relationship` properties |
-| 3 | SwiftData CloudKit cross-Apple-ID sharing gap | SwiftData with `cloudKitDatabase: .automatic` AND household/team/family/share keywords |
-| 4 | iCloud ubiquity container silent failure | iCloud entitlement AND `url(forUbiquityContainerIdentifier:)` calls |
-| 5 | iCloud symlink content corruption | Code mirrors content into `~/Library/Mobile Documents/` paths |
-| 6 | SwiftUI xcstrings localization silent failures | `Localizable.xcstrings` file present OR `String(localized:)` calls |
-| 7 | XcodeGen project generation gotchas | `project.yml` (XcodeGen) detected |
-| 8 | TestFlight upload validation gotchas | CI workflow uploads to TestFlight via `apple-actions/upload-testflight-build` or `xcrun altool` |
-| 9 | xcodebuild App Group provisioning auth failure | App Groups, Push, or extension targets in `.entitlements` |
-| 10 | iOS first-IAP submission rejection | `import StoreKit` AND `Product.products(for:)` calls |
-| 12 | Keychain test failures in simulator | `SecItemAdd` / `SecItemCopyMatching` used for symmetric keys |
+| # | Failure mode | In scope when | Typical severity |
+|---|---|---|---|
+| 1 | `CKContainer` eager-init crash in unsigned test builds | CloudKit, and CI or tests build with `CODE_SIGNING_ALLOWED=NO` | CRITICAL |
+| 2 | SwiftData `loadIssueModelContainer` from a relationship with no inverse | `@Model` classes with relationships | CRITICAL |
+| 3 | SwiftData cannot sync across Apple IDs | `cloudKitDatabase: .automatic` plus household/team/family/share features | Surface to the user |
+| 4 | iCloud ubiquity container URL is non-nil but unusable | `url(forUbiquityContainerIdentifier:)` | HIGH |
+| 5 | Dehydrated iCloud placeholder files read as empty | Code mirrors content into `~/Library/Mobile Documents/` | CRITICAL (data loss) |
+| 6 | String-catalog localization fails silently | `Localizable.xcstrings` or `String(localized:)` | MEDIUM (6.6 HIGH) |
+| 7 | XcodeGen regenerates away plist keys and sources | `project.yml` | HIGH |
+| 8 | TestFlight upload rejected server-side while CI is green | A CI workflow uploads to TestFlight | HIGH |
+| 9 | `xcodebuild` cannot provision a new capability | App Groups, Push, or extension targets in `.entitlements` | Surface to the user |
+| 10 | First in-app-purchase submission rejected | StoreKit `Product.products(for:)` | CRITICAL (missing Restore) |
+| 11 | Keychain calls fail in simulator tests | `SecItemAdd` / `SecItemCopyMatching` | HIGH |
 
 ---
 
-## 1. CKContainer eager-init crash in unsigned test builds
+## 1. `CKContainer` eager-init crash in unsigned test builds
 
-### Trigger
-- `xcodebuild test ... CODE_SIGNING_ALLOWED=NO` fails with: `Early unexpected exit, operation never finished bootstrapping - no restart will be attempted` and `The test runner crashed before establishing connection`
-- Crash report shows `EXC_BREAKPOINT (SIGTRAP)` with frames in `CKContainer.__allocating_init(identifier:)`
-- CloudKit emits a "Significant issue" log: `In order to use CloudKit, your process must have a com.apple.developer.icloud-services entitlement`
-- Tests pass with full code signing but fail with `CODE_SIGNING_ALLOWED=NO`
-- All CloudKit usage IS gated behind a feature flag, yet the app still crashes at launch
+**Detect.** `xcodebuild test ... CODE_SIGNING_ALLOWED=NO` fails with `Early unexpected exit, operation never finished bootstrapping` / `The test runner crashed before establishing connection`; the crash report shows `EXC_BREAKPOINT (SIGTRAP)` in `CKContainer.__allocating_init(identifier:)`; the same tests pass when signed. In code: any stored property of type `CKContainer`, `CKDatabase`, `CKQuerySubscription`, or `CKRecordZone` initialised inline, or an app-launch path (`App.init`, a `@StateObject` default, an eager singleton reference) that reaches one.
 
-### Root cause
-`CKContainer(identifier:)` does **not** throw or return nil when the iCloud entitlement is missing — it traps the process via an OS-level fault (`brk 1`). `CODE_SIGNING_ALLOWED=NO` strips entitlements from the simulator build. A stored property like `private let container = CKContainer(...)` runs its initializer the moment the enclosing object is constructed, so any code that touches the singleton (even just to hold a reference) triggers the trap. Feature flags do not protect against this — construction happens before any flag check.
+**Cause.** `CKContainer(identifier:)` neither throws nor returns nil when the iCloud entitlement is missing; it traps the process. `CODE_SIGNING_ALLOWED=NO` builds carry no entitlements. A stored `let container = CKContainer(...)` runs when its owner is constructed, so a feature flag checked later does not help, and neither does `try?` (the initializer is not `throws`).
 
-### Fix
-Convert every CloudKit stored property to `lazy var`:
+**Fix.** Make every CloudKit stored property `lazy var` or computed, so the container is built on first real use:
 
 ```swift
 final class CloudKitSync {
     static let shared = CloudKitSync()
-
-    // Lazy so CKContainer is only constructed when CloudKit is actually used.
-    // CKContainer(identifier:) traps when the iCloud entitlement is missing
-    // (e.g. unsigned test builds with CODE_SIGNING_ALLOWED=NO).
+    // CKContainer(identifier:) traps without the iCloud entitlement
+    // (unsigned test builds), so construct it only when CloudKit is used.
     private lazy var container = CKContainer(identifier: "iCloud.foo.bar")
     private var privateDB: CKDatabase { container.privateCloudDatabase }
-
     private init() {}
 }
 ```
 
-`lazy` requires `var`, not `let`. Safe because the property is private and the singleton is `@MainActor`-isolated. Same fix applies to `CKDatabase`, `CKQuerySubscription`, `CKRecordZone`, and any other CloudKit type whose initializer touches the container.
+`lazy var` is not thread-safe, so keep the owner actor-isolated (for example `@MainActor`) or otherwise serialise first access. Then check that nothing on the launch path touches the lazy property.
 
-Audit checklist:
-- Every stored property of type `CKContainer`, `CKDatabase`, `CKQuerySubscription`, `CKRecordZone` must be `lazy var` or computed
-- No app-launch code path (`App.init`, `@StateObject` default value, eager singleton ref) calls a method on the singleton that touches the lazy container
-
-### Verify
-```bash
-# Pick an available iOS Simulator dynamically (no hardcoded device name)
-SIM_DEST=$(xcrun simctl list devices available -j \
-  | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; \
-      runtimes=sorted([k for k in d if "iOS" in k], reverse=True); \
-      sims=next((d[k] for k in runtimes if d[k]), []); \
-      print("platform=iOS Simulator,id=" + sims[0]["udid"]) if sims else sys.exit(1)')
-
-xcodebuild test \
-  -project YourApp.xcodeproj \
-  -scheme YourApp \
-  -destination "$SIM_DEST" \
-  -configuration Debug \
-  CODE_SIGNING_ALLOWED=NO \
-  -only-testing:YourAppTests
-```
-Tests should build, launch, and execute. Production signed builds remain unaffected — the `lazy` change is transparent.
-
-### Notes
-- `try?` around `CKContainer(identifier:)` does NOT help — the init is not `throws`, it OS-faults
-- This crash is silent in `-quiet` mode — re-run without `-quiet` and grep for `CK]`, `EXC_`, or `Significant issue`
+**Verify.** Run the test target unsigned (`xcodebuild test ... CODE_SIGNING_ALLOWED=NO`). The crash is invisible under `-quiet`; rerun without it and search the log for `CK]`, `EXC_`, or `Significant issue`.
 
 ---
 
-## 2. SwiftData missing inverse relationship crash
+## 2. SwiftData `loadIssueModelContainer` from a relationship with no inverse
 
-### Trigger
-- `ModelContainer(for:configurations:)` throws `SwiftDataError._Error.loadIssueModelContainer`
-- The error occurs for BOTH persistent AND in-memory `ModelConfiguration` (rules out migration / CloudKit / corrupted store)
-- Recently added a new `@Model` class with a `@Relationship` to an existing model
-- The error message does NOT identify which model or relationship is broken
+**Detect.** `ModelContainer(for:configurations:)` throws `SwiftDataError._Error.loadIssueModelContainer`, usually just after a new `@Model` gained a relationship to an existing one. The error does not name the model or relationship.
 
-### Root cause
-SwiftData CAN auto-infer inverse relationships when both sides declare them, but it CANNOT create the inverse property when only one side does. Every `@Relationship` property must have a matching declaration on the target model. CloudKit (`cloudKitDatabase: .automatic`) makes the requirement even stricter — all relationships must have explicit inverses.
+**Diagnostic flow.** Reproduce with `ModelConfiguration(isStoredInMemoryOnly: true)`. If the in-memory container also fails, it is not a migration problem (nothing to migrate) and not a CloudKit problem (in-memory stores do not sync): it is a schema definition problem. Check every relationship on both sides, and use `git log` to find the commit that added the model.
 
-### Fix
-1. Map all relationships across every `@Model` class:
+**Cause and fix.** The usual cause is a relationship declared on one model with no matching property on the target. Add the missing side (for example `@Relationship(deleteRule: .cascade) var barnNotes: [BarnNote]? = nil` on the target). With `cloudKitDatabase: .automatic` every relationship must have an inverse and be optional. A store created under the broken schema may need the app deleted from the simulator before the fix shows.
 
-   | Model A property | Model B property | Status |
-   |---|---|---|
-   | `Horse.vetRecords: [VetRecord]?` | `VetRecord.horse: Horse?` | OK — auto-inferred |
-   | `BarnNote.horse: Horse?` | _(nothing on Horse)_ | BROKEN — missing inverse |
+**Guard.** Add a test that builds the container in memory with every `@Model` type, so a schema error fails in CI rather than at launch:
 
-2. Add the missing inverse on the target model:
-   ```swift
-   // Horse.swift — ADD THIS:
-   @Relationship(deleteRule: .cascade)
-   var barnNotes: [BarnNote]? = nil
-   ```
-
-3. Delete the app from the simulator/device to clear any corrupted local store, then rebuild.
-
-4. Add this unit test so the issue can never silently regress:
-   ```swift
-   func testModelContainerSchemaIsValid() throws {
-       _ = try ModelContainer(
-           for: ModelA.self, ModelB.self, /* every @Model type */,
-           configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-       )
-   }
-   ```
-
-### Verify
-The unit test above passes. If the in-memory container initializes successfully, the schema is valid — any remaining persistent-store errors are migration issues, not schema issues.
-
-### Diagnostic flow when you see `loadIssueModelContainer`
-1. It's NOT a migration issue (in-memory stores don't migrate)
-2. It's NOT a CloudKit issue (in-memory stores don't use CloudKit)
-3. It IS a schema definition issue — check ALL `@Relationship` properties
-4. Use `git log` to find the commit that added the new model and verify both sides were updated
+```swift
+func testModelContainerSchemaIsValid() throws {
+    _ = try ModelContainer(
+        for: ModelA.self, ModelB.self, // every @Model type
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
+}
+```
 
 ---
 
-## 3. SwiftData CloudKit cross-Apple-ID sharing gap
+## 3. SwiftData cannot sync across Apple IDs
 
-### Trigger
-- App uses `cloudKitDatabase: .automatic` and needs spouse / family member / teammate (different Apple ID) to collaborate
-- Compiler error: `type 'CKShare.Metadata' has no member 'activityType'` or `activityTypeKey`
-- Compiler error: `(saved, _) = try await db.modifyRecords(...)` doesn't compile
-- `ModelConfiguration` has no `cloudKitDatabase: .shared` case
-- Spouse/teammate logs in on a different Apple ID and sees an empty database despite the inviter having data
+**Detect.** The app uses `cloudKitDatabase: .automatic` and its features imply collaboration between different Apple IDs (household, family, team, invite, share); or a second user signs in and sees an empty database.
 
-### Root cause
-SwiftData's `cloudKitDatabase: .automatic` only syncs the user's own private database across the user's own devices. There is no `.shared` option. Apple's official answer is "drop SwiftData and use `NSPersistentCloudKitContainer` directly" — but you can keep SwiftData and overlay a `CKShare` on a custom `CKRecordZone` instead.
+**Cause.** SwiftData's CloudKit mirroring covers only the signed-in user's private database. `ModelConfiguration` has no shared-database option.
 
-### Fix
-Architecture: keep SwiftData as the local source of truth, overlay a `CKShare` on a custom `CKRecordZone` per shareable root, and let the CKShare handshake piggyback on the same CloudKit container SwiftData is already using.
-
-Step 1 — add a stable zone identifier to your shareable root model:
-```swift
-@Model
-final class Household {
-    var name: String = ""
-    var cloudZoneName: String = ""           // ← stable per-household zone ID
-    var ownerUserRecordName: String?         // nil = local user owns it
-    var shareIsActive: Bool = false
-
-    init(name: String) {
-        self.name = name
-        self.cloudZoneName = "Household-\(UUID().uuidString)"
-    }
-    var isOwner: Bool { ownerUserRecordName == nil }
-}
-```
-
-Step 2 — sharing service. Two non-obvious bits:
-1. The modern async `db.modifyRecords(saving:deleting:)` returns DICTIONARIES, not arrays:
-   ```swift
-   let result = try await privateDB.modifyRecords(saving: [rootRecord, share], deleting: [])
-   // result.saveResults is [CKRecord.ID: Result<CKRecord, Error>]
-   let savedShare = result.saveResults.values.compactMap { res -> CKShare? in
-       if case .success(let record) = res { return record as? CKShare }
-       return nil
-   }.first
-   ```
-2. `container.accept([metadata])` returns a value the compiler will warn about — bind it explicitly:
-   ```swift
-   _ = try await container.accept([metadata])
-   ```
-
-Step 3 — accept incoming shares. The activity type is the well-known string `"com.apple.CloudKit.ShareMetadata"` and the metadata lives under `"CKShareMetadata"` in `userInfo`. **There is NO `CKShare.Metadata.activityType` constant** even though older Apple sample code references one. Hardcode the strings:
-```swift
-WindowGroup {
-    ContentView()
-        .modelContainer(container)
-        .onContinueUserActivity("com.apple.CloudKit.ShareMetadata") { activity in
-            guard let metadata = activity.userInfo?["CKShareMetadata"] as? CKShare.Metadata else { return }
-            Task { @MainActor in
-                _ = try? await CloudKitSharingService.shared.acceptShare(metadata: metadata)
-            }
-        }
-}
-```
-
-Step 4 — SceneDelegate fallback. The SwiftUI `onContinueUserActivity` callback is unreliable on cold launch (iOS 17/18). Implement BOTH paths if your app supports cold-launch share acceptance:
-```swift
-// UIWindowSceneDelegate
-func windowScene(_ windowScene: UIWindowScene,
-                 userDidAcceptCloudKitShareWith metadata: CKShare.Metadata) {
-    Task { @MainActor in
-        try? await CloudKitSharingService.shared.acceptShare(metadata: metadata)
-    }
-}
-```
-On macOS: `application(_:userDidAcceptCloudKitShareWith:)` on `NSApplicationDelegate`.
-
-Step 5 — owner records live in `privateCloudDatabase`, accepted shares live in `sharedCloudDatabase`. SwiftData's CloudKit mirror handles both automatically once accepted, but if you query CKRecords directly you must pick the right database.
-
-### Verify
-1. Owner-side: create a household, tap Invite. `UICloudSharingController` opens with a share URL. CloudKit Dashboard → Zones shows a new `Household-<UUID>` zone with a `HouseholdRoot` record containing a `cloudkit.share` field.
-2. Member-side: send the URL to a different Apple ID via Messages. Tap the URL. Your `onContinueUserActivity` (or scene delegate) callback fires with metadata.
-3. Sync test: owner adds a child entity → member sees it within ~10 seconds. (No manual record mirroring.)
-4. To ship to TestFlight you must hit **Deploy Schema Changes…** in CloudKit Console to promote custom record types to PRODUCTION.
-
-### Notes
-- `@MainActor` deinit gotcha: if you make the sharing service `@MainActor`, you cannot reference any main-actor-isolated stored properties from `deinit`. Just delete the deinit (singletons live forever).
+**Surface to the user.** Cross-account sharing is a product and architecture decision (overlay `CKShare` on a custom record zone alongside SwiftData, or move to `NSPersistentCloudKitContainer`), not a remediation. File it as a deferred finding that explains the gap. If the project already has a `CKShare` implementation, two facts explain compile errors seen there: the async `modifyRecords(saving:deleting:)` returns dictionaries of per-record `Result`s, not arrays; and there is no `CKShare.Metadata.activityType` constant, so share acceptance matches the literal activity type `"com.apple.CloudKit.ShareMetadata"`. SwiftUI's `onContinueUserActivity` has been unreliable for share acceptance on cold launch, so such apps also implement `windowScene(_:userDidAcceptCloudKitShareWith:)` (on macOS, `application(_:userDidAcceptCloudKitShareWith:)`).
 
 ---
 
-## 4. iCloud ubiquity container silent failure
+## 4. iCloud ubiquity container URL is non-nil but unusable
 
-### Trigger
-- App has `com.apple.developer.icloud-container-identifiers` entitlement
-- `FileManager.url(forUbiquityContainerIdentifier:)` returns a non-nil URL
-- App shows empty state (0 items) despite files in local Documents directory
-- Import operations appear to succeed but data is never persisted
-- Removing `try?` reveals: "You don't have permission to save the file 'foo' in the folder 'Documents'"
+**Detect.** The app shows an empty state although files exist locally, or imports appear to succeed but nothing persists. In code: the result of `url(forUbiquityContainerIdentifier:)` is used directly, typically with `try? fm.createDirectory(...)` after it.
 
-### Root cause
-`url(forUbiquityContainerIdentifier:)` returning non-nil only means the entitlement is **configured** — NOT that the container is ready for use. `try?` then swallows the actual permission error, leaving the app silently operating on an inaccessible directory.
+**Rule.** A non-nil URL means only that the entitlement is configured, not that the container is usable (unprovisioned debug builds, a container never created in the developer portal, first launch before iCloud has initialised). Before adopting the directory, create it and list its contents with errors propagated, not `try?`; if either fails, fall back to a local directory and record that iCloud is off. The `try?` is what turns a permission error into silent data loss.
 
-### Fix
-Verify-then-use pattern with fallback. Never trust the URL alone:
-```swift
-private init() {
-    let fm = FileManager.default
-    let resolvedDir: URL
-    let resolvedICloud: Bool
-
-    if let iCloudURL = fm.url(forUbiquityContainerIdentifier: "iCloud.com.example.App") {
-        let targetDir = iCloudURL.appendingPathComponent("Documents/data")
-        var iCloudWorks = false
-        do {
-            try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
-            // Critical: verify the directory is actually accessible
-            _ = try fm.contentsOfDirectory(at: targetDir, includingPropertiesForKeys: nil)
-            iCloudWorks = true
-        } catch {
-            // iCloud container exists but isn't accessible (permission denied, etc.)
-        }
-        if iCloudWorks {
-            resolvedDir = targetDir
-            resolvedICloud = true
-        } else {
-            // Fall back to local Documents
-            let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let local = docs.appendingPathComponent("data")
-            try? fm.createDirectory(at: local, withIntermediateDirectories: true)
-            resolvedDir = local
-            resolvedICloud = false
-        }
-    } else {
-        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let local = docs.appendingPathComponent("data")
-        try? fm.createDirectory(at: local, withIntermediateDirectories: true)
-        resolvedDir = local
-        resolvedICloud = false
-    }
-
-    self.dataDirectory = resolvedDir
-    self.isICloud = resolvedICloud
-}
-```
-
-Anti-pattern to flag during audit:
-```swift
-// BAD: assumes non-nil URL means the directory is usable
-if let iCloudURL = fm.url(forUbiquityContainerIdentifier: "...") {
-    let dir = iCloudURL.appendingPathComponent("Documents/data")
-    try? fm.createDirectory(at: dir, withIntermediateDirectories: true)  // silently fails!
-    self.dataDirectory = dir
-}
-```
-
-### Verify
-1. Add temporary logging of the resolved path
-2. Verify `contentsOfDirectory` succeeds on the chosen path
-3. Write a test file and read it back
-
-### Notes
-- Common in: Debug builds from Xcode without full iCloud provisioning, capability added but container not created in Apple Developer portal, first launch before iCloud sync initialized, user not signed into iCloud
-- In sandboxed macOS apps, `FileManager.urls(for: .documentDirectory)` returns `~/Library/Containers/<bundleId>/Data/Documents/`, not the user's Documents folder
+Note for sandboxed macOS apps: `FileManager.urls(for: .documentDirectory, ...)` is `~/Library/Containers/<bundle id>/Data/Documents/`, not the user's Documents folder.
 
 ---
 
-## 5. iCloud symlink content corruption (sparse / dehydrated files)
+## 5. Dehydrated iCloud placeholder files read as empty
 
-### Trigger
-- `stat -f '%z' file` shows size > 0 but `stat -f '%b' file` shows `0` blocks
-- Files open and read successfully but return empty content
-- `JSONDecoder` fails on files that "exist" with non-zero reported size
-- Content directory was symlinked or rsynced into iCloud Drive
+**Detect.** Code or scripts symlink, copy, or rsync content into `~/Library/Mobile Documents/` (iCloud Drive) and read it back without an integrity check. On disk, an affected file reports a non-zero size but zero allocated blocks (`stat -f '%z %b' <file>` on macOS) and decodes as empty.
 
-### Root cause
-When you migrate content from local storage to iCloud Drive (symlink or rsync), iCloud may create "dehydrated" placeholder files: non-zero `st_size` but `st_blocks=0`. The files appear to exist but read as empty. This silently corrupts data.
+**Fix.** Add a post-write and pre-read integrity check (allocated blocks, or a content hash) to the mirroring code, and never mirror with a delete-on-sync option, which propagates the loss.
 
-### Fix
-1. Detect sparse files (macOS `stat` syntax) — null-delimited so filenames with spaces/newlines are handled correctly:
-   ```bash
-   find /path/to/content -type f -print0 | while IFS= read -r -d '' f; do
-     size=$(stat -f '%z' "$f" 2>/dev/null)
-     blocks=$(stat -f '%b' "$f" 2>/dev/null)
-     if [ "$size" -gt 0 ] 2>/dev/null && [ "$blocks" = "0" ]; then
-       echo "SPARSE: $f"
-     fi
-   done
-   ```
-2. Recovery priority order: git history (only for previously-tracked files) → Time Machine → manual reconstruction.
-3. Delete irrecoverable sparse placeholders — they waste space and cause misleading `stat` results.
-4. **Never rsync local → iCloud with `--delete`** if you suspect corruption — the backup mirrors the corruption.
-
-### Audit checks
-Flag any code that mirrors content into `~/Library/Mobile Documents/` paths without integrity verification (e.g., post-write `stat` or hash check). Binary files (images, video) that were never in git are completely irrecoverable from history.
+**Surface to the user.** Recovering already-emptied files is theirs to do, from git history for tracked files or from a backup. Report which paths are affected; do not delete placeholders or attempt recovery.
 
 ---
 
-## 6. SwiftUI xcstrings localization silent failures
+## 6. String-catalog localization fails silently
 
-A connected family of bugs. Each is silent — the app builds and runs, but UI ships in the wrong language.
+The app builds and runs; the UI simply ships in the wrong language.
 
-### 6.1 — `Text(stringVariable)` does NOT auto-localize
-**Trigger:** strings appear in English in the UI; xcstrings has correct translations; device language is set correctly.
-**Cause:** `Text("literal")` accepts `LocalizedStringKey` and auto-localizes. `Text(someVar)` where `someVar: String` does NOT — it renders raw. Any reusable component accepting `title: String` and passing it to `Text(title)` ships untranslated UI.
-**Fix:** Either change the parameter type to `LocalizedStringKey` (for literal-only callers), OR document that callers must pre-localize via `String(localized:)`.
+### 6.2 `String(localized:)` ignores the SwiftUI environment locale
 
-### 6.2 — `String(localized:)` ignores SwiftUI environment locale
-**Trigger:** in-app language picker changes formatting (dates/numbers) but not string translations.
-**Cause:** `String(localized:)` uses `Bundle.main.preferredLocalizations`, controlled by `UserDefaults["AppleLanguages"]` — NOT by `.environment(\.locale)`. The SwiftUI environment locale only affects formatting, not catalog lookups.
-**Fix:** Either (a) write to `AppleLanguages` and prompt for restart, OR (b) build an `appLocalized()` helper that passes the user's chosen locale explicitly:
-```swift
-extension Locale {
-    static var app: Locale {
-        let id = UserDefaults.standard.string(forKey: "com.example.appLocale") ?? ""
-        return id.isEmpty ? .current : Locale(identifier: id)
-    }
-}
+**Detect.** An in-app language picker changes date and number formatting but not the translated strings.
 
-func appLocalized(_ key: String.LocalizationValue, comment: StaticString = "") -> String {
-    String(localized: key, locale: .app, comment: comment)
-}
-```
-Use `appLocalized()` everywhere instead of `String(localized:)`. Always pass `comment:` so the xcstrings extractor populates context for translators.
+**Cause.** `String(localized:)` resolves against the bundle's preferred localization, which follows the `AppleLanguages` default, not `.environment(\.locale)`. The environment locale drives formatting and `Text` with a `LocalizedStringKey`; it does not redirect catalog lookups made through `String`. The `locale:` argument of `String(localized:locale:)` likewise formats interpolated values and does not choose the language.
 
-### 6.3 — AGA `^[...](inflect: true)` requires `LocalizedStringKey`
-**Trigger:** Badge or label shows `^[0 horse](inflect: true)` literally instead of "0 horses".
-**Cause:** Apple's Automatic Grammar Agreement only fires when rendered as `Text(LocalizedStringKey)`. `String(localized: "^[\(count) horse](inflect: true)")` returns a plain `String`, strips the AGA pipeline, and renders the markup literally. AGA `inflect: true` is also unreliable for non-English locales.
-**Fix:** Use xcstrings `variations.plural` for ALL locales including English:
+**Fix.** Either write the chosen language to `AppleLanguages` and ask for a relaunch, or route every lookup through one helper that passes the chosen language's `.lproj` bundle as `bundle:`. Views that can take a `LocalizedStringKey` should, since those do follow the environment.
+
+### 6.3 Automatic Grammar Agreement markup rendered literally
+
+**Detect.** A label shows `^[0 horse](inflect: true)` verbatim.
+
+**Cause.** Inflection is applied when the string is rendered as `Text(LocalizedStringKey)` or built as an attributed string. Passing it through a plain `String` first loses that step. Inflection also supports only a few languages.
+
+**Fix.** Use the catalog's `variations.plural` for every locale, English included:
+
 ```json
-"^[%lld horse](inflect: true)": {
-  "localizations": {
-    "en": {
-      "variations": { "plural": {
-        "one":   { "stringUnit": { "state": "translated", "value": "%lld horse" } },
-        "other": { "stringUnit": { "state": "translated", "value": "%lld horses" } }
-      }}
-    }
-  }
+"%lld horse": {
+  "localizations": { "en": { "variations": { "plural": {
+    "one":   { "stringUnit": { "state": "translated", "value": "%lld horse" } },
+    "other": { "stringUnit": { "state": "translated", "value": "%lld horses" } }
+  }}}}
 }
 ```
 
-### 6.4 — Static cached `DateFormatter` breaks locale switching
-**Trigger:** Dates render in the original device language even after the user switches in-app language.
-**Cause:** Static `DateFormatter` instances capture locale at creation time and never update.
-**Fix:** Use `Date.FormatStyle` (respects current locale, Foundation caches internally), OR construct a fresh formatter per call. Static caching IS safe for locale-independent formats like `yyyyMMdd` — set `locale = Locale(identifier: "en_US_POSIX")` to prevent calendar interference.
+### Other checks in this family
 
-### 6.5 — `date.formatted(...)` vs `Text(date, format:)` in views
-**Cause:** `date.formatted(...)` returns a `String` using `Locale.current` (system locale, non-reactive). `Text(date, format: ...)` uses the SwiftUI environment locale and IS reactive.
-**Fix:** Prefer `Text(date, format: .dateTime.weekday(.abbreviated))` in view bodies.
-
-### 6.6 — Localized strings stored in SwiftData / CoreData
-**Cause:** Storing `"Lektion"` (German) and reading in French gives mixed-language UI.
-**Fix:** Always store raw enum values; compute `displayName` at render time:
-```swift
-@Model final class Transaction {
-    var categoryRaw: String = "lesson"  // raw enum value
-    var category: TransactionCategory {
-        get { TransactionCategory(rawValue: categoryRaw) ?? .other }
-        set { categoryRaw = newValue.rawValue }
-    }
-}
-```
-Same rule for dates: store `Date`, format for display only. Use `ISO8601DateFormatter` for export/import.
-
-### 6.7 — Missing `comment:` parameter on `String(localized:)`
-Translators have no context, and the xcstrings extractor won't auto-populate hints. Always pass `comment:`.
-
-### 6.8 — Missing `en` entry in xcstrings when other languages are present
-Causes English UI to display with raw `^[...]` markup or fall back to keys.
+- `Text(someString)` with a `String` variable does not localize; only a literal or `LocalizedStringKey` does. A reusable view taking `title: String` ships untranslated unless its callers localize first.
+- A cached `DateFormatter`, or `date.formatted(...)` in a view body, keeps the locale it was created under; `Text(date, format:)` follows the environment.
+- 6.6: display strings stored in SwiftData or Core Data stay in the language they were written in. Store raw enum values and `Date`s, and localize at render time.
+- The source language needs its own catalog entry when other languages have one, and `String(localized:)` calls should pass `comment:` for translators.
 
 ---
 
-## 7. XcodeGen project generation gotchas
+## 7. XcodeGen project generation
 
-### 7.1 — Missing bundle ID on simulator install
-**Trigger:** `xcodebuild test` fails with "Simulator device failed to install the application. Missing bundle ID." despite `PRODUCT_BUNDLE_IDENTIFIER` being correctly set.
-**Cause:** `GENERATE_INFOPLIST_FILE: false` with a custom Info.plist that contains only app-specific keys. Xcode expects the plist to contain ALL required keys (`CFBundleIdentifier`, `CFBundleExecutable`, `CFBundlePackageType`).
-**Fix:** Set `GENERATE_INFOPLIST_FILE: true` even when providing a custom Info.plist. Xcode will merge your custom keys with auto-generated standard keys.
+### 7.1 "Missing bundle ID" on simulator install
+
+**Detect.** `xcodebuild test` fails with `Simulator device failed to install the application. Missing bundle ID.` although `PRODUCT_BUNDLE_IDENTIFIER` is set.
+
+**Cause.** `GENERATE_INFOPLIST_FILE: false` with a custom Info.plist that holds only app-specific keys, so `CFBundleIdentifier`, `CFBundleExecutable`, and `CFBundlePackageType` are absent.
+
+**Fix.** Keep the custom plist and set `GENERATE_INFOPLIST_FILE: true`; Xcode merges the standard keys in.
+
 ```yaml
 settings:
   base:
     INFOPLIST_FILE: MyApp/Info.plist
-    GENERATE_INFOPLIST_FILE: true  # merges custom + standard keys
+    GENERATE_INFOPLIST_FILE: true
 ```
 
-### 7.2 — Preview Content Swift files not compiling
-**Trigger:** Build fails with "cannot find 'PreviewSampleData' in scope".
-**Cause:** `buildPhase: none` on the entire `Preview Content/` directory excludes ALL files including Swift sources. Correct for asset catalogs, wrong for Swift files needed at runtime (e.g., `PreviewSampleData.swift` used via `-SeedSampleData` launch argument).
-**Fix:** Only exclude the asset catalog, not the entire directory:
+### 7.2 Swift files under `Preview Content/` not compiled
+
+**Detect.** Build fails with `cannot find 'PreviewSampleData' in scope`.
+
+**Cause.** `buildPhase: none` on the whole `Preview Content/` directory excludes its Swift sources as well as its asset catalog.
+
+**Fix.** Exclude only the asset catalog:
+
 ```yaml
-# CORRECT
 sources:
   - path: MyApp
     excludes:
@@ -438,214 +177,89 @@ sources:
   - path: MyApp/Preview Content/PreviewAssets.xcassets
     buildPhase: none
 ```
-Note: in Release builds on CI, `DEVELOPMENT_ASSET_PATHS` files may be stripped — for runtime-needed Swift files, MOVE them OUT of `Preview Content/` into the main source tree.
 
-### 7.3 — UILaunchScreen disappears after `xcodegen generate` (iOS letterbox mode)
-**Trigger:** iOS app renders in a tiny letterboxed/compatibility window with large black borders. App was full-screen before but regressed after `xcodegen generate`.
-**Cause:** When using XcodeGen's `info.path`, `xcodegen generate` **overwrites the entire plist file** from scratch using only the keys in `info.properties`. Any keys you manually added to the plist (like `UILaunchScreen`) are silently deleted. Without `UILaunchScreen` (even as an empty dict), iOS falls back to legacy compatibility mode.
-**Fix:** Move `UILaunchScreen` into `project.yml`'s `info.properties`:
+Files under `DEVELOPMENT_ASSET_PATHS` can be stripped from Release builds, so a Swift file the app needs at runtime belongs in the main source tree, not in `Preview Content/`.
+
+### 7.3 `UILaunchScreen` disappears after `xcodegen generate`
+
+**Detect.** The iOS app renders letterboxed with black borders after a regenerate.
+
+**Cause.** With `info.path`, `xcodegen generate` rewrites the whole plist from `info.properties`, deleting keys that were added to the file by hand. Without `UILaunchScreen` (an empty dictionary is enough) iOS falls back to its legacy compatibility size.
+
+**Fix.** Declare the key in `project.yml`:
+
 ```yaml
 targets:
   MyApp:
     info:
       path: MyApp/Info.plist
       properties:
-        UILaunchScreen: {}    # Empty dict = auto-generated launch screen
-        CFBundleDisplayName: MyApp
+        UILaunchScreen: {}
 ```
-Also REMOVE `INFOPLIST_KEY_UILaunchScreen_Generation: true` from build settings if both are present — they create a nested `UILaunchScreen > UILaunchScreen` structure. After fixing, **uninstall the app from the simulator** before reinstalling — the simulator caches the old launch screen configuration.
 
-### 7.4 — General rule
-**Never manually edit the Info.plist file when using XcodeGen's `info.path`.** All custom keys must go in `info.properties` in `project.yml`, or they will be lost on next `xcodegen generate`.
+Remove `INFOPLIST_KEY_UILaunchScreen_Generation` if it is also set, since the two together nest `UILaunchScreen` inside itself. The simulator caches launch-screen configuration, so uninstall the app before checking the fix.
+
+### 7.4 The general rule
+
+With `info.path`, every custom Info.plist key lives in `info.properties`. A hand edit to the plist file is lost on the next generate, so flag any plist key that is not also in `project.yml`.
 
 ---
 
-## 8. TestFlight upload validation gotchas
+## 8. TestFlight upload rejected server-side while CI is green
 
-These all happen SERVER-SIDE at Apple, not during local build/archive. CI shows green and the build succeeds, but the IPA never appears in TestFlight.
+These validations run at Apple after the upload, so the local build and archive succeed and the build never appears in TestFlight.
 
-### 8.1 — iPad multitasking interface orientations (code 409, fatal)
-**Symptom:** `Invalid bundle. The "UIInterfaceOrientationPortrait" orientations were provided ... but you need to include all of the [4 orientations] to support iPad multitasking.`
-**Cause:** Apple requires all 4 interface orientations declared in `UISupportedInterfaceOrientations`, OR the app must opt out of iPad multitasking via `UIRequiresFullScreen: true`. Applies even to iPhone-only apps.
-**Fix:** Add to Info.plist:
-```xml
-<key>UISupportedInterfaceOrientations</key>
-<array>
-    <string>UIInterfaceOrientationPortrait</string>
-    <string>UIInterfaceOrientationPortraitUpsideDown</string>
-    <string>UIInterfaceOrientationLandscapeLeft</string>
-    <string>UIInterfaceOrientationLandscapeRight</string>
-</array>
-<key>UIRequiresFullScreen</key>
-<true/>
-```
-Or as XcodeGen build settings:
-```yaml
-INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-INFOPLIST_KEY_UIRequiresFullScreen: YES
-```
+### 8.1 iPad multitasking orientations (error 409)
 
-### 8.2 — Missing document configuration (code 90737, warning today / fatal future)
-**Symptom:** `Missing Document Configuration. By declaring the CFBundleDocumentTypes key ... you've indicated that your app is able to open documents. Please set the LSSupportsOpeningDocumentsInPlace key to YES (recommended) or NO.`
-**Cause:** Declaring `CFBundleDocumentTypes` requires also declaring how the app handles document access.
-**Fix:**
-```xml
-<key>LSSupportsOpeningDocumentsInPlace</key>
-<true/>
-```
+**Detect.** `Invalid bundle. The "UIInterfaceOrientationPortrait" orientations were provided ... you need to include all of the ... orientations to support iPad multitasking.` In code: `UISupportedInterfaceOrientations` (or its `~ipad` variant) lists fewer than four orientations for an app that can run on iPad.
 
-### 8.3 — `apple-actions/upload-testflight-build` reports success on UPLOAD FAILED
-**Cause:** The action wraps `xcrun altool`, which outputs validation errors in XML plist format. The action exit code can still be 0 even when the plist contains `UPLOAD FAILED`.
-**Fix:** In CI release workflows, always grep raw upload logs:
+**Fix.** Declare all four orientations for iPad (`INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad` in build settings). Older projects opt out with `UIRequiresFullScreen`; Apple has deprecated that key, so prefer declaring the orientations.
+
+### 8.2 Missing document configuration (warning 90737)
+
+**Detect.** The plist declares `CFBundleDocumentTypes` without `LSSupportsOpeningDocumentsInPlace`.
+
+**Fix.** Set `LSSupportsOpeningDocumentsInPlace` to the value that matches how the app handles documents.
+
+### 8.3 The upload step reports success on `UPLOAD FAILED`
+
+**Cause.** `apple-actions/upload-testflight-build` wraps `xcrun altool`, which reports validation errors inside its plist output; the step can exit 0 while that output says `UPLOAD FAILED`.
+
+**Fix.** In a release workflow, fail the job on the content of the upload log, not the exit code. To check a finished run:
+
 ```bash
 gh run view --job=<JOB_ID> --log 2>&1 | grep -i -E '(UPLOAD FAILED|product-errors|product-warnings)'
 ```
-Always check TestFlight after CI completes to confirm the build actually arrived. Don't trust the green checkmark.
 
 ---
 
-## 9. xcodebuild App Group provisioning auth failure
+## 9. `xcodebuild` cannot provision a new capability
 
-### Trigger
-- `xcodebuild archive -allowProvisioningUpdates` fails with: `Authentication failed: Make sure a bearer token was provided, it is properly configured and signed, and it has not expired.`
-- AND: `Provisioning profile "iOS Team Provisioning Profile: <bundle-id>" doesn't include the App Groups capability`
-- The same API key WORKS for `xcrun altool --upload-app`
-- Common scenario: adding a WidgetKit extension with shared App Group to an existing app
+**Detect.** `xcodebuild archive -allowProvisioningUpdates` fails with `Authentication failed: Make sure a bearer token was provided...` together with `Provisioning profile ... doesn't include the App Groups capability`, typically after adding a widget or other extension that shares an App Group. The same API key still uploads builds.
 
-### Root cause
-The App Store Connect API key (`.p8`) has different permission scopes:
-- **Upload / App Management**: works via `altool` for submitting builds
-- **Provisioning Profile Management**: requires Xcode GUI session OR an API key with Admin/Developer role and certificate/profile management permissions
+**Cause.** The message is misleading: the App Store Connect API key is valid but lacks permission to register identifiers and regenerate profiles.
 
-When `xcodebuild` encounters a new capability not in the existing provisioning profile, it tries to register the App Group identifier and regenerate profiles via the Apple Developer Portal API. This requires higher permissions than upload-only.
-
-The error message ("bearer token not provided") is misleading — it's actually a permissions issue.
-
-### Fix
-Manually fix provisioning ONCE in Xcode GUI before committing to CI:
-1. `open YourProject.xcodeproj`
-2. Select the main app target → Signing & Capabilities
-3. Click "Fix Issue" / "Register" for each capability
-4. Repeat for the widget/extension target
-5. Once Xcode builds successfully, the CLI deploy script will work
-
-Alternative: register the App Group + bundle ID capabilities manually via the Apple Developer Portal at `https://developer.apple.com/account/resources/identifiers/`.
-
-For XcodeGen multi-platform targets with widget extensions: use `platformFilter: iOS` on the dependency since widgets are primarily iOS.
+**Surface to the user.** Ask them to open the project in Xcode once and resolve Signing & Capabilities for the app and each extension target, or to register the capability under Identifiers in the Apple Developer portal. After that the command-line build works. Do not change signing settings or entitlements to get around it.
 
 ---
 
-## 10. iOS first-IAP submission rejection (Guideline 2.1b / 3.1.1)
+## 10. First in-app-purchase submission rejected
 
-### Trigger
-- App rejected with "Unable to make IAP purchases" in sandbox review
-- All IAPs show "Developer Action Needed" / "Rejected" status
-- Error in app: "Purchase failed: Unable to Complete Request"
-- App rejected for missing "Restore Purchases" button (Guideline 3.1.1)
+**Audit checks (code).**
 
-### Root causes (often combined)
-1. **Missing Restore button:** apps that offer IAPs MUST include a distinct, user-tappable Restore button on the same screen where IAPs are shown. Not buried in deep settings.
-2. **Hardcoded fallback price:** `Text(price ?? "$0.99")` shows a tappable button before products load, which the App Reviewer taps and gets a failed purchase.
-3. **First-time IAPs CANNOT be tested in TestFlight sandbox.** Products will load (prices display correctly) but `product.purchase()` will fail with "Unable to Complete Request". This is NOT a code bug — it's a sandbox limitation for unapproved IAPs.
+- A screen that offers purchases has no visible Restore Purchases control. App Review rejects this under guideline 3.1.1; the control calls `AppStore.sync()` and then refreshes entitlements.
+- A purchase button shows a hardcoded fallback price (`Text(price ?? "$0.99")`) before products load. A reviewer can tap it and get a failed purchase. Show progress until the product resolves, and enable the button only then.
 
-### Fixes
+**Not a code bug.** Products that have never been approved can load and display prices in TestFlight's sandbox and still fail at `product.purchase()` with "Unable to Complete Request". Do not chase this in code. A `.storekit` configuration file referenced from the scheme exercises the purchase flow locally in debug runs; archived and TestFlight builds use the real sandbox.
 
-**Restore button (StoreKit 2):**
-```swift
-func restorePurchases() async -> Bool {
-    do {
-        try await AppStore.sync()
-    } catch {
-        purchaseError = "Failed to restore: \(error.localizedDescription)"
-        return false
-    }
-    await refreshPurchaseState()
-    return true
-}
-```
-Place the button on the same screen where IAPs are shown AND in Settings for discoverability. Show loading state during restore, error/success alerts.
-
-**PurchaseButton UX — never show a hardcoded fallback price:**
-```swift
-// BAD: shows tappable $0.99 even when product isn't loaded
-Text(price ?? "$0.99")
-
-// GOOD: ProgressView until product resolves
-if let price {
-    Button(action: action) { Text(price) }
-} else {
-    ProgressView()
-}
-```
-
-**Local StoreKit testing:** add a `.storekit` configuration file and reference it in the scheme's `LaunchAction` (`storeKitConfigurationFileReference`). Run from Xcode — purchases use the local test environment with no App Store Connect dependency. Note: only affects debug runs; archived/TestFlight builds use real sandbox.
-
-**Submitting first-time IAPs alongside the app version:**
-1. Go to the app version page → click "Add for Review" — this creates a Draft Submission
-2. Go to each individual IAP page → click "Submit for Review" on each — adds it to the same draft
-3. Open the Draft Submission (bottom of any page) → click "Submit for Review"
-
-**Clearing rejected IAP localizations:** for each IAP, edit the English (U.S.) localization (any minor edit), Save → status changes from "Rejected" to "Prepare for Submission". This can be automated with Playwright since App Store Connect is a web app.
-
-### Notes
-- Sandbox tester accounts (Users and Access > Sandbox) require an existing Apple Account
-- For TestFlight, sandbox purchases use the user's real Apple ID automatically — no separate sandbox account needed
-- Bank account "Processing" status does NOT block sandbox purchases for approved IAPs
+**Surface to the user.** First-time products must be submitted together with the app version in App Store Connect, and a rejected product's metadata has to be edited there before it can be resubmitted. Tell the user this is required; an agent cannot do it.
 
 ---
 
-## 12. Keychain test failures in simulator (CryptoKit)
+## 11. Keychain calls fail in simulator tests
 
-### Trigger
-- AES-GCM encryption with key stored in Keychain via CryptoKit
-- `SecItemAdd` and `SecItemCopyMatching` silently return non-success in test environment
-- Encrypt-then-decrypt roundtrip test fails because a new key is generated on each `getOrCreateKey()` call
+**Detect.** `SecItemAdd` / `SecItemCopyMatching` return a non-success status under test, and an encrypt-then-decrypt round trip fails because a fresh key is generated on every call.
 
-### Root cause
-This is a test-environment problem, not a production one: the test target is missing the Keychain-access entitlement, or the test runs with no host app under `CODE_SIGNING_ALLOWED=NO` (Keychain APIs require a signed, entitled process). Do NOT "fix" this by adding a silent in-memory fallback that production code can also take — anything encrypted under that in-memory key becomes unreadable the moment the app relaunches and hits the real Keychain (permanent data loss).
+**Cause.** A test-environment problem: Keychain APIs need a signed, entitled process, and the test target has no Keychain entitlement or runs without a host app under `CODE_SIGNING_ALLOWED=NO`.
 
-### Fix
-Put Keychain access behind a protocol and inject a fake store in tests, so the roundtrip test never touches the real Keychain:
-```swift
-protocol KeyStore {
-    func loadKey() -> SymmetricKey?
-    /// Throws if the key could not be durably persisted — callers must not
-    /// treat the key as usable when this throws (e.g. Keychain write failure).
-    func saveKey(_ key: SymmetricKey) throws
-}
-
-struct KeychainKeyStore: KeyStore { /* real SecItemAdd/SecItemCopyMatching; throws on non-zero OSStatus */ }
-
-final class InMemoryKeyStore: KeyStore {
-    private var key: SymmetricKey?
-    func loadKey() -> SymmetricKey? { key }
-    func saveKey(_ key: SymmetricKey) throws { self.key = key }
-}
-
-struct Encryptor {
-    let store: KeyStore
-    func getOrCreateKey() throws -> SymmetricKey {
-        if let existing = store.loadKey() { return existing }
-        let newKey = SymmetricKey(size: .bits256)
-        try store.saveKey(newKey)  // propagate failure — never encrypt under a key that didn't persist
-        return newKey
-    }
-}
-```
-Production always uses `KeychainKeyStore`; tests inject `InMemoryKeyStore()`. A failed `saveKey` must abort the encrypt operation with an error, never fall through and encrypt anyway — a key that isn't durably stored is unrecoverable after relaunch. If the real Keychain must be exercised in tests, fix the test target's entitlements (add the Keychain Sharing capability, or run against a host app) instead of working around the failure.
-
----
-
-## How audit agents should use this catalogue
-
-1. In Phase 0e, the orchestrator reads this catalogue once — only when the project shows at least one candidate signal (CloudKit, SwiftData, iCloud, xcstrings, StoreKit, XcodeGen, a TestFlight-uploading CI workflow) — and matches it against the Quick index above to record `GOTCHA_ENTRIES_IN_SCOPE`, routed to the audit agent(s) that own each category.
-2. Audit agents receive only the excerpted entries for their category (never the whole file) and check the **TRIGGER** signals against the codebase. When a trigger matches, the agent files a finding citing the entry number and severity.
-3. Remediation agents, when fixing a finding that cites an entry number, read that entry and apply the FIX **as written** rather than improvising. The fixes here have all shipped in real projects.
-4. Phase 4c (test enhancement) does not consume this catalogue directly — it triages Agent 7's `[VACUOUS]`/`[WEAK]`/`[MISSING]` findings independently. Fix sections that include their own test/verification code (entries 1, 2, 6, 10) are applied by the Phase 3 remediation agent as part of that entry's fix, not by Phase 4c.
-
-Severity guidance:
-- **CRITICAL**: app-launch crashes (#1, #2), App Store rejection (#10 missing Restore), data loss (#5)
-- **HIGH**: silent data corruption (#4, #6.6), build/release pipeline failures (#7.1, #7.3, #8.1)
-- **MEDIUM**: UX bugs that ship to users (#6.1–6.5, #6.7), warnings that may become fatal (#8.2)
-- **LOW**: code clarity / convention drift
+**Fix.** Do not add an in-memory fallback that production code can also take. Anything encrypted under a key that was never persisted becomes unreadable at the next launch, which is permanent data loss. Put key storage behind a protocol, use the Keychain-backed store in production and an in-memory fake only in tests, and make a failed save abort the encryption with an error. If tests must exercise the real Keychain, fix the test target's entitlements or run it against a host app.

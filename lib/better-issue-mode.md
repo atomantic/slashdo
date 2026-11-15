@@ -15,9 +15,11 @@ Phase 7, or the `--scan-only` gate's summary. Spooling and remediation are uncha
 Create `SPOOL_DIR` before dispatching any audit agent and record the literal printed
 path in run state. Each agent spools one ready-to-file block per finding (the Phase 1
 finding format in the bulk-filing block format) to `$SPOOL_DIR/<category-slug>.md` and returns only its
-`<SEVERITY-or-UNCERTAIN>` index lines. Audit agents have no `Write` tool, so they spool
-via a quoted Bash heredoc (`cat > "$SPOOL_DIR/<slug>.md" <<'EOF'`). **Only the first
-write uses `>`; every later one must use `>>`.**
+`<SEVERITY-or-UNCERTAIN>` index lines. Audit workers are read-only and may have
+no file-writing tool, so they spool with a quoted shell heredoc
+(`cat > "<spool path>/<slug>.md" <<'EOF'`), giving the literal spool path because a
+shell variable set in one command is gone in the next. Only the first write uses `>`;
+every later one uses `>>`, or it would erase the earlier findings.
 
 ### Phase 2 (Plan)
 
@@ -53,4 +55,4 @@ Read `$SPOOL_DIR/tests.md` and populate `{VACUOUS_AND_WEAK_FINDINGS}` /
 ### Phase 7 (Cleanup)
 
 Phase 4c (or Phase 2's scan-only filing) is the last reader, so remove `SPOOL_DIR`
-then — **unless any filer returned `ERROR`**: keep it and print its path.
+then, unless any filer returned `ERROR`: keep it and print its path.
