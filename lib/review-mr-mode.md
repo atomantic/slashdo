@@ -2,9 +2,9 @@
 
 Loaded only when `PR_MODE=true` and the reference is a GitLab merge request
 (Parse Arguments already chose the host). It is the GitLab counterpart of `review-pr-mode.md`: same
-phases, same dispositions, same `/tmp/do-review-pr-{PR_NUM}*` scratch paths
-(`{PR_NUM}` holds the MR **iid**). Do not use the local working tree as the
-source of truth; review the MR as published on GitLab.
+phases, same dispositions, same `{REVIEW_TMP}` scratch directory (`{PR_NUM}`
+holds the MR **iid**). Review the MR as published on GitLab, not the local
+working tree.
 
 **The MR URL picks the target, never `origin`.** The MR can live on another
 GitLab host or project than the checkout, so every call below names the host and
@@ -45,7 +45,7 @@ echo "GL_HOST=$GL_HOST GL_PROJECT=$GL_PROJECT GL_PROJECT_ENC=$GL_PROJECT_ENC GL_
 The project path keeps every subgroup (`group/sub/project`); only the
 `/-/merge_requests/{iid}` segment and what follows it (`/diffs`, `/commits`,
 `/pipelines`, `?…`, `#note_…`) are dropped. Carry the printed values literally
-into every later block — shell variables do not survive between Bash calls.
+into every later block — shell variables may not survive between tool calls.
 
 **Is the MR's project this checkout?** Set `MR_IN_CHECKOUT=true` when `origin`
 names the same host and project (compare case-insensitively, after stripping a
@@ -58,7 +58,7 @@ because those resolve the project from `origin`.
 All reads target `projects/{GL_PROJECT_ENC}` on `--hostname {GL_HOST}`:
 
 ```bash
-MR_DIR=/tmp/do-review-pr-{PR_NUM}-mr && mkdir -p "$MR_DIR"
+MR_DIR={REVIEW_TMP}/mr && mkdir -p "$MR_DIR"
 glab api --hostname {GL_HOST} "projects/{GL_PROJECT_ENC}/merge_requests/{PR_NUM}" > "$MR_DIR/mr.json" \
   && glab api --hostname {GL_HOST} --paginate "projects/{GL_PROJECT_ENC}/merge_requests/{PR_NUM}/diffs?per_page=100" > "$MR_DIR/diffs.pages" \
   || { echo "/do:review: glab api failed reading MR !{PR_NUM} in {GL_PROJECT} on {GL_HOST}"; exit 1; }
@@ -82,25 +82,24 @@ per-file fields).
    `too_large`/`collapsed` set and an empty `.diff` has no commentable lines;
    still fetch its content, but its findings go in the summary body.
 3. **Unified diff**: write each entry as `diff --git a/{old_path} b/{new_path}`
-   followed by its `.diff` into `/tmp/do-review-pr-{PR_NUM}.diff`.
+   followed by its `.diff` into `{REVIEW_TMP}/pr.diff`.
 4. **Commentable-lines map** — `{new_path: set of new-side line numbers}`;
    GitLab rejects a diff note whose `new_line` is outside the patch. The walk
    mirrors GitHub PR mode's (keep the two in sync): seed the new-side counter at `c`
    from each `@@ -a,b +c,d @@` header, count and include `+` and ` ` lines, skip
    `-` lines without counting, and **ignore the `\ No newline at end of file`
-   marker line**. Save to `/tmp/do-review-pr-{PR_NUM}-lines.json`.
+   marker line**. Save to `{REVIEW_TMP}/lines.json`.
 5. **Fetch each changed file at `HEAD_SHA`** so agents read full content. The
    file path is URL-encoded too (`/` → `%2F`, e.g. with `jq -Rr @uri`). The
    target project serves a fork MR's head through its `refs/merge-requests/`
    ref:
    ```bash
-   glab api --hostname {GL_HOST} "projects/{GL_PROJECT_ENC}/repository/files/{PATH_ENC}/raw?ref={HEAD_SHA}" > /tmp/do-review-pr-{PR_NUM}/{path} || echo "skipped (unreadable): {path}"
+   glab api --hostname {GL_HOST} "projects/{GL_PROJECT_ENC}/repository/files/{PATH_ENC}/raw?ref={HEAD_SHA}" > {REVIEW_TMP}/files/{path} || echo "skipped (unreadable): {path}"
    ```
    (Create parent dirs as needed.)
 6. **Project conventions**: fetch the MR project's CLAUDE.md and AGENTS.md the
    same way (`repository/files/CLAUDE.md/raw?ref={HEAD_SHA}` →
-   `/tmp/do-review-pr-{PR_NUM}-CLAUDE.md`, likewise AGENTS.md; a failure means
-   "absent").
+   `{REVIEW_TMP}/CLAUDE.md`, likewise AGENTS.md; a failure means "absent").
 7. Print: `Reviewing MR !{PR_NUM}: {title} — {N} files changed{strict_suffix}`
    plus `Author: {AUTHOR_LOGIN}{fork_suffix}` (` (cross-project fork)` when
    `IS_FORK=true`).
@@ -115,7 +114,7 @@ stop here. Otherwise read both projects (the source project is the fork on a
 fork MR, the target project otherwise):
 
 ```bash
-MR_DIR=/tmp/do-review-pr-{PR_NUM}-mr
+MR_DIR={REVIEW_TMP}/mr
 # Prints true only for a readable project where we hold Developer (30) or higher.
 # PROJECT_ID is the GitLab project to probe.
 can_push() {
@@ -142,7 +141,11 @@ routing signal, never an error.
    resolves it from `origin`).
 3. Fix only what this review found. Do not rebase the MR, reformat untouched
    files, or fold in unrelated cleanups — the author owns this branch.
-4. Attribute the commits exactly as local mode does (`address review (self): …`).
+4. The branch belongs to the MR's project, so its commit convention wins: follow
+   the project's CONTRIBUTING / CLAUDE.md / AGENTS.md and its recent `git log`
+   subjects, saying in the message that the commit addresses review findings.
+   Only when the project states and shows none, use the local-mode fallback
+   (`address review (self): …`).
 
 ## Push fixes to the MR branch (`PR_DISPOSITION=apply`)
 
@@ -203,7 +206,7 @@ and posting; never just substitute the new SHA for approval. Print the MR URL.
 ### Drafts mode (optional)
 
 With `--draft`: write `{"diff_refs": …, "summary": "…", "comments": [ … ]}` to
-`/tmp/do-review-pr-{PR_NUM}-payload.json`, post nothing, and print the path
+`{REVIEW_TMP}/payload.json`, post nothing, and print the path
 plus the retargeted `post-review` commands needed to publish it by hand.
 
 ## Approve the reviewed head (all dispositions)
@@ -269,15 +272,26 @@ the failing gate:
 3. **GitLab says it is mergeable.** Re-read the MR: `.detailed_merge_status`
    is `mergeable` (older GitLab: `.merge_status` is `can_be_merged` and
    `.has_conflicts` is `false`).
-4. **The pipeline is green.** Poll the re-read MR's `.head_pipeline.status`
-   until it is terminal. Only `success` passes, and no head pipeline at all is
-   vacuously green. On a failure, apply the one-conservative-re-run routine in
+4. **The pipeline is green.** Poll the re-read MR's `.head_pipeline` until its
+   `.sha` is `HEAD_SHA` and its `.status` is terminal. Only `success` passes. On
+   a failure, apply the one-conservative-re-run routine in
    `~/.claude/lib/ci-flake-handling.md` once; if it fails again, do not merge.
+   A missing head pipeline has two causes, and only one of them is green:
+   - The project runs no pipelines for this MR: it has no CI configuration at
+     `HEAD_SHA` and `merge_requests/{PR_NUM}/pipelines` is empty. The gate is
+     vacuously satisfied.
+   - A pipeline is expected but has not registered yet (CI is configured, or
+     the MR has earlier pipelines, or `apply` just pushed). Keep re-reading for
+     up to 30 minutes. If none attaches for `HEAD_SHA`, do not merge: leave the
+     MR open and report the wait as incomplete.
 5. **The head is what we reviewed.** `.sha` equals the final reviewed `HEAD_SHA`
    (including inspected, tested, and pushed fixes); `--sha` below makes GitLab enforce it.
 
-When every gate passes (`--squash` for `squash`, `--rebase` for `rebase`, no
-flag for `merge`; default `squash`):
+When `--merge` carried no method, use the one the project documents
+(CONTRIBUTING, CLAUDE.md/AGENTS.md); failing that, pass no method flag, so
+GitLab applies the project's merge method and the MR's own squash setting, and
+report the method as `project default`. When every gate passes (`--squash` for
+`squash`, `--rebase` for `rebase`, no flag otherwise):
 
 ```bash
 glab mr merge {PR_NUM} -R "{GL_REPO_URL}" --yes --sha {HEAD_SHA} {MERGE_METHOD_FLAG}
