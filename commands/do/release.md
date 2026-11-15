@@ -268,7 +268,7 @@ Carry `{PREPARED_RELEASE_SHA}`, `{PR_NUMBER}`, `{PR_URL}` and `{PR_STATE}` into 
 
 Otherwise, hand off to the **multi-reviewer loop** with the inputs resolved in "Parse Arguments" (`{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`, `{REVIEW_MODELS}`) plus `{GH_HOST}` from "Detect Release Workflow" and the per-entry `{WAIT_SCHEDULE}` selected below. On GitHub, the host-side loops use `{GH_HOST}` on every `gh api` call, and the wrapper dispatches each entry to the single-reviewer loop read below.
 
-Each host-side entry takes `{WAIT_SCHEDULE}` from the wrapper's "Wait schedules" section; this command states no difference.
+Each host-side entry takes `{WAIT_SCHEDULE}` from "Wait schedules" in the host-reviewer file; this command states no difference.
 
 **Gated source.** When `SOURCE_GATED=true`, the loops' fix pushes must not land on `{source}` directly: follow "Review fixes under a gated source" in the gate procedure loaded by **Resolve Source Branch Admission**, so every fix reaches `{source}` through a gated PR and the merge gate below runs on the release PR's updated head.
 

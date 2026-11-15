@@ -452,7 +452,7 @@ Record `PR_NUMBER` and `PR_URL`.
 
 Otherwise, run the **multi-reviewer loop** over `REVIEW_AGENTS`, in order, with the parsed `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (series default — reviewers run one-at-a-time so each sees the prior's fixes; `parallel` collects reviews concurrently then applies the union once), `{REVIEWER_APPLIES}`, and `{REVIEW_ITERATIONS}` (the last caps copilot and `@<login>` passes only; local-agent and ollama passes use their own fixed iteration caps). Read the wrapper, then only the inner loop bodies it dispatches to for the reviewer kinds in `REVIEW_AGENTS`.
 
-Each host-side entry takes `{WAIT_SCHEDULE}` from the wrapper's "Wait schedules" section; this command states no difference.
+Each host-side entry takes `{WAIT_SCHEDULE}` from "Wait schedules" in the host-reviewer file; this command states no difference.
 
 !read lib/multi-reviewer-loop.md
 

@@ -12,7 +12,7 @@ Launch one sub-agent per PR, in parallel, and wait for all. Each runs the multi-
 
 Pass each sub-agent: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (`series` default, or `parallel`), `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (the copilot/`@<login>` cap; default 1), `{REVIEW_MODELS}` (the saved per-agent default models; without it a saved default model is silently ignored), `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the host-side loops' `gh api` calls hit the right host on GitHub Enterprise), `{BRANCH_PREFIX}/{CATEGORY_SLUG}`, `{BUILD_CMD}`, and any review instruction the caller's inputs add. When a loop reaches its guardrail, default mode stops; `--interactive` asks the user whether to continue.
 
-Each host-side entry takes `{WAIT_SCHEDULE}` from the wrapper's "Wait schedules" section; this caller states no difference.
+Each host-side entry takes `{WAIT_SCHEDULE}` from "Wait schedules" in the host-reviewer file; this caller states no difference.
 
 ### Required review references (PR worker only)
 

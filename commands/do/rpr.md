@@ -108,7 +108,7 @@ Read only when `REVIEW_AGENTS` contains `ollama`:
 rpr requests and waits for host-side reviews through the same shared loop `/do:pr` uses; it has no request or polling code of its own. For each `copilot` or `@<login>` entry, pass `{CODE_HOST}`, `{CR_NOUN}`, `{PR_NUMBER}`, `{OWNER}`/`{REPO}`, `{GH_HOST}`, the head branch as `{BRANCH_NAME}`, the project `{BUILD_CMD}`, `{REVIEWER_LOGIN}`, and:
 
 - `{REVIEW_ITERATIONS}` — the entry's `~max=<n>`; without one, `0` (keep re-requesting until the reviewer is clean, bounded by the loop's convergence gate and 10-iteration guardrail).
-- `{WAIT_SCHEDULE}` — the wrapper's own default for the entry's reviewer kind (`lib/multi-reviewer-loop.md`, "Wait schedules"); rpr does not override it.
+- `{WAIT_SCHEDULE}` — the default for the entry's reviewer kind ("Wait schedules" in the host-reviewer file read below); rpr does not override it.
 
 Three rpr-specific rules sit on top of the shared loop:
 
@@ -118,9 +118,7 @@ Three rpr-specific rules sit on top of the shared loop:
 
 The shared loop already covers a review that is pending or in progress at entry (requesting again is harmless on both hosts, and it waits for a review of the current head), a review that already exists for the current head (it is reused, not re-requested), and Copilot's error and too-large replies. It does not watch CI while it waits; rpr checks CI after each push instead ("CI after a push"). Never request Copilot with an `@copilot review` comment: that starts the Copilot coding agent, which opens a new PR.
 
-Read only when `REVIEW_AGENTS` contains `copilot` or an `@<login>`; the "Wait schedules" section of the multi-reviewer file is the one definition of `{WAIT_SCHEDULE}` (ignore the rest of that file, which rpr does not run):
-
-!read lib/multi-reviewer-loop.md
+Read only when `REVIEW_AGENTS` contains `copilot` or an `@<login>`:
 
 !read lib/host-reviewer-loop.md
 

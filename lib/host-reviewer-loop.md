@@ -33,6 +33,14 @@ the parent's context. It needs shell and file-editing tools. The sub-agent runs
 the full loop (request → wait → check → fix → re-request) and returns only the
 final status. Without sub-agents, run the same prompt yourself, inline.
 
+### Wait schedules
+
+The default `{WAIT_SCHEDULE}` for a host-side entry, used whenever the caller states none, by reviewer kind. This is the one definition; the wrapper and every caller point here:
+
+- `copilot` — expected duration is the previous Copilot review's duration on this PR (60 seconds if there is none). Wait at most 3× that, no less than 90 seconds and no more than 5 minutes. Poll every 5s, 5s, 10s, 10s, then 15s.
+- `@<login>` ending in `[bot]` (an automated reviewer) — expected duration 5 minutes. Wait at most 3× that, no less than 3 minutes and no more than 15 minutes. Poll every 10s, 10s, 20s, 20s, then 30s.
+- Any other `@<login>` (presumed human) — wait at most 4 hours. Poll every 30s for the first 5 minutes, then every 60s.
+
 ### Sub-agent prompt template:
 
 ```

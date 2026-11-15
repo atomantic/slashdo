@@ -136,7 +136,7 @@ Hand off to the **multi-reviewer wrapper** (under "Reviewer loop bodies" below) 
 - `{CODE_HOST}` and `{CR_NOUN}` — from "Detect VCS Host"; they select the host-side verbs and name the PR/MR in messages
 - `{PR_NUMBER}` — the PR number (GitHub) or MR iid (GitLab) from "Open the PR"
 - `{GH_HOST}` — from "Detect VCS Host" (unused on GitLab)
-- `{WAIT_SCHEDULE}` — per host-side entry, the wrapper's own default for that reviewer kind (its "Wait schedules" section); this command does not override it.
+- `{WAIT_SCHEDULE}` — per host-side entry, the default for that reviewer kind ("Wait schedules" in the host-reviewer file); this command does not override it.
 
 **On GitLab**, `@<login>` entries run the same request → poll → fix → resolve flow against the MR through the GitLab verbs. `copilot` is GitHub's own reviewer, so the wrapper records a `copilot` entry on a GitLab MR as `skipped`, which makes the phase `inconclusive` unless the entry is `~opt`.
 
