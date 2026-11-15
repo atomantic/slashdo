@@ -6,7 +6,8 @@ Preserve across compaction, complete and unsummarized:
 - All CRITICAL/HIGH findings with file:line references, and every finding's disposition
 - Flags and saved defaults as resolved: `STRICT_MODE`, `SIMPLIFY_ONLY`, `HAS_UI`, `REVIEW_AGENTS` and the other review settings, `--interactive`, `--no-merge`
 - `HOT_FILES` and `PRIOR_REJECTIONS` (when `SIMPLIFY_ONLY=true`)
-- `REPO_DIR`, `WORKTREE_DIR`, `DATE`, whether Phase 3a stashed
+- `REPO_DIR`, `WORKTREE_DIR` (absolute), `DATE`, whether Phase 3a stashed
+- `PROJECT_CONVENTIONS` (commit style, PR template, branch pattern, merge method)
 - `VCS_HOST`, `CLI_TOOL`, `GH_HOST`, `TRACKER_AVAILABLE`, `DEFAULT_BRANCH`, `CURRENT_BRANCH`
 - `PROJECT_TYPE`, `BUILD_CMD`, `TEST_CMD`, `AUDIT_MODEL_TIER`, `REMEDIATION_MODEL_TIER`
 - Caller-specific discovery values when present: `PLATFORMS`, `DEPLOYMENT_TARGETS`, `BUILD_SYSTEM`, `SCHEME`, `WORKSPACE_OR_PROJECT`, `GOTCHA_ENTRIES_IN_SCOPE`, and per-platform command variables

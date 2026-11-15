@@ -22,7 +22,7 @@ describe('/do:release source branch admission', () => {
   // Run the rendered probe block against a stub `gh` that serves canned branch-rules/branch JSON.
   function probe({ rules, branch, fail }) {
     const block = admission.match(/```bash\n([\s\S]*?)\n```/)[1]
-      .replace(/\{GH_HOST\}/g, 'github.com').replace(/\{owner\}/g, 'o').replace(/\{repo\}/g, 'r').replace(/\{source\}/g, 'main');
+      .replace(/\{CLI_TOOL\}/g, 'gh').replace(/\{GH_HOST\}/g, 'github.com').replace(/\{owner\}/g, 'o').replace(/\{repo\}/g, 'r').replace(/\{source\}/g, 'main');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-admission-'));
     try {
       fs.writeFileSync(path.join(dir, 'rules.json'), rules);
@@ -118,7 +118,7 @@ describe('/do:release source branch admission', () => {
       git('push', 'origin', 'HEAD:refs/heads/main');
       fs.writeFileSync(path.join(dir, 'gh'), `#!/bin/sh\nprintf '%s\\n' '{"state":"MERGED","mergedAt":"2026-10-04T00:00:00Z","mergeCommit":{"oid":"${landed}"}}'\n`, { mode: 0o755 });
       const blocks = [...gate.matchAll(/```bash\n([\s\S]*?)\n```/g)];
-      const sync = blocks.at(-1)[1].replace(/\{source\}/g, 'main').replace(/<GATE_PR_NUMBER>/g, '1');
+      const sync = blocks.at(-1)[1].replace(/\{source\}/g, 'main').replace(/\{GATE_PR_NUMBER\}/g, '1').replace(/\{CLI_TOOL\}/g, 'gh');
       const r = spawnSync('bash', ['-c', 'incomplete() { echo "INCOMPLETE: $*"; exit 1; }\n' + sync], {
         cwd: dir, env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CLI_TOOL: 'gh' }, encoding: 'utf8',
       });
@@ -134,7 +134,7 @@ describe('/do:release source branch admission', () => {
 
   it('stops the sync block itself when the forge query fails', () => {
     const blocks = [...gate.matchAll(/```bash\n([\s\S]*?)\n```/g)];
-    const sync = blocks.at(-1)[1].replace(/\{source\}/g, 'main').replace(/<GATE_PR_NUMBER>/g, '1');
+    const sync = blocks.at(-1)[1].replace(/\{source\}/g, 'main').replace(/\{GATE_PR_NUMBER\}/g, '1').replace(/\{CLI_TOOL\}/g, 'gh');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-source-sync-fail-'));
     try {
       fs.writeFileSync(path.join(dir, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
@@ -164,8 +164,8 @@ describe('/do:release source branch admission', () => {
   });
 
   it('resolves GitLab protection from the effective branch endpoint, accepting both true and false', () => {
-    const block = admission.match(/```bash\n([\s\S]*?)\n```/)[1].replace(/\{source\}/g, 'main');
-    const run = (protectedBranch, mustSucceed) => {
+    const block = admission.match(/```bash\n([\s\S]*?)\n```/)[1].replace(/\{CLI_TOOL\}/g, 'glab').replace(/\{source\}/g, 'main');
+    const run =(protectedBranch, mustSucceed) => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-admission-gl-'));
       try {
         fs.writeFileSync(path.join(dir, 'glab'), [
@@ -182,6 +182,90 @@ describe('/do:release source branch admission', () => {
       assert.equal(r.status, 0, r.stdout);
       assert.match(r.stdout, new RegExp(`SOURCE_GATED=${prot}\\tSOURCE_CHECKS_REQUIRED=${ci}`));
     }
+  });
+});
+
+describe('/do:release target and version-tag checkpoints, executed', () => {
+  const { spawnSync } = require('child_process');
+  const os = require('os');
+  const block = resolved.slice(resolved.indexOf('## Post-Merge')).match(/```bash\n([\s\S]*?)\n```/)[1];
+
+  // A scratch repo whose remote `release` branch holds a merged release: root -> prep -> merge.
+  function run({ tagOwner, remoteTagAt, annotated }) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-tag-'));
+    const git = (...args) => {
+      const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+      assert.equal(r.status, 0, r.stderr);
+      return r.stdout.trim();
+    };
+    try {
+      git('init', '-q', '-b', 'main');
+      git('config', 'user.name', 'Release Test');
+      git('config', 'user.email', 'release@example.test');
+      git('commit', '-q', '--allow-empty', '-m', 'root');
+      const commits = { root: git('rev-parse', 'HEAD') };
+      git('commit', '-q', '--allow-empty', '-m', 'chore: release v1.2.3');
+      commits.prep = git('rev-parse', 'HEAD');
+      git('commit', '-q', '--allow-empty', '-m', 'merge');
+      commits.merge = git('rev-parse', 'HEAD');
+      const remote = path.join(dir, 'remote.git');
+      git('init', '-q', '--bare', remote);
+      git('remote', 'add', 'origin', remote);
+      git('push', '-q', 'origin', 'HEAD:refs/heads/release');
+      if (remoteTagAt) {
+        git('tag', ...(annotated ? ['-a', '-m', 'v1.2.3'] : []), 'v1.2.3', commits[remoteTagAt]);
+        git('push', '-q', 'origin', 'refs/tags/v1.2.3');
+        git('tag', '-d', 'v1.2.3');
+      }
+      const script = block
+        .replace(/\{tag\}/g, 'v1.2.3').replace(/\{target\}/g, 'release').replace(/\{tag_owner\}/g, tagOwner)
+        .replace(/\{PREPARED_RELEASE_SHA\}/g, commits.prep).replace(/\{MERGE_COMMIT\}/g, commits.merge)
+        .replace(/sleep 10/g, 'sleep 0');
+      const r = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8' });
+      const remoteTag = spawnSync('git', ['ls-remote', 'origin', 'refs/tags/v1.2.3^{}', 'refs/tags/v1.2.3'], { cwd: dir, encoding: 'utf8' })
+        .stdout.trim().split('\n').filter(Boolean).map((line) => line.split('\t')[0]);
+      return { status: r.status, out: r.stdout + r.stderr, remoteTag, commits };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('creates and pushes the tag at the merge commit when this command owns it', () => {
+    const r = run({ tagOwner: 'command' });
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(r.remoteTag, [r.commits.merge]);
+    assert.match(r.out, new RegExp(`RELEASE_TAG_HANDOFF\\tTARGET_SHA=${r.commits.merge}\\tTAG_COMMIT=${r.commits.merge}`));
+  });
+
+  it('waits for an automation-owned tag instead of creating it', () => {
+    const r = run({ tagOwner: 'automation' });
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /INCOMPLETE — Version tag v1\.2\.3 is unverified/);
+    assert.deepEqual(r.remoteTag, []);
+  });
+
+  it('accepts an existing tag on the release lineage, lightweight or annotated', () => {
+    for (const annotated of [false, true]) {
+      const r = run({ tagOwner: 'automation', remoteTagAt: 'merge', annotated });
+      assert.equal(r.status, 0, r.out);
+      assert.match(r.out, new RegExp(`TAG_COMMIT=${r.commits.merge}`));
+    }
+  });
+
+  it('refuses a tag that is off the release lineage and leaves it where it is', () => {
+    for (const tagOwner of ['command', 'automation']) {
+      const r = run({ tagOwner, remoteTagAt: 'root' });
+      assert.equal(r.status, 1, r.out);
+      assert.match(r.out, /never overwritten/);
+      assert.deepEqual(r.remoteTag, [r.commits.root]);
+    }
+  });
+
+  it('fails closed when the tag owner was never substituted', () => {
+    const r = run({ tagOwner: '{tag_owner}' });
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /the tag owner was not resolved/);
+    assert.deepEqual(r.remoteTag, []);
   });
 });
 

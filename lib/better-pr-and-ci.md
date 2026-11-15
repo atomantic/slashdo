@@ -1,61 +1,50 @@
 ## Phase 5: Per-Category PR Creation
 
-One branch and one PR per category, never one combined PR.
+One branch and one PR per category by default. Categories whose changes depend on each other ship together in one PR (5a): the split is a convenience for reviewers and never a reason to add code to the user's project.
 
 ### 5a: Build the Category Branches
 
-Each category in `FILE_OWNER_MAP` (as updated in Phase 4c) gets a branch `{BRANCH_PREFIX}/{CATEGORY_SLUG}`, cut from `{DEFAULT_BRANCH}` (or from the Phase 3b Foundation commit on `{BRANCH_PREFIX}/{DATE}` when that category's files import Phase 3b shared utilities) and carrying that category's files from `{BRANCH_PREFIX}/{DATE}` (added, modified, and deleted, plus any Phase 3b Foundation utility files assigned to it), in one commit `{prefix}: {category summary}`.
-- Slugs: {CATEGORY_SLUGS}
-- {CATEGORY_SLUG_RULE}
-- {COMMIT_PREFIX_RULE}
+Each category in `FILE_OWNER_MAP` (as updated in Phase 4c) gets a branch `{BRANCH_PREFIX}/{CATEGORY_SLUG}` carrying that category's files from `{BRANCH_PREFIX}/{DATE}` (added, modified, and deleted) in one commit that summarises the category (fallback subject `{prefix}: {category summary}`). Cut it from `{DEFAULT_BRANCH}`, or from the Phase 3b Foundation commit when its files use Foundation utilities, so the utilities travel with every branch that needs them. Slugs: {CATEGORY_SLUGS}.
 
-Invariants:
-- **File isolation & Foundation preservation** — every category-owned file is in its owning branch, and any Phase 3b Foundation utility files created on `{BRANCH_PREFIX}/{DATE}` are included in the category branch that owns or imports them so no category branch loses its Phase 3b Foundation dependencies when cut from `{DEFAULT_BRANCH}`. A file with changes from several categories (e.g., {MULTI_CATEGORY_FILE_EXAMPLE}) ships whole in the category that owns it in `FILE_OWNER_MAP`; file-level changes are never split across PRs.
-- **Independent build** — each branch passes `{BUILD_CMD}`{VERIFY_SCOPE_SUFFIX} on its own. When a branch references something another branch creates, add a backward-compatible {COMPAT_SHIM} in the original {COMPAT_HOST} (in the branch that owns it), move the new file to the branch that needs it, or revert the import to the original path.
-- **Push** — push with upstream tracking; a branch that still fails after one `git pull --rebase --autostash` retry is reported blocked while the others continue.
-- **`CREATED_CATEGORY_SLUGS`** — a space-delimited list of every slug whose branch was created and pushed. Phase 7 deletes only from this set, and only after merge is confirmed.
+- **Whole files.** A file with changes from several categories ships whole in the category that owns it in `FILE_OWNER_MAP`; a file's changes are never split across PRs.
+- **Independent build, by combining rather than shimming.** Each branch passes `{BUILD_CMD}` on its own. When a branch only builds with another category's changes (a moved symbol, a new file both use), combine those categories into one branch and PR: use the slug that comes first in the list above, carry all of their files, and say in the PR body which categories it combines and why. Do not add a re-export, alias, or other compatibility shim to the user's code only to make the branches build separately, and do not revert a fix for that reason. If most categories depend on each other, a single PR is the right outcome.
+- **Push.** Push with upstream tracking; a branch that still fails after one `git pull --rebase --autostash` retry is reported blocked while the others continue.
+- **`CREATED_CATEGORY_SLUGS`.** Record every slug whose branch was created and pushed (a combined branch once, under its branch slug). Phase 7 deletes only from this set, and only after merge is confirmed.
 
 ### 5b: No Version Bump in Audit PRs
 
-Never bump package or manifest versions (`package.json`, `Cargo.toml`, `pyproject.toml`, `*.pbxproj`, `VERSION`, etc.) on any category branch — version bumps belong exclusively to `/do:release` (per `lib/commit-conventions.md`) and would otherwise create merge conflicts or premature release markers before remaining category PRs merge.
+Do not bump package or manifest versions (`package.json`, `Cargo.toml`, `pyproject.toml`, `*.pbxproj`, `VERSION`, etc.) on any category branch. Version bumps belong to the project's release flow, and a bump here would conflict across the category PRs or mark a release before they have all merged.
 
 ### 5c: Create PRs
 
-Each PR targets `{DEFAULT_BRANCH}` from its category branch (`gh pr create` on GitHub, `glab mr create` on GitLab), titled `{prefix}: {short description}` with the same prefix as its 5a commit. {COMMIT_PREFIX_RULE} Body:
+Each PR targets `{DEFAULT_BRANCH}` from its category branch (`gh pr create` on GitHub, `glab mr create` on GitLab), titled like its 5a commit. When the repository has a PR/MR template, fill that template in with the content below; otherwise use this body:
 
 ```markdown
 ## {PIPELINE_TITLE} — {Category Name}
 
 ### Summary
 {count} findings addressed across {files} files.
-{PR_BODY_SUMMARY_EXTRA}
 
 ### Changes
 {bulleted list of changes with severity levels}
 
-### Files Modified
-{list of files}
-
-{PR_BODY_EXTRA_SECTIONS}
 ### Merge Order
-{e.g. "Depends on the Security PR" or "Independent"}
+{"Independent", or the PR this one should follow; for a combined PR, the categories it combines and why}
 ```
 
 When `SIMPLIFY_ONLY=true`, add the simplify contract's Phase 5 body line.
 
 Record each category's PR number and URL.
 
-**GATE: If `--no-merge` was passed, skip CI/review/merge and proceed directly to [Phase 7 safe finalization](./better-cleanup.md).** Report all PR URLs, restore this run's stash, and retain open-PR branches and the worktree for resumption.
+**Gate:** if `--no-merge` was passed, skip CI, review, and merge and go straight to [Phase 7 safe finalization](./better-cleanup.md). Report all PR URLs, restore this run's stash, and retain open-PR branches and the worktree for resumption.
 
 ## Phase 5d: CI Verification
 
-A PR passes this gate only when every expected check **for its current pushed HEAD** has passed; runs for an earlier HEAD never count. Allow each PR up to 10 minutes for checks to attach and finish. No checks reported is ambiguous: confirm the repository has no applicable CI or external required checks before treating it as green. If expected checks never attach within the wait limit, leave that PR open.
+A PR passes this gate only when every expected check for its current pushed HEAD has passed; runs for an earlier HEAD do not count. Allow each PR up to 10 minutes for checks to attach and finish. No checks reported is ambiguous: confirm the repository has no applicable CI or external required checks before treating it as green. If expected checks never attach within the wait limit, leave that PR open.
 
 - GitHub: `gh pr checks {PR_NUMBER} --required --watch --fail-fast` (also non-zero on the vacuously-green "no checks" case).
 - GitLab: `glab ci status --wait --branch {BRANCH_PREFIX}/{CATEGORY_SLUG}`; no separate required-checks list.
 
-On a failing check, read its failed-job log and fix the cause on that PR's branch in a `fix: resolve CI failure - {description}` commit (specific files staged), push, and re-gate. Causes to rule out first:
-- **Missing imports**: a symbol that lives in another PR's branch. Add a backward-compatible {COMPAT_SHIM} or revert the import.
-{CI_FAILURE_CAUSES_EXTRA}
+On a failing check, read its failed-job log and fix the cause on that PR's branch in a new commit (fallback subject `fix: resolve CI failure - {description}`, specific files staged), push, and re-gate. One cause is specific to the split: a symbol that lives in another PR's branch means those categories depend on each other. Fold the other branch into this one per 5a and close its PR with a note pointing here, rather than adding a shim.
 
-**At most 3 CI fix attempts per PR.** A PR still failing after the third is left open and reported; continue with the other PRs.
+Allow at most 3 CI fix attempts per PR. A PR still failing after the third is left open and reported; continue with the other PRs.

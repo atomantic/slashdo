@@ -1,13 +1,14 @@
 ## Remediation Agent Template
 
-Use this template when spawning remediation agents in Phase 3c. Replace all `{PLACEHOLDERS}` with actual values.
+Use this template when spawning remediation agents in Phase 3c, with every `{PLACEHOLDER}` replaced by its value. `{COMMIT_STYLE}` is the commit convention from `PROJECT_CONVENTIONS`.
 
 ```
 <context>
 Project type: {PROJECT_TYPE}
 Build command: {BUILD_CMD}
 Test command: {TEST_CMD}
-Working directory: {WORKTREE_DIR} (this is a git worktree — all work happens here)
+Working directory: {WORKTREE_DIR} (an absolute path to a git worktree; all work happens here)
+Commit style: {COMMIT_STYLE}
 Foundation utilities available (if created):
 {FOUNDATION_UTILS}
 </context>
@@ -32,7 +33,8 @@ assigned to another agent is skipped and reported, not made.
 
 <commit_strategy>
 Each commit builds independently and contains one logical group of related
-fixes. Use conventional prefixes (fix:, refactor:, feat:, security:). Because
+fixes. Write subjects in the project's commit style given above; when it names
+none, use conventional prefixes (fix:, refactor:, feat:). Because
 sibling workers share {WORKTREE_DIR} concurrently, never run `git add -A`,
 `git add .`, or an unscoped `git commit`. First register newly created owned
 files with `git add -- <new-owned-files>` (explicit paths only), then commit
@@ -46,7 +48,6 @@ work.
 
 <report>
 Commits made, files modified, findings addressed, and findings skipped with the
-evidence or reason for each (when running as a team task, also mark the task
-completed via TaskUpdate).
+evidence or reason for each.
 </report>
 ```
