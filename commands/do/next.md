@@ -9,7 +9,7 @@ Claim the next open tracker issue (any label by default; `--issues-label` narrow
 
 **How the claim works.** Issue `N` (a number, or a key like `PROJ-123` on a Jira tracker) is **"in flight"** when `issue-N` appears as a `/`-separated segment in any local or remote branch (`git branch -a`) or any open PR head ref, or when the issue already has **any assignee** or an `in-progress` marker. On GitHub, an open PR body containing `Closes #N`, `Fixes #N`, `Fixes: #N`, or `Resolves #N`, or any head commit message containing `[issue-N]` / `(#N)`, also makes it in flight regardless of branch name. `/do:next` picks the first eligible open issue that is not in flight and creates a `next/issue-<num>` branch — that branch name *is* the claim — then adds a cross-machine marker (the assignee) in Phase 2.
 
-**Resuming your own stopped run.** A `--no-merge`, `dirty` or `inconclusive` stop leaves the claim in place so the work can be finished, and an in-flight issue is otherwise never claimed again: a fresh run does not adopt an existing branch or PR, and assignment to your own login is still a claim. The one exception is a single issue you name explicitly (never auto-pick, never a swarm member) whose claim is visibly this checkout's own: the sibling worktree `../next-issue-<num>` exists locally on branch `next/issue-<num>`, and the issue's only assignee is the authenticated account (Jira: `jira_lease` prints `yes`). In that case say that you are resuming, skip the Phase 2 claim, keep the existing worktree and branch, and continue from the first unfinished phase: uncommitted or unpushed work goes to Phase 4, an open PR to Phase 6. The `--self` / `--collaborators` gates still apply. A matching login or branch name without that local worktree is not enough, because the work may live on another machine.
+**Resuming your own stopped run.** A `--no-merge`, `dirty` or `inconclusive` stop leaves the claim in place so the work can be finished, and an in-flight issue is otherwise never claimed again: a fresh run does not adopt an existing branch or PR, and assignment to your own login is still a claim. The one exception is a single issue you name explicitly (never auto-pick, never a swarm member) whose claim is visibly this checkout's own: the sibling worktree `../next-issue-<num>` exists locally on branch `next/issue-<num>`, and the issue's only assignee is the authenticated account (Jira: `jira_lease` prints `yes`). In that case say that you are resuming, skip the Phase 2 claim, keep the existing worktree and branch, and continue from the first unfinished phase: uncommitted or unpushed work goes to Phase 4, and a branch that already has an open PR goes to Phase 6, where `/do:pr` finds that PR, pushes any new commits, skips its local review phase and continues with the PR-side reviews. The `--self` / `--collaborators` gates still apply. A matching login or branch name without that local worktree is not enough, because the work may live on another machine.
 
 **Drain one item — or several (`--swarm`).** By default `/do:next` ships one item per run. `--swarm` claims and ships several independent open issues in parallel, each in its own worktree subagent, serializing only the merge — auto-picked (`/do:next --swarm`) or exactly the issues you name (`/do:next --swarm #12 #14 #15`). See **Swarm mode**; Phases 1–7 are unchanged without `--swarm`.
 
@@ -274,10 +274,17 @@ cd "${WORKTREE}" && \
 pwd && \
 # Publish the claim atomically: with an empty lease the push succeeds only while the remote ref does not exist.
 if ! git push --force-with-lease="refs/heads/next/${SLUG}:" -u origin "next/${SLUG}:refs/heads/next/${SLUG}"; then
-  echo "Could not publish next/${SLUG} (another run claimed it, or the push failed) — removing the local worktree and branch. Re-run /do:next."
-  git -C "$REPO_ROOT" worktree remove --force "$WORKTREE" || echo "WARN: remove the worktree $WORKTREE manually."
-  git -C "$REPO_ROOT" branch -D "next/${SLUG}" || echo "WARN: remove the local branch next/${SLUG} manually."
-  exit 1
+  # One read-back: a push that landed and then reported failure is still this run's claim.
+  REMOTE_SHA="$(git ls-remote origin "refs/heads/next/${SLUG}" | cut -f1)" || REMOTE_SHA=""
+  if [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" = "$(git rev-parse HEAD)" ]; then
+    echo "next/${SLUG} is on origin at the local commit — the claim is published."
+    { git fetch origin "next/${SLUG}" && git branch --set-upstream-to="origin/next/${SLUG}"; } >/dev/null 2>&1 || true
+  else
+    echo "Could not publish next/${SLUG} (another run claimed it, or the push failed) — removing the local worktree and branch. Re-run /do:next."
+    git -C "$REPO_ROOT" worktree remove --force "$WORKTREE" || echo "WARN: remove the worktree $WORKTREE manually."
+    git -C "$REPO_ROOT" branch -D "next/${SLUG}" || echo "WARN: remove the local branch next/${SLUG} manually."
+    exit 1
+  fi
 fi
 ```
 
@@ -386,7 +393,7 @@ git diff --cached --quiet || git commit -m "<subject>"   # nothing staged means 
 >
 > **Major review findings become tracker issues.** A substantial finding you decide not to fix here is filed with `issue_create` and the same labels as Phase 4. Nits are just mentioned in the summary.
 
-`/do:pr` (the workflow defined in `~/.claude/commands/do/pr.md`) owns the whole review and ship pipeline: the Local Code Review gate, the `--review-with` loop and its options. Run it from inside the worktree and do not re-implement any of it here. Forward only the review flags listed in Parse Arguments, and **always pass `--no-merge`**: `/do:next` owns the merge decision (the gate below), the post-merge cleanup and the issue close, even when a saved `/do:config --merge` default would make `/do:pr` merge on its own. Never forward this command's own `--merge` / `--no-merge` / `--merge=<method>` / `--merge-method`. When a run returns to a PR that is already open (a resumed run, host feedback, a CI fix), `/do:pr` restores its pre-PR review receipt and continues on the PR side; a completed receipt covers the head it reviewed, not later commits, and a new local review is not started after each push.
+`/do:pr` (the workflow defined in `~/.claude/commands/do/pr.md`) owns the whole review and ship pipeline: the Local Code Review gate, the `--review-with` loop and its options. Run it from inside the worktree and do not re-implement any of it here. Forward only the review flags listed in Parse Arguments, and **always pass `--no-merge`**: `/do:next` owns the merge decision (the gate below), the post-merge cleanup and the issue close, even when a saved `/do:config --merge` default would make `/do:pr` merge on its own. Never forward this command's own `--merge` / `--no-merge` / `--merge=<method>` / `--merge-method`. When a run returns to a branch whose PR is already open (a resumed run, host feedback, a CI fix), `/do:pr` adopts that PR, skips its local review phase and continues with the PR-side reviews, so later commits are covered by the PR-side reviewers and CI rather than by a new local review after each push. With no PR yet, it repeats the local phase unless its branch note (`branch.<name>.slashdo-local-review`) records a finished review of the current HEAD, in which case only the PR creation is retried.
 
 > **`/simplify`** below means the harness's built-in quality pass where it has one; otherwise do the pass by hand. It is not `/do:simplify`, slashdo's refactor-audit workflow, which opens its own per-category PRs.
 
@@ -476,7 +483,7 @@ if ! git push origin --delete "next/${SLUG}"; then
 fi
 ```
 
-(Phase 2's marker-block abort and yield retract the remote branch inline and leave the local worktree and branch for this same teardown, run from the main repo. A failed claim push has already removed them and published nothing.)
+(Phase 2's marker-block abort and yield retract the remote branch inline and leave the local worktree and branch for this same teardown, run from the main repo. A claim push that failed and did not land has already removed them and published nothing.)
 
 **Confirm closed, then clear the marker — but only for a PR that actually merged.** Anything other than `MERGED`/`merged` on the read-back means nothing shipped — leave the issue open with its `in-progress` label and assignee, and report the PR as queued/left-open. For a merged PR, `Closes #<num>` auto-closes the issue on merge to the **default branch**. Verify with `issue_state <num>`; if the result is not closed, run `issue_close_note <num> "Shipped in PR #<PR_NUM>."`. Then run `label_rm "$ISSUE_NUM" in-progress 2>/dev/null || true`. Leave the assignee — it records who shipped it. **On a Jira tracker, a merged PR runs [lib/tracker-jira.md](../../lib/tracker-jira.md) "Close after merge" in place of that verify-close-unlabel sequence** — the transition to Done with the PR URL; there is no label to remove, and a failed transition is reported, not retried.
 
