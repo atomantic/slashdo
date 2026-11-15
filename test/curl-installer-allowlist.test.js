@@ -1,121 +1,166 @@
 'use strict';
 
-// Guard against silent drift between the repo and the curl-installer allowlists.
+// Guard against silent drift between the repo and the curl installer's file list.
 //
-// install.sh and uninstall.sh hard-code LIBS and COMMANDS arrays. When a new
-// lib/*.md or commands/do/*.md is added without updating both arrays, curl-
-// installed users get a broken or missing command (the file is never copied;
-// a command spec's `!cat ~/.claude/lib/<name>.md` fails at runtime, or the
-// command itself is absent). The npm installer (src/installer.js) enumerates
-// both dirs dynamically, so it doesn't catch this drift — only this test does.
+// install.sh and uninstall.sh have no node and cannot list a GitHub directory,
+// so they read install-manifest.txt, which scripts/build-install-manifest.js
+// generates from commands/do/, lib/ and hooks/. A file added or removed without
+// regenerating it would never reach (or never leave) a curl-installed machine;
+// the npm installer (src/installer.js) reads the tree directly and cannot catch
+// that, so this test does.
 //
-// Scope: this file only diffs the bash array literals as text. The scripts'
-// actual runtime behavior (files written, settings.json merged, uninstall
-// removal) is covered end-to-end in test/install-sh.test.js.
+// Scope: the manifest, its generator, and the scripts' source text. Their
+// runtime behavior (files written, settings.json merged, uninstall removal,
+// manifest failure modes) is covered end-to-end in test/install-sh.test.js.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
+const {
+  MANIFEST_FILE, buildManifest, parseManifest, readCommitted,
+} = require('../scripts/build-install-manifest');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
+const REGENERATE = 'node scripts/build-install-manifest.js';
 
-function parseArray(shellScriptPath, name) {
-  const content = fs.readFileSync(shellScriptPath, 'utf8');
-  // Match NAME=( ... ) including newlines/whitespace. Comments inside the
-  // parens are tolerated — strip them before tokenizing.
-  const match = content.match(new RegExp(`^${name}=\\(([\\s\\S]*?)\\)`, 'm'));
-  if (!match) throw new Error(`${name}=( ... ) not found in ${shellScriptPath}`);
-  return match[1]
-    .replace(/#[^\n]*/g, '')
-    .split(/\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
+const shipped = (dir, ext) => fs.readdirSync(path.join(REPO_ROOT, dir), { withFileTypes: true })
+  .filter((entry) => entry.isFile() && !entry.name.startsWith('.') && (!ext || entry.name.endsWith(ext)))
+  .map((entry) => entry.name)
+  .sort();
 
-function parseLibsArray(shellScriptPath) {
-  return parseArray(shellScriptPath, 'LIBS');
-}
+describe('install-manifest.txt', () => {
+  const committed = readCommitted();
+  const manifest = parseManifest(committed);
 
-function parseCommandsArray(shellScriptPath) {
-  return parseArray(shellScriptPath, 'COMMANDS');
-}
-
-function dirEntries(...segments) {
-  return fs
-    .readdirSync(path.join(REPO_ROOT, ...segments))
-    .filter((f) => f.endsWith('.md'))
-    .map((f) => f.replace(/\.md$/, ''))
-    .sort();
-}
-
-function libDirEntries() {
-  return dirEntries('lib');
-}
-
-function commandDirEntries() {
-  return dirEntries('commands', 'do');
-}
-
-function hookDirEntries() {
-  return fs
-    .readdirSync(path.join(REPO_ROOT, 'hooks'))
-    .filter((f) => f.endsWith('.js'))
-    .map((f) => f.replace(/\.js$/, ''))
-    .sort();
-}
-
-describe('curl-installer LIBS allowlist', () => {
-  const expected = libDirEntries();
-
-  it('install.sh LIBS matches lib/*.md exactly', () => {
-    const actual = parseLibsArray(path.join(REPO_ROOT, 'install.sh')).sort();
-    assert.deepEqual(actual, expected,
-      `install.sh LIBS drift — add missing entries or remove stale ones.\n` +
-      `  In lib/ but not LIBS: ${expected.filter((x) => !actual.includes(x)).join(', ') || '(none)'}\n` +
-      `  In LIBS but not lib/: ${actual.filter((x) => !expected.includes(x)).join(', ') || '(none)'}`);
+  it(`is what \`${REGENERATE}\` generates from the tree`, () => {
+    assert.equal(committed, buildManifest(REPO_ROOT, committed),
+      `${MANIFEST_FILE} is out of date — run \`${REGENERATE}\` and commit the result`);
   });
 
-  it('uninstall.sh LIBS matches lib/*.md exactly', () => {
-    const actual = parseLibsArray(path.join(REPO_ROOT, 'uninstall.sh')).sort();
-    assert.deepEqual(actual, expected,
-      `uninstall.sh LIBS drift — keep in sync with install.sh.\n` +
-      `  In lib/ but not LIBS: ${expected.filter((x) => !actual.includes(x)).join(', ') || '(none)'}\n` +
-      `  In LIBS but not lib/: ${actual.filter((x) => !expected.includes(x)).join(', ') || '(none)'}`);
-  });
-});
-
-describe('curl-installer HOOKS allowlist', () => {
-  const expected = hookDirEntries();
-
-  for (const script of ['install.sh', 'uninstall.sh']) {
-    it(`${script} HOOKS matches hooks/*.js exactly`, () => {
-      const actual = parseArray(path.join(REPO_ROOT, script), 'HOOKS').sort();
-      assert.deepEqual(actual, expected,
-        `${script} HOOKS drift — a hook missing here is never delivered to curl-installed users.\n` +
-        `  In hooks/ but not HOOKS: ${expected.filter((x) => !actual.includes(x)).join(', ') || '(none)'}\n` +
-        `  In HOOKS but not hooks/: ${actual.filter((x) => !expected.includes(x)).join(', ') || '(none)'}`);
+  for (const [section, dir, ext] of [
+    ['commands', 'commands/do', '.md'],
+    ['libs', 'lib', null],
+    ['hooks', 'hooks', '.js'],
+  ]) {
+    it(`lists exactly the files under ${dir}/ in [${section}], none of them retired`, () => {
+      assert.deepEqual([...manifest[section]].sort(), shipped(dir, ext));
+      const current = new Set(manifest[section]);
+      assert.deepEqual(manifest[`retired-${section}`].filter((name) => current.has(name)), []);
     });
   }
-});
 
-describe('curl-installer COMMANDS allowlist', () => {
-  const expected = commandDirEntries();
-
-  it('install.sh COMMANDS matches commands/do/*.md exactly', () => {
-    const actual = parseCommandsArray(path.join(REPO_ROOT, 'install.sh')).sort();
-    assert.deepEqual(actual, expected,
-      `install.sh COMMANDS drift — add missing entries or remove stale ones.\n` +
-      `  In commands/do/ but not COMMANDS: ${expected.filter((x) => !actual.includes(x)).join(', ') || '(none)'}\n` +
-      `  In COMMANDS but not commands/do/: ${actual.filter((x) => !expected.includes(x)).join(', ') || '(none)'}`);
+  it('keeps the retired names the scripts hard-coded before the manifest existed', () => {
+    // Retired names are never pruned, so these must stay for as long as the file exists.
+    const seeded = {
+      'retired-commands': ['cam', 'good', 'makegoals', 'makegood', 'optimize-md'].map((n) => `${n}.md`),
+      'retired-libs': ['better-audit-architecture', 'code-review-checklist', 'github-reviewer-loop',
+        'graphql-escaping', 'plan-id-format', 'replan-issues'].map((n) => `${n}.md`),
+      'retired-hooks': ['update-check.md'],
+    };
+    for (const [section, names] of Object.entries(seeded)) {
+      for (const name of names) assert.ok(manifest[section].includes(name), `${section} lost ${name}`);
+    }
   });
 
-  it('uninstall.sh COMMANDS matches commands/do/*.md exactly', () => {
-    const actual = parseCommandsArray(path.join(REPO_ROOT, 'uninstall.sh')).sort();
-    assert.deepEqual(actual, expected,
-      `uninstall.sh COMMANDS drift — keep in sync with install.sh.\n` +
-      `  In commands/do/ but not COMMANDS: ${expected.filter((x) => !actual.includes(x)).join(', ') || '(none)'}\n` +
-      `  In COMMANDS but not commands/do/: ${actual.filter((x) => !expected.includes(x)).join(', ') || '(none)'}`);
+  it('ships in the npm package beside the scripts that read it', () => {
+    const { files } = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
+    assert.ok(files.includes(MANIFEST_FILE), `package.json "files" must include ${MANIFEST_FILE}`);
+  });
+});
+
+describe('build-install-manifest.js', () => {
+  function tree(t, files) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-manifest-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    for (const dir of ['commands/do', 'lib', 'hooks']) fs.mkdirSync(path.join(root, dir), { recursive: true });
+    for (const file of files) fs.writeFileSync(path.join(root, file), 'x\n');
+    return root;
+  }
+
+  it('carries every name that leaves the tree into retired-*, and never prunes it', (t) => {
+    const root = tree(t, ['commands/do/a.md', 'commands/do/b.md', 'lib/one.md', 'lib/two.sh', 'hooks/h.js']);
+    const first = buildManifest(root, null);
+    assert.deepEqual(parseManifest(first).libs, ['one.md', 'two.sh'], 'lib entries keep their extension');
+
+    fs.rmSync(path.join(root, 'commands/do/b.md'));
+    fs.rmSync(path.join(root, 'lib/two.sh'));
+    const second = parseManifest(buildManifest(root, first));
+    assert.deepEqual(second.commands, ['a.md']);
+    assert.deepEqual(second['retired-commands'], ['b.md']);
+    assert.deepEqual(second['retired-libs'], ['two.sh']);
+
+    // A later run still remembers b.md and two.sh, though neither manifest's
+    // current section has them any more.
+    fs.rmSync(path.join(root, 'lib/one.md'));
+    const third = parseManifest(buildManifest(root, buildManifest(root, first)));
+    assert.deepEqual(third['retired-libs'], ['one.md', 'two.sh']);
+    assert.deepEqual(third['retired-commands'], ['b.md']);
+  });
+
+  it('un-retires a name that comes back', (t) => {
+    const root = tree(t, ['commands/do/a.md', 'lib/one.md', 'hooks/h.js']);
+    const previous = buildManifest(root, null).replace('[retired-libs]\n', () => '[retired-libs]\nback.md\n');
+    fs.writeFileSync(path.join(root, 'lib/back.md'), 'x\n');
+    const next = parseManifest(buildManifest(root, previous));
+    assert.deepEqual(next.libs, ['back.md', 'one.md']);
+    assert.deepEqual(next['retired-libs'], []);
+  });
+
+  it('refuses a filename the shell scripts would reject', (t) => {
+    const root = tree(t, ['commands/do/a.md', 'lib/has space.md', 'hooks/h.js']);
+    assert.throws(() => buildManifest(root, null), /only accepts/);
+  });
+
+  it('--check accepts the committed manifest', () => {
+    execFileSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'build-install-manifest.js'), '--check']);
+  });
+});
+
+describe('curl installer scripts read the manifest, not hand-kept lists', () => {
+  const scripts = ['install.sh', 'uninstall.sh'].map((name) => [name, fs.readFileSync(path.join(REPO_ROOT, name), 'utf8')]);
+  const manifestBlock = (text) => text.match(/^# ── install manifest ──[\s\S]*?^# ── end install manifest ──$/m)?.[0];
+
+  it('starts every file list empty, to be filled from install-manifest.txt', () => {
+    for (const [name, text] of scripts) {
+      for (const list of ['COMMANDS', 'LIBS', 'HOOKS', 'OLD_COMMANDS', 'OLD_LIBS', 'OLD_HOOKS']) {
+        assert.match(text, new RegExp(`^${list}=\\(\\)$`, 'm'), `${name} must declare ${list}=() and fill it from the manifest`);
+        assert.doesNotMatch(text, new RegExp(`^${list}=\\(\\s*[^)\\s]`, 'm'), `${name} hand-keeps ${list}`);
+      }
+    }
+  });
+
+  it('shares one manifest parser between install.sh and uninstall.sh', () => {
+    const [[, install], [, uninstall]] = scripts;
+    assert.ok(manifestBlock(install), 'install.sh must carry the manifest block');
+    assert.equal(manifestBlock(uninstall), manifestBlock(install),
+      'the manifest blocks in install.sh and uninstall.sh drifted; keep them identical');
+  });
+});
+
+describe('curl installer atomic_write', () => {
+  // Executes the real functions: the destination directory comes from parameter
+  // expansion, which must still work for a bare filename with no slash.
+  it('stages beside the destination, with or without a directory part', (t) => {
+    const installer = fs.readFileSync(path.join(REPO_ROOT, 'install.sh'), 'utf8');
+    const fn = (name) => installer.match(new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?^\\}$`, 'm'))[0];
+    const mode = installer.match(/^FILE_MODE=.*$/m)[0];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-atomic-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    fs.mkdirSync(path.join(dir, 'sub'));
+    fs.writeFileSync(path.join(dir, 'src'), 'payload\n');
+    const script = [
+      'set -euo pipefail', 'ACTIVE_TMP=""', mode, fn('allocate_temp'), fn('atomic_write'),
+      'atomic_write bare.txt cp src', 'atomic_write sub/nested.txt cp src', `atomic_write "${dir}/abs.txt" cp src`,
+    ].join('\n');
+    execFileSync('bash', ['-c', script], { cwd: dir });
+    for (const file of ['bare.txt', 'sub/nested.txt', 'abs.txt']) {
+      assert.equal(fs.readFileSync(path.join(dir, file), 'utf8'), 'payload\n', file);
+    }
+    const leftovers = [dir, path.join(dir, 'sub')].flatMap((d) => fs.readdirSync(d).filter((f) => f.startsWith('.slashdo-tmp.')));
+    assert.deepEqual(leftovers, []);
   });
 });
 
@@ -133,8 +178,10 @@ describe('curl-installer OpenCode temporary files', () => {
     assert.match(code, /mktemp "\$@"/, 'the allocation helper must use mktemp');
     assert.match(code, /allocate_temp STAGE_DIR -d "\$\{TMPDIR:-\/tmp\}\/slashdo-install\.XXXXXX"/,
       'the OpenCode staging directory must come from mktemp -d');
-    assert.match(code, /allocate_temp ACTIVE_TMP "\$\(dirname "\$dest"\)\/\.slashdo-tmp\.XXXXXX"/,
+    assert.match(code, /allocate_temp ACTIVE_TMP "\$dir\/\.slashdo-tmp\.XXXXXX"/,
       'destination writes must stage through mktemp in the destination directory');
+    assert.match(code, /dir="\$\{dest%\/\*\}"/,
+      'the destination directory comes from parameter expansion, not a dirname fork per file');
     assert.doesNotMatch(code, /\/tmp\/slashdo/, 'no predictable /tmp/slashdo-* path');
   });
 });

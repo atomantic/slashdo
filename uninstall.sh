@@ -24,10 +24,13 @@ fi
 # offline machine can still deregister. Mirrors SETTINGS_HOOKS_CACHE in that module.
 SETTINGS_HOOKS_CACHE=".slashdo-settings-hooks.js"
 
-# Scratch copy of the module, removed however we exit.
+# Scratch copies of the module and of the downloaded manifest, removed however
+# we exit.
 MOD_DIR=""
+MANIFEST_TMP=""
 cleanup_temp() {
   [ -n "$MOD_DIR" ] && rm -rf "$MOD_DIR"
+  [ -n "$MANIFEST_TMP" ] && rm -f "$MANIFEST_TMP"
   return 0
 }
 trap cleanup_temp EXIT
@@ -86,58 +89,81 @@ banner() {
   printf "\n"
 }
 
-COMMANDS=(
-  better better-swift config depfree fpr goals help next omd
-  plan-task pr pr-better prd push release replan review rpr scan simplify update
-)
+# ── install manifest ── (this block is identical in install.sh and uninstall.sh)
+#
+# Which commands, libs and hooks ship, and which files earlier releases shipped
+# that must be cleaned up, come from install-manifest.txt, generated from the
+# tree by `node scripts/build-install-manifest.js`. Entries are bare filenames
+# with their extension, grouped under [commands], [libs], [hooks] and their
+# [retired-*] counterparts.
+MANIFEST_FILE="install-manifest.txt"
+MANIFEST_FORMAT="# slashdo install manifest v1"
+# Copy left in each installed environment's root, so uninstall.sh can find
+# everything a past install put there without a network round trip.
+MANIFEST_CACHE=".slashdo-install-manifest.txt"
+COMMANDS=()
+LIBS=()
+HOOKS=()
+OLD_COMMANDS=()
+OLD_LIBS=()
+OLD_HOOKS=()
 
-
-OLD_COMMANDS=(cam good makegoals makegood optimize-md)
-
-# Libs a prior release installed that are no longer shipped, kept here only so
-# uninstall.sh can still clean them off disk (install.sh's LIBS never installs
-# them again). Mirrors the OLD_COMMANDS/OLD_HOOKS convention above.
-OLD_LIBS=(
-  better-audit-architecture better-audit-bugs-perf
-  better-audit-code-quality better-audit-cognitive-load better-audit-deps
-  better-audit-dry better-audit-security better-audit-stack-specific
-  better-audit-structural better-audit-tests better-audit-ux
-  code-review-checklist github-reviewer-loop graphql-escaping
-  per-finding-root-cause post-review-doc-recommendations
-  plan-id-format replan-issues
-)
-
-# NOTE: keep in sync with install.sh LIBS — see comment there.
-LIBS=(
-  better-audit
-  better-discovery better-issue-mode better-options better-pipeline-inputs
-  better-plan better-remediation better-simplify
-  better-state better-test-enhancement
-  better-cleanup better-pr-and-ci better-review-loop better-verification
-  ci-flake-handling commit-conventions config-defaults-issues-merge copilot-review-loop depfree-policy
-  empty-array-expansion enhance-loop epic-children
-  finding-disposition fix-regression-guard
-  gh-host host-github host-gitlab host-reviewer-loop
-  local-agent-review-loop local-agent-agy local-agent-claude local-agent-cmd local-agent-cursor local-agent-opencode local-cli-runner
-  merge-gate model-tiers multi-reviewer-loop multi-reviewer-parallel next-github next-gitlab next-swarm ollama-review-loop
-  plan-issue-setup plan-issue-filing pr-write-access pre-pr-review-lifecycle
-  rebase-conflict-resolution remediation-agent-template
-  release-ci-gate release-documented release-source-gate review-agent-selection review-config-defaults review-convergence-gate review-flags
-  review-fix-conventions review-fix-tail
-  review-pr-mode review-mr-mode
-  review-preferences
-  swift-review-checklist swift-gotchas swift-pipeline-inputs
-  review-surface-scan review-surface-quality review-security-audit
-  review-cross-file-tracing review-cross-file-contract
-  review-structural-ambition
-  tracker-jira
-  upstream-push
-  vcs-host
-)
-
-HOOKS=(slashdo-check-update slashdo-statusline)
-
-OLD_HOOKS=(update-check)
+# Append one manifest's entries to the arrays above. The scripts build cp, mv
+# and rm paths from these names, so anything but a bare filename under a known
+# section rejects the whole manifest instead of being skipped, and nothing from
+# a rejected manifest is kept.
+# Usage: read_manifest <file> <label for messages>
+read_manifest() {
+  local file="$1" label="$2" line section="" entry
+  local entries=()
+  if ! IFS= read -r line < "$file" || [ "${line%$'\r'}" != "$MANIFEST_FORMAT" ]; then
+    printf "    ${YELLOW}%s: not a v1 slashdo install manifest${RESET}\n" "$label"
+    return 1
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in
+      ''|'#'*) continue ;;
+      '['*']')
+        section="${line#[}"
+        section="${section%]}"
+        case "$section" in
+          commands|libs|hooks|retired-commands|retired-libs|retired-hooks) continue ;;
+        esac
+        printf "    ${YELLOW}%s: unknown section %s${RESET}\n" "$label" "$line"
+        return 1
+        ;;
+      .*|*[!A-Za-z0-9._-]*)
+        printf "    ${YELLOW}%s: invalid entry %s${RESET}\n" "$label" "$line"
+        return 1
+        ;;
+    esac
+    case "$section" in
+      '')
+        printf "    ${YELLOW}%s: entry %s precedes any section${RESET}\n" "$label" "$line"
+        return 1
+        ;;
+      commands|retired-commands)
+        case "$line" in
+          *.md) ;;
+          *) printf "    ${YELLOW}%s: command %s is not a .md file${RESET}\n" "$label" "$line"; return 1 ;;
+        esac
+        ;;
+    esac
+    entries+=("$section/$line")
+  done < "$file"
+  for entry in ${entries[@]+"${entries[@]}"}; do
+    case "${entry%%/*}" in
+      commands)         COMMANDS+=("${entry#*/}") ;;
+      libs)             LIBS+=("${entry#*/}") ;;
+      hooks)            HOOKS+=("${entry#*/}") ;;
+      retired-commands) OLD_COMMANDS+=("${entry#*/}") ;;
+      retired-libs)     OLD_LIBS+=("${entry#*/}") ;;
+      retired-hooks)    OLD_HOOKS+=("${entry#*/}") ;;
+    esac
+  done
+}
+# ── end install manifest ──
 
 uninstall_claude() {
   local target_cmd="$CLAUDE_CONFIG_DIR/commands/do"
@@ -197,26 +223,27 @@ uninstall_claude() {
     esac
   fi
 
-  for cmd in "${COMMANDS[@]}" "${OLD_COMMANDS[@]}"; do
-    if [ -f "$target_cmd/$cmd.md" ]; then
-      rm -f "$target_cmd/$cmd.md"
-      printf "    removed: /do:%-18s${GREEN}ok${RESET}\n" "$cmd"
+  local file
+  for file in "${REMOVE_COMMANDS[@]}"; do
+    if [ -f "$target_cmd/$file" ]; then
+      rm -f "$target_cmd/$file"
+      printf "    removed: /do:%-18s${GREEN}ok${RESET}\n" "${file%.md}"
       count=$((count + 1))
     fi
   done
 
-  for lib in "${LIBS[@]}" "${OLD_LIBS[@]}"; do
-    if [ -f "$target_lib/$lib.md" ]; then
-      rm -f "$target_lib/$lib.md"
-      printf "    removed: lib/%-18s${GREEN}ok${RESET}\n" "$lib.md"
+  for file in "${REMOVE_LIBS[@]}"; do
+    if [ -f "$target_lib/$file" ]; then
+      rm -f "$target_lib/$file"
+      printf "    removed: lib/%-18s${GREEN}ok${RESET}\n" "$file"
       count=$((count + 1))
     fi
   done
 
-  for hook in "${HOOKS[@]}"; do
-    if [ -f "$target_hooks/$hook.js" ]; then
-      rm -f "$target_hooks/$hook.js"
-      printf "    removed: hook/%-17s${GREEN}ok${RESET}\n" "$hook.js"
+  for file in "${REMOVE_HOOKS[@]}"; do
+    if [ -f "$target_hooks/$file" ]; then
+      rm -f "$target_hooks/$file"
+      printf "    removed: hook/%-17s${GREEN}ok${RESET}\n" "$file"
       count=$((count + 1))
     fi
   done
@@ -227,13 +254,7 @@ uninstall_claude() {
     count=$((count + 1))
   fi
 
-  for old in "${OLD_HOOKS[@]}"; do
-    if [ -f "$target_hooks/$old.md" ]; then
-      rm -f "$target_hooks/$old.md"
-      printf "    removed: hook/%-17s${GREEN}ok${RESET}\n" "$old.md"
-      count=$((count + 1))
-    fi
-  done
+  remove_manifest_cache "$CLAUDE_CONFIG_DIR" && count=$((count + 1))
 
   # Remove cache file
   if [ -f "$CLAUDE_CONFIG_DIR/cache/slashdo-update-check.json" ]; then
@@ -269,21 +290,24 @@ uninstall_opencode() {
 
   printf "  Uninstalling from ${GREEN}OpenCode${RESET}...\n"
 
-  for cmd in "${COMMANDS[@]}" "${OLD_COMMANDS[@]}"; do
-    if [ -f "$target_cmd/do-$cmd.md" ]; then
-      rm -f "$target_cmd/do-$cmd.md"
-      printf "    removed: /do-%-18s${GREEN}ok${RESET}\n" "$cmd"
+  local file
+  for file in "${REMOVE_COMMANDS[@]}"; do
+    if [ -f "$target_cmd/do-$file" ]; then
+      rm -f "$target_cmd/do-$file"
+      printf "    removed: /do-%-18s${GREEN}ok${RESET}\n" "${file%.md}"
       count=$((count + 1))
     fi
   done
 
-  for lib in "${LIBS[@]}" "${OLD_LIBS[@]}"; do
-    if [ -f "$target_lib/$lib.md" ]; then
-      rm -f "$target_lib/$lib.md"
-      printf "    removed: lib/%-18s${GREEN}ok${RESET}\n" "$lib.md"
+  for file in "${REMOVE_LIBS[@]}"; do
+    if [ -f "$target_lib/$file" ]; then
+      rm -f "$target_lib/$file"
+      printf "    removed: lib/%-18s${GREEN}ok${RESET}\n" "$file"
       count=$((count + 1))
     fi
   done
+
+  remove_manifest_cache "$HOME/.config/opencode" && count=$((count + 1))
 
   if [ -f "$HOME/.config/opencode/.slashdo-config.json" ]; then
     rm -f "$HOME/.config/opencode/.slashdo-config.json"
@@ -307,7 +331,9 @@ uninstall_antigravity() {
 
   printf "  Uninstalling from ${GREEN}Antigravity CLI${RESET}...\n"
 
-  for cmd in "${COMMANDS[@]}" "${OLD_COMMANDS[@]}"; do
+  local file cmd
+  for file in "${REMOVE_COMMANDS[@]}"; do
+    cmd="${file%.md}"
     if [ -d "$target_skills/do-$cmd" ]; then
       rm -rf "$target_skills/do-$cmd"
       printf "    removed: /do-%-18s${GREEN}ok${RESET}\n" "$cmd"
@@ -346,7 +372,9 @@ uninstall_agent_skills() {
 
   printf "  Uninstalling from ${GREEN}%s${RESET}...\n" "$label"
 
-  for cmd in "${COMMANDS[@]}" "${OLD_COMMANDS[@]}"; do
+  local file cmd
+  for file in "${REMOVE_COMMANDS[@]}"; do
+    cmd="${file%.md}"
     if [ -d "$target_skills/do-$cmd" ]; then
       rm -rf "$target_skills/do-$cmd"
       printf "    removed: /do-%-18s${GREEN}ok${RESET}\n" "$cmd"
@@ -381,18 +409,19 @@ uninstall_gemini_legacy() {
 
   printf "  Uninstalling legacy ${GREEN}Gemini CLI${RESET} files...\n"
 
-  for cmd in "${COMMANDS[@]}" "${OLD_COMMANDS[@]}"; do
-    if [ -f "$target_cmd/$cmd.md" ]; then
-      rm -f "$target_cmd/$cmd.md"
-      printf "    removed: /do:%-18s${GREEN}ok${RESET}\n" "$cmd"
+  local file
+  for file in "${REMOVE_COMMANDS[@]}"; do
+    if [ -f "$target_cmd/$file" ]; then
+      rm -f "$target_cmd/$file"
+      printf "    removed: /do:%-18s${GREEN}ok${RESET}\n" "${file%.md}"
       count=$((count + 1))
     fi
   done
 
-  for lib in "${LIBS[@]}" "${OLD_LIBS[@]}"; do
-    if [ -f "$target_lib/$lib.md" ]; then
-      rm -f "$target_lib/$lib.md"
-      printf "    removed: lib/%-18s${GREEN}ok${RESET}\n" "$lib.md"
+  for file in "${REMOVE_LIBS[@]}"; do
+    if [ -f "$target_lib/$file" ]; then
+      rm -f "$target_lib/$file"
+      printf "    removed: lib/%-18s${GREEN}ok${RESET}\n" "$file"
       count=$((count + 1))
     fi
   done
@@ -408,6 +437,51 @@ uninstall_gemini_legacy() {
   else
     printf "    ${GREEN}$count files removed${RESET}\n"
   fi
+}
+
+# Build the removal lists from every manifest that can be read: the checkout's
+# own copy in local mode, otherwise the current one from $BASE_URL, plus the
+# copy each install left in its environment root. Taking the union means a
+# file is removed if either the installed release or the current one names it,
+# and an offline uninstall still works from an installed copy. Returns 1, with
+# nothing removed yet, only when no manifest at all could be read.
+REMOVE_COMMANDS=()
+REMOVE_LIBS=()
+REMOVE_HOOKS=()
+load_manifests() {
+  local cache loaded=false
+  if [ "$LOCAL_MODE" = true ]; then
+    if [ -f "$SCRIPT_DIR/$MANIFEST_FILE" ] && read_manifest "$SCRIPT_DIR/$MANIFEST_FILE" "$SCRIPT_DIR/$MANIFEST_FILE"; then
+      loaded=true
+    fi
+  else
+    MANIFEST_TMP="$(mktemp "${TMPDIR:-/tmp}/slashdo-manifest.XXXXXX")" || MANIFEST_TMP=""
+    if [ -n "$MANIFEST_TMP" ] && fetch_file "$MANIFEST_FILE" "$MANIFEST_TMP" &&
+       read_manifest "$MANIFEST_TMP" "$BASE_URL/$MANIFEST_FILE"; then
+      loaded=true
+    else
+      printf "  ${DIM}could not download %s — using the installed copy${RESET}\n" "$BASE_URL/$MANIFEST_FILE"
+    fi
+  fi
+  for cache in "$CLAUDE_CONFIG_DIR/$MANIFEST_CACHE" "$HOME/.config/opencode/$MANIFEST_CACHE"; do
+    if [ -f "$cache" ] && read_manifest "$cache" "$cache"; then
+      loaded=true
+    fi
+  done
+  if [ "$loaded" = false ] || [ ${#COMMANDS[@]} -eq 0 ] || [ ${#LIBS[@]} -eq 0 ] || [ ${#HOOKS[@]} -eq 0 ]; then
+    return 1
+  fi
+  REMOVE_COMMANDS=("${COMMANDS[@]}" ${OLD_COMMANDS[@]+"${OLD_COMMANDS[@]}"})
+  REMOVE_LIBS=("${LIBS[@]}" ${OLD_LIBS[@]+"${OLD_LIBS[@]}"})
+  REMOVE_HOOKS=("${HOOKS[@]}" ${OLD_HOOKS[@]+"${OLD_HOOKS[@]}"})
+}
+
+# Remove the manifest copy install.sh left in <environment root>; succeeds only
+# if there was one, so the caller can count it.
+remove_manifest_cache() {
+  [ -f "$1/$MANIFEST_CACHE" ] || return 1
+  rm -f "$1/$MANIFEST_CACHE"
+  printf "    removed: %s ${GREEN}ok${RESET}\n" "$MANIFEST_CACHE"
 }
 
 detect_envs() {
@@ -432,6 +506,13 @@ if [ ${#envs[@]} -eq 0 ]; then
 fi
 
 printf "  Detected: ${GREEN}%s${RESET}\n\n" "${envs[*]}"
+
+if ! load_manifests; then
+  printf "  ${YELLOW}Uninstall aborted:${RESET} could not read the file list (%s) from %s\n" "$MANIFEST_FILE" "$BASE_URL"
+  printf "  or from an installed copy, so nothing was removed. Re-run with network access,\n"
+  printf "  or from a slashdo checkout.\n\n"
+  exit 1
+fi
 
 for env in "${envs[@]}"; do
   case "$env" in
