@@ -82,7 +82,8 @@ the audit rather than silently losing an allowance.
 
 `/do:depfree` keeps matches with reason **policy allowlist** before usage analysis
 and reports each package and matching pattern in its summary and, when remediation
-runs, under **Kept — Policy allowlist** in `docs/DEPS.md`. Transitive accounting
+runs, as a `KEPT` row with reason `policy: <pattern>` in the decision record
+(`docs/DEPS.md` by default). Transitive accounting
 and whole-tree vulnerability reporting still include these packages. Policy is
 reloaded every run: deleting a recorded decision does not bypass current policy,
 and removing an allowance causes normal classification on the next run.

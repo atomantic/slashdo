@@ -5,134 +5,125 @@ argument-hint: "[--show] [--project] [--review-with <list>] [--review-models <ag
 
 ## Purpose
 
-`/do:config` reads and writes **saved defaults** for the shared review-loop flags so you can omit them on future commands. Set them once:
+`/do:config` reads and writes **saved defaults**, so a flag set once can be omitted on later commands:
 
 ```
 /do:config --review-with=claude,codex,ollama[qwen2.5-coder:32b]
 ```
 
-…and afterward `/do:pr`, `/do:release`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:simplify`, `/do:depfree`, and `/do:rpr` behave as if you had passed `--review-with=claude,codex,ollama[qwen2.5-coder:32b]` — unless you pass an explicit flag on that run (which always wins) or `--review-with none` to skip reviewers for a single run.
+Afterward every command that reads the `review-with` key behaves as if that flag had been passed. An explicit flag on a run always wins over a saved default, and a `--no-<flag>` (or `--review-with none`) overrides it for that run.
 
-The store also holds per-agent default models (`--review-models`), the issue label (`--issues-label`), dependency policy (`--depfree-allow`), `/do:next`'s claim gates (`--self`/`--collaborators`/`--trusted-authors`), the `/do:review` approval default (`--approve`/`--no-approve`), the auto-merge default (`--merge`/`--merge-method`), the code-host / issue-tracker overrides (`--code-host`/`--tracker`), and the Jira project (`--jira-project`) — see the flag-by-flag rules under "Recognized setting flags" below for what each key means, who reads it, and its built-in default; this section doesn't restate them.
+The defaults live under a `defaults` object in a JSON file that also holds other top-level keys (such as `autoUpdate`); never clobber those.
 
-A `--no-<flag>` on a single run overrides any of these for that run.
+## Scope
 
-The config is a generic JSON store keyed under a `defaults` object, so new keys can be added without changing the file shape. It coexists with other top-level keys (e.g. `autoUpdate`) — never clobber them.
+- **Global (default)** — the host CLI's config file at `~/.claude/.slashdo-config.json`. Applies everywhere on this machine, for the CLI you run the command in; defaults are not mirrored into other installed slashdo environments.
+- **Per-project (`--project`)** — `.slashdo.json` at the repository root (`git rev-parse --show-toplevel`). Outside a git repo, abort with: `--project requires a git repository (no repo root found).`
 
-## Scope (where defaults are written)
+At read time the project value overrides the global one, key by key (see `lib/review-config-defaults.md`). The one exception is `depfree-allow`, where the two lists are unioned: an empty project list cannot clear global policy, so a global allowance is removed in the global scope.
 
-- **Global (default)** — the host CLI's config file at `~/.claude/.slashdo-config.json` (the path installed for whichever CLI you're running in). Applies everywhere on this machine.
-- **Per-project (`--project`)** — a `.slashdo.json` file at the repository root (`git rev-parse --show-toplevel`). Overrides the global defaults for this repo only, except `depfree-allow`, which is unioned with global policy. If `--project` is passed outside a git repo, abort with: `--project requires a git repository (no repo root found).`
+## Keys
 
-At read time, **per-project overrides global, key by key** (see `lib/review-config-defaults.md`), except **`depfree-allow` uses the union of both scopes**. An empty project list cannot clear global policy. To remove a global allowance, edit or unset it in the global scope.
+This table is the complete list of saved keys. Everything below — the unknown-flag message, `--unset`, and the Show output — refers to it instead of repeating it.
 
-For dependency policy loading, validation, and union, use the shared procedure
-below. Apply requested Set/Unset/Reset edits before validating the resulting
-policy, so a malformed allowance can be repaired. `/do:config` only manages
-configuration; the audit/classification rules apply when `/do:depfree` runs:
+| Flag(s) | Key | Stored value | Built-in default when unset | Read by |
+|---|---|---|---|---|
+| `--review-with <list>` | `review-with` | normalized string, or `none` | no external reviewer | the review commands: `/do:pr`, `/do:release`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:simplify`, `/do:depfree`, `/do:rpr` |
+| `--review-models <agent=model,...>` | `review-models` | object keyed by agent slug | each reviewer's own default model | the review commands |
+| `--review-iterations <n>` | `review-iterations` | non-negative integer | `1` | the review commands except `/do:rpr` |
+| `--review-mode <series\|parallel>` | `review-mode` | `series` or `parallel` | `series` | the review commands except `/do:rpr` |
+| `--reviewer-applies` / `--no-reviewer-applies` | `reviewer-applies` | `true` / `false` | `false` | the review commands |
+| `--review-stop-on-findings` / `--review-stop-on-clean` / `--review-stop-all` | `review-stop-mode` | `on-findings` / `on-clean` / `all` | `all` | the review commands except `/do:rpr` |
+| `--issues-label <name>` | `issues-label` | string, verbatim | `plan` | every command that files or reads tracker issues |
+| `--depfree-allow <patterns>` | `depfree-allow` | array of strings | `[]` | `/do:depfree`, in every mode |
+| `--self` / `--no-self` | `self` | `true` / `false` | `false` (any author) | `/do:next` |
+| `--collaborators` / `--no-collaborators` | `collaborators` | `true` / `false` | `false` (any author) | `/do:next` |
+| `--trusted-authors <list>` | `trusted-authors` | normalized string, or `none` | no extra authors | `/do:next` |
+| `--approve` / `--no-approve` | `approve` | `true` / `false` | `true` | `/do:review` in PR/MR mode |
+| `--merge` / `--no-merge` / `--merge=<method>` | `merge` | `true` / `false` | `false` for `/do:pr`, `true` for `/do:next` | `/do:pr`, `/do:next` |
+| `--merge-method <method>` | `merge-method` | `squash`, `rebase` or `merge` | the repo's allowed method | `/do:pr`, `/do:next` |
+| `--code-host <github\|gitlab>` | `code-host` | `github` or `gitlab` | detected from the `origin` remote | every command that selects a host (`lib/vcs-host.md`) |
+| `--tracker <github\|gitlab\|jira>` | `tracker` | `github`, `gitlab` or `jira` | same as the code host | every tracker-backed command (`lib/vcs-host.md`) |
+| `--jira-project <KEY>` | `jira-project` | uppercase project key | unset; required when `tracker` is `jira` | the Jira backend (`lib/tracker-jira.md`) |
 
-!read lib/depfree-policy.md
+Each boolean flag's `--no-*` form stores an explicit `false`, so a project default can turn off an inherited global `true`; `--unset <key>` instead removes the key and falls back to the lower-precedence value. A flag and its opposite are mutually exclusive.
 
-## Parse `$ARGUMENTS`
+What each key does at run time is specified where it is consumed — `lib/review-config-defaults.md` for the review keys, `lib/config-defaults-issues-merge.md` for the issue and merge keys, `lib/vcs-host.md` for the host keys, `/do:next` for its claim gates (`self`: only issues the running account filed; `collaborators`: only issues filed by a current repo collaborator or a `trusted-authors` login; both may be stored, and `self` wins when both are on), and `/do:review` for `approve` (approve someone else's change when the review ends with no unresolved CRITICAL finding). The rules below cover only validating and storing a value.
 
-1. Determine `SCOPE`: `project` if `--project` is present, else `global`. Resolve `TARGET_FILE`:
-   - global → `~/.claude/.slashdo-config.json`
-   - project → `{repo-root}/.slashdo.json`
-2. Determine the **action**:
-   - **Show** — no setting/unset/reset flags are present (only `--show`, only `--project`, or no args). Go to "Show effective config".
-   - **Reset** — `--reset` is present: clear the entire `defaults` object in `TARGET_FILE` (preserve every other top-level key). Then re-show.
-   - **Unset** — one or more `--unset <key>`: remove those keys from `defaults` in `TARGET_FILE`.
-   - **Set** — one or more recognized setting flags are present: validate and merge them into `defaults`.
-   `--unset` and setting flags may be combined in one call; apply unsets first, then sets.
-3. **Recognized setting flags** (parse and validate each that is present, with the same rules the review commands use). Every boolean flag's `--no-*` opposite stores an explicit `false` so a **project** default can override an inherited global `true`; `--unset <key>` instead removes the key and falls back to the lower-precedence value. Each flag/opposite pair is mutually exclusive.
-   - `--review-with <list>` → key `review-with`. Parse and validate the list with the same grammar every review command uses — split-on-comma-outside-brackets, alias normalization, slug validation, the `~opt`/`~max=<n>`/`~effort=<level>` suffixes and their abort strings, and dedupe identity — owned by the shared partial; do not restate it here:
+### Validation and storage
+
+**`review-with`.** Parse and validate the list with the grammar every review command uses, owned by this partial:
 
 !read lib/review-flags.md
 
-     Saving a default differs from a single run's parse in three ways:
-     - **When `SCOPE=project`, reject any `cmd[…]` entry** with `cmd[<invocation>] cannot be saved in the per-project .slashdo.json — it is repo content and would let the repo choose a shell command; save it globally instead (omit --project).` — the per-project file is committed and shared, so a shell command stored there would run for every maintainer who checks the repo out.
-     - The literal `none` (case-insensitive) is also accepted here and stored verbatim as `none` — an explicit "no external reviewer" tombstone, most useful with `--project`: a project-scoped `review-with=none` masks an inherited **global** reviewer default for that one repo, which `--unset review-with` cannot do (unsetting the project key just falls back to the global value). The review commands resolve a saved `none` to `REVIEW_AGENTS=[]`.
-     - Store the **normalized, deduped** string with each entry's `~` suffixes **re-appended in canonical order — `~opt` first, then `~max=<n>`, then `~effort=<level>`** (e.g. `claude~opt~max=2~effort=high,ollama[qwen2.5-coder:32b]~opt~max=1,codex`), so the stored value is byte-stable whatever order the user typed — a single run's parse has no storage step and so no canonical order to enforce.
-   - `--review-models <agent=model,...>` → key `review-models`, a JSON **object** keyed by agent slug (e.g. `--review-models codex=o3,claude=opus,cursor=gpt-5,opencode=provider/model` → `{"codex":"o3","claude":"opus","cursor":"gpt-5","opencode":"provider/model"}`). Cursor effort is not a separate key — save it on the `--review-with` token (`--review-with cursor[gpt-5]~effort=max`, or `--review-with cursor~effort=max` plus a `review-models` entry for the loop to fold `[effort=max]` into). For `agy`, saving a **bare base** name (`--review-models agy=gemini-3.8-flash`, no level suffix) is supported, not a stale-name hazard: the review loop completes it against the pinned `~effort` level (or the roster-default level with none given) at run time, since `agy models` only lists leveled entries. Split the value on `,` into entries; split each entry on the **first** `=` into `slug=model`. Normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, `zen`/`opencode-zen` → `opencode`. Validate each slug ∈ {`codex`, `claude`, `agy`, `grok`, `pi`, `cursor`, `opencode`, `ollama`}; reject `copilot`, an `@<login>`, or any other slug with `--review-models only accepts codex, claude, agy, grok, pi, cursor, opencode, ollama (got: {slug}) — copilot and @<login> reviewers take no model.` The model is a free-form string (trim surrounding whitespace; it may contain spaces/parens, e.g. `Gemini 3.8 Flash (High)`) — validate its shape, not against an allowlist. **Merge into the existing `review-models` object key-by-key** (do not clobber the whole map). An entry with an **empty** model — `codex=` — **removes** that agent's key (the per-agent analog of `--unset`). Reject a malformed entry (no `=`, or an empty slug) with `--review-models entries must be <agent>=<model> (got: {entry}).` Store the resulting object. `review-models` never selects which reviewers run (that is `--review-with`) — it only pins the model for a reviewer already listed there, and an explicit `<agent>[<model>]` bracket (typed on the run or carried by a saved `review-with` default) overrides it.
-   - `--review-iterations <n>` → key `review-iterations`. Must be a non-negative integer; else abort with `--review-iterations must be a non-negative integer (got: {value}).` Store as a number.
-   - `--reviewer-applies` → key `reviewer-applies`, value `true`. `--no-reviewer-applies` → value `false`.
-   - `--review-stop-on-findings` / `--review-stop-on-clean` → key `review-stop-mode`, value `"on-findings"` / `"on-clean"`. The explicit default `--review-stop-all` → value `"all"` (so a **project** default can override an inherited global stop-mode). The three are mutually exclusive — if more than one is present, abort with `--review-stop-on-findings, --review-stop-on-clean, and --review-stop-all are mutually exclusive`.
-   - `--review-mode <series|parallel>` → key `review-mode`. Must be one of `series`/`parallel`; else abort with `--review-mode must be one of series, parallel (got: {value}).` Store the string verbatim. Selects how the multi-reviewer loop dispatches reviewers (`series` — one-at-a-time, each sees the prior's fixes, the built-in default; `parallel` — reviews run concurrently, then the union is applied once). Read by `/do:pr`, `/do:review`, `/do:better`, `/do:better-swift`, `/do:simplify`, `/do:depfree`, and `/do:release` (`/do:rpr` ignores it).
-   - `--issues` / `--no-issues` → abort with `/do:config --issues/--no-issues was removed: PLAN.md mode no longer exists, issues are always used. Run /do:config --unset issues to clean up a saved value.`
-   - `--issues-label <name>` → key `issues-label`. Store the string verbatim — the label that scopes plan-tracking issues (built-in default `plan`).
-   - `--depfree-allow <patterns>` → key `depfree-allow`. Split a comma-separated list of exact package names or `*` patterns, trim each entry, reject empty entries or whitespace within a pattern with `--depfree-allow requires comma-separated nonblank package-name patterns.` Dedupe case-sensitively in first-occurrence order and store a JSON **array of strings**, e.g. `/do:config --depfree-allow '@aws-sdk/*,pg'` → `["@aws-sdk/*","pg"]`. Quote wildcards when invoking from a shell. Replace only the chosen scope's list, preserving all other defaults and top-level keys. Use `--unset depfree-allow` (or `--reset`) to clear this scope; clearing project policy never removes global allowances. Only `/do:depfree` consumes it, in every mode including `--heavy` and `--extreme`; unlike scalar defaults the two lists are unioned, with no per-run bypass. Per-entry reason objects are not supported.
-   - `--self` → key `self`, value `true`. `--no-self` → value `false`. A saved `self=true` makes `/do:next` claim only issues filed by the running account (`@me`) — auto-pick filters out others and an explicit `#<num>` for someone else's issue is refused; an explicit `--self`/`--no-self` on a run still wins. Only `/do:next` reads this key.
-   - `--collaborators` → key `collaborators`, value `true`. `--no-collaborators` → value `false`. `--self` and `--collaborators` are **not** mutually exclusive — both may be stored; at runtime SELF_MODE wins when both are on (`@me` is a subset of collaborators). A saved `collaborators=true` makes `/do:next` claim only issues filed by a current repo collaborator (live host-API list) **or** a `--trusted-authors` login — auto-pick filters out others and an explicit `#<num>` for someone in neither set is refused; an explicit `--collaborators`/`--no-collaborators` on a run still wins. Only `/do:next` reads this key.
-   - `--trusted-authors <list>` → key `trusted-authors`, a comma-separated string of GitHub/GitLab logins (e.g. `howlingmime,Joebok`). Split on `,`, trim, strip a leading `@`, reject empty entries (except a lone `none`). Validate each login against `^[A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?$` (the same shape as `@<login>` reviewers); abort with `Invalid --trusted-authors login: {value}. Use GitHub/GitLab logins (comma-separated), or none to clear.` Dedupe case-insensitively, preserving first-occurrence spelling, and store the **normalized, deduped** comma-separated string. The literal `none` (case-insensitive) or an empty value is a tombstone stored as `none` — no extra authors — so a project-scoped `none` can mask an inherited global list (`--unset trusted-authors` instead removes the key and falls back). This list is extra trusted *authors* only, unioned into `/do:next --collaborators`' live collaborator set; it is not a saved collaborator allowlist, and when collaborators mode is off it does not restrict or widen auto-pick. An explicit `--trusted-authors` on a `/do:next` run still wins. Only `/do:next` reads this key.
-   - `--approve` → key `approve`, value `true`. `--no-approve` → value `false`; both together abort with `--approve and --no-approve cannot be combined`. Only `/do:review` in PR/MR mode reads this boolean (built-in `true`): a completed review with zero unresolved CRITICAL findings approves someone else's change at the exact reviewed head. Save `--no-approve` for teams reserving approval for a human; this does not disable comments or alter `--merge` gates. Explicit flags win over saved values; `--unset approve` removes this scope's preference and falls back. Draft mode always publishes nothing, and local branch mode never approves.
-   - `--merge` → key `merge`, value `true`. `--no-merge` → value `false` (leave-open). The shorthand `--merge=<method>` sets `merge=true` **and** `merge-method=<method>` in one token (`<method>` validated against `squash`/`rebase`/`merge` with the same abort as `--merge-method` below). If both `--merge=<method>` and `--merge-method <method>` are given with **different** methods, abort with `--merge=<method> and --merge-method specify conflicting methods ({first} vs {second})`; identical methods are accepted. `/do:pr` **and** `/do:next` both read this key, with different built-in defaults when it's absent: `/do:pr`'s is `false` (open the PR and stop); `/do:next`'s is `true` (it merges its own claim's PR once its gate passes; `--no-merge` is the opt-out). `/do:next` never forwards `--merge`/`--no-merge` to the `/do:pr` call it makes internally to open the PR (that call is always `--no-merge`) — the key only governs `/do:next`'s own post-review merge step. An explicit `--merge`/`--no-merge` on a run still wins over the saved default.
-   - `--merge-method <method>` → key `merge-method`. Must be one of `squash`, `rebase`, `merge`; else abort with `--merge-method must be one of squash, rebase, merge (got: {value}).` The method `/do:pr` uses when auto-merging (only meaningful there alongside merge mode), and the method `/do:next` always uses for its own merge; when unset, both fall back to the repo's allowed method.
-   - `--code-host <github|gitlab>` → key `code-host`. Lowercase the value; it must be one of `github`, `gitlab`, else abort with `--code-host must be one of github, gitlab (got: {value}).` Overrides the forge [lib/vcs-host.md](../../lib/vcs-host.md) otherwise detects from the `origin` remote — for a self-managed GitLab (or a GitHub Enterprise host) whose hostname does not say which forge it is. Saved per-project (`--project`) is usually right, since it describes one repo's remote. Every command that selects a host reads this key; the selected CLI must still be able to read the repo.
-   - `--tracker <github|gitlab|jira>` → key `tracker`. Lowercase the value; it must be one of `github`, `gitlab`, `jira`, else abort with `--tracker must be one of github, gitlab, jira (got: {value}).` Selects the issue tracker independently of the code host (default: the code host itself). [lib/vcs-host.md](../../lib/vcs-host.md)'s tracker gate (`TRACKER_CLI`) treats a tracker with no backend for this repo's code host yet as **no tracker**: backlog commands (`/do:next`, `/do:replan`, `/do:plan-task`) stop, and commands that only defer findings list them in their report instead of filing. A `jira` tracker is served by every tracker-backed command — `/do:next`, `/do:replan`, `/do:plan-task`, `/do:goals`, and each command that files deferred findings — through the Jira backend's pre-flight ([lib/tracker-jira.md](../../lib/tracker-jira.md)); a failed pre-flight is no tracker, with its message. New tracker backends extend this value set and that gate together. `jira` also needs `jira-project` and an authenticated [jira CLI](https://github.com/ankitpokhrel/jira-cli); the code host (PRs/MRs) is unaffected.
-   - `--jira-project <KEY>` → key `jira-project`. Uppercase the value; it must match `^[A-Z][A-Z0-9_]+$`, else abort with `--jira-project must be a Jira project key like PROJ (got: {value}).` Store the uppercased key. The project a `jira` tracker reads and files into; ignored unless `tracker=jira`. Saved per-project (`--project`) is usually right.
-   - Any other `--flag` that is not one of the above and not `--show`/`--project`/`--reset`/`--unset` → abort with: `Unknown /do:config option: {flag}. Supported: --review-with, --review-models, --review-iterations, --review-mode, --reviewer-applies, --no-reviewer-applies, --review-stop-on-findings, --review-stop-on-clean, --review-stop-all, --issues-label, --depfree-allow, --self, --no-self, --collaborators, --no-collaborators, --trusted-authors, --approve, --no-approve, --merge, --no-merge, --merge-method, --code-host, --tracker, --jira-project, --unset <key>, --reset, --show, --project.`
-4. **`--unset <key>`**: `<key>` must be one of `review-with`, `review-models`, `review-iterations`, `review-mode`, `reviewer-applies`, `review-stop-mode`, `issues` (removed key; unset only cleans up a stale value), `issues-label`, `depfree-allow`, `self`, `collaborators`, `trusted-authors`, `approve`, `merge`, `merge-method`, `code-host`, `tracker`, `jira-project`. Reject others with `Unknown --unset key: {key}. Valid keys: review-with, review-models, review-iterations, review-mode, reviewer-applies, review-stop-mode, issues, issues-label, depfree-allow, self, collaborators, trusted-authors, approve, merge, merge-method, code-host, tracker, jira-project.` (`--unset review-models` clears the entire per-agent map; to clear one agent, set an empty model with `--review-models <agent>=`.)
+Saving differs from a single run's parse in three ways:
+- When `SCOPE=project`, reject any `cmd[…]` entry with `cmd[<invocation>] cannot be saved in the per-project .slashdo.json — it is repo content and would let the repo choose a shell command; save it globally instead (omit --project).` The project file is committed and shared, so a shell command stored there would run for every maintainer who checks the repo out.
+- The literal `none` (case-insensitive) is accepted and stored as `none`. It is a tombstone meaning "no external reviewer": saved with `--project` it masks an inherited global reviewer list for that repo, which `--unset review-with` cannot do.
+- Store the normalized, deduped string with each entry's suffixes in canonical order — `~opt`, then `~max=<n>`, then `~effort=<level>` (e.g. `claude~opt~max=2~effort=high,ollama[qwen2.5-coder:32b]~opt~max=1,codex`) — so the stored value is the same whatever order the user typed.
+
+**`review-models`.** Split the value on `,` into entries and each entry on the first `=` into `slug=model`. Normalize `gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`, `zen`/`opencode-zen` → `opencode`. The slug must be one of `codex`, `claude`, `agy`, `grok`, `pi`, `cursor`, `opencode`, `ollama`; otherwise abort with `--review-models only accepts codex, claude, agy, grok, pi, cursor, opencode, ollama (got: {slug}) — copilot and @<login> reviewers take no model.` Reject an entry with no `=` or an empty slug with `--review-models entries must be <agent>=<model> (got: {entry}).` The model is free-form (trim it; it may contain spaces and parentheses) and is not checked against a list. Merge into the existing object key by key instead of replacing it; an entry with an empty model (`codex=`) removes that agent's key. Two things that look like mistakes and are not: a bare `agy` base name with no level suffix is valid, because the review loop completes it against the `~effort` level at run time; and Cursor effort is not a key here — it is saved on the `--review-with` token (`cursor~effort=max`). This key only pins the model for a reviewer already listed in `review-with`, and an explicit `<agent>[<model>]` bracket overrides it.
+
+**`review-iterations`.** Not a non-negative integer → `--review-iterations must be a non-negative integer (got: {value}).` Store a number.
+
+**`review-mode`.** Not `series` or `parallel` → `--review-mode must be one of series, parallel (got: {value}).`
+
+**`review-stop-mode`.** More than one of the three flags → `--review-stop-on-findings, --review-stop-on-clean, and --review-stop-all are mutually exclusive`.
+
+**`depfree-allow`.** Split the comma-separated list, trim each entry, and reject an empty entry or whitespace inside a pattern with `--depfree-allow requires comma-separated nonblank package-name patterns.` Dedupe case-sensitively in first-occurrence order and store an array, e.g. `--depfree-allow '@aws-sdk/*,pg'` → `["@aws-sdk/*","pg"]` (quote wildcards in a shell). Setting replaces only the chosen scope's list; `--unset depfree-allow` or `--reset` clears only that scope. Entries are plain strings; per-entry reason objects are not supported. Loading, validating and unioning the two scopes follows the shared procedure below. Apply the requested Set/Unset/Reset edit before validating the resulting policy, so a malformed allowance can be repaired with this command:
+
+!read lib/depfree-policy.md
+
+**`trusted-authors`.** Split on `,`, trim, strip a leading `@`, and reject empty entries. Each login must match `^[A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?$`; otherwise abort with `Invalid --trusted-authors login: {value}. Use GitHub/GitLab logins (comma-separated), or none to clear.` Dedupe case-insensitively, keeping the first spelling, and store the comma-separated string. The literal `none` (case-insensitive) or an empty value is stored as `none`, a tombstone that masks an inherited global list.
+
+**`approve`.** `--approve` with `--no-approve` → `--approve and --no-approve cannot be combined`.
+
+**`merge` and `merge-method`.** `--merge=<method>` sets `merge=true` and `merge-method=<method>` together. A method that is not `squash`, `rebase` or `merge`, from either flag → `--merge-method must be one of squash, rebase, merge (got: {value}).` `--merge=<method>` and `--merge-method` naming different methods → `--merge=<method> and --merge-method specify conflicting methods ({first} vs {second})`; the same method twice is fine.
+
+**`code-host`, `tracker`.** Lowercase the value. Outside the allowed set → `--code-host must be one of github, gitlab (got: {value}).` or `--tracker must be one of github, gitlab, jira (got: {value}).` `code-host` is for a self-managed GitLab or GitHub Enterprise host whose hostname does not say which forge it is; `tracker=jira` also needs `jira-project` and an authenticated [jira CLI](https://github.com/ankitpokhrel/jira-cli). Both usually belong in `--project` scope, since they describe one repo.
+
+**`jira-project`.** Uppercase the value; it must match `^[A-Z][A-Z0-9_]+$`, else `--jira-project must be a Jira project key like PROJ (got: {value}).`
+
+## Parse `$ARGUMENTS`
+
+1. `SCOPE` is `project` if `--project` is present, else `global`. `TARGET_FILE` is the corresponding file from Scope.
+2. Determine the action:
+   - **Show** — no setting, unset or reset flag is present. Go to "Show effective config".
+   - **Reset** — `--reset`: replace the `defaults` object in `TARGET_FILE` with `{}`.
+   - **Unset** — one or more `--unset <key>`: remove those keys. `<key>` is any key in the table, or `issues` (a removed key, accepted only so a stale value can be cleaned up). Reject anything else with `Unknown --unset key: {key}. Valid keys: {every key in the table, then issues}.` `--unset review-models` clears the whole map.
+   - **Set** — one or more flags from the table: validate each and merge it into `defaults`.
+
+   `--unset` and setting flags may be combined; apply unsets first.
+3. `--issues` / `--no-issues` were removed with PLAN.md mode; abort with `/do:config --issues/--no-issues was removed: PLAN.md mode no longer exists, issues are always used. Run /do:config --unset issues to clean up a saved value.`
+4. Any other flag → `Unknown /do:config option: {flag}. Supported: {every flag in the table}, --unset <key>, --reset, --show, --project.`
 
 ## Apply (read → modify → write)
 
-Do this with your file tools (do not assume `jq` is installed):
+Use file tools; do not assume `jq` is installed.
 
-1. **Read** `TARGET_FILE` if it exists and parse it as JSON into `CONFIG` (on a missing file use `{}`; on a parse error, abort with `{TARGET_FILE} is not valid JSON — fix or remove it before saving defaults.` rather than overwriting a corrupt-but-meaningful file). Ensure `CONFIG.defaults` is an object (create `{}` if absent).
-2. **Apply** the action to `CONFIG.defaults`: delete unset keys, set/overwrite the validated keys, or (for `--reset`) replace `CONFIG.defaults` with `{}`. Leave all other top-level keys (e.g. `autoUpdate`) untouched.
-3. **Write** `CONFIG` back to `TARGET_FILE` as pretty JSON (2-space indent) with a trailing newline. Create the parent directory if needed (only relevant for the project file at a fresh repo root). If, after the change, `CONFIG` holds nothing but an empty `defaults` and the file is the per-project one, you may still write it (an explicit empty `.slashdo.json` is harmless), or remove it on `--reset`.
+1. **Read** `TARGET_FILE` and parse it as JSON into `CONFIG`. A missing file is `{}`. On a parse error abort with `{TARGET_FILE} is not valid JSON — fix or remove it before saving defaults.` instead of overwriting a file that may still hold something meaningful. Create `CONFIG.defaults` as `{}` if absent.
+2. **Apply** the action to `CONFIG.defaults` and leave every other top-level key untouched.
+3. **Write** `CONFIG` back as JSON with 2-space indentation and a trailing newline, creating the parent directory if needed.
 
 ## Show effective config
 
-Print three things so the user understands what will actually apply:
+Print three blocks, each listing every key in table order. For `review-models` print `agent=model` pairs; for `depfree-allow` print the JSON array.
 
 ```
 ## slashdo defaults
 
 Global (~/.claude/.slashdo-config.json):
   review-with        = {value or "(unset)"}
-  review-models      = {agent=model pairs joined by ", ", or "(unset)"}
-  review-iterations  = {value or "(unset)"}
-  review-mode        = {value or "(unset)"}
-  reviewer-applies   = {value or "(unset)"}
-  review-stop-mode   = {value or "(unset)"}
-  issues-label       = {value or "(unset)"}
-  depfree-allow      = {JSON array or "(unset)"}
-  self               = {value or "(unset)"}
-  collaborators      = {value or "(unset)"}
-  trusted-authors    = {value or "(unset)"}
-  approve            = {value or "(unset)"}
-  merge              = {value or "(unset)"}
-  merge-method       = {value or "(unset)"}
-  code-host          = {value or "(unset)"}
-  tracker            = {value or "(unset)"}
-  jira-project       = {value or "(unset)"}
+  ... one line per key ...
 
 Project ({repo-root}/.slashdo.json):
   {same keys, or "(no .slashdo.json in this repo)"}
 
 Effective (project overrides global; depfree-allow is unioned):
-  depfree-allow      = {global/project union as JSON array, or []}
-  review-with        = {merged value or "(none — no external reviewer)"}
-  review-models      = {per-agent merged pairs (project overrides global per agent), or "(none — each reviewer's built-in default)"}
-  review-iterations  = {merged value or "1 (built-in default)"}
-  review-mode        = {merged value or "series (built-in default)"}
-  reviewer-applies   = {merged value or "false (built-in default)"}
-  review-stop-mode   = {merged value or "all (built-in default)"}
-  issues-label       = {merged value or "plan (built-in default)"}
-  self               = {merged value or "false (built-in default — any author)"}
-  collaborators      = {merged value or "false (built-in default — any author)"}
-  trusted-authors    = {merged value or "(none — no extra authors)"}
-  approve            = {merged value or "true (built-in default, /do:review PR/MR mode only)"}
-  merge              = {merged value or "false for /do:pr, true for /do:next (built-in defaults differ — see Purpose)"}
-  merge-method       = {merged value or "(repo default)"}
-  code-host          = {merged value or "(detected from the origin remote)"}
-  tracker            = {merged value or "(same as the code host)"}
-  jira-project       = {merged value or "(unset — required when tracker = jira)"}
+  review-with        = {merged value, or "(none — no external reviewer)"}
+  review-iterations  = {merged value, or "1 (built-in default)"}
+  ... one line per key ...
 ```
 
-After a Set/Unset/Reset action, re-print this block so the result is visible, prefixed with a one-line confirmation, e.g. `Saved global default: review-with = claude,codex,ollama[qwen2.5-coder:32b]`.
+In the Effective block, a key set in neither scope shows its built-in default from the table, marked as such. `review-models` merges per agent, and `depfree-allow` shows the union of both scopes.
 
-## Notes
-
-- This command only ever writes to the config of the **CLI you run it in** (host-CLI only). It does not mirror defaults into other installed slashdo environments.
-- The review commands consume these defaults via the shared procedure in `lib/review-config-defaults.md`; the precedence and the `--review-with none` per-run escape hatch are defined there. The `issues-label`/`self`/`collaborators`/`trusted-authors`/`merge`/`merge-method` keys are documented in `lib/config-defaults-issues-merge.md`, included only by the commands that accept those flags. `code-host`/`tracker` are read by `lib/vcs-host.md` itself, so every command that selects a host honors them; `jira-project` is read by the Jira backend's pre-flight (`lib/tracker-jira.md`). Dependency policy is read and unioned separately by `/do:depfree` through `lib/depfree-policy.md`.
+After a Set, Unset or Reset, print a one-line confirmation (e.g. `Saved global default: review-with = claude,codex`) followed by this output.
