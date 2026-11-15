@@ -109,9 +109,8 @@ and wait in step 3, and its Verify and restore in step 4. Read it now:
 !read lib/local-cli-runner.md
 
 Shell state may not survive between tool calls, so each pass's launch is one
-command, per the runner: the timeout wrapper, the draft-loading and
-`ENHANCE_PROMPT` blocks above, the per-entry model flags below, then the launch
-block.
+command, per the runner: the draft-loading and `ENHANCE_PROMPT` blocks above,
+the per-entry model flags below, then the runner's launch line.
 
 ### Per-entry model flags (recompute for EVERY agent)
 
@@ -201,7 +200,7 @@ one's output):
    `AGY_ENH_MODEL` from THIS entry's `{ENH_MODEL}`** (see "Per-entry model flags"
    above — a prior entry's bracket must not leak into this agent's invocation).
    Then take the runner's **Snapshot**, the baseline for step 4's contract check,
-   and keep its printed `RUN_STATE_DIR` and `RUN_STATE_SUM`. Take a fresh one on
+   and keep its printed `RUN_STATE_DIR`, `RUN_STATE_SUM` and `RUNNER_SUM`. Take a fresh one on
    every pass.
 
 3. **Invoke** per the table above.
@@ -214,12 +213,12 @@ one's output):
      pass's parse in step 4. Skip the runner launch; it is only for subprocess CLIs.
 <!-- /if:teams -->
    - **`codex` / `agy` / `grok` / `pi` / `cursor`<!-- if:teams --><!-- else --> / `claude`<!-- /if:teams -->:**
-     launch with the runner's **Launch and wait**, with `RUN_TAG="enhance-${AGENT}"`
-     and `PROMPT_ON_STDIN=""`, since every row takes the prompt as a positional
+     launch with the runner's **Launch** (its plain form, no stdin pipe), with
+     `RUN_TAG="enhance-${AGENT}"`, since every row takes the prompt as a positional
      argument. Keeping stderr out of the log matters doubly here: step 4 parses the
      body as everything after `<<<ENHANCED_BODY>>>` to end-of-output, so trailing
-     stderr would be pasted into the filed issue. Once `$DONE_FILE` exists, read
-     `EXIT_CODE=$(cat "$DONE_FILE")` and `OUTPUT=$(cat "$LOG_FILE")`. A timed-out
+     stderr would be pasted into the filed issue. Once the runner's `wait` prints the exit
+     code, take it as `EXIT_CODE` and read `OUTPUT=$(cat "$LOG_FILE")`. A timed-out
      pass is a `no-op`.
 
 4. **Verify the read-only contract, then parse the output.** Run the runner's

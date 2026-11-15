@@ -449,6 +449,22 @@ describe('uninstall', () => {
     assert.ok(!fs.existsSync(settingsHooksCache), 'cached settings module should be removed');
     cleanup(tmpDir);
   });
+
+  it('a full uninstall removes the manifest copy the curl installer left, a filtered one keeps it', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    const cache = path.join(path.dirname(env.commandsDir), '.slashdo-install-manifest.txt');
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      fs.writeFileSync(cache, '# slashdo install manifest v1\n');
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['help'], uninstall: true, dryRun: false });
+      assert.ok(fs.existsSync(cache), 'a filtered uninstall leaves the rest of the install, and its manifest');
+      const dry = install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: true });
+      assert.ok(dry.actions.some((a) => a.name === '.slashdo-install-manifest.txt' && a.status === 'would remove'));
+      assert.ok(fs.existsSync(cache));
+      install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false });
+      assert.ok(!fs.existsSync(cache), 'full uninstall removes the cached manifest');
+    } finally { cleanup(tmpDir); }
+  });
 });
 
 // ── registerHooksInSettings (via install) ───────────────────────────
@@ -1245,4 +1261,75 @@ describe('list flags a wrapper command as unhealthy when its dependency is missi
       assert.ok(prd.missingDependencies.includes('goals'));
     } finally { cleanup(tmpDir); }
   });
+});
+
+// ── local CLI runner script (#532) ──────────────────────────────────
+
+describe('local CLI runner script in every environment', () => {
+  const { ENVIRONMENTS } = require('../src/environments');
+  const RUNNER_SOURCE = fs.readFileSync(path.join(PACKAGE_DIR, 'lib', 'local-cli-runner.sh'), 'utf8');
+
+  // A real environment definition with every on-disk location moved into a temp
+  // dir. Runtime prefixes (~/.codex/skills/, ~/.config/opencode/lib/, ...) stay as
+  // the prompts will see them, and `onDisk` maps such a path back to the temp dir.
+  function relocated(name) {
+    const real = ENVIRONMENTS[name];
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `slashdo-runner-${name}-`));
+    tempDirs.add(tmpDir);
+    const env = {
+      ...real,
+      commandsDir: path.join(tmpDir, 'commands'),
+      libDir: real.libDir ? path.join(tmpDir, 'lib') : null,
+      hooksDir: real.hooksDir ? path.join(tmpDir, 'hooks') : null,
+      settingsFile: path.join(tmpDir, 'settings.json'),
+      versionFile: path.join(tmpDir, '.slashdo-version'),
+      configFile: path.join(tmpDir, '.slashdo-config.json'),
+      // Default layout only; a relocated CLAUDE_CONFIG_DIR is covered by the transformer tests.
+      claudeRootPath: null,
+      claudeRootPathPrefix: null,
+      libPathPrefix: name === 'claude' ? '~/.claude/lib/' : real.libPathPrefix,
+    };
+    const prefixes = [
+      [env.libPathPrefix, env.libDir],
+      [env.commandsPathPrefix, env.commandsDir],
+    ].filter(([prefix, dir]) => prefix && dir);
+    const onDisk = (runtimePath) => {
+      const hit = prefixes.find(([prefix]) => runtimePath.startsWith(prefix));
+      return hit ? path.join(hit[1], runtimePath.slice(hit[0].length)) : null;
+    };
+    return { tmpDir, env, onDisk };
+  }
+
+  function installedMarkdown(dir) {
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir, { recursive: true })
+      .map((rel) => path.join(dir, rel))
+      .filter((file) => file.endsWith('.md') && fs.statSync(file).isFile());
+  }
+
+  for (const name of Object.keys(ENVIRONMENTS)) {
+    it(`${name}: every invocation of the runner names the installed copy, and uninstall removes it`, () => {
+      const { tmpDir, env, onDisk } = relocated(name);
+      try {
+        install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+        const docs = [...installedMarkdown(env.commandsDir), ...(env.libDir ? installedMarkdown(env.libDir) : [])];
+        const invoked = new Set();
+        for (const doc of docs) {
+          for (const [, ref] of fs.readFileSync(doc, 'utf8').matchAll(/(?:bash |^R=)(\S*local-cli-runner\.sh)\b/gm)) invoked.add(ref);
+        }
+        assert.ok(invoked.size > 0, `${name}: some installed prompt invokes the runner`);
+        const scripts = new Set();
+        for (const ref of invoked) {
+          const file = onDisk(ref);
+          assert.ok(file, `${name}: ${ref} is not under an installed root`);
+          assert.ok(fs.existsSync(file), `${name}: ${ref} was not installed`);
+          assert.equal(fs.readFileSync(file, 'utf8'), RUNNER_SOURCE, `${name}: ${ref} is the runner, verbatim`);
+          scripts.add(file);
+        }
+
+        install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false });
+        for (const file of scripts) assert.ok(!fs.existsSync(file), `${name}: uninstall removes ${file}`);
+      } finally { cleanup(tmpDir); }
+    });
+  }
 });

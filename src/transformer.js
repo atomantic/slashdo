@@ -97,6 +97,9 @@ const LIB_MD_LINK_RE = /\[[^\]]*\]\((?:\.\.\/)+lib\/([A-Za-z0-9._-]+\.md)\)/g;
 // when a matching library exists; command/lib basename disjointness is tested.
 const LIB_SIBLING_LINK_RE = /\[[^\]]*\]\(\.\/([A-Za-z0-9._-]+\.md)\)/g;
 const LIB_BACKTICK_RE = /`lib\/([A-Za-z0-9._-]+\.md)`/g;
+// Executable lib assets (shell scripts) are cited only by their installed path and
+// are never inlined: a bundle always ships them as files, verbatim.
+const LIB_ASSET_RE = /~\/\.claude\/lib\/([A-Za-z0-9._-]+\.sh)(?![A-Za-z0-9._-])/g;
 
 // Libs that sit on a CONDITIONAL path — content a given run needs only when it
 // takes a particular branch. Inlining them puts every branch in every SKILL.md at
@@ -180,6 +183,12 @@ function assertLibraryFilename(filename) {
   }
 }
 
+function assertAssetFilename(filename) {
+  if (!/^[A-Za-z0-9._-]+\.sh$/.test(filename)) {
+    throw new Error(`Invalid slashdo library asset filename: ${filename}`);
+  }
+}
+
 function requiredReadDirective(ref) {
   return `Read \`${ref}\` before performing this step; required when this step applies.`;
 }
@@ -194,9 +203,12 @@ function deferredLibDirective(ref, filename) {
 // directives become files in deferred mode. Eager mode includes each dependency
 // once. Resolve conditions before discovering edges, so inactive references do
 // not load content or fail on a file that that environment never needs.
-function createPromptRenderer(libDir, { skipIncludes = [], teams = false, defer = true, followReferences = true } = {}) {
-  const skipped = new Set(skipIncludes.map(name => name.endsWith('.md') ? name : `${name}.md`));
+function createPromptRenderer(libDir, {
+  skipIncludes = [], teams = false, defer = true, followReferences = true, assetPathPrefix = `${BUNDLED_LIB_DIR}/`,
+} = {}) {
+  const skipped = new Set(skipIncludes.map(name => /\.(md|sh)$/.test(name) ? name : `${name}.md`));
   const bundled = new Set();
+  const assets = new Set();
   const cache = new Map();
   const bareName = filename => filename.replace(/\.md$/, '');
   const prepare = text => applyConditionalBlocks(text, { supportsTeams: teams });
@@ -210,6 +222,13 @@ function createPromptRenderer(libDir, { skipIncludes = [], teams = false, defer 
     const content = cache.get(filename);
     if (content === null && required) throw new Error(`Missing required slashdo library: ${filename}`);
     return content;
+  }
+
+  function readAsset(filename) {
+    assertAssetFilename(filename);
+    const file = path.join(libDir, filename);
+    if (!fs.existsSync(file)) throw new Error(`Missing required slashdo library: ${filename}`);
+    return fs.readFileSync(file, 'utf8');
   }
 
   function renderDocument(content, { fromLibDir = false, present = new Set() } = {}) {
@@ -256,7 +275,14 @@ function createPromptRenderer(libDir, { skipIncludes = [], teams = false, defer 
         // following them in eager mode inflated tiny recipes by entire workflows.
         return `\`${defer ? queueAndName(filename) : bareName(filename)}\``;
       })
-      .replace(LIB_PROSE_RE, (match, filename) => queueAndName(filename));
+      .replace(LIB_PROSE_RE, (match, filename) => queueAndName(filename))
+      .replace(LIB_ASSET_RE, (match, filename) => {
+        if (!skipped.has(filename)) {
+          readAsset(filename);
+          assets.add(filename);
+        }
+        return `${assetPathPrefix}${filename}`;
+      });
 
     const body = resolveRefs(inlineDirectives(content));
     const sections = [];
@@ -271,7 +297,7 @@ function createPromptRenderer(libDir, { skipIncludes = [], teams = false, defer 
     };
   }
 
-  return { renderDocument, bundled, readLib };
+  return { renderDocument, bundled, assets, readLib, readAsset };
 }
 
 function buildPromptBundle(content, libDir, options = {}) {
@@ -285,6 +311,8 @@ function buildPromptBundle(content, libDir, options = {}) {
       present: new Set([...root.present, filename]),
     }).body;
   }
+  // Assets cannot be inlined, so they are files in eager mode too.
+  for (const filename of renderer.assets) files[filename] = renderer.readAsset(filename);
   return { body: root.body, files };
 }
 
@@ -454,6 +482,13 @@ function rewriteCommandReferences(body, env, relPath, knownNames, dependenciesOu
   return result;
 }
 
+// The installed lib directory of a directory-namespaced skill, as a runtime path
+// (`~/.codex/skills/do-review/lib/`). Undefined when the env has no such layout.
+function skillLibPathPrefix(env, relPath) {
+  if (env.namespacing !== 'directory' || !env.commandsPathPrefix || !relPath) return undefined;
+  return `${env.commandsPathPrefix}${getSkillName(relPath)}/${BUNDLED_LIB_DIR}/`;
+}
+
 function transformCommand(content, env, sourceLibDir, relPath, opts = {}) {
   const { frontmatter, body } = parseFrontmatter(content);
 
@@ -477,11 +512,14 @@ function transformCommand(content, env, sourceLibDir, relPath, opts = {}) {
     const bundle = buildPromptBundle(transformedBody, sourceLibDir, {
       teams: env.supportsTeams === true,
       defer: env.bundlesLibs === true,
+      // A shell asset is run from the repository, not read beside SKILL.md, so it
+      // is cited by the absolute path of the skill's installed lib directory.
+      assetPathPrefix: skillLibPathPrefix(env, relPath),
     });
     transformedBody = bundle.body;
     if (opts.files) {
       for (const [filename, text] of Object.entries(bundle.files)) {
-        opts.files[filename] = rewriteVersionPath(rewriteConfigPath(text, env), env);
+        opts.files[filename] = filename.endsWith('.md') ? rewriteVersionPath(rewriteConfigPath(text, env), env) : text;
       }
     }
     for (const filename of Object.keys(bundle.files)) opts.bundled?.add(filename);

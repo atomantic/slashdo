@@ -11,6 +11,7 @@ Thanks for considering a contribution. slashdo is a small, actively-maintained p
 
 - `commands/do/*.md` — the source of truth for every `/do:*` command, written in Claude Code's native format
 - `lib/*.md` — shared partials referenced from multiple commands
+  - **A program goes in a `lib/*.sh` script, not in a partial's bash block.** `lib/local-cli-runner.sh` is the example: its partial holds only the contract. Cite a script only as `bash ~/.claude/lib/<name>.sh <args>` (always through `bash`, so the executable bit never matters). Every environment installs it verbatim and rewrites that path to the installed copy: the lib directory for Claude Code and OpenCode, and each skill's own `lib/` for the Agent Skills environments. Keep the script free of `~/.claude` paths.
   - **Include a partial with `` !`cat ~/.claude/lib/<name>.md` `` only when every run needs it on the default path.** Put `!read lib/<name>.md` on its own line at the step that needs it when the content is branch-only (flag-gated, issues-mode-only, one of several mutually exclusive backends or lenses). A deferred read is not free — when the step runs, the agent pays for the file plus a tool call and line-number overhead (~7%) — so it only saves context when the step is usually skipped. Say in the sentence before the directive exactly when it applies.
 - **Any command with a genuine runtime dependency on another command must cite it, not just mention it in prose.** Cite the required command with `` ~/.claude/commands/do/<name>.md `` for an execution instruction (e.g. "Run the workflow defined in `~/.claude/commands/do/goals.md`"), or `[label](<name>.md#anchor)` for a link to one of its sections — never hand-roll a host-specific path, and never rely on a bare `` `/do:<name>` `` mention or verb phrase like "delegate to"/"invoke" without one of these two forms nearby. The transformer resolves both forms per environment (`src/transformer.js`'s `resolveCommandExecRef`/`resolveCommandSiblingRef`) and uses the same two forms (`extractCommandDependencies`) to auto-install the dependency on a filtered install and to refuse an uninstall that would strand it. This applies whether the dependency is a **wrapper command** that delegates its entire workflow (`do:prd`, `do:simplify`, `do:pr-better`) or a command that merely invokes another as one step of a larger, otherwise-independent procedure (e.g. `do:next` citing `do:pr` for its ship phase) — the citation form is what makes the dependency machine-checkable either way. A command that only *mentions* another (e.g. contrasting itself with it, or referencing a flag the other command also accepts) does not need a citation — only a command whose own run cannot complete without the other installed does.
 - `src/*.js` — the installer/transformer that converts `commands/do/` and `lib/` into each target environment's native format (Claude Code, OpenCode, Antigravity CLI, Codex, Grok Build)
@@ -79,7 +80,12 @@ Write `bundle.body` beside a `lib/` directory containing `bundle.files` (an obje
 keyed by bare library filenames). References in the body use `lib/name.md`;
 references between supporting files use `./name.md`. Give the agent access to
 that directory. Use `defer: false` when file tools are unavailable: the returned
-body includes dependencies once and `files` is empty. Conditions are resolved
+body includes dependencies once and `files` holds only shell assets. A cited
+`~/.claude/lib/name.sh` script is never inlined: it is always in `files`,
+verbatim, and the reference becomes `<assetPathPrefix>name.sh`. Pass
+`assetPathPrefix` as the absolute directory you write `files` to (default
+`lib/`), because the agent runs that script from the user's repository, not from
+beside the body. Conditions are resolved
 before dependencies; missing required files fail with a named error. For legacy
 recipe consumers that intentionally include only explicit `!cat`/`!read` content,
 set `followReferences: false` to avoid traversing see-also citations. Eager mode

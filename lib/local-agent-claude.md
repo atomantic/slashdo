@@ -54,9 +54,9 @@ if [ "$REVIEW_AGENT" = claude ] && ! prepare_claude_review_input; then
 fi
 ```
 
-`mktemp` creates the input with owner-only permissions. Keep the file until the reviewer exits, including in the background, and print its path if a later call has to run the cleanup below. Do not read the payload back into an argv string or `eval` it. The invocation redirects the file itself, so it uses Step 2's ordinary (non-`cmd`) timed branch.
+`mktemp` creates the input with owner-only permissions. Keep the file until the reviewer exits, including in the background, and print its path if a later call has to run the cleanup below. Do not read the payload back into an argv string or `eval` it. The invocation redirects the file itself, so it uses the runner's plain launch form (no stdin pipe); the redirect applies to the runner script, which hands that stdin to the CLI.
 
-**Claude input cleanup** — after Step 2's foreground exit-code capture or background done-marker read, before handling any success, timeout, CLI-error, or verdict-parser result, run:
+**Claude input cleanup** — after Step 2 has its exit code (a foreground launch's exit, or the runner's `wait`), before handling any success, timeout, CLI-error, or verdict-parser result, run:
 
 ```bash
 if [ "$REVIEW_AGENT" = claude ] && [ -n "${CLAUDE_REVIEW_INPUT:-}" ]; then

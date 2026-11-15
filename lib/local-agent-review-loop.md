@@ -70,10 +70,10 @@ A prompt-driven reviewer gets `$LOCAL_PROMPT`, never slashdo's `/do:review` skil
 
 The invocations run **non-interactively** through each CLI's documented unattended profile. The flags select the narrowest supported permissions and never grant blanket approval, write access, or bypass controls; where a CLI requires a non-interactive approval setting, combine it with the enforced restrictions below.
 
-The shared local-CLI runner owns the timeout wrapper, the Step 1 snapshot, the Step 2 launch and wait, the Step 3 verify-and-restore, and the rule for what survives between tool calls. Read it now:
+The shared local-CLI runner (an installed script plus its contract) owns the timeout, the Step 1 snapshot, the Step 2 launch and wait, the Step 3 verify-and-restore, and the rule for what survives between tool calls. Read it now:
 !read lib/local-cli-runner.md
 
-The block below computes the shared inputs. It is part of every launch command (the runner's "one command per launch"), after the timeout wrapper. Assign `REVIEW_AGENT`, `BASE_BRANCH`, `BRANCH_NAME`, `REVIEW_MODEL`, `REVIEW_EFFORT` and `REVIEWER_APPLIES` from pre-flight at its top, then use it verbatim:
+The block below computes the shared inputs. It is part of every launch command (the runner's "one command" rule), before the launch line. Assign `REVIEW_AGENT`, `BASE_BRANCH`, `BRANCH_NAME`, `REVIEW_MODEL`, `REVIEW_EFFORT` and `REVIEWER_APPLIES` from pre-flight at its top, then use it verbatim:
 
 ```bash
 REVIEW_TITLE=$(git log -1 --format=%s HEAD)
@@ -211,11 +211,11 @@ Every pass ends in the shared fix tail, which holds the apply rules and steps 4â
 
 1. **Capture baseline**: record `git rev-parse HEAD` as `LOOP_START_SHA`.
 
-   When `REVIEWER_APPLIES=false`, also take the runner's Snapshot and keep the `RUN_STATE_DIR` and `RUN_STATE_SUM` it prints. This is defense in depth on top of enforced isolation, never a replacement for it. Skip it when `REVIEWER_APPLIES=true`, where writes are the expected outcome.
+   When `REVIEWER_APPLIES=false`, also take the runner's Snapshot and keep the `RUN_STATE_DIR`, `RUN_STATE_SUM` and `RUNNER_SUM` it prints. This is defense in depth on top of enforced isolation, never a replacement for it. Skip it when `REVIEWER_APPLIES=true`, where writes are the expected outcome.
 
 2. **Invoke the chosen reviewer**, capturing its output to a log so context stays clean. If the recipe replaces this Bash launch (claude under Claude Code), follow the recipe and go to Step 3. Run any recipe pre-launch step first (claude: stdin preparation; grok: its prompt file), and stop this pass if it set `STATUS=no-verdict`.
 
-   Launch with the runner's **Launch and wait**, with `RUN_TAG="local-review-${REVIEW_AGENT}"`. Set `PROMPT_ON_STDIN="$LOCAL_PROMPT"` for `cmd` (its recipe), and `PROMPT_ON_STDIN=""` for every other reviewer.
+   Launch with the runner's **Launch**, then its `wait` after a background launch, with `RUN_TAG="local-review-${REVIEW_AGENT}"`. Set `PROMPT_ON_STDIN="$LOCAL_PROMPT"` for `cmd` (its recipe), and `PROMPT_ON_STDIN=""` for every other reviewer.
 
    - After capturing `EXIT_CODE`, run any recipe post-launch cleanup (claude: its stdin file; grok: its prompt file and verdict extraction). Then run any recipe exit classifier (opencode: provider admission; cursor: workspace trust) **before** the generic branch below.
    - If `EXIT_CODE != 0`, no recipe classifier claimed it, and the CLI produced no commits, set `STATUS=cli-error`. Print the last 80 lines of **`$ERR_FILE`** (fall back to `$LOG_FILE` if it is empty), surface both paths, and exit the loop. A timed-out run (the runner's `124` or gave-up case) is `cli-error` with the log paths, never `clean`.
