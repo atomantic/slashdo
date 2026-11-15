@@ -268,12 +268,7 @@ Carry `{PREPARED_RELEASE_SHA}`, `{PR_NUMBER}`, `{PR_URL}` and `{PR_STATE}` into 
 
 Otherwise, hand off to the **multi-reviewer loop** with the inputs resolved in "Parse Arguments" (`{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`, `{REVIEW_MODELS}`) plus `{GH_HOST}` from "Detect Release Workflow" and the per-entry `{WAIT_SCHEDULE}` selected below. On GitHub, the host-side loops use `{GH_HOST}` on every `gh api` call, and the wrapper dispatches each entry to the single-reviewer loop read below.
 
-For each host-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
-
-- `copilot` — use the previous Copilot review duration on this PR (default 60 seconds if none); max wait 3x that duration, minimum 90 seconds, maximum 5 minutes; poll every 5s, 5s, 10s, 10s, then 15s.
-- `@<login>` — a login ending in `[bot]` is an automated reviewer: expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s. Any other login is presumed human: max wait 4 hours; poll every 30s for the first 5 minutes, then every 60s.
-
-Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass both schedules.
+Each host-side entry takes `{WAIT_SCHEDULE}` from the wrapper's "Wait schedules" section; this command states no difference.
 
 **Gated source.** When `SOURCE_GATED=true`, the loops' fix pushes must not land on `{source}` directly: follow "Review fixes under a gated source" in the gate procedure loaded by **Resolve Source Branch Admission**, so every fix reaches `{source}` through a gated PR and the merge gate below runs on the release PR's updated head.
 
