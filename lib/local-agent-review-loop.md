@@ -211,7 +211,7 @@ Every pass ends in the shared fix tail, which holds the apply rules and steps 4â
 
 1. **Capture baseline**: record `git rev-parse HEAD` as `LOOP_START_SHA`.
 
-   When `REVIEWER_APPLIES=false`, also take the runner's Snapshot and keep the `RUN_STATE_DIR` and `RUN_STATE_SUM` it prints. This is defense in depth on top of enforced isolation, never a replacement for it. Skip it when `REVIEWER_APPLIES=true`, where writes are the expected outcome.
+   When `REVIEWER_APPLIES=false`, also take the runner's Snapshot and keep the `RUN_STATE_DIR`, `RUN_STATE_SUM` and `RUNNER_SUM` it prints. This is defense in depth on top of enforced isolation, never a replacement for it. Skip it when `REVIEWER_APPLIES=true`, where writes are the expected outcome.
 
 2. **Invoke the chosen reviewer**, capturing its output to a log so context stays clean. If the recipe replaces this Bash launch (claude under Claude Code), follow the recipe and go to Step 3. Run any recipe pre-launch step first (claude: stdin preparation; grok: its prompt file), and stop this pass if it set `STATUS=no-verdict`.
 

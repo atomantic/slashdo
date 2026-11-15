@@ -34,7 +34,7 @@ function sandbox(t) {
 
 const snapshotThenVerify = [
   'out=$(bash "$RUNNER" snapshot) || exit 1',
-  'RUN_STATE_DIR=${out#RUN_STATE_DIR=}; RUN_STATE_DIR=${RUN_STATE_DIR%% RUN_STATE_SUM=*}; RUN_STATE_SUM=${out##*RUN_STATE_SUM=}',
+  'eval "$out"',   // test paths hold no spaces
 ];
 
 async function run(t, mutate, setup = '', after = '') {
@@ -165,7 +165,7 @@ describe('local-cli-runner snapshot state survives a fresh shell', { concurrency
     // Snapshot from a subdirectory: the artifacts must still cover the whole repository.
     const snap = await sh(`bash ${q(RUNNER)} snapshot`, path.join(repo, 'sub'));
     assert.equal(snap.status, 0, snap.stderr);
-    const [, stateDir, sum] = snap.stdout.match(/^RUN_STATE_DIR=(\S+) RUN_STATE_SUM=([0-9a-f]{64})\n$/);
+    const [, stateDir, sum] = snap.stdout.match(/^RUN_STATE_DIR=(\S+) RUN_STATE_SUM=([0-9a-f]{64}) RUNNER_SUM=[0-9a-f]{40,64}\n$/);
     const verify = (overrides = {}) => sh(
       `bash ${q(RUNNER)} verify --state-dir ${q(overrides.stateDir ?? stateDir)} --sum ${q(overrides.sum ?? sum)} && echo VERIFY_DONE`,
       repo,
@@ -258,7 +258,7 @@ describe('local-cli-runner snapshot state survives a fresh shell', { concurrency
     fs.writeFileSync(path.join(bin, 'git'),
       `#!/bin/sh\nfor a in "$@"; do [ "$a" = read-tree ] && exit 0; done\nexec ${q(realGit)} "$@"\n`, { mode: 0o755 });
     const snap = await sh(`bash ${q(RUNNER)} snapshot`);
-    const [, stateDir, sum] = snap.stdout.match(/RUN_STATE_DIR=(\S+) RUN_STATE_SUM=(\S+)/);
+    const [, stateDir, sum] = snap.stdout.match(/RUN_STATE_DIR=(\S+) RUN_STATE_SUM=(\S+) /);
     assert.equal((await sh('git rm -q --cached staged.txt')).status, 0);
     const r = await sh(`bash ${q(RUNNER)} verify --state-dir ${q(stateDir)} --sum ${q(sum)}`, { PATH: `${bin}:${process.env.PATH}` });
     assert.equal(r.status, 1, r.stderr);
@@ -295,6 +295,67 @@ describe('local-cli-runner refuses to protect a tree it lives in', { concurrency
     const r = await sh(`bash ${q(RUNNER)} snapshot`, dir, { GIT_CEILING_DIRECTORIES: dir });
     assert.equal(r.status, 1);
     assert.match(r.stderr, /^cannot snapshot/);
+  });
+});
+
+// The contract's Verify block, as the installer renders it for an installed copy:
+// its hash check is prompt-level code that must refuse a rewritten script before
+// running any of it (a CLI that can write outside the repo can reach the install).
+describe('local-cli-runner contract refuses a runner rewritten during the pass', { concurrency: true }, () => {
+  const contract = fs.readFileSync(path.join(__dirname, '..', 'lib', 'local-cli-runner.md'), 'utf8');
+  const afterVerify = contract.slice(contract.indexOf('**Verify and restore**'));
+  const verifyBlock = afterVerify.slice(afterVerify.indexOf('```bash\n') + 8, afterVerify.indexOf('\n```', afterVerify.indexOf('```bash\n')));
+
+  async function installed(t) {
+    const { dir, sh } = sandbox(t);
+    assert.equal((await sh('git init -q r && cd r && git -c user.email=a@b -c user.name=n commit -q --allow-empty -m i')).status, 0);
+    const root = path.join(dir, 'r');
+    const copy = path.join(dir, 'installed', 'local-cli-runner.sh');   // outside the repo, like every install
+    fs.mkdirSync(path.dirname(copy));
+    fs.copyFileSync(RUNNER, copy);
+    const snap = await sh(`bash ${q(copy)} snapshot`, root);
+    assert.equal(snap.status, 0, snap.stderr);
+    const values = Object.fromEntries(snap.stdout.trim().split(' ').map((pair) => pair.split('=')));
+    const block = verifyBlock.split('~/.claude/lib/local-cli-runner.sh').join(q(copy));
+    assert.notEqual(block, verifyBlock, 'the block names the installed runner');
+    const verify = () => sh(block, root, values);
+    return { dir, root, copy, values, verify, sh };
+  }
+
+  it('prints RUNNER_SUM, and runs verify when the script is unchanged', async (t) => {
+    const { copy, values, verify, sh } = await installed(t);
+    assert.equal(values.RUNNER_SUM, (await sh(`git hash-object --no-filters -- ${q(copy)}`)).stdout.trim());
+    const r = await verify();
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /TREE_STATE=clean/);
+  });
+
+  it('refuses to run a script modified after the snapshot', async (t) => {
+    const { dir, root, copy, verify } = await installed(t);
+    fs.writeFileSync(path.join(root, 'planted.txt'), 'x\n');
+    // A rewritten runner that would report a clean tree and run planted code.
+    fs.writeFileSync(copy, `touch ${q(path.join(dir, 'PWNED'))}\necho TREE_STATE=clean\n`);
+    const r = await verify();
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /runner script changed during the pass; do not trust this tree/);
+    assert.doesNotMatch(r.stdout, /TREE_STATE/);
+    assert.equal(fs.existsSync(path.join(dir, 'PWNED')), false, 'no code from the rewritten script ran');
+  });
+
+  it('refuses when RUNNER_SUM was not carried over', async (t) => {
+    const { values, root, sh } = await installed(t);
+    const r = await sh(verifyBlock.split('~/.claude/lib/local-cli-runner.sh').join(q(RUNNER)), root, { ...values, RUNNER_SUM: '' });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /runner script changed/);
+  });
+
+  it('runs no filter or hook the CLI planted in repo config while hashing', async (t) => {
+    const { dir, root, verify, sh } = await installed(t);
+    const marker = path.join(dir, 'FILTER_RAN');
+    assert.equal((await sh(`git config filter.evil.clean ${q(`touch ${marker}; cat`)} && echo '* filter=evil' > .gitattributes && git config core.fsmonitor ${q(`touch ${marker}`)}`, root)).status, 0);
+    const r = await verify();
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(fs.existsSync(marker), false, 'the hash check consulted planted config');
   });
 });
 

@@ -5,7 +5,7 @@
 # lib/local-cli-runner.md. Invoke it as `bash <path> <subcommand>`, never
 # through the executable bit.
 #
-#   snapshot                               print RUN_STATE_DIR=… RUN_STATE_SUM=…
+#   snapshot                               print RUN_STATE_DIR=… RUN_STATE_SUM=… RUNNER_SUM=…
 #   verify --state-dir DIR --sum SUM       print TREE_STATE=clean|restored|restore-failed
 #   launch --tag TAG -- COMMAND [ARG…]     print LOG_FILE=…, run COMMAND bounded at 30 min
 #   wait --log LOG_FILE [--seconds N]      print the exit code, or STILL_RUNNING
@@ -18,6 +18,9 @@
 # refuses to run when this file or its state directory is inside the working
 # tree, and verify refuses state whose checksum does not match the value
 # snapshot printed (the checksum covers every backup verify restores from).
+# This file itself lives outside the repository but a CLI that can write there
+# could still rewrite it, so snapshot also prints RUNNER_SUM, this file's own
+# hash, and the contract has the caller compare it before running anything here.
 #
 # Portable to macOS bash 3.2 with BSD userland and to GNU userland.
 
@@ -94,6 +97,14 @@ inside_repo() {
 
 SELF_DIR="$(physical_dir "$(dirname "${BASH_SOURCE[0]}")")" || SELF_DIR=""
 
+# The hash the contract compares before every later call. Must stay identical to
+# the contract's check: from /, with no system or global config, and
+# --no-filters, so no repository or planted config can run a filter or change
+# the result.
+runner_sum() {
+  (cd / && GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git hash-object --no-filters -- "$1")
+}
+
 cmd_snapshot() {
   local top
   top="$(git rev-parse --show-toplevel 2>/dev/null)" && REPO_ROOT="$(physical_dir "$top")" && [ -n "$REPO_ROOT" ] ||
@@ -143,7 +154,9 @@ cmd_snapshot() {
     UNTRACKED_TAR_SUM "$UNTRACKED_TAR_SUM" META_CONFIG_SUM "$META_CONFIG_SUM" HOOKS_TAR_SUM "$HOOKS_TAR_SUM" \
     > "$RUN_STATE_DIR/state.sh" || die "cannot write snapshot state"
   RUN_STATE_SUM="$(file_sha256 "$RUN_STATE_DIR/state.sh")" || die "cannot write snapshot state"
-  echo "RUN_STATE_DIR=$RUN_STATE_DIR RUN_STATE_SUM=$RUN_STATE_SUM"
+  RUNNER_SUM="$(runner_sum "$SELF_DIR/$(basename "${BASH_SOURCE[0]}")")" && [ -n "$RUNNER_SUM" ] ||
+    die "cannot fingerprint the runner script"
+  echo "RUN_STATE_DIR=$RUN_STATE_DIR RUN_STATE_SUM=$RUN_STATE_SUM RUNNER_SUM=$RUNNER_SUM"
 }
 
 # Restore ONLY the security-relevant keys, before any Git command can consult

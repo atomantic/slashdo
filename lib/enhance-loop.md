@@ -200,7 +200,7 @@ one's output):
    `AGY_ENH_MODEL` from THIS entry's `{ENH_MODEL}`** (see "Per-entry model flags"
    above — a prior entry's bracket must not leak into this agent's invocation).
    Then take the runner's **Snapshot**, the baseline for step 4's contract check,
-   and keep its printed `RUN_STATE_DIR` and `RUN_STATE_SUM`. Take a fresh one on
+   and keep its printed `RUN_STATE_DIR`, `RUN_STATE_SUM` and `RUNNER_SUM`. Take a fresh one on
    every pass.
 
 3. **Invoke** per the table above.

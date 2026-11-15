@@ -1315,7 +1315,7 @@ describe('local CLI runner script in every environment', () => {
         const docs = [...installedMarkdown(env.commandsDir), ...(env.libDir ? installedMarkdown(env.libDir) : [])];
         const invoked = new Set();
         for (const doc of docs) {
-          for (const [, ref] of fs.readFileSync(doc, 'utf8').matchAll(/bash (\S*local-cli-runner\.sh)\b/g)) invoked.add(ref);
+          for (const [, ref] of fs.readFileSync(doc, 'utf8').matchAll(/(?:bash |^R=)(\S*local-cli-runner\.sh)\b/gm)) invoked.add(ref);
         }
         assert.ok(invoked.size > 0, `${name}: some installed prompt invokes the runner`);
         const scripts = new Set();
