@@ -98,10 +98,10 @@ query($owner: String!, $name: String!, $number: Int!, $search: String!, $endCurs
           and (.pr.body | type == "string") and (.pr.commits | complete)
           and all(.pr.commits.nodes[]; .commit.message | type == "string")
         then . else bad end)
-    | (.[].pr.headRefName),
-      (if any(.[]; .linked or (.pr.title | refers) or (.pr.body | refers)
-          or any(.pr.commits.nodes[]; .commit.message | refers))
-        then "issue-" + $n else empty end)')" || exit 1
+    | [ (.[].pr.headRefName),
+        (if any(.[]; .linked or (.pr.title | refers) or (.pr.body | refers)
+            or any(.pr.commits.nodes[]; .commit.message | refers))
+          then "issue-" + $n else empty end) ] | unique[]')" || exit 1
   CLAIM_REPO="$(printf '%s' "$PAGES" | jq -r '.[0].data.repository.nameWithOwner')" || exit 1
   printf '%s\n' "$CLAIM_REPO" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || exit 1
   DEFAULT_BRANCH="$(printf '%s' "$PAGES" | jq -r '.[0].data.repository.defaultBranchRef.name')" || exit 1
