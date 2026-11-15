@@ -103,7 +103,7 @@ Aligned with [GOALS.md](./GOALS.md)'s Core Goals:
 | NFR-5 | Portability | `install.sh`/`uninstall.sh` MUST remain compatible with bash 3.2 (stock macOS) under `set -u`, using guarded array expansions. |
 | NFR-6 | Reliability | Long-running reviewer invocations MUST run in the background/poll rather than block the foreground past the host's execution cap (~10 minutes). |
 | NFR-7 | Compatibility | The CLI MUST run on Node.js >=18 and is verified in CI across Node 18/20/22. |
-| NFR-8 | Security / Supply chain | The curl-based install path (`install.sh`/`uninstall.sh`) MUST stay structurally in sync with the npm-distributed command/lib set — CI fails if the hard-coded `COMMANDS`/`LIBS` arrays drift from the actual `commands/do/*.md` / `lib/*.md` contents, so remote-install users never silently receive a broken or missing command. |
+| NFR-8 | Security / Supply chain | The curl-based install path (`install.sh`/`uninstall.sh`) MUST stay structurally in sync with the npm-distributed command/lib/hook set — both scripts read their file list from `install-manifest.txt`, generated from `commands/do/`, `lib/` and `hooks/` by `node scripts/build-install-manifest.js`, and CI fails when the committed manifest drifts from the tree, so remote-install users never silently receive a broken or missing command, lib file or hook. |
 
 ---
 
@@ -126,7 +126,7 @@ Aligned with [GOALS.md](./GOALS.md)'s Core Goals:
 
 - **CI/CD pipeline replacement** — commands complement GitHub Actions/GitLab CI by handling code-level workflows; infrastructure automation and deployment pipelines are out of scope.
 - **A GUI or dashboard** — everything runs in the CLI via AI coding assistants; no web interface or visual tooling is planned.
-- **Install integrity verification (checksums/signing)** — the curl-installer allowlist test (NFR-8) is a drift guard between the repo's source files and the hard-coded shell arrays, not a supply-chain signing or checksum system. This is an accepted risk for the standard curl-pipe-bash distribution pattern; the npm install path is the primary, recommended route and isn't subject to it.
+- **Install integrity verification (checksums/signing)** — the curl-installer allowlist test (NFR-8) is a drift guard between the repo's source files and the generated `install-manifest.txt` the shell scripts read, not a supply-chain signing or checksum system. This is an accepted risk for the standard curl-pipe-bash distribution pattern; the npm install path is the primary, recommended route and isn't subject to it.
 
 ---
 

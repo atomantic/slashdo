@@ -449,6 +449,22 @@ describe('uninstall', () => {
     assert.ok(!fs.existsSync(settingsHooksCache), 'cached settings module should be removed');
     cleanup(tmpDir);
   });
+
+  it('a full uninstall removes the manifest copy the curl installer left, a filtered one keeps it', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    const cache = path.join(path.dirname(env.commandsDir), '.slashdo-install-manifest.txt');
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      fs.writeFileSync(cache, '# slashdo install manifest v1\n');
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['help'], uninstall: true, dryRun: false });
+      assert.ok(fs.existsSync(cache), 'a filtered uninstall leaves the rest of the install, and its manifest');
+      const dry = install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: true });
+      assert.ok(dry.actions.some((a) => a.name === '.slashdo-install-manifest.txt' && a.status === 'would remove'));
+      assert.ok(fs.existsSync(cache));
+      install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false });
+      assert.ok(!fs.existsSync(cache), 'full uninstall removes the cached manifest');
+    } finally { cleanup(tmpDir); }
+  });
 });
 
 // ── registerHooksInSettings (via install) ───────────────────────────

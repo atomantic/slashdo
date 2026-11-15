@@ -18,6 +18,10 @@ const {
 
 const shellQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
 
+// The manifest copy install.sh leaves in each environment root it installs to
+// (MANIFEST_CACHE in install.sh/uninstall.sh). A full npm uninstall removes it too.
+const INSTALL_MANIFEST_CACHE = '.slashdo-install-manifest.txt';
+
 function collectCommands(commandsDir) {
   const commands = [];
   const doDir = path.join(commandsDir, 'do');
@@ -582,6 +586,15 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
       }
       results.removed++;
     }
+  }
+
+  if (!filterNames?.length) {
+    removeFile({
+      label: INSTALL_MANIFEST_CACHE,
+      targetPath: path.join(path.dirname(env.commandsDir), INSTALL_MANIFEST_CACHE),
+      dryRun,
+      results,
+    });
   }
 
   if (!dryRun && env.versionFile && fs.existsSync(env.versionFile)) {
