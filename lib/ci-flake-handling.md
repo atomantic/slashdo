@@ -19,8 +19,5 @@ A failure is a **flake only if the *same commit* both fails and passes.** Same S
 
 ## Boundaries
 
-- **Log before re-run.** Never re-run a failure whose log already shows a deterministic assertion; the re-run budget is for failures the log cannot explain. Reading the log is the discriminator, not a list of known messages.
-- **One re-run, ever, per gate invocation.** Re-running until green is how broken code merges. If the first re-run still fails, stop and surface it.
-- **Required checks only.** An optional/non-required job's failure never blocked the merge to begin with — don't re-run it.
-- **Same SHA only.** If anything pushed to the branch between the failure and the re-run, the comparison is void — treat the latest result as authoritative and do not claim "flake."
-- **No project-specific signature matching here.** This routine is deliberately mechanism-only (fails-then-passes-on-same-commit). A project that wants to *recognize* a known flake signature and react faster should encode that in its own `CLAUDE.md`/`AGENTS.md`, not in slashdo — keep this command project-agnostic.
+- **Required checks only.** An optional job's failure never blocked the merge, so do not re-run it.
+- **No project-specific signature matching.** This routine is mechanism-only (fails, then passes, on the same commit). A project that wants a known flake recognized faster should say so in its own `CLAUDE.md`/`AGENTS.md`.
