@@ -20,9 +20,9 @@ Only on a Jira tracker (`TRACKER=jira`), if not yet read (it replaces the tracke
 
 Two optional labels (`:` here means `LABEL_SEP`) recommending **how to run the work**:
 - **`model:light` / `model:medium` / `model:heavy`** — capability tier: `light` is mechanical; `heavy` is hard reasoning.
-- **`effort:low` / `medium` / `high` / `xhigh` / `max`** — reasoning budget per step: high when wide or subtle.
+- **`effort:low` / `medium` / `high` / `xhigh` / `max`** — thinking per step, not amount of work: `medium` normal, `low` mechanical, `high` when a step hinges on a hard argument, `xhigh`/`max` rarely. List wide call sites in the body instead.
 
-Axes are independent. Record **tier names only**, never slugs — resolve per [model-tiers.md](./model-tiers.md). Apply an axis only when justified; reflexive `medium`/`medium` is noise.
+Axes are independent. Record **tier names only**, never slugs — resolve per [model-tiers.md](./model-tiers.md). Apply an axis only when justified; reflexive `model:medium` is noise.
 
 ## Label colors
 
