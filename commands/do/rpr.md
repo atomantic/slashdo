@@ -108,7 +108,7 @@ Read only when `REVIEW_AGENTS` contains `ollama`:
 rpr requests and waits for host-side reviews through the same shared loop `/do:pr` uses; it has no request or polling code of its own. For each `copilot` or `@<login>` entry, pass `{CODE_HOST}`, `{CR_NOUN}`, `{PR_NUMBER}`, `{OWNER}`/`{REPO}`, `{GH_HOST}`, the head branch as `{BRANCH_NAME}`, the project `{BUILD_CMD}`, `{REVIEWER_LOGIN}`, and:
 
 - `{REVIEW_ITERATIONS}` — the entry's `~max=<n>`; without one, `0` (keep re-requesting until the reviewer is clean, bounded by the loop's convergence gate and 10-iteration guardrail).
-- `{WAIT_SCHEDULE}` — `copilot`: wait up to 5 minutes, polling every 5s at first and backing off to 15s. A login ending in `[bot]`: up to 15 minutes, polling every 10s backing off to 30s. Any other login is presumed human: up to 4 hours, polling every 30s for the first 5 minutes, then every 60s.
+- `{WAIT_SCHEDULE}` — the default for the entry's reviewer kind ("Wait schedules" in the host-reviewer file read below); rpr does not override it.
 
 Three rpr-specific rules sit on top of the shared loop:
 

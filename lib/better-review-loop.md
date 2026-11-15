@@ -12,12 +12,7 @@ Launch one sub-agent per PR, in parallel, and wait for all. Each runs the multi-
 
 Pass each sub-agent: `{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}` (`series` default, or `parallel`), `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}` (the copilot/`@<login>` cap; default 1), `{REVIEW_MODELS}` (the saved per-agent default models; without it a saved default model is silently ignored), `{PR_NUMBER}`, `{OWNER}/{REPO}`, `{GH_HOST}` (so the host-side loops' `gh api` calls hit the right host on GitHub Enterprise), `{BRANCH_PREFIX}/{CATEGORY_SLUG}`, `{BUILD_CMD}`, and any review instruction the caller's inputs add. When a loop reaches its guardrail, default mode stops; `--interactive` asks the user whether to continue.
 
-For each host-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch (the same values `/do:review` uses):
-
-- `copilot` — use the previous Copilot review duration on this PR (default 60 seconds if none); max wait 3x that duration, minimum 90 seconds, maximum 5 minutes; poll every 5s, 5s, 10s, 10s, then 15s.
-- `@<login>` — a login ending in `[bot]` is an automated reviewer: expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s. Any other login is presumed human: max wait 4 hours; poll every 30s for the first 5 minutes, then every 60s.
-
-Forward only the selected schedule as `{WAIT_SCHEDULE}`; a pass never receives both.
+Each host-side entry takes `{WAIT_SCHEDULE}` from "Wait schedules" in the host-reviewer file; this caller states no difference.
 
 ### Required review references (PR worker only)
 

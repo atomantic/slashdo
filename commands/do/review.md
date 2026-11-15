@@ -307,7 +307,7 @@ The wrapper takes the values resolved in Parse Arguments (`{REVIEW_AGENTS}`, `{R
 
 - `{GH_HOST}` — the GitHub API host established in "Determine Scope" (the PR URL's host in PR mode, the `origin` remote's host in local mode).
 - `{CODE_HOST}` / `{CR_NOUN}` — in PR mode, the reference's host from Parse Arguments: `github` / `PR` for a GitHub PR, `gitlab` / `MR` for a GitLab MR. Never re-derive them from `origin` there. In local mode, use the `origin` code host from `lib/vcs-host.md`. When the list has a `copilot` or `@<login>` entry and the deferral path has not already resolved it, read and run that partial now. It selects the verb file the host-side loops run, so `@<login>` works on the branch's GitLab MR too.
-- `{WAIT_SCHEDULE}` — for each host-side entry, the wrapper's own default for that reviewer kind (its "Wait schedules" section); this command does not override it.
+- `{WAIT_SCHEDULE}` — for each host-side entry, the default for that reviewer kind ("Wait schedules" in the host-reviewer file); this command does not override it.
 
 Per-agent dispatch inside the wrapper:
 

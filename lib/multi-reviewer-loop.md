@@ -15,7 +15,7 @@ The calling command populates these before reaching this loop:
 - `{REVIEW_ITERATIONS}` — non-negative integer (default 1): the review-and-fix cycle cap for the host-side `copilot` and `@<login>` loops. It never reaches a local-agent or Ollama entry.
 - `{CODE_HOST}` — `github` or `gitlab`, resolved by `~/.claude/lib/vcs-host.md`; `github` when the caller has not resolved it. It selects the verb file the host-side loops run. `{CR_NOUN}` is `PR` on GitHub and `MR` on GitLab (`PR` when unset).
 - `{GH_HOST}` — the GitHub API host derived from the repo's `origin` remote (see `~/.claude/lib/gh-host.md`), forwarded to the host-side loops so their `gh api` calls reach the right host on GitHub Enterprise. Empty on GitLab, or when unset, means `gh`'s github.com default.
-- `{WAIT_SCHEDULE}` — the wait schedule for the current host-side entry. A caller may state its own; otherwise use Wait schedules below. Resolve it per entry before dispatch and pass only that one schedule to the host-reviewer template.
+- `{WAIT_SCHEDULE}` — the wait schedule for the current host-side entry. A caller may state its own; otherwise use the default in "Wait schedules" in `host-reviewer-loop.md`, which every host-side entry reads. Resolve it per entry before dispatch and pass only that one schedule to the host-reviewer template.
 - `{REVIEW_MODE}` — `series` (default) or `parallel`. Only when `parallel` was explicitly resolved (flag or saved default), read the parallel-mode file now; it replaces Pre-flight step 6, Series dispatch, and the aggregate rule below for this run. Series callers never need it.
 
   !read lib/multi-reviewer-parallel.md
@@ -62,14 +62,6 @@ Inner loops return: Copilot `clean | capped | timeout | error | guardrail | too-
 Only when `{REVIEW_MODE}=parallel` was explicitly resolved, apply [multi-reviewer-parallel.md](./multi-reviewer-parallel.md)'s Pre-flight step 6 here.
 
 Print the resolved plan before starting: `Review plan: {REVIEW_AGENTS} (mode: {REVIEW_MODE}, stop-mode: {REVIEW_STOP_MODE})`. When any entry resolved a non-default cap, append the per-reviewer caps: `Iteration caps: claude=2, ollama=1, codex=3`.
-
-### Wait schedules
-
-The default `{WAIT_SCHEDULE}` for a host-side entry, by reviewer kind:
-
-- `copilot` — expected duration is the previous Copilot review's duration on this PR (60 seconds if there is none). Wait at most 3× that, no less than 90 seconds and no more than 5 minutes. Poll every 5s, 5s, 10s, 10s, then 15s.
-- `@<login>` ending in `[bot]` (an automated reviewer) — expected duration 5 minutes. Wait at most 3× that, no less than 3 minutes and no more than 15 minutes. Poll every 10s, 10s, 20s, 20s, then 30s.
-- Any other `@<login>` (presumed human) — wait at most 4 hours. Poll every 30s for the first 5 minutes, then every 60s.
 
 ### Series dispatch (default — `{REVIEW_MODE}=series`)
 
