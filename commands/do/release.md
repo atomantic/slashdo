@@ -68,7 +68,21 @@ Discover the project's branches and conventions for releases rather than assumin
 3. **Confirm the target exists on the remote** with `git ls-remote --heads origin "{target}"`. Consult the remote, not just local refs: on a fresh clone `{target}` may exist only there, and recreating it from the last tag would lose history and clobber the real release branch.
    - It exists: continue.
    - It is missing but the project's own pipeline config or docs name it (a first release): create it from the last release tag, or the root commit when there are no tags, with `git push origin "<start-commit>:refs/heads/{target}"`. In `--interactive` mode confirm first.
-   - Nothing names a target and no `release` branch exists: stop. A trunk-only project should not get a new long-lived branch it never asked for. Tell the user to document the release flow (which branch is promoted into which, or a tag-based procedure, in `RELEASING.md` or `CONTRIBUTING.md`) or to create the target branch, then re-run. In `--interactive` mode, ask which branch to promote into instead of stopping.
+   - Nothing names a target and no `release` branch exists: ask the user once, in default mode as well as `--interactive`, because a trunk-only project should not get a new long-lived branch it never asked for. Say that the project documents no release flow and has no `release` branch, and offer:
+     - **(a)** create a long-lived `release` branch from the last release tag and promote `{source}` into it; or
+     - **(b)** name a different existing branch to promote into.
+
+     Mention that documenting the flow (which branch is promoted into which, or a tag-based procedure, in `RELEASING.md` or `CONTRIBUTING.md`) avoids this question next time. On (b), use the named branch as `{target}` and confirm it exists on the remote as above. On an explicit yes to (a), set `{target}` to `release` and create it from the last release tag, or the root commit when there are no tags yet, re-checking the remote in the same step so an existing branch is never recreated:
+     ```bash
+     git fetch origin "release:refs/remotes/origin/release" 2>/dev/null || true
+     if ! git show-ref --verify --quiet refs/heads/release \
+         && ! git show-ref --verify --quiet refs/remotes/origin/release \
+         && [ -z "$(git ls-remote --heads origin release)" ]; then
+       git branch release "$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)"
+       git push -u origin release
+     fi
+     ```
+     Do not create the branch without that yes. When nobody can answer (a headless or non-interactive run), stop instead: report that no release target could be determined, and tell the user to document the release flow or create the target branch, then re-run.
 4. **Naming** — follow the pattern visible in the project's history, and fall back to slashdo's only when history shows none:
    - `{tag}` — the shape of the existing release tags (`git tag --sort=-v:refname`), e.g. `1.2.3` or `pkg-v1.2.3`. Fallback `v{version}`.
    - `{release_subject}` — the subject of the commits that bumped the version for the last few releases. Fallback `chore: release v{version}`.
