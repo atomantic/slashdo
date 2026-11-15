@@ -98,7 +98,7 @@ indentation on every line.
 
 **Do not write a changelog entry in your PR.** There is no unreleased/staging changelog file in this repo — no `NEXT.md`, no `## Unreleased` section. **The commit history is the changelog.**
 
-Release notes are rolled up once, at release time: `/do:release` reads `git log {last_tag}..HEAD`, synthesizes it into feature-grouped notes, and writes `.changelogs/v{version}.md` as part of the release PR. `.github/workflows/release.yml` then publishes that file as the GitHub Release body. The `.changelogs/v*.md` files are the archive of past releases — read them, don't hand-edit them.
+Release notes are rolled up once, at release time: `/do:release` reads `git log {last_tag}..HEAD`, synthesizes it into feature-grouped notes, and overwrites `.changelogs/RELEASE.md` with that version's notes as part of the release PR. `.github/workflows/release.yml` then publishes that file as the GitHub Release body and fails if its version heading does not match `package.json`. `RELEASE.md` holds only the latest release; GitHub Releases and git tags are the archive of past ones — don't hand-edit it outside a release.
 
 This is why commit subjects matter (below): a vague subject becomes a vague release note, and nothing downstream can recover the intent.
 

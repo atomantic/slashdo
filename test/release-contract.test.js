@@ -494,3 +494,76 @@ describe('/do:release source branch admission', () => {
     assert.match(resolved, /freshly created temporary head branch has no remote rules to probe/);
   });
 });
+
+describe('/do:release current-release notes file', () => {
+  const { spawnSync } = require('child_process');
+  const os = require('os');
+  const workflow = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'release.yml'), 'utf8');
+  const step = workflow.slice(workflow.indexOf('- name: Generate changelog'), workflow.indexOf('- name: Create Release'));
+  const script = step.slice(step.indexOf('run: |\n') + 7).replace(/^ {10}/gm, '');
+
+  // Runs the workflow's real changelog step in a scratch repo; returns the exit status and release body.
+  function runStep(version, notes) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-release-'));
+    try {
+      const sh = (cmd) => spawnSync('sh', ['-c', cmd], { cwd: dir, encoding: 'utf8' });
+      sh('git init -q && git config user.email t@example.com && git config user.name t && git commit -q --allow-empty -m "chore: root" && git commit -q --allow-empty -m "feat: seed"');
+      if (notes !== null) {
+        fs.mkdirSync(path.join(dir, '.changelogs'));
+        fs.writeFileSync(path.join(dir, '.changelogs', 'RELEASE.md'), notes);
+      }
+      const out = path.join(dir, 'gh-output');
+      const r = spawnSync('bash', ['-c', script.replace('${{ steps.package-version.outputs.version }}', version)], {
+        cwd: dir, encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: out },
+      });
+      const bodyPath = r.status === 0 ? fs.readFileSync(out, 'utf8').match(/body-path=(.+)/)[1] : null;
+      return { status: r.status, stderr: r.stderr, body: bodyPath && fs.readFileSync(bodyPath, 'utf8') };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('describes detection, overwrite and staging of the single notes file', () => {
+    assert.match(body, /\*\*A current-release file\*\*[^\n]*each release overwrites[^\n]*forge release is the archive/);
+    assert.match(body, /holds that single notes file and no `v\*\.md` files/);
+    assert.match(body, /stage it in the release commit like any changelog file[^\n]*GitHub and GitLab/);
+    assert.match(body, /rather than a new per-release directory/);
+    assert.match(body, /`\{changelog_dir\}\/v\{new_version\}\.md`/, 'per-release directories keep their shape');
+    assert.match(body, /Never migrate a per-release directory to it on your own/);
+  });
+
+  it('keeps the published body complete instead of truncating to Highlights', () => {
+    assert.match(body, /Keep the published body complete[^\n]*tighten the detailed sections[^\n]*only when the project keeps per-release files\. Never truncate silently/);
+    assert.doesNotMatch(body, /publish the Highlights as the release body/);
+  });
+
+  it('documents the opt-in migration with the forge-release check', () => {
+    assert.match(body, /Migrating to a current-release file\*\* \(opt-in[^\n]*matching forge release[^\n]*truncated[^\n]*then delete the old files/);
+  });
+
+  it('publishes the notes file when its heading matches the package version', () => {
+    const notes = '# Release v1.2.3\n\n## Highlights\n\n- Something.\n';
+    const r = runStep('1.2.3', notes);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.body, notes);
+  });
+
+  it('fails on a version mismatch rather than publishing stale notes', () => {
+    const r = runStep('1.2.4', '# Release v1.2.3\n\n- Old.\n');
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /does not match package\.json version v1\.2\.4/);
+  });
+
+  it('falls back to the commit list only when the file is missing', () => {
+    const r = runStep('1.2.3', null);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.body, /^# Release v1\.2\.3\n\n## Changes\n\n- feat: seed/);
+  });
+
+  it('ships a single notes file whose heading matches package.json', () => {
+    const dir = path.join(__dirname, '..', '.changelogs');
+    assert.deepEqual(fs.readdirSync(dir), ['RELEASE.md']);
+    const { version } = require('../package.json');
+    assert.equal(fs.readFileSync(path.join(dir, 'RELEASE.md'), 'utf8').split('\n')[0], `# Release v${version}`);
+  });
+});

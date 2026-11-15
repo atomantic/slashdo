@@ -85,18 +85,24 @@ jobs:
         if: steps.npm-check.outputs.published == 'false'
         run: npm publish --provenance
 
-      # /do:release rolls the commits since the last tag up into .changelogs/v{VERSION}.md
-      # as part of the release PR, so by the time this runs the file is already on the
-      # branch. The git-log fallback below only fires for a release cut by hand.
+      # /do:release rolls the commits since the last tag up into .changelogs/RELEASE.md
+      # (overwritten each release) as part of the release PR, so by the time this runs the
+      # file is already on the branch. A heading for another version fails the step; the
+      # git-log fallback below only fires when the file is missing (a release cut by hand).
       - name: Generate changelog
         id: changelog
         if: steps.release-check.outputs.exists == 'false'
         run: |
           VERSION="${{ steps.package-version.outputs.version }}"
-          CHANGELOG_FILE=".changelogs/v${VERSION}.md"
+          CHANGELOG_FILE=".changelogs/RELEASE.md"
           RELEASE_BODY_FILE="$(mktemp)"
 
           if [ -f "$CHANGELOG_FILE" ]; then
+            HEADING="$(head -n 1 "$CHANGELOG_FILE" | tr -d '\r')"
+            if [ "$HEADING" != "# Release v${VERSION}" ]; then
+              echo "${CHANGELOG_FILE} heading '${HEADING}' does not match package.json version v${VERSION}." >&2
+              exit 1
+            fi
             cp "$CHANGELOG_FILE" "$RELEASE_BODY_FILE"
           else
             echo "No ${CHANGELOG_FILE}; falling back to a raw commit list." >&2
