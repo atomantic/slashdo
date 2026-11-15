@@ -36,7 +36,8 @@
     "lib/",
     "hooks/",
     "install.sh",
-    "uninstall.sh"
+    "uninstall.sh",
+    "install-manifest.txt"
   ],
   "scripts": {
     "test": "node --test"

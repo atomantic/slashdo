@@ -2,6 +2,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const { parseManifest } = require('../scripts/build-install-manifest');
 
 const root = path.join(__dirname, '..');
 const read = (...segments) => fs.readFileSync(path.join(root, ...segments), 'utf8');
@@ -10,11 +11,10 @@ const read = (...segments) => fs.readFileSync(path.join(root, ...segments), 'utf
 describe('PLAN.md mode is retired', () => {
   it('folds the former issue-mode lib back in and retires it from installers', () => {
     assert.equal(fs.existsSync(path.join(root, 'lib', 'replan-issues.md')), false);
-    for (const script of ['install.sh', 'uninstall.sh']) {
-      const libs = read(script).match(/^LIBS=\(([\s\S]*?)\)/m)[1];
-      assert.doesNotMatch(libs, /\breplan-issues\b/, script);
-    }
-    assert.match(read('uninstall.sh').match(/^OLD_LIBS=\(([\s\S]*?)\)/m)[1], /\breplan-issues\b/);
+    // The curl installer's manifest no longer ships it, but still retires it.
+    const manifest = parseManifest(read('install-manifest.txt'));
+    assert.ok(!manifest.libs.includes('replan-issues.md'));
+    assert.ok(manifest['retired-libs'].includes('replan-issues.md'));
   });
 
   it('the repo itself is tracker-only', () => {

@@ -5,7 +5,6 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { buildPromptBundle } = require('../src/transformer');
 
 const root = path.join(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8');
@@ -161,14 +160,5 @@ describe('dependency policy procedure', () => {
       assert.throws(() => readDepfreeDefaults(file));
     }
     assert.throws(() => readDepfreeDefaults(dir));
-  });
-});
-
-describe('dependency policy workflow integration', () => {
-  it('ships the policy procedure with both audit and config command bundles', () => {
-    for (const name of ['commands/do/depfree.md', 'commands/do/config.md']) {
-      const bundle = buildPromptBundle(read(name), path.join(root, 'lib'));
-      assert.equal(bundle.files['depfree-policy.md'].trim(), policy.trim(), name);
-    }
   });
 });

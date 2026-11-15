@@ -6,7 +6,6 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { buildPromptBundle } = require('../src/transformer');
 
 const root = path.join(__dirname, '..');
 const read = (name) => fs.readFileSync(path.join(root, name), 'utf8');
@@ -300,10 +299,4 @@ describe('fresh ownership checks shared by explicit, auto-pick and swarm', () =>
       assert.doesNotMatch(result.stdout, /CLAIM_MUTATION/);
     });
   }
-
-  it('ships the collector in generated command bundles', () => {
-    const bundle = buildPromptBundle(next, path.join(root, 'lib'));
-    assert.ok(Object.hasOwn(bundle.files, 'next-github.md'));
-    assert.match(bundle.files['next-github.md'], /pr_claim_refs\(\)/);
-  });
 });

@@ -44,11 +44,14 @@ CLAUDE_STAGE_DIR=""
 # Scratch copy of src/settings-hooks.js, the module this script calls instead of
 # re-implementing settings.json registration.
 MOD_DIR=""
+# Downloaded copy of install-manifest.txt (remote mode only).
+MANIFEST_TMP=""
 # The temp file atomic_write is currently filling, so an interrupted install
 # does not strand a .slashdo-tmp.* file next to the real command files.
 ACTIVE_TMP=""
 cleanup_temp() {
   [ -n "$ACTIVE_TMP" ] && rm -f "$ACTIVE_TMP"
+  [ -n "$MANIFEST_TMP" ] && rm -f "$MANIFEST_TMP"
   [ -n "$STAGE_DIR" ] && rm -rf "$STAGE_DIR"
   [ -n "$CLAUDE_STAGE_DIR" ] && rm -rf "$CLAUDE_STAGE_DIR"
   [ -n "$MOD_DIR" ] && rm -rf "$MOD_DIR"
@@ -92,8 +95,10 @@ FILE_MODE="$(printf '%04o' "$(( 0666 & ~0$(umask) ))")"
 atomic_write() {
   local dest="$1"
   shift
-  local tmp
-  allocate_temp ACTIVE_TMP "$(dirname "$dest")/.slashdo-tmp.XXXXXX" || return 1
+  local tmp dir=.
+  # Parameter expansion, not $(dirname): one fork fewer per installed file.
+  case "$dest" in */*) dir="${dest%/*}"; dir="${dir:-/}" ;; esac
+  allocate_temp ACTIVE_TMP "$dir/.slashdo-tmp.XXXXXX" || return 1
   tmp="$ACTIVE_TMP"
   if "$@" "$tmp" && chmod "$FILE_MODE" "$tmp" && mv -f "$tmp" "$dest"; then
     ACTIVE_TMP=""
@@ -186,54 +191,86 @@ banner() {
   printf "\n"
 }
 
-COMMANDS=(
-  better better-swift config depfree fpr goals help next omd
-  plan-task pr pr-better prd push release replan review rpr scan simplify update
-)
+# ── install manifest ── (this block is identical in install.sh and uninstall.sh)
+#
+# Which commands, libs and hooks ship, and which files earlier releases shipped
+# that must be cleaned up, come from install-manifest.txt, generated from the
+# tree by `node scripts/build-install-manifest.js`. Entries are bare filenames
+# with their extension, grouped under [commands], [libs], [hooks] and their
+# [retired-*] counterparts.
+MANIFEST_FILE="install-manifest.txt"
+MANIFEST_FORMAT="# slashdo install manifest v1"
+# Copy left in each installed environment's root, so uninstall.sh can find
+# everything a past install put there without a network round trip.
+MANIFEST_CACHE=".slashdo-install-manifest.txt"
+COMMANDS=()
+LIBS=()
+HOOKS=()
+OLD_COMMANDS=()
+OLD_LIBS=()
+OLD_HOOKS=()
 
-
-OLD_COMMANDS=(cam good makegoals makegood optimize-md)
-
-# NOTE: keep this allowlist in sync with files under lib/ in the repo. Any new
-# lib/*.md that a command spec references (e.g. via `!cat ~/.claude/lib/<name>.md`)
-# MUST be added here AND to uninstall.sh, or the curl installer will silently skip
-# it and the command will fail at runtime. The npm installer (src/installer.js)
-# enumerates lib/ dynamically, so it doesn't need updating.
-LIBS=(
-  better-audit
-  better-discovery better-issue-mode better-options better-pipeline-inputs
-  better-plan better-remediation better-simplify
-  better-state better-test-enhancement
-  better-cleanup better-pr-and-ci better-review-loop better-verification
-  ci-flake-handling commit-conventions config-defaults-issues-merge copilot-review-loop depfree-policy
-  empty-array-expansion enhance-loop epic-children
-  finding-disposition fix-regression-guard
-  gh-host host-github host-gitlab host-reviewer-loop
-  local-agent-review-loop local-agent-agy local-agent-claude local-agent-cmd local-agent-cursor local-agent-opencode local-cli-runner
-  merge-gate model-tiers multi-reviewer-loop multi-reviewer-parallel next-github next-gitlab next-swarm ollama-review-loop
-  plan-issue-setup plan-issue-filing pr-write-access pre-pr-review-lifecycle
-  rebase-conflict-resolution remediation-agent-template
-  release-ci-gate release-documented release-source-gate review-agent-selection review-config-defaults review-convergence-gate review-flags
-  review-fix-conventions review-fix-tail
-  review-pr-mode review-mr-mode
-  review-preferences
-  swift-review-checklist swift-gotchas swift-pipeline-inputs
-  review-surface-scan review-surface-quality review-security-audit
-  review-cross-file-tracing review-cross-file-contract
-  review-structural-ambition
-  tracker-jira
-  upstream-push
-  vcs-host
-)
-
-HOOKS=(slashdo-check-update slashdo-statusline)
+# Append one manifest's entries to the arrays above. The scripts build cp, mv
+# and rm paths from these names, so anything but a bare filename under a known
+# section rejects the whole manifest instead of being skipped, and nothing from
+# a rejected manifest is kept.
+# Usage: read_manifest <file> <label for messages>
+read_manifest() {
+  local file="$1" label="$2" line section="" entry
+  local entries=()
+  if ! IFS= read -r line < "$file" || [ "${line%$'\r'}" != "$MANIFEST_FORMAT" ]; then
+    printf "    ${YELLOW}%s: not a v1 slashdo install manifest${RESET}\n" "$label"
+    return 1
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in
+      ''|'#'*) continue ;;
+      '['*']')
+        section="${line#[}"
+        section="${section%]}"
+        case "$section" in
+          commands|libs|hooks|retired-commands|retired-libs|retired-hooks) continue ;;
+        esac
+        printf "    ${YELLOW}%s: unknown section %s${RESET}\n" "$label" "$line"
+        return 1
+        ;;
+      .*|*[!A-Za-z0-9._-]*)
+        printf "    ${YELLOW}%s: invalid entry %s${RESET}\n" "$label" "$line"
+        return 1
+        ;;
+    esac
+    case "$section" in
+      '')
+        printf "    ${YELLOW}%s: entry %s precedes any section${RESET}\n" "$label" "$line"
+        return 1
+        ;;
+      commands|retired-commands)
+        case "$line" in
+          *.md) ;;
+          *) printf "    ${YELLOW}%s: command %s is not a .md file${RESET}\n" "$label" "$line"; return 1 ;;
+        esac
+        ;;
+    esac
+    entries+=("$section/$line")
+  done < "$file"
+  for entry in ${entries[@]+"${entries[@]}"}; do
+    case "${entry%%/*}" in
+      commands)         COMMANDS+=("${entry#*/}") ;;
+      libs)             LIBS+=("${entry#*/}") ;;
+      hooks)            HOOKS+=("${entry#*/}") ;;
+      retired-commands) OLD_COMMANDS+=("${entry#*/}") ;;
+      retired-libs)     OLD_LIBS+=("${entry#*/}") ;;
+      retired-hooks)    OLD_HOOKS+=("${entry#*/}") ;;
+    esac
+  done
+}
+# ── end install manifest ──
 
 # install.sh leaves a copy of the shared module here so uninstall.sh can
 # deregister without a network round trip. Mirrors SETTINGS_HOOKS_CACHE in
 # src/settings-hooks.js.
 SETTINGS_HOOKS_CACHE=".slashdo-settings-hooks.js"
-
-OLD_HOOKS=(update-check)
 
 detect_envs() {
   local envs=()
@@ -251,6 +288,7 @@ install_claude() {
   local target_hooks="$CLAUDE_CONFIG_DIR/hooks"
   local registration_failed=false
   local hooks_ready=true
+  local files_failed=false
   if ! allocate_temp CLAUDE_STAGE_DIR -d "${TMPDIR:-/tmp}/slashdo-claude.XXXXXX"; then
     printf "    ${YELLOW}failed (could not create a temp directory)${RESET}\n"
     return 1
@@ -259,30 +297,33 @@ install_claude() {
 
   printf "  Installing to ${GREEN}Claude Code${RESET}...\n"
 
-  for cmd in "${COMMANDS[@]}"; do
-    printf "    /do:%-20s" "$cmd"
-    if fetch_file "commands/do/$cmd.md" "$CLAUDE_STAGE_DIR/command-$cmd.md" &&
-        atomic_write "$target_cmd/$cmd.md" rewrite_for_claude "$CLAUDE_STAGE_DIR/command-$cmd.md"; then
+  local file
+  for file in "${COMMANDS[@]}"; do
+    printf "    /do:%-20s" "${file%.md}"
+    if fetch_file "commands/do/$file" "$CLAUDE_STAGE_DIR/command-$file" &&
+        atomic_write "$target_cmd/$file" rewrite_for_claude "$CLAUDE_STAGE_DIR/command-$file"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
+      files_failed=true
     fi
   done
 
-  for lib in "${LIBS[@]}"; do
-    printf "    lib/%-20s" "$lib.md"
-    if fetch_file "lib/$lib.md" "$CLAUDE_STAGE_DIR/lib-$lib.md" &&
-        atomic_write "$target_lib/$lib.md" rewrite_for_claude "$CLAUDE_STAGE_DIR/lib-$lib.md"; then
+  for file in "${LIBS[@]}"; do
+    printf "    lib/%-20s" "$file"
+    if fetch_file "lib/$file" "$CLAUDE_STAGE_DIR/lib-$file" &&
+        atomic_write "$target_lib/$file" rewrite_for_claude "$CLAUDE_STAGE_DIR/lib-$file"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
+      files_failed=true
     fi
   done
 
-  for hook in "${HOOKS[@]}"; do
-    printf "    hook/%-19s" "$hook.js"
-    if fetch_file "hooks/$hook.js" "$CLAUDE_STAGE_DIR/hook-$hook.js" &&
-        atomic_write "$target_hooks/$hook.js" cp "$CLAUDE_STAGE_DIR/hook-$hook.js"; then
+  for file in "${HOOKS[@]}"; do
+    printf "    hook/%-19s" "$file"
+    if fetch_file "hooks/$file" "$CLAUDE_STAGE_DIR/hook-$file" &&
+        atomic_write "$target_hooks/$file" cp "$CLAUDE_STAGE_DIR/hook-$file"; then
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
@@ -290,19 +331,28 @@ install_claude() {
     fi
   done
 
-  for old in "${OLD_COMMANDS[@]}"; do
-    if [ -f "$target_cmd/$old.md" ]; then
-      rm -f "$target_cmd/$old.md"
-      printf "    migrated: /do:%-14s${GREEN}ok${RESET}\n" "$old"
+  for file in ${OLD_COMMANDS[@]+"${OLD_COMMANDS[@]}"}; do
+    if [ -f "$target_cmd/$file" ]; then
+      rm -f "$target_cmd/$file"
+      printf "    migrated: /do:%-14s${GREEN}ok${RESET}\n" "${file%.md}"
     fi
   done
 
-  for old in "${OLD_HOOKS[@]}"; do
-    if [ -f "$target_hooks/$old.md" ]; then
-      rm -f "$target_hooks/$old.md"
-      printf "    removed:  hook/%-13s${GREEN}ok${RESET}\n" "$old.md"
+  for file in ${OLD_LIBS[@]+"${OLD_LIBS[@]}"}; do
+    if [ -f "$target_lib/$file" ]; then
+      rm -f "$target_lib/$file"
+      printf "    removed:  lib/%-14s${GREEN}ok${RESET}\n" "$file"
     fi
   done
+
+  for file in ${OLD_HOOKS[@]+"${OLD_HOOKS[@]}"}; do
+    if [ -f "$target_hooks/$file" ]; then
+      rm -f "$target_hooks/$file"
+      printf "    removed:  hook/%-13s${GREEN}ok${RESET}\n" "$file"
+    fi
+  done
+
+  cache_manifest "$CLAUDE_CONFIG_DIR"
 
   # Register hooks in settings.json by calling the canonical implementation —
   # src/settings-hooks.js, the same module the npm installer requires — instead
@@ -346,7 +396,7 @@ install_claude() {
     registration_failed=true
   fi
 
-  if [ "$registration_failed" = true ]; then
+  if [ "$registration_failed" = true ] || [ "$files_failed" = true ]; then
     return 1
   fi
 }
@@ -366,36 +416,91 @@ install_opencode() {
     return 1
   fi
 
-  for cmd in "${COMMANDS[@]}"; do
-    printf "    /do-%-20s" "$cmd"
-    if fetch_file "commands/do/$cmd.md" "$STAGE_DIR/$cmd.md"; then
-      if ! atomic_write "$target_cmd/do-$cmd.md" rewrite_for_opencode "$STAGE_DIR/$cmd.md"; then
+  local file failed=false
+  for file in "${COMMANDS[@]}"; do
+    printf "    /do-%-20s" "${file%.md}"
+    if fetch_file "commands/do/$file" "$STAGE_DIR/command-$file"; then
+      if ! atomic_write "$target_cmd/do-$file" rewrite_for_opencode "$STAGE_DIR/command-$file"; then
         return 1
       fi
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
+      failed=true
     fi
   done
 
-  for lib in "${LIBS[@]}"; do
-    printf "    lib/%-20s" "$lib.md"
-    if fetch_file "lib/$lib.md" "$STAGE_DIR/lib-$lib.md"; then
-      if ! atomic_write "$target_lib/$lib.md" rewrite_for_opencode "$STAGE_DIR/lib-$lib.md"; then
+  for file in "${LIBS[@]}"; do
+    printf "    lib/%-20s" "$file"
+    if fetch_file "lib/$file" "$STAGE_DIR/lib-$file"; then
+      if ! atomic_write "$target_lib/$file" rewrite_for_opencode "$STAGE_DIR/lib-$file"; then
         return 1
       fi
       printf "${GREEN}ok${RESET}\n"
     else
       printf "failed\n"
+      failed=true
     fi
   done
 
-  for old in "${OLD_COMMANDS[@]}"; do
-    if [ -f "$target_cmd/do-$old.md" ]; then
-      rm -f "$target_cmd/do-$old.md"
-      printf "    migrated: /do-%-14s${GREEN}ok${RESET}\n" "$old"
+  for file in ${OLD_COMMANDS[@]+"${OLD_COMMANDS[@]}"}; do
+    if [ -f "$target_cmd/do-$file" ]; then
+      rm -f "$target_cmd/do-$file"
+      printf "    migrated: /do-%-14s${GREEN}ok${RESET}\n" "${file%.md}"
     fi
   done
+
+  for file in ${OLD_LIBS[@]+"${OLD_LIBS[@]}"}; do
+    if [ -f "$target_lib/$file" ]; then
+      rm -f "$target_lib/$file"
+      printf "    removed:  lib/%-14s${GREEN}ok${RESET}\n" "$file"
+    fi
+  done
+
+  cache_manifest "$HOME/.config/opencode"
+  [ "$failed" = false ]
+}
+
+# Read the manifest before touching any environment, so a failed fetch aborts
+# with nothing changed. In local mode it is the checkout's own copy. Otherwise
+# it comes from the same $BASE_URL ref as this script and every file it names.
+# They are still separate requests, so a push landing in between can pair this
+# script with a newer manifest: the format line catches an incompatible one,
+# and a listed file that will not download is reported and fails the install
+# instead of being skipped.
+MANIFEST_SRC=""
+load_manifest() {
+  if [ "$LOCAL_MODE" = true ]; then
+    MANIFEST_SRC="$SCRIPT_DIR/$MANIFEST_FILE"
+    if [ ! -f "$MANIFEST_SRC" ]; then
+      printf "  ${YELLOW}%s is missing from %s${RESET}\n" "$MANIFEST_FILE" "$SCRIPT_DIR"
+      return 1
+    fi
+  else
+    if ! allocate_temp MANIFEST_TMP "${TMPDIR:-/tmp}/slashdo-manifest.XXXXXX"; then
+      printf "  ${YELLOW}could not create a temp file for %s${RESET}\n" "$MANIFEST_FILE"
+      return 1
+    fi
+    if ! fetch_into "$MANIFEST_FILE" "$MANIFEST_TMP"; then
+      printf "  ${YELLOW}failed to download %s${RESET}\n" "$BASE_URL/$MANIFEST_FILE"
+      return 1
+    fi
+    MANIFEST_SRC="$MANIFEST_TMP"
+  fi
+  read_manifest "$MANIFEST_SRC" "$MANIFEST_FILE" || return 1
+  if [ ${#COMMANDS[@]} -eq 0 ] || [ ${#LIBS[@]} -eq 0 ] || [ ${#HOOKS[@]} -eq 0 ]; then
+    printf "  ${YELLOW}%s lists no commands, libs or hooks${RESET}\n" "$MANIFEST_FILE"
+    return 1
+  fi
+}
+
+# Leave a copy of the manifest in an environment's root for uninstall.sh. A
+# failure only costs offline uninstall, so it is a note, not an install failure.
+# Usage: cache_manifest <environment root>
+cache_manifest() {
+  if ! atomic_write "$1/$MANIFEST_CACHE" cp "$MANIFEST_SRC"; then
+    printf "    ${YELLOW}note: could not cache %s — uninstall will need network access${RESET}\n" "$MANIFEST_FILE"
+  fi
 }
 
 banner
@@ -415,6 +520,15 @@ else
   printf "  Source: ${GREEN}github${RESET} (${DIM}$BASE_URL${RESET})\n"
 fi
 printf "  Detected: ${GREEN}%s${RESET}\n\n" "${envs[*]}"
+
+case " ${envs[*]} " in
+  *" claude "*|*" opencode "*)
+    if ! load_manifest; then
+      printf "  ${YELLOW}Install aborted:${RESET} could not read the file list (%s); nothing was changed.\n\n" "$MANIFEST_FILE"
+      exit 1
+    fi
+    ;;
+esac
 
 npx_needed=false
 curl_installed=false
