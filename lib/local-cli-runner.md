@@ -28,7 +28,7 @@ bash "$R" verify --state-dir "$RUN_STATE_DIR" --sum "$RUN_STATE_SUM"
 It refuses a state directory whose checksum does not match. It restores git config and hooks with shell tools before running any Git command, then compares the tree and, if the CLI moved it, restores the whole pre-pass state. It prints one of:
 
 - `TREE_STATE=clean`: the CLI left the tree alone.
-- `TREE_STATE=restored`: the CLI wrote to the tree and the snapshot was put back. The caller decides what that means for its status.
+- `TREE_STATE=restored`: the CLI wrote to the tree (or only to git config or hooks) and the snapshot was put back. The caller decides what that means for its status.
 - `TREE_STATE=restore-failed`, or a non-zero exit with a `runner script changed`, `cannot …` or `… failed` message and no `TREE_STATE`: the tree is not at baseline. The caller stops with a warning naming the log and never continues on top of that tree.
 
 A `local CLI modified gitignored file` line names a file (`.env`, a local generated config) the runner cannot put back. Surface it in the caller's report. Delete `RUN_STATE_DIR` once the pass's result has been read.

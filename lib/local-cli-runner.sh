@@ -223,8 +223,9 @@ cmd_verify() {
   # Metadata first, with shell tools and `git config --file` only.
   cfg_now=$(git_sec_hash "$GIT_COMMON/config") || die "cannot inspect git metadata; stop before running Git"
   hooks_now=$(git_hooks_hash) || die "cannot inspect git metadata; stop before running Git"
-  [ "$cfg_now" = "$GIT_CFG_BASELINE" ] || restore_git_config
-  [ "$hooks_now" = "$GIT_HOOKS_BASELINE" ] || restore_git_hooks
+  META_RESTORED=false
+  [ "$cfg_now" = "$GIT_CFG_BASELINE" ] || { restore_git_config; META_RESTORED=true; }
+  [ "$hooks_now" = "$GIT_HOOKS_BASELINE" ] || { restore_git_hooks; META_RESTORED=true; }
   # Informational only: other worktrees' branch.* (or any non-security) config writes during the pass.
   if [ "$(git config --file "$GIT_META_BAK/config" --list | sort)" != "$(git config --file "$GIT_COMMON/config" --list | sort)" ]; then
     echo "note: non-security git config changed during the pass (likely a concurrent worktree); left untouched" >&2
@@ -232,6 +233,8 @@ cmd_verify() {
 
   # Metadata is back at baseline, so Git is safe to run. Compare the tree; restore it wholesale if it moved.
   TREE_STATE=clean
+  # A metadata-only write is still a write to the caller's state: report it as restored.
+  [ "$META_RESTORED" = false ] || TREE_STATE=restored
   if ! tree_matches; then
     # HEAD: --soft only. --mixed would wipe the caller's staged state; --hard
     # would destroy uncommitted work swept into the CLI's commit.

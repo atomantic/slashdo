@@ -56,7 +56,7 @@ If a remote upstream is configured and the push fails (for example, non-fast-for
 - `ITERATION=$((ITERATION + 1))`
 - Apply the convergence gate (`~/.claude/lib/review-convergence-gate.md`). If the round just completed made zero commits, or landed only marginal findings, converge: set `STATUS=clean` and exit, noting the diminishing-returns convergence in the report. This is the normal exit.
 - Otherwise the round was substantive. Let `CEILING` be `MAX_ITERATIONS` when it is 1 or more, or `10` when `MAX_ITERATIONS=0` (unlimited mode's backstop). If `ITERATION < CEILING`, go back to the calling loop's step 1 and re-review the latest commits, which catches findings a fix introduced.
-- Otherwise the ceiling stopped a loop that was still productive. Set `STATUS=capped` when the cap was the user's (`MAX_EXPLICIT=true`), which counts as a verdict, or `STATUS=guardrail` when it was built in (`MAX_EXPLICIT=false`: the default `3`, or the backstop of 10), which is inconclusive.
+- Otherwise the ceiling stopped a loop that was still productive. Set `STATUS=capped` only when the cap was the user's and positive (`MAX_EXPLICIT=true` and `MAX_ITERATIONS` of 1 or more), which counts as a verdict. Otherwise set `STATUS=guardrail`, which is inconclusive: the cap was built in (`MAX_EXPLICIT=false`: the default `3`), or it was unlimited mode's backstop of 10, even when the user typed `~max=0`.
 
 ### After the final report
 

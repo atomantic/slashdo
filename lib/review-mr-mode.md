@@ -272,8 +272,12 @@ the failing gate:
 3. **GitLab says it is mergeable.** Re-read the MR: `.detailed_merge_status`
    is `mergeable` (older GitLab: `.merge_status` is `can_be_merged` and
    `.has_conflicts` is `false`).
-4. **The pipeline is green.** Poll the re-read MR's `.head_pipeline` until its
-   `.sha` is `HEAD_SHA` and its `.status` is terminal. Only `success` passes. On
+4. **The pipeline is green.** Poll the re-read MR's `.head_pipeline` until it
+   validates `HEAD_SHA` and its `.status` is terminal. It validates `HEAD_SHA`
+   when its `.sha` is `HEAD_SHA`, or, for a merged-results pipeline (its `.ref` is
+   `refs/merge-requests/{PR_NUM}/merge` and its `.sha` is a synthetic merge commit),
+   when that commit's `parent_ids` (`GET projects/:id/repository/commits/:sha`)
+   include `HEAD_SHA`. Only `success` passes. On
    a failure, apply the one-conservative-re-run routine in
    `~/.claude/lib/ci-flake-handling.md` once; if it fails again, do not merge.
    A missing head pipeline has two causes, and only one of them is green:
