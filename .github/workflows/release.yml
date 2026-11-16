@@ -78,10 +78,6 @@ jobs:
             fi
           fi
 
-      - name: Publish to npm
-        if: steps.npm-check.outputs.published == 'false'
-        run: npm publish --provenance
-
       # /do:release rolls the commits since the last tag up into .changelogs/RELEASE.md
       # (overwritten each release) as part of the release PR, so by the time this runs the
       # file is already on the branch. A heading for another version fails the step; the
@@ -111,6 +107,10 @@ jobs:
           fi
 
           echo "body-path=${RELEASE_BODY_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to npm
+        if: steps.npm-check.outputs.published == 'false'
+        run: npm publish --provenance
 
       - name: Create Release
         if: steps.release-check.outputs.exists == 'false'
