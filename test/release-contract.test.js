@@ -273,7 +273,7 @@ describe('/do:release current-release notes file', () => {
   const { spawnSync } = require('child_process');
   const os = require('os');
   const workflow = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'release.yml'), 'utf8');
-  const step = workflow.slice(workflow.indexOf('- name: Generate changelog'), workflow.indexOf('- name: Create Release'));
+  const step = workflow.slice(workflow.indexOf('- name: Generate changelog'), workflow.indexOf('- name: Publish to npm'));
   const script = step.slice(step.indexOf('run: |\n') + 7).replace(/^ {10}/gm, '');
 
   // Runs the workflow's real changelog step in a scratch repo; returns the exit status and release body.
