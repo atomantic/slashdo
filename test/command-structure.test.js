@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
+const { parseFrontmatter } = require('../src/transformer');
+
 const dir = path.join(__dirname, '..', 'commands', 'do');
 
 // A command file is front matter (--- … ---) followed by the body. A spliced-in copy of
@@ -26,6 +28,13 @@ describe('command file structure', () => {
   });
 
   for (const name of files) {
+    it(`${name} parses a non-empty description from its front matter`, () => {
+      const { frontmatter } = parseFrontmatter(fs.readFileSync(path.join(dir, name), 'utf8'));
+      assert.ok(frontmatter.description, `missing description in ${name}`);
+    });
+  }
+
+  for (const name of files) {
     it(`${name} carries exactly one front-matter block`, () => {
       const lines = fs.readFileSync(path.join(dir, name), 'utf8').split('\n');
       assert.equal(lines[0], '---', `front matter must open on line 1: ${name}`);
@@ -44,6 +53,32 @@ describe('command file structure', () => {
       );
     });
   }
+});
+
+// `gh label create --color` takes six hex digits with no `#`; `glab label create --color`
+// takes them with one. Either CLI rejects anything else, and the label is then silently
+// missing from every later filter. Checks the value's shape wherever a literal is given,
+// in any command or lib partial; `<placeholder>` values are skipped.
+describe('label colors', () => {
+  const root = path.join(__dirname, '..');
+  const colors = [];
+  for (const rel of ['commands/do', 'lib']) {
+    for (const name of fs.readdirSync(path.join(root, rel)).filter((n) => n.endsWith('.md'))) {
+      const body = fs.readFileSync(path.join(root, rel, name), 'utf8');
+      for (const [, value] of body.matchAll(/--color[ =]+"?#?([^\s"`]+)/g)) {
+        if (!value.startsWith('<')) colors.push({ file: `${rel}/${name}`, value });
+      }
+    }
+  }
+
+  it('finds literal --color values', () => {
+    assert.ok(colors.length > 0, 'expected at least one literal --color value');
+  });
+
+  it('gives every literal --color a six-digit hex value', () => {
+    const bad = colors.filter(({ value }) => !/^[0-9A-Fa-f]{6}$/.test(value)).map(({ file, value }) => `${file}: ${value}`);
+    assert.deepEqual(bad, []);
+  });
 });
 
 // help.md hand-maintains a table of every /do:* command. Nothing enforces that

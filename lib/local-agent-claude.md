@@ -32,7 +32,7 @@ claude -p --input-format text --output-format json --json-schema "$CLAUDE_VERDIC
 
 The no-shell profile cannot reconstruct a Git patch itself. Use Claude's documented [piped input](https://code.claude.com/docs/en/cli-reference): the CLI receives the complete `LOCAL_PROMPT` (instructions, verdict contract, base/head IDs, changed-file scope, diff, and any needed context) through a private temporary file on stdin. No patch, file list, or source text goes in argv, and no shell tool is added. Never replace the patch with a summary or truncate it to fit.
 
-Before **each subprocess invocation**, after constructing the full payload, run this block in the invocation's shell. It accepts at most **8 MiB (8,388,608 bytes)** — a transport safety bound, not a promise about model context. A missing/empty payload, failed write/count, or larger input is `STATUS=no-verdict`; return to the caller without launching. Required reviewers remain unsatisfied; `~opt` only excuses inconclusive results, never turns them into clean reviews. If a verified CLI/provider has a smaller input limit, enforce that too; never silently accept incomplete coverage.
+Before each subprocess invocation, after constructing the full payload, run this block in the launch command. It accepts at most **8 MiB (8,388,608 bytes)** — a transport safety bound, not a promise about model context. A missing/empty payload, failed write/count, or larger input is `STATUS=no-verdict`; return to the caller without launching. Required reviewers remain unsatisfied; `~opt` only excuses inconclusive results, never turns them into clean reviews. If a verified CLI/provider has a smaller input limit, enforce that too; never silently accept incomplete coverage.
 
 ```bash
 # The verdict schema for --json-schema: either a clean verdict with no findings, or one or more complete findings.
@@ -54,9 +54,9 @@ if [ "$REVIEW_AGENT" = claude ] && ! prepare_claude_review_input; then
 fi
 ```
 
-`mktemp` creates the input with owner-only permissions. Keep the file until the reviewer exits, including in the background. Do not read the payload back into an argv string or `eval` it. The invocation redirects the file itself, so it uses Step 2's ordinary (non-`cmd`) timed branch.
+`mktemp` creates the input with owner-only permissions. Keep the file until the reviewer exits, including in the background, and print its path if a later call has to run the cleanup below. Do not read the payload back into an argv string or `eval` it. The invocation redirects the file itself, so it uses the runner's plain launch form (no stdin pipe); the redirect applies to the runner script, which hands that stdin to the CLI.
 
-**Claude input cleanup** — after Step 2's foreground exit-code capture or background done-marker read, before handling any success, timeout, CLI-error, or verdict-parser result, run:
+**Claude input cleanup** — after Step 2 has its exit code (a foreground launch's exit, or the runner's `wait`), before handling any success, timeout, CLI-error, or verdict-parser result, run:
 
 ```bash
 if [ "$REVIEW_AGENT" = claude ] && [ -n "${CLAUDE_REVIEW_INPUT:-}" ]; then

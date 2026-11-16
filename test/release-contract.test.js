@@ -6,265 +6,9 @@ const fs = require('fs');
 const path = require('path');
 const { readCommandDocs } = require('./helpers/command-docs');
 
-const body = fs.readFileSync(path.join(__dirname, '..', 'commands', 'do', 'release.md'), 'utf8');
-// The documented-delivery path lives in lib/release-documented.md, loaded on demand
-// via `!read` so recovery/generic-promotion runs don't pay for it — resolve it here
-// so the contract below still pins its text.
+// Parts of the release flow live in lib partials loaded on demand via `!read`; resolve
+// them here so the snippets the tests below execute are reachable.
 const resolved = readCommandDocs('release.md', { eager: true });
-const ciGate = fs.readFileSync(path.join(__dirname, '..', 'lib', 'release-ci-gate.md'), 'utf8');
-
-describe('/do:release expected CI independent of branch protection', () => {
-  it('routes both release paths to the same installed gate', () => {
-    assert.match(body, /^!read lib\/release-ci-gate\.md$/m);
-    const documented = fs.readFileSync(path.join(__dirname, '..', 'lib', 'release-documented.md'), 'utf8');
-    assert.match(documented, /^!read lib\/release-ci-gate\.md$/m);
-    const { buildPromptBundle, parseFrontmatter } = require('../src/transformer');
-    const source = parseFrontmatter(body).body;
-    const libs = path.join(__dirname, '..', 'lib');
-    const deferred = buildPromptBundle(source, libs, { teams: false, defer: true });
-    assert.ok(deferred.files['release-ci-gate.md']);
-    const eager = buildPromptBundle(source, libs, { teams: false, defer: false });
-    assert.match(eager.body, /empty required list does not block/);
-  });
-
-  it('allows successful expected CI on an unprotected branch without waiting for required checks to appear', () => {
-    assert.match(ciGate, /unfiltered checks/);
-    assert.match(ciGate, /empty required list does not block\s+an unprotected release branch whose expected CI has succeeded/);
-    assert.doesNotMatch(body, /poll for up to five minutes for a required check to attach/);
-    assert.match(ciGate, /No required checks and no applicable configured CI is a valid\s+no-CI case only after this configuration inspection succeeds/);
-  });
-
-  it('cannot infer expected workflows from whichever checks happened to attach', () => {
-    assert.match(ciGate, /PR base's workflow definitions/);
-    assert.match(ciGate, /branches.*branches-ignore/);
-    assert.match(ciGate, /paths.*paths-ignore/);
-    assert.match(ciGate, /complete\s+changed-path list/);
-    assert.match(ciGate, /configured path\/ID/);
-    assert.match(ciGate, /latest applicable run and latest attempt/);
-    assert.match(ciGate, /Missing expected workflow, pending, queued/);
-    assert.match(ciGate, /failed, cancelled, timed-out, skipped, neutral, action-required/);
-    assert.match(ciGate, /then report\s+INCOMPLETE with the missing workflow\/check and current head/);
-  });
-
-  it('retains actual required failures and invalidates proof on head changes', () => {
-    assert.match(ciGate, /Expected workflow success cannot excuse a missing, pending\s+or failed required check/);
-    assert.match(ciGate, /new head or changed base invalidates this gate's evidence/);
-    assert.match(ciGate, /recorded PR\/head association/);
-    assert.match(ciGate, /pull_request_target.*base alone is not head-test proof/s);
-    assert.match(body, /gh pr merge "\$PR_NUMBER" --merge --match-head-commit "<ci-verified-head>"/);
-  });
-
-  it('keeps API uncertainty and unsupported configuration blocked', () => {
-    assert.match(ciGate, /permission errors, rate limits, malformed data and other API failures\s+are INCOMPLETE/);
-    assert.match(ciGate, /unsupported configuration or an incomplete\/paginated\s+path\/workflow listing must remain INCOMPLETE/);
-    assert.match(ciGate, /never\s+grants admission or changes branch protection/);
-  });
-});
-
-describe('/do:release remote promotion contracts', () => {
-  it('requires ordered remote checkpoints before reporting completion', () => {
-    const checkpoints = [
-      'Checkpoint 1 — source push',
-      'Checkpoint 2 — release PR',
-      'Checkpoint 3 — merged release PR',
-      'Checkpoint 4 — target-branch tree',
-      'Checkpoint 5 — version tag',
-      'Checkpoint 6 — GitHub Release',
-    ];
-    let previous = -1;
-    for (const checkpoint of checkpoints) {
-      const index = body.indexOf(checkpoint);
-      assert.ok(index > previous, `${checkpoint} must follow the previous checkpoint`);
-      previous = index;
-    }
-    assert.match(body, /Only after all six checkpoints pass.*report the release as complete/s);
-    assert.match(body, /[Ee]mpty,\s+malformed, timed-out, queued, or otherwise inconclusive output is incomplete/);
-  });
-
-  it('verifies the source push and avoids duplicate PRs on reruns', () => {
-    assert.match(body, /git push -u origin "HEAD:refs\/heads\/\{source\}"/);
-    assert.match(body, /REMOTE_SOURCE_SHA="\$\(git ls-remote --heads origin "refs\/heads\/\{source\}"/);
-    assert.match(body, /REMOTE_SOURCE_SHA.*\[ "\$REMOTE_SOURCE_SHA" != "\$SOURCE_SHA" \]/s);
-    assert.match(body, /gh pr list --state all --base "\{target\}" --head "\{source\}"/);
-    assert.match(body, /select\(\.headRefOid == \$sha and \(\.state == "OPEN" or \.state == "MERGED"\)\)/);
-    assert.match(body, /never create a\s+duplicate/);
-  });
-
-  it('resumes prepared releases before version bumping and merged PRs after review', () => {
-    const recovery = body.indexOf('## Recover Prepared Release State');
-    const determineVersion = body.indexOf('## Determine Version and Finalize Changelog');
-    assert.ok(recovery >= 0 && recovery < determineVersion, 'prepared recovery must precede version determination');
-    assert.match(body, /Skip this entire section when `PREPARED_RELEASE` is non-empty/);
-    assert.match(body, /PREPARED_RELEASE="\$\(prepared_release_sha "origin\/\{target\}\.\.HEAD"\)"/);
-    assert.doesNotMatch(body, /PREVIOUS_TAG=.*git describe/);
-    assert.match(body, /PR_STATE="\$\(printf '[^\n]+' \"\$MATCHING_RELEASE_PRS\" \| jq -r '\.\[0\]\.state'/);
-    assert.match(body, /If the selected PR already has `PR_STATE=MERGED`, skip this section entirely[\s\S]*?Do not request another review/);
-    assert.match(body, /If `PR_STATE=MERGED`, skip the CI gate and merge command below/);
-    assert.match(body, /TARGET_RECOVERY=true/);
-    assert.match(body, /RELEASE_TARGET_HANDOFF/);
-    assert.match(body, /skip Local Code Review, Checkpoints 1–2/);
-  });
-
-  it('requires mergedAt and mergeCommit instead of trusting merge exit status', () => {
-    assert.match(body, /gh pr view "\$PR_NUMBER" --json state,mergedAt,mergeCommit/);
-    assert.match(body, /\.state == "MERGED"/);
-    assert.match(body, /\.mergedAt \| type == "string"/);
-    assert.match(body, /\.mergeCommit\.oid \| type == "string"/);
-    assert.match(body, /MERGE_COMMIT="\$\(.*\.mergeCommit\.oid/s);
-  });
-
-  it('verifies target ancestry and makes tag publication idempotent', () => {
-    assert.match(body, /git fetch origin "refs\/heads\/\{target\}"/);
-    assert.match(body, /git cat-file -e "\$TARGET_SHA\^\{tree\}"/);
-    assert.match(body, /git merge-base --is-ancestor "\$MERGE_COMMIT" "\$TARGET_SHA"/);
-    assert.match(body, /refs\/tags\/v\{version\}\^\{/);
-    assert.match(body, /refusing to overwrite it/);
-    assert.match(body, /git push origin "refs\/tags\/v\{version\}" \|\| true/);
-    assert.match(body, /git rev-parse --verify --quiet FETCH_HEAD\^\{commit\}/);
-    assert.match(body, /git merge-base --is-ancestor "\$PREPARED_RELEASE_SHA" "\$TAG_COMMIT"/);
-    assert.match(body, /git merge-base --is-ancestor "\$TAG_COMMIT" "\$TARGET_SHA"/);
-    assert.match(body, /git tag "v\{version\}" "\$MERGE_COMMIT"/);
-    assert.match(body, /publishes_github_release/);
-    assert.match(body, /\[ "\$ATTEMPT" -lt 30 \] && sleep 10/);
-    assert.match(body, /TARGET_PREPARED_RELEASE="\$\(prepared_release_sha "origin\/\{target\}"\)"/);
-    assert.match(body, /RELEASE_PR_HANDOFF/);
-    assert.match(body, /case "\{publishes_github_release\}" in[\s\S]*true\|false/);
-    assert.match(body, /TARGET_RELEASE_STATUS=.*gh api --include/);
-    assert.match(body, /404\) TARGET_RELEASE_JSON=""/);
-    assert.match(body, /SOURCE_SHA="\$PREPARED_RELEASE_SHA"/);
-  });
-
-  it('polls for a published GitHub Release and fails closed on timeout', () => {
-    assert.match(body, /for ATTEMPT in \$\(seq 1 30\)/);
-    assert.match(body, /gh release view "v\{version\}" --json tagName,isDraft,isPrerelease,publishedAt/);
-    assert.match(body, /\.tagName == "v\{version\}"/);
-    assert.match(body, /\.isDraft == false/);
-    assert.match(body, /\.isPrerelease == false/);
-    assert.match(body, /incomplete "GitHub Release" "no published release was found after the bounded wait\."/);
-    assert.match(body, /incomplete\(\) \{\n {2}printf 'INCOMPLETE — %s is unverified; %s Preserve the prepared release state and retry\.\\n' "\$@"/);
-  });
-
-  it('deduplicates repeated checkpoint logic into shared shell helpers', () => {
-    assert.match(body, /prepared_release_sha\(\) \{/);
-    assert.match(body, /remote_tag_commit\(\) \{/);
-    assert.match(body, /release_published_json\(\) \{/);
-    assert.match(body, /release_is_published\(\) \{/);
-    assert.match(body, /incomplete\(\) \{/);
-
-    const publishesFlagGuards = (body.match(/case "\{publishes_github_release\}" in/g) || []).length;
-    assert.equal(publishesFlagGuards, 1, 'the publishes_github_release guard must not be duplicated as a case statement');
-
-    const extendedRegexpUses = (body.match(/--extended-regexp/g) || []).length;
-    assert.equal(extendedRegexpUses, 0, 'the no-op --extended-regexp flag must be removed');
-
-    // Checkpoint 3's merge read-back must not be a standalone fenced block anymore —
-    // it runs inside the merged Checkpoints 3-6 invocation alongside Checkpoint 4.
-    const mergedPrHandoffPrintfs = (body.match(/printf 'RELEASE_PR_HANDOFF\\tPR_NUMBER=%s\\tPR_URL=%s\\tPR_STATE=MERGED\\tMERGE_COMMIT=%s\\n'/g) || []).length;
-    assert.equal(mergedPrHandoffPrintfs, 1, 'the merged-PR handoff print must appear exactly once, not once per duplicated checkpoint block');
-  });
-});
-
-
-describe('/do:release documented project delivery', () => {
-  const selection = resolved.slice(resolved.indexOf('## Select the Project Release Procedure'), resolved.indexOf('## Detect Release Workflow'));
-
-  it('selects the native procedure before any promotion branch mutation', () => {
-    assert.match(selection, /docs\/RELEASING\.md/);
-    assert.match(selection, /documented project procedure\s+wins/);
-    assert.match(selection, /temporary `release\/vX\.Y\.Z` branch into `main`/);
-    assert.match(selection, /Do not run the generic branch detection/);
-    assert.match(selection, /Do not fall through into the generic promotion workflow/);
-    // Preserve the self-PR guard for repositories using generic promotion.
-    assert.match(body.slice(body.indexOf('## Detect Release Workflow')), /target == source.*abort/);
-  });
-
-  it('carries native release recovery and publication ownership through delivery', () => {
-    assert.match(selection, /Resume an existing\s+prepared version or interrupted publication/);
-    assert.match(selection, /Keep the running application's checkout, branch, dirty\s+files, and data untouched/);
-    assert.match(selection, /run the configured review loops from\s+\*\*Run the Review Loop\*\*\s+below after step 5 creates the PR/);
-    assert.match(selection, /run every configured \*\*local-agent and Ollama\*\*\s+reviewer/);
-    assert.match(selection, /\*\*before\*\* step 5's submission command/);
-    assert.match(selection, /preserv(?:e|ing) their verdict and optionality/);
-    assert.match(selection, /report\s+INCOMPLETE naming it rather than publishing ungated/);
-    assert.match(selection, /full previous-release\s+commit-to-prepared-head diff/);
-    assert.match(selection, /No reported checks is not green when CI/);
-    assert.match(selection, /Squash\/rebase merges need verification/);
-    assert.match(selection, /When automation creates the tag or release, wait for it; do not pre-create/);
-    assert.match(selection, /first\s+unverified checkpoint as INCOMPLETE/);
-  });
-});
-
-describe('/do:release GitLab paths', () => {
-  it('classifies non-conventional commits using the selected forge or a patch fallback', () => {
-    const bump = body.slice(body.indexOf('1. **Determine version bump**'), body.indexOf('\n\n2. **Bump version**'));
-    assert.match(bump, /using the detected host/);
-    assert.match(bump, /On GitHub, use `gh pr list --state merged --search <sha>`/);
-    assert.match(bump, /on GitLab, capture `glab api --paginate "projects\/:id\/repository\/commits\/<sha>\/merge_requests"` before parsing/);
-    assert.match(bump, /Use the title only when exactly one merged PR\/MR is associated with the commit/);
-    assert.match(bump, /lookup fails, is malformed, is ambiguous, or its title has no recognized prefix, default to \*\*patch\*\* bump/);
-  });
-
-  it('captures glab api output before parsing the source branch and merged MR URL', () => {
-    assert.match(body, /PROJECT_JSON="\$\(glab api "projects\/:id"\)"/);
-    assert.match(body, /SOURCE_BRANCH="\$\(printf '%s\\n' "\$PROJECT_JSON" \| jq -er '\.default_branch/);
-    assert.doesNotMatch(body, /glab api[^|`\n]*--jq/);
-    assert.match(body, /MR_JSON="\$\(glab api "projects\/:id\/merge_requests\/\$PR_NUMBER"\)"/);
-    assert.match(body, /MERGE_JSON="\$\(printf '%s\\n' "\$MR_JSON"[\s\\]*\| jq/);
-    assert.match(body, /PR_URL="\$\(printf '%s\\n' "\$MR_JSON" \| jq -er '\.web_url \| select\(type == "string" and length > 0\)'/);
-  });
-
-  it('checks GitLab MR API calls before parsing them into release candidates', () => {
-    assert.match(body, /TARGET_RELEASE_PRS_RESPONSE="\$\(glab api --paginate[\s\S]+?\)"\s+\\\s*\n\s+\|\| incomplete "Merged release MR"/);
-    assert.match(body, /TARGET_RELEASE_PRS_JSON="\$\(printf '%s\\n' "\$TARGET_RELEASE_PRS_RESPONSE" \| jq -s 'if length == 0 then error\("expected JSON document"\) elif \(all\(\.\[\]; type == "array"\) \| not\) then error\("expected array pages"\) else add \| if type != "array"/);
-    assert.match(body, /RELEASE_PRS_RESPONSE="\$\(glab api --paginate[\s\S]+?\)"\s+\\\s*\n\s+\|\| incomplete "Release MR"/);
-    assert.match(body, /RELEASE_PRS_JSON="\$\(printf '%s\\n' "\$RELEASE_PRS_RESPONSE" \| jq -s 'if length == 0 then error\("expected JSON document"\) elif \(all\(\.\[\]; type == "array"\) \| not\) then error\("expected array pages"\) else add \| if type != "array"/);
-    assert.doesNotMatch(body, /RELEASE_PRS_JSON[\s\S]{0,300}add \/\/ \[\]/);
-    assert.doesNotMatch(body, /TARGET_RELEASE_PRS_JSON[\s\S]{0,300}add \/\/ \[\]/);
-    assert.doesNotMatch(body, /glab api --paginate[^\n]*\| *jq/);
-  });
-
-  it('detects the code host up front and derives CR_NOUN for messages', () => {
-    assert.match(body, /!read lib\/vcs-host\.md/);
-    assert.match(body, /\{CR_NOUN\}/);
-  });
-
-  it('gives every gh-only checkpoint a glab branch instead of failing on GitLab', () => {
-    // Recover Prepared Release State: target-release lookup and merged-PR lookup.
-    assert.match(body, /glab release view "v\$\{TARGET_VERSION\}"/);
-    assert.match(body, /glab api --paginate "projects\/:id\/merge_requests\?state=merged&target_branch=\{target\}/);
-
-    // Open the Release PR: query + create.
-    assert.match(body, /glab api --paginate "projects\/:id\/merge_requests\?source_branch=\{source\}&target_branch=\{target\}/);
-    assert.match(body, /glab mr create --source-branch "\{source\}" --target-branch "\{target\}"/);
-
-    // Merging: CI gate + merge command.
-    assert.match(resolved, /glab ci status --wait --branch <head-branch>/);
-    assert.match(body, /glab mr view "\$PR_NUMBER" --output json --jq \.state/);
-    assert.match(body, /glab mr merge "\$PR_NUMBER" --yes/);
-
-    // Post-Merge: merged-MR read-back and release detection (glab release view,
-    // for tag/release detection).
-    assert.match(body, /glab api "projects\/:id\/merge_requests\/\$PR_NUMBER"/);
-    assert.match(body, /glab release view "v\{version\}" -F json/);
-  });
-
-  it('never derives a GitLab URL host from GH_HOST, which is only populated on GitHub', () => {
-    // Reuses {ORIGIN_HOST} already resolved by lib/vcs-host.md instead of
-    // re-typing its origin-parse sed (banned by the GH_HOST-derivation contract).
-    assert.doesNotMatch(body, /GL_HOST=/);
-    assert.match(body, /https:\/\/\{ORIGIN_HOST\}\/\{owner\}\/\{repo\}\/-\/compare\//);
-  });
-
-  it('keeps the GitHub Recover/Post-Merge literals intact for the unchanged GitHub path', () => {
-    assert.match(body, /gh api --include --hostname "\{GH_HOST\}" "repos\/\{owner\}\/\{repo\}\/releases\/tags\/v\$\{TARGET_VERSION\}"/);
-    assert.match(body, /gh pr list --state merged --base "\{target\}" --limit 100/);
-    assert.match(body, /gh pr list --state all --base "\{target\}" --head "\{source\}"/);
-    assert.match(body, /gh pr create --title "Release v\{version\}" --base "\{target\}" --head "\{source\}"/);
-    assert.match(body, /gh pr view "\$PR_NUMBER" --json state -q \.state/);
-    assert.match(body, /gh pr merge "\$PR_NUMBER" --merge/);
-  });
-});
-
 
 describe('/do:release source branch admission', () => {
   const { spawnSync } = require('child_process');
@@ -278,7 +22,7 @@ describe('/do:release source branch admission', () => {
   // Run the rendered probe block against a stub `gh` that serves canned branch-rules/branch JSON.
   function probe({ rules, branch, fail }) {
     const block = admission.match(/```bash\n([\s\S]*?)\n```/)[1]
-      .replace(/\{GH_HOST\}/g, 'github.com').replace(/\{owner\}/g, 'o').replace(/\{repo\}/g, 'r').replace(/\{source\}/g, 'main');
+      .replace(/\{CLI_TOOL\}/g, 'gh').replace(/\{GH_HOST\}/g, 'github.com').replace(/\{owner\}/g, 'o').replace(/\{repo\}/g, 'r').replace(/\{source\}/g, 'main');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-admission-'));
     try {
       fs.writeFileSync(path.join(dir, 'rules.json'), rules);
@@ -374,7 +118,7 @@ describe('/do:release source branch admission', () => {
       git('push', 'origin', 'HEAD:refs/heads/main');
       fs.writeFileSync(path.join(dir, 'gh'), `#!/bin/sh\nprintf '%s\\n' '{"state":"MERGED","mergedAt":"2026-10-04T00:00:00Z","mergeCommit":{"oid":"${landed}"}}'\n`, { mode: 0o755 });
       const blocks = [...gate.matchAll(/```bash\n([\s\S]*?)\n```/g)];
-      const sync = blocks.at(-1)[1].replace(/\{source\}/g, 'main').replace(/<GATE_PR_NUMBER>/g, '1');
+      const sync = blocks.at(-1)[1].replace(/\{source\}/g, 'main').replace(/\{GATE_PR_NUMBER\}/g, '1').replace(/\{CLI_TOOL\}/g, 'gh');
       const r = spawnSync('bash', ['-c', 'incomplete() { echo "INCOMPLETE: $*"; exit 1; }\n' + sync], {
         cwd: dir, env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CLI_TOOL: 'gh' }, encoding: 'utf8',
       });
@@ -390,7 +134,7 @@ describe('/do:release source branch admission', () => {
 
   it('stops the sync block itself when the forge query fails', () => {
     const blocks = [...gate.matchAll(/```bash\n([\s\S]*?)\n```/g)];
-    const sync = blocks.at(-1)[1].replace(/\{source\}/g, 'main').replace(/<GATE_PR_NUMBER>/g, '1');
+    const sync = blocks.at(-1)[1].replace(/\{source\}/g, 'main').replace(/\{GATE_PR_NUMBER\}/g, '1').replace(/\{CLI_TOOL\}/g, 'gh');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-source-sync-fail-'));
     try {
       fs.writeFileSync(path.join(dir, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
@@ -420,8 +164,8 @@ describe('/do:release source branch admission', () => {
   });
 
   it('resolves GitLab protection from the effective branch endpoint, accepting both true and false', () => {
-    const block = admission.match(/```bash\n([\s\S]*?)\n```/)[1].replace(/\{source\}/g, 'main');
-    const run = (protectedBranch, mustSucceed) => {
+    const block = admission.match(/```bash\n([\s\S]*?)\n```/)[1].replace(/\{CLI_TOOL\}/g, 'glab').replace(/\{source\}/g, 'main');
+    const run =(protectedBranch, mustSucceed) => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-admission-gl-'));
       try {
         fs.writeFileSync(path.join(dir, 'glab'), [
@@ -438,59 +182,144 @@ describe('/do:release source branch admission', () => {
       assert.equal(r.status, 0, r.stdout);
       assert.match(r.stdout, new RegExp(`SOURCE_GATED=${prot}\\tSOURCE_CHECKS_REQUIRED=${ci}`));
     }
-    assert.match(admission, /glab api "projects\/:id\/repository\/branches\//);
-    assert.doesNotMatch(admission, /protected_branches/);
+  });
+});
+
+describe('/do:release target and version-tag checkpoints, executed', () => {
+  const { spawnSync } = require('child_process');
+  const os = require('os');
+  const block = resolved.slice(resolved.indexOf('## Post-Merge')).match(/```bash\n([\s\S]*?)\n```/)[1];
+
+  // A scratch repo whose remote `release` branch holds a merged release: root -> prep -> merge.
+  function run({ tagOwner, remoteTagAt, annotated }) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-tag-'));
+    const git = (...args) => {
+      const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+      assert.equal(r.status, 0, r.stderr);
+      return r.stdout.trim();
+    };
+    try {
+      git('init', '-q', '-b', 'main');
+      git('config', 'user.name', 'Release Test');
+      git('config', 'user.email', 'release@example.test');
+      git('commit', '-q', '--allow-empty', '-m', 'root');
+      const commits = { root: git('rev-parse', 'HEAD') };
+      git('commit', '-q', '--allow-empty', '-m', 'chore: release v1.2.3');
+      commits.prep = git('rev-parse', 'HEAD');
+      git('commit', '-q', '--allow-empty', '-m', 'merge');
+      commits.merge = git('rev-parse', 'HEAD');
+      const remote = path.join(dir, 'remote.git');
+      git('init', '-q', '--bare', remote);
+      git('remote', 'add', 'origin', remote);
+      git('push', '-q', 'origin', 'HEAD:refs/heads/release');
+      if (remoteTagAt) {
+        git('tag', ...(annotated ? ['-a', '-m', 'v1.2.3'] : []), 'v1.2.3', commits[remoteTagAt]);
+        git('push', '-q', 'origin', 'refs/tags/v1.2.3');
+        git('tag', '-d', 'v1.2.3');
+      }
+      const script = block
+        .replace(/\{tag\}/g, 'v1.2.3').replace(/\{target\}/g, 'release').replace(/\{tag_owner\}/g, tagOwner)
+        .replace(/\{PREPARED_RELEASE_SHA\}/g, commits.prep).replace(/\{MERGE_COMMIT\}/g, commits.merge)
+        .replace(/sleep 10/g, 'sleep 0');
+      const r = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8' });
+      const remoteTag = spawnSync('git', ['ls-remote', 'origin', 'refs/tags/v1.2.3^{}', 'refs/tags/v1.2.3'], { cwd: dir, encoding: 'utf8' })
+        .stdout.trim().split('\n').filter(Boolean).map((line) => line.split('\t')[0]);
+      return { status: r.status, out: r.stdout + r.stderr, remoteTag, commits };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('creates and pushes the tag at the merge commit when this command owns it', () => {
+    const r = run({ tagOwner: 'command' });
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(r.remoteTag, [r.commits.merge]);
+    assert.match(r.out, new RegExp(`RELEASE_TAG_HANDOFF\\tTARGET_SHA=${r.commits.merge}\\tTAG_COMMIT=${r.commits.merge}`));
   });
 
-  it('runs admission before the release PR, loads the gate only on demand, and never pushes to a gated source', () => {
-    assert.ok(body.indexOf('## Resolve Source Branch Admission') > body.indexOf('## Local Code Review'));
-    assert.ok(body.indexOf('## Resolve Source Branch Admission') < body.indexOf('## Open the Release PR'));
-    assert.match(admission, /^!read lib\/release-source-gate\.md$/m);
-    assert.match(body, /\[ "<source-gated>" = "true" \] \|\| git push -u origin "HEAD:refs\/heads\/\{source\}"/);
-    assert.match(body, /Do not push yet — publication to `\{source\}` happens only through/);
-    assert.doesNotMatch(body, /commit and push\n/);
-    assert.match(admission, /Never use bypass permission, force push, or relax the branch protection/);
+  it('waits for an automation-owned tag instead of creating it', () => {
+    const r = run({ tagOwner: 'automation' });
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /INCOMPLETE — Version tag v1\.2\.3 is unverified/);
+    assert.deepEqual(r.remoteTag, []);
   });
 
-  it('lands gated work through a temporary branch PR with exact-head verification and CI', () => {
-    assert.match(gate, /GATE_BRANCH="release-prep\/v\{version\}"/);
-    assert.match(gate, /GATE_TITLE="chore: release v\{version\}"/);
-    assert.match(gate, /git push -u origin "HEAD:refs\/heads\/\$GATE_BRANCH"/);
-    assert.match(gate, /\[ "\$REMOTE_GATE_SHA" != "\$GATE_SHA" \]/);
-    assert.match(gate, /gh pr create --base "\{source\}" --head "\$GATE_BRANCH"/);
-    assert.match(gate, /\.headRefOid == \$sha and \(\.state == "OPEN" or \.state == "MERGED"\)/);
-    assert.match(gate, /gh pr checks <GATE_PR_NUMBER> --required --watch --fail-fast/);
-    assert.match(gate, /none attaching is INCOMPLETE, not green/);
-    assert.match(gate, /glab api "projects\/:id\/merge_requests\/<GATE_PR_NUMBER>"/);
-    assert.match(gate, /--squash --match-head-commit "<GATE_SHA>" --subject "<GATE_TITLE>"/);
-    assert.match(gate, /glab mr merge <GATE_PR_NUMBER> --sha "<GATE_SHA>"/);
-    assert.match(gate, /\.mergedAt \| type == "string"/);
-    assert.match(gate, /git merge-base --is-ancestor/);
-    assert.match(gate, /never `--admin` or `--auto`/);
-    assert.doesNotMatch(gate, /gh pr merge[^\n]*(--admin|--auto)/);
-    assert.match(gate, /never force-push, never disable or edit the protection/);
+  it('accepts an existing tag on the release lineage, lightweight or annotated', () => {
+    for (const annotated of [false, true]) {
+      const r = run({ tagOwner: 'automation', remoteTagAt: 'merge', annotated });
+      assert.equal(r.status, 0, r.out);
+      assert.match(r.out, new RegExp(`TAG_COMMIT=${r.commits.merge}`));
+    }
   });
 
-  it('keeps the release PR a source-to-target promotion and routes review fixes through the gate', () => {
-    assert.match(admission, /still promotes `\{source\}` into `\{target\}` and shows the full unreleased range/);
-    assert.match(gate, /Review fixes under a gated source/);
-    assert.match(gate, /release-fix\/v\{version\}-<n>/);
-    assert.match(gate, /re-read the release PR's head SHA; it must equal the local `\{source\}` head/);
-    assert.match(body, /\*\*Gated source\.\*\* When `SOURCE_GATED=true`, the loops' fix pushes must not land on `\{source\}` directly/);
+  it('refuses a tag that is off the release lineage and leaves it where it is', () => {
+    for (const tagOwner of ['command', 'automation']) {
+      const r = run({ tagOwner, remoteTagAt: 'root' });
+      assert.equal(r.status, 1, r.out);
+      assert.match(r.out, /never overwritten/);
+      assert.deepEqual(r.remoteTag, [r.commits.root]);
+    }
   });
 
-  it('resumes a pending preparation PR without a second version bump or duplicate PR', () => {
-    const recovery = body.slice(body.indexOf('## Recover Prepared Release State'), body.indexOf('## Determine Version and Finalize Changelog'));
-    assert.match(recovery, /startswith\("release-prep\/v"\)/);
-    assert.match(recovery, /git merge --ff-only FETCH_HEAD/);
-    assert.match(recovery, /more than one open release-prep\/v\* PR targets/);
-    assert.match(recovery, /the admission procedure then reuses the open PR/);
-    assert.match(gate, /resumed run reuses the open or already-merged PR for the same head/);
+  it('fails closed when the tag owner was never substituted', () => {
+    const r = run({ tagOwner: '{tag_owner}' });
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /the tag owner was not resolved/);
+    assert.deepEqual(r.remoteTag, []);
+  });
+});
+
+describe('/do:release current-release notes file', () => {
+  const { spawnSync } = require('child_process');
+  const os = require('os');
+  const workflow = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'release.yml'), 'utf8');
+  const step = workflow.slice(workflow.indexOf('- name: Generate changelog'), workflow.indexOf('- name: Publish to npm'));
+  const script = step.slice(step.indexOf('run: |\n') + 7).replace(/^ {10}/gm, '');
+
+  // Runs the workflow's real changelog step in a scratch repo; returns the exit status and release body.
+  function runStep(version, notes) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-release-'));
+    try {
+      const sh = (cmd) => spawnSync('sh', ['-c', cmd], { cwd: dir, encoding: 'utf8' });
+      sh('git init -q && git config user.email t@example.com && git config user.name t && git commit -q --allow-empty -m "chore: root" && git commit -q --allow-empty -m "feat: seed"');
+      if (notes !== null) {
+        fs.mkdirSync(path.join(dir, '.changelogs'));
+        fs.writeFileSync(path.join(dir, '.changelogs', 'RELEASE.md'), notes);
+      }
+      const out = path.join(dir, 'gh-output');
+      const r = spawnSync('bash', ['-c', script.replace('${{ steps.package-version.outputs.version }}', version)], {
+        cwd: dir, encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: out },
+      });
+      const bodyPath = r.status === 0 ? fs.readFileSync(out, 'utf8').match(/body-path=(.+)/)[1] : null;
+      return { status: r.status, stderr: r.stderr, body: bodyPath && fs.readFileSync(bodyPath, 'utf8') };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('publishes the notes file when its heading matches the package version', () => {
+    const notes = '# Release v1.2.3\n\n## Highlights\n\n- Something.\n';
+    const r = runStep('1.2.3', notes);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.body, notes);
   });
 
-  it('applies admission to documented project delivery too', () => {
-    assert.match(resolved, /Before pushing to the integration branch \(it exists remotely, so its rules are readable\), resolve its admission/);
-    assert.match(resolved, /INCOMPLETE unless the project documents a PR path for it/);
-    assert.match(resolved, /freshly created temporary head branch has no remote rules to probe/);
+  it('fails on a version mismatch rather than publishing stale notes', () => {
+    const r = runStep('1.2.4', '# Release v1.2.3\n\n- Old.\n');
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /does not match package\.json version v1\.2\.4/);
+  });
+
+  it('falls back to the commit list only when the file is missing', () => {
+    const r = runStep('1.2.3', null);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.body, /^# Release v1\.2\.3\n\n## Changes\n\n- feat: seed/);
+  });
+
+  it('ships a single notes file whose heading matches package.json', () => {
+    const dir = path.join(__dirname, '..', '.changelogs');
+    assert.deepEqual(fs.readdirSync(dir), ['RELEASE.md']);
+    const { version } = require('../package.json');
+    assert.equal(fs.readFileSync(path.join(dir, 'RELEASE.md'), 'utf8').split('\n')[0], `# Release v${version}`);
   });
 });

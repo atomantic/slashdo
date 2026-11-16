@@ -11,84 +11,36 @@ Thanks for considering a contribution. slashdo is a small, actively-maintained p
 
 - `commands/do/*.md` — the source of truth for every `/do:*` command, written in Claude Code's native format
 - `lib/*.md` — shared partials referenced from multiple commands
+  - **A program goes in a `lib/*.sh` script, not in a partial's bash block.** `lib/local-cli-runner.sh` is the example: its partial holds only the contract. Cite a script only as `bash ~/.claude/lib/<name>.sh <args>` (always through `bash`, so the executable bit never matters). Every environment installs it verbatim and rewrites that path to the installed copy: the lib directory for Claude Code and OpenCode, and each skill's own `lib/` for the Agent Skills environments. Keep the script free of `~/.claude` paths.
   - **Include a partial with `` !`cat ~/.claude/lib/<name>.md` `` only when every run needs it on the default path.** Put `!read lib/<name>.md` on its own line at the step that needs it when the content is branch-only (flag-gated, issues-mode-only, one of several mutually exclusive backends or lenses). A deferred read is not free — when the step runs, the agent pays for the file plus a tool call and line-number overhead (~7%) — so it only saves context when the step is usually skipped. Say in the sentence before the directive exactly when it applies.
 - **Any command with a genuine runtime dependency on another command must cite it, not just mention it in prose.** Cite the required command with `` ~/.claude/commands/do/<name>.md `` for an execution instruction (e.g. "Run the workflow defined in `~/.claude/commands/do/goals.md`"), or `[label](<name>.md#anchor)` for a link to one of its sections — never hand-roll a host-specific path, and never rely on a bare `` `/do:<name>` `` mention or verb phrase like "delegate to"/"invoke" without one of these two forms nearby. The transformer resolves both forms per environment (`src/transformer.js`'s `resolveCommandExecRef`/`resolveCommandSiblingRef`) and uses the same two forms (`extractCommandDependencies`) to auto-install the dependency on a filtered install and to refuse an uninstall that would strand it. This applies whether the dependency is a **wrapper command** that delegates its entire workflow (`do:prd`, `do:simplify`, `do:pr-better`) or a command that merely invokes another as one step of a larger, otherwise-independent procedure (e.g. `do:next` citing `do:pr` for its ship phase) — the citation form is what makes the dependency machine-checkable either way. A command that only *mentions* another (e.g. contrasting itself with it, or referencing a flag the other command also accepts) does not need a citation — only a command whose own run cannot complete without the other installed does.
 - `src/*.js` — the installer/transformer that converts `commands/do/` and `lib/` into each target environment's native format (Claude Code, OpenCode, Antigravity CLI, Codex, Grok Build)
 - `src/settings-hooks.js` — the single implementation of the `~/.claude/settings.json` hook/statusline mutation, shared by the npm installer and (fetched at install time) by `install.sh`/`uninstall.sh`; keep it dependency-free so the curl path can fetch it alone
-- `install.sh` / `uninstall.sh` — the no-npm curl-based install path; their `COMMANDS`/`LIBS` arrays must stay in sync with `commands/do/` and `lib/` (`test/curl-installer-allowlist.test.js` enforces this in CI)
+- `install.sh` / `uninstall.sh` — the no-npm curl-based install path. They have no node, so the files they install and remove come from `install-manifest.txt`, a plain-text list generated from `commands/do/`, `lib/` and `hooks/` by `node scripts/build-install-manifest.js`. Its `retired-*` sections carry forward every file an earlier release shipped, so uninstall and upgrade still clean it up; the generator adds to them and never prunes them. `test/curl-installer-allowlist.test.js` fails in CI when the committed manifest is out of date.
+- `scripts/` — repo maintenance scripts; not shipped in the npm package
 - `test/*.test.js` — the test suite, run with `node --test`
 
 ### Shared `better-*` pipeline placeholders
 
-`/do:better` and `/do:better-swift` share Phases 3–7 verbatim via
-`lib/better-*.md` (see `lib/better-pipeline-inputs.md` and
-`lib/swift-pipeline-inputs.md`); each calling command supplies the differences
-as `{PLACEHOLDER}` values in its own `## Shared Pipeline Inputs` section. Each
-shared partial's `### Inputs` block only lists which placeholders that phase
-reads — this is where their meanings and examples live, so the runtime prompt
-doesn't re-teach them on every run:
+`/do:better` and `/do:better-swift` share Phases 3–7 via `lib/better-*.md`. The shared partials are written in plain language for a single-target run and read only four caller values, which each command defines in its `## Shared Pipeline Inputs` section (`lib/better-pipeline-inputs.md`, `lib/swift-pipeline-inputs.md`):
 
-- `{BRANCH_PREFIX}` — branch namespace, no trailing slash (`better`,
-  `better-swift`); the staging branch is `{BRANCH_PREFIX}/{DATE}`.
-- `{PIPELINE_LABEL}` / `{PIPELINE_TITLE}` — human name used in commit subjects
-  (`better audit`) and the PR body heading (`Better Audit`).
-- `{VERIFY_SCOPE_SUFFIX}` / `{VERIFY_SCOPE_NOTE}` / `{VERIFY_FAILURE_SCOPE}` /
-  `{VERIFY_FAILURE_COMMIT_SLOT}` / `{VERIFY_STATUS_CLAUSE}` — widen a
-  single-target pipeline's build/test/failure/status language to cover
-  multiple targets; all empty for a single-target project. A multi-platform
-  pipeline sets `{VERIFY_SCOPE_SUFFIX}` to ` on ALL supported platforms`
-  (leading space kept), names its platform set in `{VERIFY_SCOPE_NOTE}`, scopes
-  a build failure with `{VERIFY_FAILURE_SCOPE}` (e.g. ` on any platform`), adds
-  a required `{platform} ` slot to the failure-commit subject via
-  `{VERIFY_FAILURE_COMMIT_SLOT}`, and appends a pass/fail sentence via
-  `{VERIFY_STATUS_CLAUSE}`.
-- `{REVIEW_CHECKLIST}` — name of the section (defined inline by the calling
-  command) Phase 4b reviews the remediation diff against.
-- `{SIMPLIFY_ONLY}` — `true` only in a refactor-only run that promised
-  identical behavior; pipelines with no such mode leave it `false`.
-- `{CATEGORY_SLUGS}` / `{CATEGORY_SLUG_RULE}` — the pipeline's branch-slug set,
-  and a mode-dependent narrowing of it (or empty), used where 5a chooses branch
-  names.
-- `{COMMIT_PREFIX_RULE}` — a mode-dependent override of the conventional
-  prefix the per-category commit and PR title take, or empty.
-- `{MULTI_CATEGORY_FILE_EXAMPLE}` — a representative file from this stack that
-  could pick up changes from two categories (e.g. `` `server/index.js` with
-  both security and stack-specific changes ``), used in the file-isolation
-  rule.
-- `{COMPAT_SHIM}` / `{COMPAT_HOST}` — the stack's backward-compatible shim for
-  a symbol moved between branches (`re-export`/`module` for JS/TS,
-  `typealias`/`file` for Swift).
-- `{PR_BODY_SUMMARY_EXTRA}` / `{PR_BODY_EXTRA_SECTIONS}` — extra PR-body lines
-  or `###` sections, or empty (e.g. "Platforms verified: {PLATFORMS}", a
-  "Platform Impact" section).
-- `{CI_FAILURE_CAUSES_EXTRA}` — extra bullet(s) for the CI failure-cause list,
-  or empty (e.g. a JS-only "missing exports" cause, code-signing noise).
-  Lands at column 0, in the bullet list under Phase 5d's CI-fix rule.
-- `{REVIEW_LOOP_EXTRA_INSTRUCTION}` — extra paragraph handed to every Phase 6
-  review sub-agent, or empty (a multi-platform pipeline requires each fix still
-  compiles everywhere).
-- `{REVIEW_STATUS_EXTRA}` — extra line(s) for the interactive review-status
-  prompt, or empty.
-- `{SUMMARY_TABLE_ROWS}` / `{SUMMARY_TABLE_ROW_RULES}` / `{SUMMARY_TABLE_FOOTER}`
-  — the Phase 7 summary table's category rows, the (unprinted) rules for which
-  rows to omit in which mode, and extra printed line(s) under the table.
+- `{BRANCH_PREFIX}` — branch namespace, no trailing slash (`better`, `better-swift`); the staging branch is `{BRANCH_PREFIX}/{DATE}`.
+- `{PIPELINE_TITLE}` — the PR body heading (`Better Audit`).
+- `{REVIEW_CHECKLIST}` — name of the caller's section that Phase 4b reviews the remediation diff against.
+- `{CATEGORY_SLUGS}` — the pipeline's category branch slugs.
 
-Substitution rules (documented once, in `lib/better-verification.md`, and
-referenced from every other partial): an empty value alone on its line drops
-that whole line; an empty value inside a line vanishes in place, collapsing
-the doubled space; a value inside an indented list carries that list's
-indentation on every line.
+Everything else that differs for Swift (all-platform verification, `typealias` as the shim, the extra PR-body section, extra CI causes) is a short prose "Swift deltas" block in `lib/swift-pipeline-inputs.md`, not a token. Add a token only for a value that varies as data; describe a behavioral difference in the caller's deltas instead. `test/better-pipeline-partials.test.js` checks that both commands define the same tokens and that the partials read no token a command does not define.
 
 ## Making a change
 
 1. Fork and clone the repo. There are no npm dependencies to install — the package has none, and the test suite runs on Node's built-in test runner.
 2. Edit the relevant `commands/do/*.md` or `lib/*.md` source file. If you touch environment-specific behavior, wrap it in `<!-- if:teams -->…<!-- else -->…<!-- /if:teams -->` (or the matching capability flag in `src/environments.js`) rather than hard-coding for one environment.
-3. If you add or rename a command or lib file, update the `COMMANDS`/`LIBS` arrays in both `install.sh` and `uninstall.sh` — CI will fail the drift check otherwise.
+3. If you add, rename or delete a command, lib or hook file, run `node scripts/build-install-manifest.js` and commit the updated `install-manifest.txt` (`--check` reports drift without writing). Never edit the manifest by hand or delete its `retired-*` entries. No test lists which libs a command bundles: `test/command-bundle-closure.test.js` checks for every command that each include and citation resolves to a real file and that the generated bundle is exactly what those references reach.
 4. Verify locally:
    - `node bin/cli.js --list` — confirm the command shows up correctly
    - `node bin/cli.js --dry-run` — preview what install would do
    - `npm test` — run the full test suite
-5. If your change affects behavior covered by an existing test, update it; if it adds new behavior worth locking in, add a test under `test/`.
+5. If your change affects behavior covered by an existing test, update it; if it adds new behavior worth locking in, add a test under `test/`. Tests cover the installer/transformer code (`src/`, `bin/`, `hooks/`, `install.sh`/`uninstall.sh`), shell or JS snippets extracted from the prompt files and actually executed, and structural invariants of the prompt files (includes resolve, bundles match their references, the install manifest is current, frontmatter is valid). They do not pin prompt wording: a test that regex-matches the prose of a `commands/do/*.md` or `lib/*.md` file only freezes the text and says nothing about how a model behaves, so do not add one.
 
 ## Releasing
 
@@ -98,7 +50,7 @@ indentation on every line.
 
 **Do not write a changelog entry in your PR.** There is no unreleased/staging changelog file in this repo — no `NEXT.md`, no `## Unreleased` section. **The commit history is the changelog.**
 
-Release notes are rolled up once, at release time: `/do:release` reads `git log {last_tag}..HEAD`, synthesizes it into feature-grouped notes, and writes `.changelogs/v{version}.md` as part of the release PR. `.github/workflows/release.yml` then publishes that file as the GitHub Release body. The `.changelogs/v*.md` files are the archive of past releases — read them, don't hand-edit them.
+Release notes are rolled up once, at release time: `/do:release` reads `git log {last_tag}..HEAD`, synthesizes it into feature-grouped notes, and overwrites `.changelogs/RELEASE.md` with that version's notes as part of the release PR. `.github/workflows/release.yml` then publishes that file as the GitHub Release body and fails if its version heading does not match `package.json`. `RELEASE.md` holds only the latest release; GitHub Releases and git tags are the archive of past ones — don't hand-edit it outside a release.
 
 This is why commit subjects matter (below): a vague subject becomes a vague release note, and nothing downstream can recover the intent.
 
@@ -107,7 +59,7 @@ This is why commit subjects matter (below): a vague subject becomes a vague rele
 - Commit subjects are specific sentences, not vague tags — `fix: guard empty array expansion in review-loop bash 3.2 path`, not `fix bug`.
 - Conventional prefixes (`fix:`, `feat:`, `docs:`, `chore:`, `refactor:`) are used but not strictly enforced by tooling — match the style in `git log`.
 - Keep PRs scoped to one logical change. A doc fix and a behavior change should be separate PRs.
-- CI runs the full test suite, a `shellcheck` pass on `install.sh`/`uninstall.sh`, and validates every command's frontmatter across Node 18/20/22 — make sure it's green before requesting review.
+- CI runs the full test suite, a `shellcheck` pass on `install.sh`/`uninstall.sh`, and validates every command's frontmatter across Node 22, 24 and 26 — make sure it's green before requesting review.
 - No AI-attribution footers or co-author trailers in commits or PR descriptions, regardless of what tooling you used to help write the change.
 
 ## Embedding command prompts (integrator API)
@@ -128,7 +80,12 @@ Write `bundle.body` beside a `lib/` directory containing `bundle.files` (an obje
 keyed by bare library filenames). References in the body use `lib/name.md`;
 references between supporting files use `./name.md`. Give the agent access to
 that directory. Use `defer: false` when file tools are unavailable: the returned
-body includes dependencies once and `files` is empty. Conditions are resolved
+body includes dependencies once and `files` holds only shell assets. A cited
+`~/.claude/lib/name.sh` script is never inlined: it is always in `files`,
+verbatim, and the reference becomes `<assetPathPrefix>name.sh`. Pass
+`assetPathPrefix` as the absolute directory you write `files` to (default
+`lib/`), because the agent runs that script from the user's repository, not from
+beside the body. Conditions are resolved
 before dependencies; missing required files fail with a named error. For legacy
 recipe consumers that intentionally include only explicit `!cat`/`!read` content,
 set `followReferences: false` to avoid traversing see-also citations. Eager mode

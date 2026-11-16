@@ -54,33 +54,51 @@ for every message below:
 
 !read lib/vcs-host.md
 
-Discover the project's source and target branches for releases; do NOT hardcode branch names:
+**Placeholders.** Every `{name}` in this command (`{CLI_TOOL}`, `{source}`, `{target}`, `{tag}`, `{PR_NUMBER}`, …) is a value resolved in an earlier step; write its literal value into each command before running it. Shell variables do not survive from one tool call to the next, so no block may rely on a variable set by an earlier one — a block that branches on the host starts from the literal `{CLI_TOOL}` (`gh` or `glab`) and stops when it is neither. An `<angle>` slot is local to the sentence that explains it.
 
-1. **Source branch**:
-   - GitHub: `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` (typically `main`). While here, **derive the GitHub API host `{GH_HOST}` from the `origin` remote** with the shared snippet at the end of this section and forward it to the review loop — `gh api` (used by the host-side reviewer loops' GitHub verbs) defaults to github.com rather than reading the remote, so on GitHub Enterprise those loops would silently poll the wrong host and time out. If `gh auth token --hostname "$GH_HOST"` fails, stop and tell the user to run `gh auth login --hostname $GH_HOST`.
-   - GitLab: capture `PROJECT_JSON="$(glab api "projects/:id")"` and check the call's exit status, then set `SOURCE_BRANCH="$(printf '%s\n' "$PROJECT_JSON" | jq -er '.default_branch | select(type == "string" and length > 0)')"`; stop if either step fails (typically `main`). `glab api` has no `--jq` flag, and its output must not be piped directly into jq because that can hide API failures. GitLab needs no separate API-host derivation for `glab` calls — it already resolves the host from `origin`, and the GitLab-side reviewer loop (`host-gitlab.md`) never needs `{GH_HOST}`. A plain host string is still needed for URLs this file builds itself (e.g. the changelog's compare link): use `{ORIGIN_HOST}`, already resolved by `lib/vcs-host.md` above — never re-derive it with a second copy of that parse.
-2. **Target branch** — determine by reading (in priority order):
-   - **Release pipeline config** — GitHub: check `.github/workflows/release.yml` (or similar) for `on: push: branches:` to find the branch that triggers the release pipeline. GitLab: check `.gitlab-ci.yml` (and any included files) for a release/publish job's `rules`/`only: refs:` to find the equivalent trigger branch.
-   - **Project conventions** (already in context) — git workflow sections, branch descriptions, or release instructions
-   - **Versioning docs** — `docs/VERSIONING.md`, `CONTRIBUTING.md`, or `RELEASING.md`
-   - **Branch convention** — if a `release` branch exists, the target is `release`; otherwise create it from the last release tag (step 3). In `--interactive` mode, ask the user to confirm
-3. **Ensure the target branch exists** — if not, create it from the last release tag (or the root commit if no tags exist yet). Consult the remote, not just local refs: on a fresh clone `{target}` may exist only on the remote, and recreating it from the last tag would lose history and clobber the real release branch:
-   ```bash
-   git fetch origin "{target}:refs/remotes/origin/{target}" 2>/dev/null || true
-   if ! git show-ref --verify --quiet refs/heads/{target} \
-       && ! git show-ref --verify --quiet refs/remotes/origin/{target} \
-       && [ -z "$(git ls-remote --heads origin {target})" ]; then
-     git branch {target} $(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
-     git push -u origin {target}
-   fi
-   ```
-4. **Detect release publication** — set `{publishes_github_release}` to true only when the documented workflow or release instructions publish a host release object (GitHub Release: `gh release`, `softprops/action-gh-release`, or an equivalent action; GitLab Release: `glab release create`, `release-cli`, or the CI/CD `release:` keyword — checked with `glab release view` below). The flag name predates GitLab support; it gates either host's release-publication checkpoint. Projects that publish only packages or tags have no release-object checkpoint; their successful completion ends after the version-tag checkpoint.
+Discover the project's branches and conventions for releases rather than assuming names:
 
-Print the detected workflow: `Detected release flow: {source} → {target}`
+1. **Source branch** (the default branch, typically `main`):
+   - GitHub: `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`. While here, derive the GitHub API host `{GH_HOST}` from the `origin` remote with the shared snippet at the end of this section and forward it to the review loop — `gh api` (used by the host-side reviewer loops) defaults to github.com rather than reading the remote, so on GitHub Enterprise those loops would silently poll the wrong host and time out. If `gh auth token --hostname {GH_HOST}` fails, stop and tell the user to run `gh auth login --hostname {GH_HOST}`.
+   - GitLab: capture `glab api "projects/:id"`, check its exit status, then read `.default_branch` from the captured output with `jq -er`; stop if either step fails. `glab api` has no `--jq` flag, and its output must not be piped directly into jq because that can hide an API failure. `glab` resolves its host from `origin`, so no API-host derivation is needed. For URLs this command builds itself (the changelog's compare link) use `{ORIGIN_HOST}`, already resolved by `lib/vcs-host.md`, rather than parsing the remote a second time.
+2. **Target branch** — the first of these that names one:
+   - **Release pipeline config** — GitHub: the `on: push: branches:` of `.github/workflows/release.yml` (or similar). GitLab: the `rules`/`only: refs:` of the release/publish job in `.gitlab-ci.yml` and its includes.
+   - **Project conventions** already in context, then `docs/VERSIONING.md`, `CONTRIBUTING.md`, or `RELEASING.md`.
+   - **An existing `release` branch.**
+3. **Confirm the target exists on the remote** with `git ls-remote --heads origin "{target}"`. Consult the remote, not just local refs: on a fresh clone `{target}` may exist only there, and recreating it from the last tag would lose history and clobber the real release branch.
+   - It exists: continue.
+   - It is missing but the project's own pipeline config or docs name it (a first release): create it from the last release tag, or the root commit when there are no tags, with `git push origin "<start-commit>:refs/heads/{target}"`. In `--interactive` mode confirm first.
+   - Nothing names a target and no `release` branch exists: ask the user once, in default mode as well as `--interactive`, because a trunk-only project should not get a new long-lived branch it never asked for. Say that the project documents no release flow and has no `release` branch, and offer:
+     - **(a)** create a long-lived `release` branch from the last release tag and promote `{source}` into it; or
+     - **(b)** name a different existing branch to promote into.
 
-**Default mode**: If ambiguous, use the most likely branch (prefer `release` if it exists). If detection still yields `target == source`, abort with an error — a release PR cannot merge a branch into itself. **Interactive mode (`--interactive`)**: Ask the user to confirm before proceeding.
+     Mention that documenting the flow (which branch is promoted into which, or a tag-based procedure, in `RELEASING.md` or `CONTRIBUTING.md`) avoids this question next time. On (b), use the named branch as `{target}` and confirm it exists on the remote as above. On an explicit yes to (a), set `{target}` to `release` and create it from the last release tag, or the root commit when there are no tags yet, re-checking the remote in the same step so an existing branch is never recreated:
+     ```bash
+     git fetch origin "release:refs/remotes/origin/release" 2>/dev/null || true
+     if ! git show-ref --verify --quiet refs/heads/release \
+         && ! git show-ref --verify --quiet refs/remotes/origin/release \
+         && [ -z "$(git ls-remote --heads origin release)" ]; then
+       git branch release "$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)"
+       git push -u origin release
+     fi
+     ```
+     Do not create the branch without that yes. When nobody can answer (a headless or non-interactive run), stop instead: report that no release target could be determined, and tell the user to document the release flow or create the target branch, then re-run.
+4. **Naming** — follow the pattern visible in the project's history, and fall back to slashdo's only when history shows none:
+   - `{tag}` — the shape of the existing release tags (`git tag --sort=-v:refname`), e.g. `1.2.3` or `pkg-v1.2.3`. Fallback `v{version}`.
+   - `{release_subject}` — the subject of the commits that bumped the version for the last few releases. Fallback `chore: release v{version}`.
+   - `{release_title}` — the titles of the last merged {CR_NOUN}s into `{target}`. Fallback `Release v{version}`.
+   - `{release_subject_regex}` — `{release_subject}` as an extended regex with the version replaced by `[0-9]+\.[0-9]+\.[0-9]+` and other metacharacters escaped (fallback `chore: release v[0-9]+\.[0-9]+\.[0-9]+`). Resume finds the preparation commit by this pattern, so the commit, the admission PR title and the pattern must agree.
+5. **Publication ownership** — read the release pipeline config and record two separate facts:
+   - `{tag_owner}` — `automation` when the pipeline that runs on the merge into `{target}` creates the version tag itself (a tag-and-push step, `softprops/action-gh-release` or `gh release create` running on a branch push, `semantic-release`, GitLab's `release:` keyword with a new `tag_name`, …). `command` when nothing does. A pipeline that starts on a tag push (`on: push: tags:`, `rules: if: $CI_COMMIT_TAG`) is waiting for someone to push the tag, so it is `command` too.
+   - `{publishes_release}` — `true` when the pipeline or the release instructions publish a host release object (GitHub Release: `gh release`, `softprops/action-gh-release`, or an equivalent action; GitLab Release: `glab release create`, `release-cli`, or the CI/CD `release:` keyword), otherwise `false`. A project that publishes only packages or tags finishes after the version-tag checkpoint.
 
-The {CR_NOUN} direction is `{source}` → `{target}` (e.g., `main` → `release`), so reviewers and the human approver see the full diff since the last release. Do NOT create a branch from source and {CR_NOUN} back into it — that only shows the version bump commit.
+   A tag-triggered publisher is therefore `{tag_owner}=command` with `{publishes_release}=true`: this command pushes the tag, then waits for the release.
+
+Print the detected workflow: `Detected release flow: {source} → {target} (tag {tag} by {tag_owner}, release object: {publishes_release})`.
+
+If detection yields `target == source`, stop with an error: a release {CR_NOUN} cannot merge a branch into itself. In `--interactive` mode, ask the user to confirm the flow before proceeding.
+
+The {CR_NOUN} direction is `{source}` → `{target}` (e.g. `main` → `release`), so reviewers and the human approver see the full diff since the last release. A branch cut from source and merged back into it would show only the version-bump commit.
 
 **GitHub only** — the shared `{GH_HOST}` derivation in step 1 refers to:
 
@@ -88,231 +106,99 @@ The {CR_NOUN} direction is `{source}` → `{target}` (e.g., `main` → `release`
 
 ## Pre-Release Checks
 
-1. **Ensure you're on the source branch** — checkout if needed
-2. **Pull latest source** — `git pull --rebase --autostash`
-3. **Pull latest target** — `git fetch origin {target} && (git show-ref --verify --quiet refs/heads/{target} && git checkout {target} || git checkout -b {target} --track origin/{target}) && git pull --rebase --autostash origin {target} && git checkout {source}` — so the local target matches `origin/{target}` before any diff or PR creation, even on a fresh clone where it exists only on the remote.
-4. **Run tests** — execute the project's test suite (per project conventions already in context, or check package.json)
-5. **Run build** — execute the project's build command if one exists
+1. Check out the source branch and bring it up to date (`git pull --rebase --autostash`).
+2. Fetch the target: `git fetch origin "refs/heads/{target}:refs/remotes/origin/{target}"`. Every later diff and history check reads `origin/{target}`, so the target is never checked out locally.
+3. Run the project's test suite and, if it has one, its build (per the project conventions already in context, or its package manifest).
 
 ## Recover Prepared Release State
 
-**Pending admission PR first.** When `{source}` is gated (see **Resolve Source Branch Admission**), an interrupted run may have pushed the preparation to a temporary `release-prep/v*` branch that has not merged yet. Look for one before the block below, so the retry resumes that version instead of bumping again:
+An interrupted run must resume the version it already prepared rather than bump again. Before determining a version, look for prepared state in this order. A forge query that fails or returns malformed data is INCOMPLETE, never "nothing found".
 
-```bash
-if [ "$CLI_TOOL" = gh ]; then
-  PREP_PRS_JSON="$(gh pr list --state open --base "{source}" --limit 100 --json number,headRefName,headRefOid)" || { echo "INCOMPLETE — Preparation PR is unverified; the forge query failed. Preserve the prepared release state and retry."; exit 1; }
-  PREP_PRS="$(printf '%s\n' "$PREP_PRS_JSON" | jq -c '[.[] | select(.headRefName | startswith("release-prep/v"))]')" || { echo "INCOMPLETE — Preparation PR is unverified; the forge response was malformed. Preserve the prepared release state and retry."; exit 1; }
-  case "$(printf '%s\n' "$PREP_PRS" | jq 'length')" in
-    0) ;;
-    1)
-      PREP_BRANCH="$(printf '%s\n' "$PREP_PRS" | jq -r '.[0].headRefName')"
-      git fetch origin "refs/heads/$PREP_BRANCH" && git merge --ff-only FETCH_HEAD \
-        || { echo "INCOMPLETE — Preparation PR is unverified; $PREP_BRANCH could not be fast-forwarded onto the local {source}. Close the stale PR or resolve it, then retry."; exit 1; }
-      ;;
-    *) echo "INCOMPLETE — Preparation PR is ambiguous; more than one open release-prep/v* PR targets {source}. Preserve the prepared release state and retry."; exit 1 ;;
-  esac
-fi
-```
+1. **A pending admission {CR_NOUN}.** When `{source}` is gated (see **Resolve Source Branch Admission**), an earlier run may have pushed the preparation to a temporary `release-prep/*` branch that has not merged. List the open {CR_NOUN}s into `{source}` and keep those whose head branch starts with `release-prep/` (`gh pr list --state open --base "{source}" --limit 100 --json number,headRefName,headRefOid`; GitLab: `glab api "projects/:id/merge_requests?state=opened&target_branch={source}"`, filtering on `source_branch`). With exactly one, `git fetch origin "refs/heads/<its branch>" && git merge --ff-only FETCH_HEAD` so the preparation commit is the local `HEAD` again; the admission procedure later reuses that {CR_NOUN}. More than one, or a failed fast-forward, is INCOMPLETE: name the stale {CR_NOUN}s for the user to close.
 
-On GitLab list open MRs the same way (`glab api "projects/:id/merge_requests?state=opened&target_branch={source}"`, filtering `source_branch` on `release-prep/v`, validated like the other MR queries) and apply the same 0/1/many handling. After a fast-forward, the preparation commit is local `HEAD` again and the block below detects it; the admission procedure then reuses the open PR.
+2. **A preparation commit**, found by its subject:
+   ```bash
+   git fetch origin "refs/heads/{target}:refs/remotes/origin/{target}" \
+     || { echo "INCOMPLETE — Prepared release state is unverified; origin/{target} could not be fetched."; exit 1; }
+   TAB="$(printf '\t')"
+   echo "UNMERGED=$(git log --format='%H%x09%s' "origin/{target}..HEAD" | grep -m1 -E "${TAB}{release_subject_regex}\$")"
+   echo "ON_TARGET=$(git log --format='%H%x09%s' "origin/{target}" | grep -m1 -E "${TAB}{release_subject_regex}\$")"
+   ```
+   - **`UNMERGED` is set** — a release was prepared and has not reached `{target}`. Resume it: `{PREPARED_RELEASE_SHA}` is its SHA, `{version}` the version in its subject, `{TARGET_RECOVERY}=false`.
+   - **Only `ON_TARGET` is set** — that is the newest release already merged. Check that it was published: its tag exists on the remote (`git ls-remote origin "refs/tags/<its tag>"`) and, when `{publishes_release}=true`, its release object is published (`gh release view <its tag> --json isDraft,isPrerelease,publishedAt` shows a non-draft, non-prerelease release with a publish time; on GitLab `glab release view <its tag> -F json`, where there is no draft state, `upcoming_release` is the prerelease flag and `released_at` the publish time). Tell "not found" apart from a failed lookup; only the first means unpublished. If both are present there is nothing to recover. If either is missing, the merge happened but publication was never verified: resume with `{PREPARED_RELEASE_SHA}` and `{version}` from that commit and `{TARGET_RECOVERY}=true`, and identify its release {CR_NOUN} — the merged `{source}` → `{target}` {CR_NOUN} whose head contains that commit (`git merge-base --is-ancestor`). Exactly one must qualify; record its `{PR_NUMBER}` and URL. Zero or several is INCOMPLETE.
+   - **Neither is set** — no prepared release; determine a new version below.
 
-Before determining a new version, look for an existing release-preparation commit on the current source history; an interrupted run must resume the prepared version, not bump it again. This block also defines the shared checkpoint helpers reused by the merged checkpoint blocks below — **redefine them at the top of any other block that calls them**, since shell state does not persist across separate tool invocations:
-
-```bash
-incomplete() {
-  printf 'INCOMPLETE — %s is unverified; %s Preserve the prepared release state and retry.\n' "$@"
-  exit 1
-}
-prepared_release_sha() {
-  git log --format='%H%x09%s' "$@" | grep -m1 -E "$(printf '\t')"'chore: release v[0-9]+\.[0-9]+\.[0-9]+$'
-}
-
-case "{publishes_github_release}" in
-  true|false) ;;
-  *)
-    echo "INCOMPLETE — GitHub Release publication flag is unresolved; preserve the prepared release state."
-    exit 1
-    ;;
-esac
-RECOVERED_TARGET_RELEASE=false
-if ! git fetch origin "refs/heads/{target}:refs/remotes/origin/{target}" >/dev/null 2>&1 \
-   || ! git show-ref --verify --quiet "refs/remotes/origin/{target}"; then
-  incomplete "Prepared release state" "origin/{target} could not be resolved."
-fi
-PREPARED_RELEASE="$(prepared_release_sha "origin/{target}..HEAD")"
-TARGET_PREPARED_RELEASE="$(prepared_release_sha "origin/{target}")"
-if [ -z "$PREPARED_RELEASE" ] && [ -n "$TARGET_PREPARED_RELEASE" ]; then
-  TARGET_VERSION="$(printf '%s\n' "$TARGET_PREPARED_RELEASE" | sed -E 's/.*release v//')"
-  TARGET_TAG="$(git ls-remote origin "refs/tags/v${TARGET_VERSION}^{}" | head -n1 | cut -f1)"
-  if ! printf '%s\n' "$TARGET_TAG" | grep -Eq '^[0-9a-f]{40}$'; then
-    TARGET_TAG="$(git ls-remote origin "refs/tags/v${TARGET_VERSION}" | head -n1 | cut -f1)"
-  fi
-  if [ "$CLI_TOOL" = gh ]; then
-    TARGET_RELEASE_STATUS="$(gh api --include --hostname "{GH_HOST}" "repos/{owner}/{repo}/releases/tags/v${TARGET_VERSION}" 2>/dev/null | sed -n 's|^HTTP/[^ ]* \([0-9]*\).*|\1|p' | head -n1 || true)"
-    case "$TARGET_RELEASE_STATUS" in
-      200)
-        TARGET_RELEASE_JSON="$(gh release view "v${TARGET_VERSION}" --json isDraft,isPrerelease,publishedAt 2>/dev/null)" || incomplete "Prepared release state" "GitHub Release metadata could not be read."
-        ;;
-      404) TARGET_RELEASE_JSON="" ;;
-      *)
-        incomplete "Prepared release state" "GitHub Release lookup returned ${TARGET_RELEASE_STATUS:-empty}."
-        ;;
-    esac
-  else
-    # GitLab: `glab release view` has no separate HTTP-status
-    # probe; fold "not found" into an empty $TARGET_RELEASE_JSON and let the jq
-    # gate below fail closed on any other unreadable/malformed response.
-    TARGET_RELEASE_ERR="$(mktemp)"
-    if TARGET_RELEASE_JSON="$(glab release view "v${TARGET_VERSION}" -F json 2>"$TARGET_RELEASE_ERR")"; then
-      :
-    elif grep -qi '404\|not found' "$TARGET_RELEASE_ERR"; then
-      TARGET_RELEASE_JSON=""
-    else
-      incomplete "Prepared release state" "GitLab Release lookup failed: $(cat "$TARGET_RELEASE_ERR")."
-    fi
-    rm -f "$TARGET_RELEASE_ERR"
-    # GitLab releases have no draft state; map its fields onto the same shape
-    # the jq gate below expects (isDraft always false, isPrerelease from
-    # `upcoming_release`, publishedAt from `released_at`).
-    if [ -n "$TARGET_RELEASE_JSON" ]; then
-      TARGET_RELEASE_JSON="$(printf '%s' "$TARGET_RELEASE_JSON" | jq '{isDraft: false, isPrerelease: (.upcoming_release // false), publishedAt: .released_at}')"
-    fi
-  fi
-  if [ -z "$TARGET_TAG" ] || { [ "{publishes_github_release}" = "true" ] && ! printf '%s\n' "$TARGET_RELEASE_JSON" | jq -e 'type == "object" and .isDraft == false and .isPrerelease == false and (.publishedAt | type == "string") and (.publishedAt | length > 0)' >/dev/null 2>&1; }; then
-    PREPARED_RELEASE="$TARGET_PREPARED_RELEASE"
-    RECOVERED_TARGET_RELEASE=true
-  fi
-fi
-if [ -n "$PREPARED_RELEASE" ]; then
-  PREPARED_RELEASE_SHA="$(printf '%s\n' "$PREPARED_RELEASE" | cut -f1)"
-  VERSION="$(printf '%s\n' "$PREPARED_RELEASE" | sed -E 's/.*release v//')"
-  echo "Resuming prepared release v${VERSION} at ${PREPARED_RELEASE_SHA}; skipping version bump and changelog generation."
-  if [ "$RECOVERED_TARGET_RELEASE" = "true" ]; then
-    if [ "$CLI_TOOL" = gh ]; then
-      TARGET_RELEASE_PRS_JSON="$(gh pr list --state merged --base "{target}" --limit 100 --json number,state,headRefOid,baseRefName,headRefName,url,mergedAt,mergeCommit)" || incomplete "Merged release PR" "the forge query failed."
-      if ! printf '%s\n' "$TARGET_RELEASE_PRS_JSON" | jq -e 'type == "array"' >/dev/null; then
-        incomplete "Merged release PR" "the forge returned empty or malformed data."
-      fi
-      MATCHING_TARGET_RELEASE_PRS="$(printf '%s\n' "$TARGET_RELEASE_PRS_JSON" | jq -c --arg sha "$PREPARED_RELEASE_SHA" --arg source "{source}" '[.[] | select(.headRefOid == $sha and .baseRefName == "{target}" and .headRefName == $source)]')"
-    else
-      # GitLab: `glab mr list` has no --head/--base filter pair as precise as gh's,
-      # so pull merged MRs into `{target}` and filter on source/target/SHA in jq,
-      # same shape as the GitHub branch above.
-      TARGET_RELEASE_PRS_RESPONSE="$(glab api --paginate "projects/:id/merge_requests?state=merged&target_branch={target}&per_page=100")" \
-        || incomplete "Merged release MR" "the forge query failed."
-      TARGET_RELEASE_PRS_JSON="$(printf '%s\n' "$TARGET_RELEASE_PRS_RESPONSE" | jq -s 'if length == 0 then error("expected JSON document") elif (all(.[]; type == "array") | not) then error("expected array pages") else add | if type != "array" then error("expected array") else [.[] | {number: .iid, state: (.state | ascii_upcase), headRefOid: .sha, baseRefName: .target_branch, headRefName: .source_branch, url: .web_url, mergedAt: .merged_at, mergeCommit: {oid: .merge_commit_sha}}] end end')" \
-        || incomplete "Merged release MR" "the forge response was malformed."
-      if ! printf '%s\n' "$TARGET_RELEASE_PRS_JSON" | jq -e 'type == "array"' >/dev/null; then
-        incomplete "Merged release MR" "the forge returned empty or malformed data."
-      fi
-      MATCHING_TARGET_RELEASE_PRS="$(printf '%s\n' "$TARGET_RELEASE_PRS_JSON" | jq -c --arg sha "$PREPARED_RELEASE_SHA" --arg source "{source}" '[.[] | select(.headRefOid == $sha and .baseRefName == "{target}" and .headRefName == $source)]')"
-    fi
-    MATCHING_TARGET_RELEASE_COUNT="$(printf '%s\n' "$MATCHING_TARGET_RELEASE_PRS" | jq 'length')"
-    if [ "$MATCHING_TARGET_RELEASE_COUNT" -ne 1 ]; then
-      incomplete "Merged release {CR_NOUN}" "expected exactly one merged {CR_NOUN} for prepared SHA $PREPARED_RELEASE_SHA, found $MATCHING_TARGET_RELEASE_COUNT."
-    fi
-    PR_NUMBER="$(printf '%s\n' "$MATCHING_TARGET_RELEASE_PRS" | jq -r '.[0].number')"
-    PR_URL="$(printf '%s\n' "$MATCHING_TARGET_RELEASE_PRS" | jq -r '.[0].url')"
-    PR_STATE="MERGED"
-    printf 'RELEASE_TARGET_HANDOFF\tPREPARED_RELEASE_SHA=%s\tPR_NUMBER=%s\tPR_URL=%s\tPR_STATE=%s\n' "$PREPARED_RELEASE_SHA" "$PR_NUMBER" "$PR_URL" "$PR_STATE"
-  fi
-  printf 'RELEASE_PREPARED_HANDOFF\tPREPARED_RELEASE_SHA=%s\tVERSION=%s\tTARGET_RECOVERY=%s\n' "$PREPARED_RELEASE_SHA" "$VERSION" "$RECOVERED_TARGET_RELEASE"
-else
-  echo "No prepared release commit found; determine a new version and finalize its changelog below."
-fi
-```
-
-When `PREPARED_RELEASE` is non-empty, verify that the checked-out package version
-is `{version}` and continue directly to **Local Code Review**. Do not determine a
-new bump, rewrite release notes, or create another `chore: release` commit. If the
-package version does not match the prepared commit's version, fail closed and
-preserve the prepared state for investigation. When `TARGET_RECOVERY=true`, the
-prepared release is already merged into `{target}`: carry the
-`RELEASE_TARGET_HANDOFF` values and skip Local Code Review, Checkpoints 1–2, and
-the open-PR review/CI/merge gates; continue directly to Checkpoint 3 and then
-verify the target tree, tag, and GitHub Release.
+When resuming, confirm the checked-out package version equals `{version}`; a mismatch is INCOMPLETE, and the prepared state is left as it is for investigation. Then skip **Determine Version and Finalize Changelog** — no new bump, no rewritten notes, no second release commit — and continue at **Local Code Review**. With `{TARGET_RECOVERY}=true` the release {CR_NOUN} is already merged, so continue directly at **Post-Merge** (Checkpoint 3).
 
 ## Determine Version and Finalize Changelog
 
-Skip this entire section when `PREPARED_RELEASE` is non-empty; it is only for a
-release with no prepared release commit.
+Only for a release with no prepared commit.
 
-1. **Determine version bump** from commits since the last git tag:
-   - Scan commit messages (subject and body/footer) for conventional commit prefixes:
-     - `breaking:`, any prefix with a `!` (e.g. `feat!:`, `fix!:`, `refactor!:`, `feat!(scope):`), or a `BREAKING CHANGE:` footer → **major** bump
-     - `feat:` or `feat(scope):` → **minor** bump
-     - `fix:`, `build:`, `chore:`, `docs:`, `refactor:`, `perf:`, `style:`, `test:`, `ci:` (with or without scope) → **patch** bump
-     - `revert:` → **patch** bump
-     - Commits with no recognized prefix or `address review …` commits: classify by the merged change request's title using the detected host. On GitHub, use `gh pr list --state merged --search <sha>`; on GitLab, capture `glab api --paginate "projects/:id/repository/commits/<sha>/merge_requests"` before parsing and validate the response as an array. Use the title only when exactly one merged PR/MR is associated with the commit. If the lookup fails, is malformed, is ambiguous, or its title has no recognized prefix, default to **patch** bump. (These commits are part of the PR/MR whose merge-request title classifies the change.)
-   - Use the **highest applicable level** across all commits
-   - **Default mode**: Use the determined version automatically. **Interactive mode (`--interactive`)**: Present the proposed version to the user for confirmation
+1. **Determine the version bump** from commits since the last release tag. Scan subjects, bodies and footers for conventional-commit prefixes and take the highest level found:
+   - `breaking:`, any prefix with a `!` (`feat!:`, `fix!:`, `feat!(scope):`), or a `BREAKING CHANGE:` footer → **major**
+   - `feat:` or `feat(scope):` → **minor**
+   - `fix:`, `build:`, `chore:`, `docs:`, `refactor:`, `perf:`, `style:`, `test:`, `ci:`, `revert:` (with or without scope) → **patch**
+   - Commits with no recognized prefix, and `address review …` commits, are classified by the title of the merged change request they belong to. On GitHub, use `gh pr list --state merged --search <sha>`; on GitLab, capture `glab api --paginate "projects/:id/repository/commits/<sha>/merge_requests"` before parsing and validate the response as an array. Use the title only when exactly one merged {CR_NOUN} is associated with the commit. If the lookup fails, is malformed, is ambiguous, or its title has no recognized prefix, default to **patch**.
 
-2. **Bump version** with the project's native command. Node: `npm version <major|minor|patch> --no-git-tag-version` (updates `package.json` and `package-lock.json`). **Rust**: `cargo set-version --bump <level>` or edit `Cargo.toml` + `cargo update -p <package>`. **Python**: `poetry version <level>` (Poetry projects), else edit `pyproject.toml` `[project] version = "..."`. **Elixir**: edit `mix.exs`. **Go**: edit a `VERSION` file. Other ecosystems: the equivalent, detected from the project files.
+   In `--interactive` mode, present the proposed version for confirmation.
 
-3. **Finalize changelog / build the release notes**:
+2. **Bump the version** with the project's native command — Node: `npm version <major|minor|patch> --no-git-tag-version`; Rust: `cargo set-version --bump <level>`, or edit `Cargo.toml` and run `cargo update -p <package>`; Python: `poetry version <level>`, else edit `pyproject.toml`; Elixir: `mix.exs`; Go: a `VERSION` file; other ecosystems: the equivalent, detected from the project files.
 
-   First **resolve how this project produces release notes**, in order:
-   1. **Stated convention** — `CLAUDE.md` / `AGENT.md` / `AGENTS.md` / `CONTRIBUTING.md`, or a release workflow in `.github/workflows/`, describing the release-notes process. An explicit instruction wins over everything inferred below.
-   2. **An existing release-automation tool** — `release-please`, `semantic-release`, `changesets`, `towncrier`, `git-cliff`, or similar, detected from its config file. **That tool owns the changelog**: run its documented command if the project expects you to; otherwise leave the changelog alone.
-   3. **An existing file-based changelog** — a per-release directory (`.changelogs/`, `.changelog/`, `docs/releases/`) or a rolling `CHANGELOG.md`. Follow the shape already in the repo (the two branches below).
-   4. **No file-based changelog at all** — build the release notes from the commits since the last release (below).
+3. **Write the release notes** the way this project does. Resolve that in order:
+   1. **A stated convention** — `CLAUDE.md` / `AGENTS.md` / `CONTRIBUTING.md`, or a release workflow that reads a notes file. An explicit instruction wins over anything inferred below.
+   2. **A release-automation tool** — `release-please`, `semantic-release`, `changesets`, `towncrier`, `git-cliff` or similar, detected from its config. That tool owns the changelog: run its documented command if the project expects you to, otherwise leave the changelog alone.
+   3. **An existing file-based changelog** — a per-release directory (`.changelogs/`, `.changelog/`, `docs/releases/`) or a rolling `CHANGELOG.md`. Match the headings, sections, date line and link style of the previous entries.
+   4. **A current-release file** — one fixed-path notes file (e.g. `{changelog_dir}/RELEASE.md`) that each release overwrites; the forge release is the archive and tags keep past versions. Detected when the stated convention names it, or the changelog directory holds that single notes file and no per-version files. Overwrite it with the new version's notes under the heading the project's workflow expects (`# Release v{version}` unless it states another) and stage it in the release commit like any changelog file. Do not migrate a per-release directory to it unasked (see the migration note below).
+   5. **No changelog file at all** — the notes become the release body and the {CR_NOUN} description, and no file is created or staged. If the release workflow reads a notes file, create the single overwritten file above rather than a new per-release directory.
 
-   **If the project stages unreleased entries in a file** (e.g. a `NEXT.md` alongside versioned files, or an `## Unreleased` section at the top of `CHANGELOG.md`) and that staging content exists:
-     - Promote it to the release: rename `NEXT.md` → `v{new_version}.md` in a per-release directory, or retitle the `## Unreleased` section, whichever matches the repo
-     - Replace the unreleased header with `# Release v{new_version}` (or the project's equivalent)
-     - Add `Released: YYYY-MM-DD` with today's date
-     - **Lead with a feature-grouped `## Highlights` summary** directly under the header/date, *above* the detailed `Added`/`Changed`/`Fixed` sections: **5–15 plain-language bullets grouped by theme/feature area** (e.g. "Editorial pipeline", "Local LLM", "Infra & deps"), each one sentence on *what changed and why it matters to a user*, with **no file paths and no inline `(#1234)` issue spam** (that detail stays in the sections below). For a tiny release that is already a clean feature list, Highlights is optional — don't pad it. The detailed entries below remain the authoritative record.
-     - Add a `## Full Changelog` section with the diff link built from the resolved host, never a literal `github.com` (404s on GitHub Enterprise) or `gitlab.com` (404s on self-managed GitLab):
-       - GitHub: `**Full Diff**: https://{GH_HOST}/{owner}/{repo}/compare/v{prev}...v{new}`
-       - GitLab: `**Full Diff**: https://{ORIGIN_HOST}/{owner}/{repo}/-/compare/v{prev}...v{new}` (GitLab's compare path has a `/-/` segment before `compare`; `{ORIGIN_HOST}` is the same value `lib/vcs-host.md` resolved in "Detect Release Workflow")
+   **Content.** If the project stages unreleased entries (a `NEXT.md` beside versioned files, an `## Unreleased` section in `CHANGELOG.md`) and that content exists, promote it: rename or retitle it for `{version}`, whichever matches the repo. Otherwise derive the notes from the commits since the last release tag (the full history for a first release), preferring merge-commit and {CR_NOUN} titles over intermediate "address review" commits, and reading bodies as well as subjects for the user-visible effect.
 
-   **If there is no staged unreleased content — or no file-based changelog at all — derive the notes from the commits since the last release** (the normal path for a repo whose history *is* its changelog):
-     - Take the range since the last release tag (`git log {last_tag}..HEAD`, or the full history for a first release). Prefer merge-commit/PR titles over intermediate "address review" commits.
-     - **Group by feature/theme, never a raw `git log` dump**, in the same `## Highlights` + detailed-sections shape: read each commit's subject *and body* for the user-visible effect, drop pure-noise commits (formatting, "fix typo", CI churn) or fold them into an `Internal` group, and write each bullet for someone deciding whether to upgrade — no file paths, no `(#1234)` spam.
-     - Destination per the resolved convention: the project's per-release file (`{changelog_dir}/v{new_version}.md`), the top of a rolling `CHANGELOG.md` — **or nowhere on disk** if the project keeps no changelog file, in which case the notes become the release body (and the PR description) and no changelog file is created or staged.
+   **Fallback format**, used where the previous entries or the stated convention do not already settle the shape:
+   - a `# Release v{version}` heading and a `Released: YYYY-MM-DD` line;
+   - a `## Highlights` summary of 5–15 plain-language bullets grouped by feature area, each one sentence on what changed and why it matters to someone deciding whether to upgrade, without file paths or inline issue numbers (skip it for a tiny release that is already a clean list);
+   - the detailed `Added` / `Changed` / `Fixed` sections, grouped by theme rather than dumped from `git log`, with noise commits (formatting, typos, CI churn) dropped or folded into an `Internal` group;
+   - a `## Full Changelog` section with the compare link, built from the resolved host because a literal `github.com` or `gitlab.com` 404s on Enterprise and self-managed hosts — GitHub: `https://{GH_HOST}/{owner}/{repo}/compare/{previous_tag}...{tag}`; GitLab: `https://{ORIGIN_HOST}/{owner}/{repo}/-/compare/{previous_tag}...{tag}` (GitLab's path has a `/-/` segment before `compare`).
 
-   - **Mind the release-note size limit.** If the body would exceed **125,000 characters**, publish the Highlights as the release body and link to the full changelog file at the tag.
+   **Size limit.** Keep the published body complete. If it would exceed 125,000 characters, tighten the detailed sections until it fits; link to the changelog file at the tag only when the project keeps per-release files. Do not truncate silently.
 
-4. **Commit the release**: Stage exactly the files step 2's bump command modified (Node: `package.json` and possibly `package-lock.json`; Rust: `Cargo.toml` and `Cargo.lock`; Python: `pyproject.toml`; etc.) plus the changelog file **if step 3 wrote one** — list files explicitly, never `git add -A`. Commit with message `chore: release v{new_version}`.
+   **Migrating to a current-release file** (only when the owner asks): switch the release workflow to the fixed path and fail it when the file's version heading does not match the package version; verify every existing per-release file has a matching forge release (list any that do not, and any whose release body was truncated and links to the file at its tag); then delete the old files.
 
-## Local Code Review (REQUIRED GATE)
+4. **Commit the release.** Stage exactly the files the bump command modified (Node: `package.json` and a lockfile if one exists and changed; Rust: `Cargo.toml` and `Cargo.lock`; Python: `pyproject.toml`; …) plus the changelog file if step 3 wrote one, each named explicitly rather than with `git add -A`. Commit with the subject `{release_subject}`. This commit is `{PREPARED_RELEASE_SHA}`.
+
+## Local Code Review
+
+This review is a required gate: the release {CR_NOUN} is not opened until its summary is printed.
 
 <review_gate>
 
-1. Read all commit messages since last release to understand the scope
-2. Run `git diff --name-only {target}...{source}` to get the list of changed files
+1. Read the commit messages since the last release to understand the scope.
+2. List the changed files with `git diff --name-only origin/{target}...HEAD`.
 3. For every changed file:
-   a. Read the entire file using the Read tool (not just diff hunks)
+   a. Read the entire file, not just the diff hunks.
    b. Review it under the review preferences. Load them now, the first time this step runs:
       !read lib/review-preferences.md
-   c. For each finding, quote the specific code line and explain why it's a problem
-4. After reviewing all files, verify: does the aggregate change set deliver what the release claims?
-5. Print a review summary table (`| File | Tier | Finding | Severity | Status |`)
-6. Fix any issues, run tests, verify tests cover the changed code paths, and commit. Do not push yet — publication to `{source}` happens only through **Resolve Source Branch Admission** and **Open the Release PR** below, so a gated `{source}` is never updated by a bare push
-7. Only after printing the review summary may you proceed to "Resolve Source Branch Admission"
+   c. For each finding, quote the specific line and name the concrete wrong outcome; a style preference is not a finding.
+4. Check that the aggregate change set delivers what the release claims.
+5. Print a review summary table (`| File | Tier | Finding | Severity | Status |`).
+6. Fix any issues, run tests, confirm they cover the changed code paths, and commit. Do not push yet: publication to `{source}` happens only through **Resolve Source Branch Admission** and **Open the Release PR**, so a gated `{source}` is never updated by a bare push.
 
-If the diff touches more than 15 files, delegate later batches to a subagent to keep context clean.
+If the diff touches more than 15 files, delegate later batches to a sub-agent to keep context clean.
 
 </review_gate>
 
-Verification — self-check before proceeding (no user prompt needed):
-- [ ] Read every changed file in full (not just diffs)
-- [ ] Every finding names a concrete wrong outcome, not a style preference
-- [ ] Quoted specific code for each finding
-- [ ] Printed a review summary table with findings
-
 ## Resolve Source Branch Admission
 
-Skip this section when `TARGET_RECOVERY=true`. Before the first push of the preparation commit or of any review fix to `{source}`, read what the forge requires to land a commit there. A branch whose rules require status checks or a PR is **gated**: an account with bypass permission can still push straight onto it, and GitHub reports "Bypassed rule violations" — the commit lands before its required remote check exists, and local tests/build/pregate do not satisfy that check. Never use bypass permission, force push, or relax the branch protection to get past a gate.
+Before the first push of the preparation commit or of any review fix to `{source}`, read what the forge requires to land a commit there. A branch whose rules require status checks or a PR is **gated**: an account with bypass permission can still push straight onto it, and GitHub reports "Bypassed rule violations" — the commit lands before its required remote check exists, and local tests/build/pregate do not satisfy that check. Never use bypass permission, force push, or relax the branch protection to get past a gate.
 
 ```bash
 incomplete() {
-  printf 'INCOMPLETE — %s is unverified; %s Preserve the prepared release state and retry.\n' "$@"
+  echo "INCOMPLETE — Source branch admission is unverified; $WHY Preserve the prepared release state and retry."
   exit 1
 }
-if [ "$CLI_TOOL" = gh ]; then
-  RULES_JSON="$(gh api --hostname "{GH_HOST}" "repos/{owner}/{repo}/rules/branches/{source}")" || incomplete "Source branch admission" "the branch-rules query failed."
-  BRANCH_JSON="$(gh api --hostname "{GH_HOST}" "repos/{owner}/{repo}/branches/{source}")" || incomplete "Source branch admission" "the branch query failed."
+case "{CLI_TOOL}" in
+gh)
+  RULES_JSON="$(gh api --hostname "{GH_HOST}" "repos/{owner}/{repo}/rules/branches/{source}")" || WHY="the branch-rules query failed." incomplete
+  BRANCH_JSON="$(gh api --hostname "{GH_HOST}" "repos/{owner}/{repo}/branches/{source}")" || WHY="the branch query failed." incomplete
   SOURCE_CHECKS_REQUIRED="$(jq -n --argjson rules "$RULES_JSON" --argjson branch "$BRANCH_JSON" '
     $branch.protection.required_status_checks as $raw_checks |
     (if $raw_checks == null then {} else $raw_checks end) as $checks |
@@ -325,130 +211,64 @@ if [ "$CLI_TOOL" = gh ]; then
     else (([$rules[] | select(.type == "required_status_checks")] | length) > 0)
       or (($checks.enforcement_level // "configured") != "off" and (($contexts | length) + ($status_checks | length)) > 0)
     end')" \
-    || incomplete "Source branch admission" "the branch rules were malformed."
+    || WHY="the branch rules were malformed." incomplete
   # Classic protection hides its pull-request-review requirement from non-admins, so any classic
   # protection counts as a gate: landing through a PR is always allowed, a bare push may not be.
   SOURCE_GATED="$(jq -n --argjson rules "$RULES_JSON" --argjson branch "$BRANCH_JSON" --argjson checks "$SOURCE_CHECKS_REQUIRED" '$checks or (([$rules[] | select(.type == "pull_request")] | length) > 0) or ($branch.protected == true)')" \
-    || incomplete "Source branch admission" "the branch rules were malformed."
-else
+    || WHY="the branch rules were malformed." incomplete
+  ;;
+glab)
   # The branch endpoint reports effective protection, including wildcard protected-branch rules that an exact-name lookup 404s on.
-  BRANCH_JSON="$(glab api "projects/:id/repository/branches/$(printf '%s' '{source}' | jq -sRr @uri)")" || incomplete "Source branch admission" "the branch query failed."
-  PROJECT_JSON="$(glab api "projects/:id")" || incomplete "Source branch admission" "the project query failed."
-  SOURCE_GATED="$(printf '%s\n' "$BRANCH_JSON" | jq -r 'if (.protected | type) == "boolean" then .protected else error("missing") end')" || incomplete "Source branch admission" "the branch protection flag was missing."
-  SOURCE_CHECKS_REQUIRED="$(printf '%s\n' "$PROJECT_JSON" | jq -r 'if (.only_allow_merge_if_pipeline_succeeds | type) == "boolean" then .only_allow_merge_if_pipeline_succeeds else error("missing") end')" || incomplete "Source branch admission" "the pipeline-must-succeed setting was missing."
-fi
+  BRANCH_JSON="$(glab api "projects/:id/repository/branches/$(printf '%s' '{source}' | jq -sRr @uri)")" || WHY="the branch query failed." incomplete
+  PROJECT_JSON="$(glab api "projects/:id")" || WHY="the project query failed." incomplete
+  SOURCE_GATED="$(printf '%s\n' "$BRANCH_JSON" | jq -r 'if (.protected | type) == "boolean" then .protected else error("missing") end')" || WHY="the branch protection flag was missing." incomplete
+  SOURCE_CHECKS_REQUIRED="$(printf '%s\n' "$PROJECT_JSON" | jq -r 'if (.only_allow_merge_if_pipeline_succeeds | type) == "boolean" then .only_allow_merge_if_pipeline_succeeds else error("missing") end')" || WHY="the pipeline-must-succeed setting was missing." incomplete
+  ;;
+*) WHY="the code host CLI was not resolved." incomplete ;;
+esac
 case "$SOURCE_GATED/$SOURCE_CHECKS_REQUIRED" in
   true/true|true/false|false/true|false/false) ;;
-  *) incomplete "Source branch admission" "the gate result was neither true nor false." ;;
+  *) WHY="the gate result was neither true nor false." incomplete ;;
 esac
 printf 'SOURCE_ADMISSION_HANDOFF\tSOURCE_GATED=%s\tSOURCE_CHECKS_REQUIRED=%s\n' "$SOURCE_GATED" "$SOURCE_CHECKS_REQUIRED"
 ```
 
-Unreadable or malformed rules are INCOMPLETE, never "not gated". Carry the printed `SOURCE_GATED` value into every later block as the literal `<source-gated>`, and `SOURCE_CHECKS_REQUIRED` into the gate procedure's CI wait.
+Unreadable or malformed rules are INCOMPLETE, never "not gated". Carry the two printed values into later steps as `{SOURCE_GATED}` and `{SOURCE_CHECKS_REQUIRED}`.
 
-- **`SOURCE_GATED=false`** — no remote admission applies; continue at **Open the Release PR** and push as documented. A project-documented direct-push flow stays supported here.
-- **`SOURCE_GATED=true`** — read the gate procedure and land the preparation commit (and every later review-fix commit) through a temporary branch and a gated PR into `{source}` instead of pushing to it. The release PR below is unchanged: it still promotes `{source}` into `{target}` and shows the full unreleased range.
+- **`{SOURCE_GATED}=false`** — no remote admission applies; continue at **Open the Release PR** and push as documented. A project-documented direct-push flow stays supported here.
+- **`{SOURCE_GATED}=true`** — read the gate procedure and land the preparation commit (and every later review-fix commit) through a temporary branch and a gated {CR_NOUN} into `{source}` instead of pushing to it. The release {CR_NOUN} is unchanged: it still promotes `{source}` into `{target}` and shows the full unreleased range.
 
 !read lib/release-source-gate.md
 
 ## Open the Release PR
 
-When `TARGET_RECOVERY=true`, use the carried `RELEASE_TARGET_HANDOFF` instead of
-running Checkpoints 1–2; the already-merged PR is the release PR for this retry.
-Continue with Checkpoint 3 and the post-merge verification blocks below.
+### Push, read back, reuse or create
 
-- **Checkpoint 1 — source push.** Push the prepared source commit — unless `SOURCE_GATED=true`, where **Resolve Source Branch Admission** already landed it and the local `{source}` is fast-forwarded to the remote head, so nothing is pushed here — and verify the
-  forge reports the exact same commit before creating or reusing a PR; empty,
-  malformed, or mismatched output is an incomplete release and must name
-  `Source push` as the first unverified checkpoint.
-- **Checkpoint 2 — release PR.** Query all matching PRs for the current source SHA
-  before creating one. Reuse an open PR, or a merged PR whose head is still this
-  source SHA when an interrupted rerun already completed it; never create a
-  duplicate. Missing, empty, malformed, or ambiguous forge output is incomplete
-  and must name `Release PR` as the first unverified checkpoint. A closed,
-  unmerged PR is not reusable, so a later run may create a new PR for the newly
-  pushed source SHA. Checkpoints 1 and 2 run as **one** shell invocation — the
-  push is verified once, then reused to query or create the PR:
-  ```bash
-  incomplete() {
-    printf 'INCOMPLETE — %s is unverified; %s Preserve the prepared release state and retry.\n' "$@"
-    exit 1
-  }
-  prepared_release_sha() {
-    git log --format='%H%x09%s' "$@" | grep -m1 -E "$(printf '\t')"'chore: release v[0-9]+\.[0-9]+\.[0-9]+$'
-  }
+Every {CR_NOUN} this command opens — the release {CR_NOUN}, and the admission {CR_NOUN}s of a gated source — goes through these steps for its head branch, base branch and title, so that a retry never opens a duplicate and never proceeds on a push that did not arrive:
 
-  # A gated {source} already received the preparation through its admission PR; never push to it directly.
-  [ "<source-gated>" = "true" ] || git push -u origin "HEAD:refs/heads/{source}"
-  SOURCE_SHA="$(git rev-parse HEAD)"
-  PREPARED_RELEASE_SHA="$(prepared_release_sha HEAD | cut -f1)"
-  if ! printf '%s\n' "$PREPARED_RELEASE_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
-    incomplete "Prepared release state" "the release preparation commit could not be identified."
-  fi
-  REMOTE_SOURCE_SHA="$(git ls-remote --heads origin "refs/heads/{source}" | head -n1 | cut -f1)"
-  if ! printf '%s\n' "$REMOTE_SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$' || [ "$REMOTE_SOURCE_SHA" != "$SOURCE_SHA" ]; then
-    incomplete "Source push" "expected $SOURCE_SHA, got ${REMOTE_SOURCE_SHA:-empty}."
-  fi
-  if [ "$CLI_TOOL" = gh ]; then
-    RELEASE_PRS_JSON="$(gh pr list --state all --base "{target}" --head "{source}" --limit 100 \
-      --json number,state,headRefOid,baseRefName,headRefName,url,createdAt)" || incomplete "Release PR" "the forge query failed."
-  else
-    # GitLab: `glab mr list` has no combined source+target filter as precise as
-    # gh's, so query the REST endpoint directly and reshape onto the same field
-    # names the jq below already expects.
-    RELEASE_PRS_RESPONSE="$(glab api --paginate "projects/:id/merge_requests?source_branch={source}&target_branch={target}&state=all&per_page=100")" \
-      || incomplete "Release MR" "the forge query failed."
-    RELEASE_PRS_JSON="$(printf '%s\n' "$RELEASE_PRS_RESPONSE" | jq -s 'if length == 0 then error("expected JSON document") elif (all(.[]; type == "array") | not) then error("expected array pages") else add | if type != "array" then error("expected array") else [.[] | {number: .iid, state: (.state | ascii_upcase), headRefOid: .sha, baseRefName: .target_branch, headRefName: .source_branch, url: .web_url, createdAt: .created_at}] end end')" \
-      || incomplete "Release MR" "the forge response was malformed."
-  fi
-  if ! printf '%s\n' "$RELEASE_PRS_JSON" | jq -e 'type == "array"' >/dev/null; then
-    incomplete "Release {CR_NOUN}" "the forge returned empty or malformed data."
-  fi
-  MATCHING_RELEASE_PRS="$(printf '%s\n' "$RELEASE_PRS_JSON" | jq -c --arg sha "$SOURCE_SHA" \
-    '[.[] | select(.headRefOid == $sha and (.state == "OPEN" or .state == "MERGED"))]')"
-  MATCHING_COUNT="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq 'length')"
-  if [ "$MATCHING_COUNT" -gt 1 ]; then
-    incomplete "Release {CR_NOUN}" "more than one open or merged {CR_NOUN} matches $SOURCE_SHA; investigate the ambiguity."
-  elif [ "$MATCHING_COUNT" -eq 1 ]; then
-    PR_NUMBER="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq -r '.[0].number')"
-    PR_URL="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq -r '.[0].url')"
-    PR_STATE="$(printf '%s\n' "$MATCHING_RELEASE_PRS" | jq -r '.[0].state')"
-  else
-    if [ "$CLI_TOOL" = gh ]; then
-      PR_URL="$(gh pr create --title "Release v{version}" --base "{target}" --head "{source}" --body "...")" || incomplete "Release PR" "creation failed; retry without creating another PR."
-    else
-      PR_URL="$(glab mr create --source-branch "{source}" --target-branch "{target}" --title "Release v{version}" --description "..." --yes)" || incomplete "Release MR" "creation failed; retry without creating another MR."
-    fi
-    PR_NUMBER="${PR_URL##*/}"
-    if ! printf '%s\n' "$PR_NUMBER" | grep -Eq '^[0-9]+$'; then
-      incomplete "Release {CR_NOUN}" "creation returned empty or malformed data."
-    fi
-    PR_STATE="OPEN"
-  fi
-  printf 'RELEASE_PR_HANDOFF\tPREPARED_RELEASE_SHA=%s\tPR_NUMBER=%s\tPR_URL=%s\tPR_STATE=%s\n' "$PREPARED_RELEASE_SHA" "$PR_NUMBER" "$PR_URL" "$PR_STATE"
-  ```
-- Title: `Release v{version}` (read version from package.json or equivalent)
-- Body: the changelog content for this version if available, otherwise a summary of commits since last release; no co-author or "generated with" messages
-- Do NOT bump the version for review fixes — it was already set during release preparation.
+1. **Push and read back.** `git push origin "HEAD:refs/heads/<head>"`, then require `git ls-remote --heads origin "refs/heads/<head>"` to report exactly `git rev-parse HEAD`. An empty or different SHA is INCOMPLETE.
+2. **List every {CR_NOUN} from that head into that base, in any state.** GitHub: `gh pr list --state all --base "<base>" --head "<head>" --limit 100 --json number,state,headRefOid,url`. GitLab: `glab api --paginate "projects/:id/merge_requests?source_branch=<head>&target_branch=<base>&state=all&per_page=100"` — `glab mr list` cannot filter on both branches at once; the paginated output is one JSON array per page (combine them with `jq -s add`), and the fields are `iid`, `state` (`opened`/`merged`/`closed`), `sha` and `web_url`. A failed, empty or malformed response is INCOMPLETE rather than "none exist".
+3. **Reuse or create.** Among the {CR_NOUN}s whose head SHA is the pushed SHA and whose state is open or merged: exactly one is reused (a merged one means an interrupted run already got this far); none means create it now; more than one is INCOMPLETE. A closed, unmerged {CR_NOUN} is never reused. If creation fails, report INCOMPLETE and let the retry re-list instead of creating again.
+4. **Record** the number, URL and state (`OPEN` or `MERGED`).
 
-Record the printed `RELEASE_PREPARED_HANDOFF` and `RELEASE_PR_HANDOFF` lines and carry their literal `PREPARED_RELEASE_SHA`, `PR_NUMBER`, `PR_URL`, and `PR_STATE` values into the review and merge steps; shell variables do not survive separate tool calls.
+### The release {CR_NOUN}
+
+- **Checkpoint 1 — source push.** Step 1 above for head `{source}`. When `{SOURCE_GATED}=true` the admission procedure already landed the commits and fast-forwarded the local `{source}`, so skip the push and only do the read-back. A mismatch names `Source push` as the first unverified checkpoint.
+- **Checkpoint 2 — release {CR_NOUN}.** Steps 2–4 for head `{source}`, base `{target}`. A failure names `Release {CR_NOUN}` as the first unverified checkpoint. When creating:
+  - Title: `{release_title}`.
+  - Body: the project's {CR_NOUN} template if it has one, filled with the release notes for this version (or a summary of the commits since the last release when no notes were written). No co-author or "generated with" lines.
+
+Carry `{PREPARED_RELEASE_SHA}`, `{PR_NUMBER}`, `{PR_URL}` and `{PR_STATE}` into the review and merge steps. Review fixes do not bump the version again; it was set during preparation.
 
 ## Run the Review Loop
 
-If the selected PR already has `PR_STATE=MERGED`, skip this section entirely.
-Do not request another review or treat an already-merged PR as an open merge
-candidate; set `OVERALL_STATUS=clean` for the post-merge verification path.
+**If the release {CR_NOUN} is already merged** (`{PR_STATE}=MERGED` at Checkpoint 2, because an interrupted run completed the merge), skip this section and **Merge the PR** and continue at **Post-Merge**: a merged {CR_NOUN} is not a merge candidate and needs no further review. Treat `OVERALL_STATUS` as `clean` for the post-merge path.
 
 **If `REVIEW_AGENTS` is empty**, skip this entire section — the Local Code Review gate plus the passing build/tests are the merge gate; set `OVERALL_STATUS=clean` (no-review path) and proceed to the merge section.
 
 Otherwise, hand off to the **multi-reviewer loop** with the inputs resolved in "Parse Arguments" (`{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`, `{REVIEW_MODELS}`) plus `{GH_HOST}` from "Detect Release Workflow" and the per-entry `{WAIT_SCHEDULE}` selected below. On GitHub, the host-side loops use `{GH_HOST}` on every `gh api` call, and the wrapper dispatches each entry to the single-reviewer loop read below.
 
-For each host-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
-
-- `copilot` — use the previous Copilot review duration on this PR (default 60 seconds if none); max wait 3x that duration, minimum 90 seconds, maximum 5 minutes; poll every 5s, 5s, 10s, 10s, then 15s.
-- `@<login>` — a login ending in `[bot]` is an automated reviewer: expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s. Any other login is presumed human: max wait 4 hours; poll every 30s for the first 5 minutes, then every 60s.
-
-Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass both schedules.
+Each host-side entry takes `{WAIT_SCHEDULE}` from "Wait schedules" in the host-reviewer file; this command states no difference.
 
 **Gated source.** When `SOURCE_GATED=true`, the loops' fix pushes must not land on `{source}` directly: follow "Review fixes under a gated source" in the gate procedure loaded by **Resolve Source Branch Admission**, so every fix reaches `{source}` through a gated PR and the merge gate below runs on the release PR's updated head.
 
@@ -484,222 +304,87 @@ Only when the in-session merge gate sees a required check fail:
 
 !read lib/ci-flake-handling.md
 
-## Merge the PR (only after a CLEAN multi-reviewer result)
-
-If `PR_STATE=MERGED`, skip all review-verdict and CI/merge gates in this section and continue directly to Checkpoint 3's remote read-back.
+## Merge the PR
 
 Merge only when the wrapper's `{OVERALL_STATUS}` is `clean`, or `partial` with an explicit `--review-stop-on-findings`/`--review-stop-on-clean` flag. The wrapper and the inner loops own what each status means — `~opt` exclusion, `push-failed`, copilot `too-large`, `capped` vs `guardrail` — so apply its verdict as-is rather than re-deriving it from the per-pass table. For `inconclusive` or `dirty`:
-- **Default mode**: leave the PR open and report the proximate status so the user can review manually.
-- **Interactive mode (`--interactive`)**: ask the user whether to merge anyway, re-run a specific reviewer, or leave open.
+- **Default mode**: leave the {CR_NOUN} open and report the proximate status so the user can review manually.
+- **Interactive mode (`--interactive`)**: ask the user whether to merge anyway, re-run a specific reviewer, or leave it open.
 
-### Merging
+Then:
 
-If `PR_STATE=MERGED`, skip the CI gate and merge command below and continue
-directly to **Checkpoint 3**, so an interrupted rerun can recover from a merge
-that already succeeded remotely. Otherwise:
-
-- **Gate on required CI first, following the same rule as step 6 above.**
-  - Apply the shared release CI gate below to this PR's live head and `{target}`. Verify configured expected CI independently of protection-required checks; an empty required list is not missing CI.
+1. **Gate on CI.** Apply the shared release CI gate below to this {CR_NOUN}'s live head and `{target}`. It verifies the CI the project configures independently of the checks branch protection requires, so an empty required list is not mistaken for missing CI, and no reported checks is not mistaken for green.
 
 !read lib/release-ci-gate.md
 
-  - On a required-check/pipeline **failure**, apply the **CI flake handling** routine — one conservative re-run on the same commit (see **CI flake handling** above). If the same SHA passes on the re-run, treat it as a flake and proceed (logging which check flaked); if it fails again, **abort the release merge** and report which check failed.
-- Once confirmed clean, merge (the `merge` verb — GitHub reads the PR state and merges directly since a release PR is never squashed/rebased away from its exact head; GitLab has no separate list-required-checks step, so the pipeline wait above is its whole gate):
-  ```bash
-  PR_NUMBER="<number>"
-  if [ "$CLI_TOOL" = gh ]; then
-    CURRENT_PR_STATE="$(gh pr view "$PR_NUMBER" --json state -q .state)" || {
-      echo "INCOMPLETE — Merged release PR is unverified; the forge state query failed. Preserve the prepared release state and retry."
-      exit 1
-    }
-    if [ "$CURRENT_PR_STATE" = "OPEN" ]; then
-      gh pr merge "$PR_NUMBER" --merge --match-head-commit "<ci-verified-head>"
-    elif [ "$CURRENT_PR_STATE" != "MERGED" ]; then
-      echo "INCOMPLETE — Merged release PR is unverified; expected OPEN or MERGED, got ${CURRENT_PR_STATE:-empty}. Preserve the prepared release state and retry."
-      exit 1
-    fi
-  else
-    CURRENT_PR_STATE="$(glab mr view "$PR_NUMBER" --output json --jq .state)" || {
-      echo "INCOMPLETE — Merged release MR is unverified; the forge state query failed. Preserve the prepared release state and retry."
-      exit 1
-    }
-    if [ "$CURRENT_PR_STATE" = "opened" ]; then
-      glab mr merge "$PR_NUMBER" --yes
-    elif [ "$CURRENT_PR_STATE" != "merged" ]; then
-      echo "INCOMPLETE — Merged release MR is unverified; expected opened or merged, got ${CURRENT_PR_STATE:-empty}. Preserve the prepared release state and retry."
-      exit 1
-    fi
-  fi
-  ```
-- **Checkpoint 3 — merged release PR.** Do not infer completion from the merge
-  command's exit status: read back all three remote fields and require a merged
-  state, a non-empty merge timestamp, and a non-empty merge commit. Empty,
-  malformed, timed-out, queued, or otherwise inconclusive output is incomplete;
-  name `Merged release PR` as the first unverified checkpoint and preserve the
-  prepared state. Checkpoints 3 through 6 run as **one** shell invocation — the
-  single fenced block under **Post-Merge** below — with a command timeout of at
-  least 600 seconds, substituting the carried preparation SHA and PR number for
-  `<prepared-release-sha>` and `<number>`.
+   On a failed check or pipeline, apply **CI flake handling** above: one conservative re-run on the same commit. If that SHA passes, it was a flake; proceed and log which check flaked. If it fails again, stop without merging and report the check.
+2. **Merge, pinned to the verified head.** Re-read the {CR_NOUN} state first. If it is still open, merge the head the CI gate verified, `{VERIFIED_HEAD}`:
+   - GitHub: `gh pr merge {PR_NUMBER} --merge --match-head-commit {VERIFIED_HEAD}`
+   - GitLab: `glab mr merge {PR_NUMBER} --sha {VERIFIED_HEAD} --yes`
+
+   If the head moved, the forge refuses the merge; go back to the CI gate for the new head. Use the merge method the project documents for release {CR_NOUN}s. Without one, use a merge commit: a promotion {CR_NOUN} has to carry the source history into `{target}` unchanged, since a squash or rebase would make the two branches diverge and hide the preparation commit that resume looks for. If the repository does not allow merge commits and documents no alternative, leave the {CR_NOUN} open and report that. Never merge with `--admin`, auto-merge, or any other bypass of the target's protection.
+
+   If the state is already merged, continue. Any other state is INCOMPLETE.
 
 ## Post-Merge
 
-1. **Checkpoints 3–6 — merged remote verification.** Read back the merged PR
-   (Checkpoint 3), then fetch the target and verify its remote ref is a real
-   commit whose tree contains the merged release commit (Checkpoint 4 — PR
-   state alone would miss a queued or incomplete target update), then publish
-   or verify the version tag (Checkpoint 5) and, when documented, the GitHub
-   Release (Checkpoint 6). If any command is empty, malformed, timed out, or
-   fails, report the first unverified checkpoint by name and do not create or
-   reuse a tag. Checkpoints 3–6 run as **one** shell invocation with a command
-   timeout of at least 600 seconds:
-   ```bash
-   incomplete() {
-     printf 'INCOMPLETE — %s is unverified; %s Preserve the prepared release state and retry.\n' "$@"
-     exit 1
-   }
-   remote_tag_commit() {
-     local sha
-     sha="$(git ls-remote origin "refs/tags/v{version}^{}" | head -n1 | cut -f1)"
-     if ! printf '%s\n' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
-       sha="$(git ls-remote origin "refs/tags/v{version}" | head -n1 | cut -f1)"
-     fi
-     printf '%s\n' "$sha"
-   }
-   release_published_json() {
-     if [ "$CLI_TOOL" = gh ]; then
-       gh release view "v{version}" --json tagName,isDraft,isPrerelease,publishedAt 2>/dev/null
-     else
-       # `glab release view` has no draft state, so map
-       # onto the same {tagName,isDraft,isPrerelease,publishedAt} shape the
-       # shared release_is_published gate below expects: isDraft is always
-       # false, isPrerelease comes from `upcoming_release`, publishedAt from
-       # `released_at`.
-       glab release view "v{version}" -F json 2>/dev/null \
-         | jq '{tagName: .tag_name, isDraft: false, isPrerelease: (.upcoming_release // false), publishedAt: .released_at}'
-     fi
-   }
-   # release_is_published: run as `RELEASE_JSON_IN="$JSON" release_is_published` (named variable; see the positional-parameter contract test).
-   release_is_published() {
-     printf '%s\n' "$RELEASE_JSON_IN" | jq -e \
-       'type == "object" and .tagName == "v{version}" and .isDraft == false and .isPrerelease == false and (.publishedAt | type == "string") and (.publishedAt | length > 0)' >/dev/null 2>&1
-   }
+Do not infer completion from the merge command's exit status, a local commit, or a pushed tag. Read each fact back from the remote, in order, and when one cannot be verified — empty, malformed, failed, queued or timed out — report INCOMPLETE naming that checkpoint, leave the prepared state as it is, and stop.
 
-   PREPARED_RELEASE_SHA="<prepared-release-sha>"
-   PR_NUMBER="<number>"
-   if [ "<target-recovery>" = "true" ]; then
-     SOURCE_SHA="$PREPARED_RELEASE_SHA"
-   else
-     SOURCE_SHA="$(git rev-parse HEAD)"
-   fi
+**Checkpoint 3 — merged release {CR_NOUN}.** Read back the {CR_NOUN} and require a merged state, a non-empty merge timestamp and a non-empty merge commit: `gh pr view {PR_NUMBER} --json state,mergedAt,mergeCommit,url`; on GitLab capture `glab api "projects/:id/merge_requests/{PR_NUMBER}"` and read `state` (`merged`), `merged_at`, `merge_commit_sha` and `web_url`. Record the merge commit as `{MERGE_COMMIT}`.
 
-   # Checkpoint 3 — merged release PR/MR.
-   if [ "$CLI_TOOL" = gh ]; then
-     MERGE_JSON="$(gh pr view "$PR_NUMBER" --json state,mergedAt,mergeCommit)" || incomplete "Merged release PR" "the forge query failed."
-   else
-     # GitLab has no separate mergedAt field distinct from the merge commit's
-     # presence; reshape onto the same {state,mergedAt,mergeCommit.oid} the
-     # shared jq gate below expects.
-     MR_JSON="$(glab api "projects/:id/merge_requests/$PR_NUMBER")" \
-       || incomplete "Merged release MR" "the forge query failed."
-     MERGE_JSON="$(printf '%s\n' "$MR_JSON" \
-       | jq '{state: (if .state == "merged" then "MERGED" else (.state | ascii_upcase) end), mergedAt: .merged_at, mergeCommit: {oid: .merge_commit_sha}}')" \
-       || incomplete "Merged release MR" "the forge response could not be parsed."
-   fi
-   if ! printf '%s\n' "$MERGE_JSON" | jq -e \
-    'type == "object" and .state == "MERGED" and (.mergedAt | type == "string") and (.mergedAt | length > 0) and (.mergeCommit.oid | type == "string") and (.mergeCommit.oid | length > 0)' >/dev/null; then
-     incomplete "Merged release {CR_NOUN}" "state, mergedAt, or mergeCommit is missing or not MERGED."
-   fi
-   MERGE_COMMIT="$(printf '%s\n' "$MERGE_JSON" | jq -r '.mergeCommit.oid')"
-   if [ "$CLI_TOOL" = gh ]; then
-     PR_URL="$(gh pr view "$PR_NUMBER" --json url -q .url)" || incomplete "Merged release PR" "the PR URL could not be read."
-   else
-     PR_URL="$(printf '%s\n' "$MR_JSON" | jq -er '.web_url | select(type == "string" and length > 0)')" || incomplete "Merged release MR" "the MR URL could not be read."
-   fi
-   printf 'RELEASE_PR_HANDOFF\tPR_NUMBER=%s\tPR_URL=%s\tPR_STATE=MERGED\tMERGE_COMMIT=%s\n' "$PR_NUMBER" "$PR_URL" "$MERGE_COMMIT"
+**Checkpoints 4 and 5 — target branch and version tag.** The {CR_NOUN} state alone would miss a queued or incomplete target update, so verify the target ref itself, then the tag. Run this as one shell invocation, allowing it at least six minutes:
 
-   # Checkpoint 4 — target-branch tree. FETCH_HEAD pins the exact target ref
-   # fetched; do not resolve a second moving tip with ls-remote.
-   git fetch origin "refs/heads/{target}" || incomplete "Target branch tree" "fetching {target} failed."
-   TARGET_SHA="$(git rev-parse --verify --quiet FETCH_HEAD^{commit} || true)"
-   if ! printf '%s\n' "$TARGET_SHA" | grep -Eq '^[0-9a-f]{40}$' \
-      || ! git cat-file -e "$TARGET_SHA^{tree}" 2>/dev/null \
-      || ! git merge-base --is-ancestor "$MERGE_COMMIT" "$TARGET_SHA"; then
-     incomplete "Target branch tree" "expected {target} to contain $MERGE_COMMIT, got ${TARGET_SHA:-empty}."
-   fi
+```bash
+incomplete() {
+  echo "INCOMPLETE — $WHAT is unverified; $WHY Preserve the prepared release state and retry."
+  exit 1
+}
+# The commit the remote tag points at: the peeled entry of an annotated tag, else the lightweight ref.
+remote_tag_commit() {
+  TAG_REFS="$(git ls-remote origin "refs/tags/{tag}" "refs/tags/{tag}^{}")" || return 1
+  printf '%s\n' "$TAG_REFS" | sort -k2 | tail -n1 | cut -f1 | grep -E '^[0-9a-f]{40}$'
+}
+on_release_lineage() {
+  git merge-base --is-ancestor "{PREPARED_RELEASE_SHA}" "$TAG_COMMIT" && git merge-base --is-ancestor "$TAG_COMMIT" "$TARGET_SHA"
+}
 
-   # Checkpoint 5 — version tag. A workflow may add housekeeping commits after
-   # the merge, so accept only a tag on the merged-release lineage, never an
-   # unrelated or stale tag, and never overwrite an existing tag. A failed push
-   # may have raced with another successful publisher, so re-read the tag before
-   # reporting failure.
-   TAG_SHA="$(remote_tag_commit)"
-   if ! printf '%s\n' "$TAG_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "{publishes_github_release}" = "true" ]; then
-     # Automation owns tag creation for this project — poll for it with the
-     # same bound Checkpoint 6 uses; never pre-create it here (see step 7 above).
-     for ATTEMPT in $(seq 1 30); do
-       TAG_SHA="$(remote_tag_commit)"
-       printf '%s\n' "$TAG_SHA" | grep -Eq '^[0-9a-f]{40}$' && break
-       TAG_SHA=""
-       [ "$ATTEMPT" -lt 30 ] && sleep 10
-     done
-   fi
-   if printf '%s\n' "$TAG_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
-     TAG_COMMIT="$TAG_SHA"
-     if ! git merge-base --is-ancestor "$PREPARED_RELEASE_SHA" "$TAG_COMMIT" \
-        || ! git merge-base --is-ancestor "$TAG_COMMIT" "$TARGET_SHA"; then
-       echo "INCOMPLETE — Version tag v{version} is not on the merged release lineage; refusing to overwrite it."
-       exit 1
-     fi
-   elif [ "{publishes_github_release}" = "true" ]; then
-     incomplete "Version tag v{version}" "automation owns tag creation for this project, so it was never pre-created here."
-   else
-     if git rev-parse --verify --quiet "refs/tags/v{version}^{commit}" >/dev/null; then
-       LOCAL_TAG_COMMIT="$(git rev-parse --verify --quiet "refs/tags/v{version}^{commit}")" || incomplete "Version tag" "the local tag could not be read."
-       if ! git merge-base --is-ancestor "$PREPARED_RELEASE_SHA" "$LOCAL_TAG_COMMIT" \
-          || ! git merge-base --is-ancestor "$LOCAL_TAG_COMMIT" "$TARGET_SHA"; then
-         echo "INCOMPLETE — Local version tag v{version} is not on the merged release lineage; refusing to overwrite it."
-         exit 1
-       fi
-     else
-       git tag "v{version}" "$MERGE_COMMIT" || incomplete "Version tag" "local tag creation failed."
-     fi
-     git push origin "refs/tags/v{version}" || true
-     TAG_COMMIT="$(remote_tag_commit)"
-     if ! printf '%s\n' "$TAG_COMMIT" | grep -Eq '^[0-9a-f]{40}$' \
-        || ! git merge-base --is-ancestor "$PREPARED_RELEASE_SHA" "$TAG_COMMIT" \
-        || ! git merge-base --is-ancestor "$TAG_COMMIT" "$TARGET_SHA"; then
-       incomplete "Version tag" "expected a tag on the merged release lineage, got ${TAG_COMMIT:-empty}."
-     fi
-   fi
+# Checkpoint 4. FETCH_HEAD pins the exact target ref fetched; do not resolve a second moving tip with ls-remote.
+git fetch origin "refs/heads/{target}" || WHAT="Target branch tree" WHY="fetching {target} failed." incomplete
+TARGET_SHA="$(git rev-parse --verify --quiet 'FETCH_HEAD^{commit}')"
+{ [ -n "$TARGET_SHA" ] && git merge-base --is-ancestor "{MERGE_COMMIT}" "$TARGET_SHA"; } \
+  || WHAT="Target branch tree" WHY="expected {target} to contain {MERGE_COMMIT}, got ${TARGET_SHA:-nothing}." incomplete
 
-   # Checkpoint 6 — GitHub Release. The release workflow may need time to publish
-   # after the tag. Missing, empty, malformed, or timed-out output is incomplete
-   # when GitHub Release publication is part of the documented workflow.
-   if [ "{publishes_github_release}" != "true" ] && [ "{publishes_github_release}" != "false" ]; then
-     echo "INCOMPLETE — GitHub Release publication flag is unresolved; preserve the prepared release state."
-     exit 1
-   fi
-   if [ "{publishes_github_release}" = "true" ]; then
-   RELEASE_JSON=""
-   for ATTEMPT in $(seq 1 30); do
-     CANDIDATE_RELEASE_JSON="$(release_published_json)"
-     if RELEASE_JSON_IN="$CANDIDATE_RELEASE_JSON" release_is_published; then
-       RELEASE_JSON="$CANDIDATE_RELEASE_JSON"
-       break
-     fi
-     [ "$ATTEMPT" -lt 30 ] && sleep 10
-   done
-   if ! RELEASE_JSON_IN="$RELEASE_JSON" release_is_published; then
-     incomplete "GitHub Release" "no published release was found after the bounded wait."
-   fi
-   else
-     echo "Checkpoint 6 — GitHub Release: skipped because the documented workflow does not publish one."
-   fi
+# Checkpoint 5. The tag must sit on the merged-release lineage: at or after the preparation commit, and
+# reachable from the target (a workflow may add housekeeping commits after the merge). An existing tag
+# anywhere else is reported, never moved.
+TAG_COMMIT="$(remote_tag_commit)"
+if [ -z "$TAG_COMMIT" ]; then
+  case "{tag_owner}" in
+  automation)
+    # The project's pipeline creates the tag. Creating it here can make that pipeline skip publication.
+    for ATTEMPT in $(seq 1 30); do
+      TAG_COMMIT="$(remote_tag_commit)" && break
+      [ "$ATTEMPT" -lt 30 ] && sleep 10
+    done
+    [ -n "$TAG_COMMIT" ] || WHAT="Version tag {tag}" WHY="the project's automation creates it and it did not appear within five minutes; it was not created here." incomplete
+    ;;
+  command)
+    if TAG_COMMIT="$(git rev-parse --verify --quiet 'refs/tags/{tag}^{commit}')"; then
+      on_release_lineage || WHAT="Version tag {tag}" WHY="a local tag of that name is not on the merged release lineage and was not overwritten." incomplete
+    else
+      git tag "{tag}" "{MERGE_COMMIT}" || WHAT="Version tag {tag}" WHY="local tag creation failed." incomplete
+    fi
+    # A rejected push may have lost a race with another publisher, so the read-back decides, not the exit status.
+    git push origin "refs/tags/{tag}" || true
+    TAG_COMMIT="$(remote_tag_commit)"
+    ;;
+  *) WHAT="Version tag {tag}" WHY="the tag owner was not resolved." incomplete ;;
+  esac
+fi
+{ [ -n "$TAG_COMMIT" ] && on_release_lineage; } \
+  || WHAT="Version tag {tag}" WHY="expected a tag on the merged release lineage, got ${TAG_COMMIT:-nothing}; an existing tag is never overwritten." incomplete
+printf 'RELEASE_TAG_HANDOFF\tTARGET_SHA=%s\tTAG_COMMIT=%s\n' "$TARGET_SHA" "$TAG_COMMIT"
+```
 
-   echo "COMPLETE — source $SOURCE_SHA; PR $PR_NUMBER merged at $MERGE_COMMIT; target $TARGET_SHA; tag $TAG_COMMIT."
-   ```
-2. **Only after all six checkpoints pass** report the release as complete, including
-   the source SHA, PR URL and merged state, target SHA, tag SHA, and published
-   GitHub Release; a local prepared commit, a merge command's exit status, or a
-   pushed tag is never sufficient on its own. Only then switch back locally:
-   `git checkout {source} && git pull --rebase --autostash`.
+**Checkpoint 6 — release object.** Only when `{publishes_release}=true`; otherwise say it was skipped because the project publishes none. The pipeline may need time after the tag, so poll every 10 seconds for up to five minutes for a published release whose tag is `{tag}`: `gh release view "{tag}" --json tagName,isDraft,isPrerelease,publishedAt` must show the tag, `isDraft` and `isPrerelease` false, and a publish time. On GitLab, `glab release view "{tag}" -F json` must show `tag_name`, a `released_at` time and `upcoming_release` not true (GitLab has no draft state). If the project documents its releases as prereleases, accept that flag. No published release after the wait is INCOMPLETE.
+
+**Report.** Once every applicable checkpoint has passed, report the release as complete with the source SHA, the {CR_NOUN} URL and merge commit, the target SHA, the tag and its commit, and the release URL when one was published. Then switch back: `git checkout {source} && git pull --rebase --autostash`.

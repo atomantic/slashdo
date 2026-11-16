@@ -2,14 +2,14 @@
 
 // End-to-end tests for the curl installer scripts themselves.
 //
-// test/curl-installer-allowlist.test.js only diffs the LIBS/COMMANDS bash array
-// literals against the repo as text — it never executes either script. These
-// tests actually run install.sh and uninstall.sh against a sandbox HOME (the
-// same mkdtemp pattern test/installer.test.js uses for the npm path) and assert
-// on the resulting filesystem and settings.json state.
+// test/curl-installer-allowlist.test.js checks install-manifest.txt against the
+// tree without executing either script. These tests actually run install.sh and
+// uninstall.sh against a sandbox HOME (the same mkdtemp pattern
+// test/installer.test.js uses for the npm path) and assert on the resulting
+// filesystem and settings.json state.
 //
 // Expected inventory is derived from commands/do/ and lib/ on disk, never from
-// the bash arrays under test — otherwise deleting an entry from COMMANDS would
+// the manifest the scripts read — otherwise dropping an entry from it would
 // silently delete its coverage too.
 //
 // Two source modes are exercised. LOCAL_MODE: install.sh copies from its
@@ -23,11 +23,12 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFile, execFileSync, spawn, spawnSync } = require('child_process');
+const { execFile, execFileSync, spawn } = require('child_process');
 const { once } = require('node:events');
 
 const { ENVIRONMENTS } = require('../src/environments');
 const { install: npmInstall } = require('../src/installer');
+const { parseManifest } = require('../scripts/build-install-manifest');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const INSTALL_SH = path.join(REPO_ROOT, 'install.sh');
@@ -46,6 +47,9 @@ function mdNames(...segments) {
 
 const COMMANDS = mdNames('commands', 'do');
 const LIBS = mdNames('lib');
+// Non-markdown lib files (the local CLI runner script) install byte for byte:
+// no environment rewrite may touch code that runs.
+const LIB_ASSETS = fs.readdirSync(path.join(REPO_ROOT, 'lib')).filter((f) => !f.endsWith('.md')).sort();
 const HOOKS = fs
   .readdirSync(path.join(REPO_ROOT, 'hooks'))
   .filter((f) => f.endsWith('.js'))
@@ -96,19 +100,46 @@ function childEnv({ home, tmpdir, pathPrefix }) {
   };
 }
 
-// Run a script with a sandboxed HOME. Returns { status, stdout } with stderr
+// One install forks several hundred short-lived child processes (dirname,
+// mktemp, cp/curl, sed, chmod, mv per file), so the wall time of this file is
+// process spawning, not logic. The cases run concurrently (see suite() below);
+// this cap keeps the number of simultaneous installers at the core count so the
+// signal-timing cases are not starved on a small CI runner.
+const MAX_PARALLEL_SCRIPTS = os.availableParallelism();
+let runningScripts = 0;
+const waitingScripts = [];
+
+async function withScriptSlot(fn) {
+  if (runningScripts >= MAX_PARALLEL_SCRIPTS) await new Promise((resolve) => waitingScripts.push(resolve));
+  else runningScripts++;
+  try {
+    return await fn();
+  } finally {
+    // Hand the slot straight to the next waiter, or give it back.
+    const next = waitingScripts.shift();
+    if (next) next();
+    else runningScripts--;
+  }
+}
+
+// Run a script with a sandboxed HOME. Resolves to { status, stdout } with stderr
 // folded in, so tests can assert on failure paths and on shell diagnostics.
 // `stdin: true` pipes the script the way the documented `curl ... | bash`
-// install does, which leaves BASH_SOURCE unset.
+// install does, which leaves BASH_SOURCE unset. Asynchronous so that one
+// script run does not block the event loop the other cases are waiting on.
 function runScript(script, opts = {}) {
   const { stdin = false, cwd } = opts;
-  const result = spawnSync('bash', stdin ? [] : [script], {
-    env: childEnv(opts),
-    cwd,
-    encoding: 'utf8',
-    input: stdin ? fs.readFileSync(script, 'utf8') : undefined,
-  });
-  return { status: result.status, stdout: (result.stdout || '') + (result.stderr || '') };
+  return withScriptSlot(() => new Promise((resolve, reject) => {
+    const child = spawn('bash', stdin ? [] : [script], { env: childEnv(opts), cwd });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk; });
+    child.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk; });
+    child.once('error', reject);
+    child.once('close', (status) => resolve({ status, stdout: stdout + stderr }));
+    child.stdin.on('error', () => { /* the script may exit before reading stdin */ });
+    child.stdin.end(stdin ? fs.readFileSync(script, 'utf8') : undefined);
+  }));
 }
 
 const runInstall = (opts) => runScript(INSTALL_SH, opts);
@@ -173,20 +204,37 @@ const makeServingCurlWithoutHook = (hook) => makeCurlStub(
   `[ "$rel" = "hooks/${hook}.js" ] && exit 22\n[ -f "${REPO_ROOT}/$rel" ] || exit 22\ncp "${REPO_ROOT}/$rel" "$dest"`
 );
 
+// The file list both scripts read before anything else. Stubs that fail every
+// other transfer still serve it, so the failure lands on the files it names.
+const MANIFEST = 'install-manifest.txt';
+const serveManifest = (source = path.join(REPO_ROOT, MANIFEST)) =>
+  `if [ "$rel" = "${MANIFEST}" ]; then cp "${source}" "$dest"; exit 0; fi`;
+
 // Writes a partial body and then fails, standing in for a dead transfer.
-const makeFailingCurl = () => makeCurlStub('[ -n "$dest" ] && printf TRUNCATED > "$dest"\nexit 1');
+const makeFailingCurl = () => makeCurlStub(`${serveManifest()}\n[ -n "$dest" ] && printf TRUNCATED > "$dest"\nexit 1`);
+
+// Fails every transfer, the manifest included: an offline machine.
+const makeOfflineCurl = () => makeCurlStub('exit 6');
 
 // Same, but hangs afterwards so a test can interrupt the install mid-write.
 const makeHangingCurl = () => makeCurlStub(
-  '[ -n "$dest" ] && printf TRUNCATED > "$dest" || exit 1\nprintf "SLASHDO_TEST_WRITE_READY\\n"\nsleep 30\nexit 1'
+  `${serveManifest()}\n[ -n "$dest" ] && printf TRUNCATED > "$dest" || exit 1\nprintf "SLASHDO_TEST_WRITE_READY\\n"\nsleep 30\nexit 1`
 );
 
-// Copy install.sh somewhere with no sibling commands//lib/, forcing remote mode.
-function remoteModeInstaller() {
-  const dest = path.join(mkTmp('slashdo-remote-'), 'install.sh');
-  fs.copyFileSync(INSTALL_SH, dest);
+// Serves the repo, but with <manifestText> in place of the committed manifest.
+function makeServingCurlWithManifest(manifestText) {
+  const source = path.join(mkTmp('slashdo-manifest-'), MANIFEST);
+  fs.writeFileSync(source, manifestText);
+  return makeCurlStub(`${serveManifest(source)}\n[ -f "${REPO_ROOT}/$rel" ] || exit 22\ncp "${REPO_ROOT}/$rel" "$dest"`);
+}
+
+// Copy a script somewhere with no sibling commands//lib/, forcing remote mode.
+function remoteModeCopy(script) {
+  const dest = path.join(mkTmp('slashdo-remote-'), path.basename(script));
+  fs.copyFileSync(script, dest);
   return dest;
 }
+const remoteModeInstaller = () => remoteModeCopy(INSTALL_SH);
 
 // Separate from stdout: mktemp's stdout belongs to command substitution and
 // must remain withheld until the test has signalled the allocating installer.
@@ -237,18 +285,26 @@ after(() => {
   for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
 
+// Top-level suites in a test file run one after another, and so do the cases
+// inside each. No case here writes to a HOME, TMPDIR, or PATH stub another case
+// uses (the fresh-install cases only read the tree their before() hook built),
+// so every suite is registered under one concurrent parent (at the end of this
+// file) and runs its own cases concurrently too.
+const suites = [];
+const suite = (name, fn) => suites.push([name, fn]);
+
 // ── install.sh: Claude Code, local mode ─────────────────────────────
 
-describe('install.sh — Claude Code fresh install', () => {
+suite('install.sh — Claude Code fresh install', () => {
   let home;
   let result;
 
-  before(() => {
+  before(async () => {
     home = makeHome();
-    result = runInstall({ home });
+    result = await runInstall({ home });
   });
 
-  it('exits successfully and reports local mode', () => {
+  it('exits successfully and reports local mode', async () => {
     assert.equal(result.status, 0, result.stdout);
     assert.match(result.stdout, /Source:.*local/);
     assert.doesNotMatch(result.stdout, /failed/);
@@ -257,7 +313,7 @@ describe('install.sh — Claude Code fresh install', () => {
     assert.ok(!result.stdout.includes('\\033'), 'no uninterpreted escape sequences in the output');
   });
 
-  it('installs every command with native required-read paths', () => {
+  it('installs every command with native required-read paths', async () => {
     for (const cmd of COMMANDS) {
       const file = path.join(home, '.claude', 'commands', 'do', `${cmd}.md`);
       assert.ok(fs.existsSync(file), `${cmd}.md should be installed`);
@@ -265,7 +321,7 @@ describe('install.sh — Claude Code fresh install', () => {
     }
   });
 
-  it('installs every library with native required-read paths', () => {
+  it('installs every library with native required-read paths', async () => {
     for (const lib of LIBS) {
       const file = path.join(home, '.claude', 'lib', `${lib}.md`);
       assert.ok(fs.existsSync(file), `${lib}.md should be installed`);
@@ -273,7 +329,15 @@ describe('install.sh — Claude Code fresh install', () => {
     }
   });
 
-  it('installs the hook files verbatim', () => {
+  it('installs the lib assets verbatim', async () => {
+    assert.ok(LIB_ASSETS.includes('local-cli-runner.sh'), 'the runner script is a lib asset');
+    for (const asset of LIB_ASSETS) {
+      const file = path.join(home, '.claude', 'lib', asset);
+      assert.equal(fs.readFileSync(file, 'utf8'), readRepo('lib', asset), `${asset} content`);
+    }
+  });
+
+  it('installs the hook files verbatim', async () => {
     for (const hook of HOOKS) {
       const file = path.join(home, '.claude', 'hooks', `${hook}.js`);
       assert.ok(fs.existsSync(file), `${hook}.js should be installed`);
@@ -281,7 +345,7 @@ describe('install.sh — Claude Code fresh install', () => {
     }
   });
 
-  it('installs files with the mode the umask implies, not mktemp-private 0600', () => {
+  it('installs files with the mode the umask implies, not mktemp-private 0600', async () => {
     const umask = parseInt(execFileSync('sh', ['-c', 'umask'], { encoding: 'utf8' }).trim(), 8);
     const expected = 0o666 & ~umask;
     for (const file of ['commands/do/push.md', 'lib/model-tiers.md', 'hooks/slashdo-statusline.js']) {
@@ -290,16 +354,16 @@ describe('install.sh — Claude Code fresh install', () => {
     }
   });
 
-  it('leaves no staging temp files behind', () => {
+  it('leaves no staging temp files behind', async () => {
     for (const dir of claudeSubdirs(home)) assert.deepEqual(strayTempFiles(dir), []);
   });
 
-  it('defaults auto-update to enabled in .slashdo-config.json', () => {
+  it('defaults auto-update to enabled in .slashdo-config.json', async () => {
     const config = JSON.parse(fs.readFileSync(path.join(home, '.claude', '.slashdo-config.json'), 'utf8'));
     assert.equal(config.autoUpdate, true);
   });
 
-  it('registers the SessionStart hook and the statusline in settings.json', () => {
+  it('registers the SessionStart hook and the statusline in settings.json', async () => {
     const settings = readSettings(home);
     const commands = settings.hooks.SessionStart.flatMap((g) => g.hooks.map((h) => h.command));
     assert.equal(commands.length, 1);
@@ -309,10 +373,10 @@ describe('install.sh — Claude Code fresh install', () => {
   });
 });
 
-describe('install.sh — OpenCode fresh install', () => {
-  it('installs commands and libs with the OpenCode path rewrite applied', () => {
+suite('install.sh — OpenCode fresh install', () => {
+  it('installs commands and libs with the OpenCode path rewrite applied', async () => {
     const home = makeHome(['.claude', '.config/opencode']);
-    const result = runInstall({ home });
+    const result = await runInstall({ home });
     assert.equal(result.status, 0, result.stdout);
 
     for (const cmd of COMMANDS) {
@@ -329,6 +393,10 @@ describe('install.sh — OpenCode fresh install', () => {
       assert.ok(fs.existsSync(file), `${lib}.md should be installed`);
       assert.equal(fs.readFileSync(file, 'utf8'), rewriteForOpencode(readRepo('lib', `${lib}.md`)), `${lib}.md content`);
     }
+    for (const asset of LIB_ASSETS) {
+      assert.equal(fs.readFileSync(path.join(home, '.config', 'opencode', 'lib', asset), 'utf8'),
+        readRepo('lib', asset), `opencode lib/${asset} is copied verbatim`);
+    }
     assert.ok(
       COMMANDS.some((c) => fs.readFileSync(
         path.join(home, '.config', 'opencode', 'commands', `do-${c}.md`), 'utf8'
@@ -337,9 +405,9 @@ describe('install.sh — OpenCode fresh install', () => {
     );
   });
 
-  it('rewrites command execution references to installed OpenCode filenames', () => {
+  it('rewrites command execution references to installed OpenCode filenames', async () => {
     const home = makeHome(['.claude', '.config/opencode']);
-    const result = runInstall({ home });
+    const result = await runInstall({ home });
     assert.equal(result.status, 0, result.stdout);
 
     let sawExecRef = false;
@@ -362,10 +430,10 @@ describe('install.sh — OpenCode fresh install', () => {
 
 // ── install.sh: remote (curl) mode ──────────────────────────────────
 
-describe('install.sh — remote mode', () => {
-  it('installs the same tree over curl as it does from a local checkout', () => {
+suite('install.sh — remote mode', () => {
+  it('installs the same tree over curl as it does from a local checkout', async () => {
     const home = makeHome(['.claude', '.config/opencode']);
-    const result = runScript(remoteModeInstaller(), { home, pathPrefix: makeServingCurl() });
+    const result = await runScript(remoteModeInstaller(), { home, pathPrefix: makeServingCurl() });
 
     assert.equal(result.status, 0, result.stdout);
     assert.match(result.stdout, /Source:.*github/);
@@ -395,6 +463,12 @@ describe('install.sh — remote mode', () => {
         `opencode lib/${lib}.md should be fetched and rewritten`
       );
     }
+    for (const asset of LIB_ASSETS) {
+      for (const root of [['.claude'], ['.config', 'opencode']]) {
+        assert.equal(fs.readFileSync(path.join(home, ...root, 'lib', asset), 'utf8'), readRepo('lib', asset),
+          `${root.join('/')}/lib/${asset} should be fetched intact`);
+      }
+    }
     for (const hook of HOOKS) {
       assert.equal(
         fs.readFileSync(path.join(home, '.claude', 'hooks', `${hook}.js`), 'utf8'),
@@ -406,8 +480,8 @@ describe('install.sh — remote mode', () => {
   });
 });
 
-describe('install.sh — piped from stdin (curl | bash)', () => {
-  it('fetches from GitHub, not from the caller directory', () => {
+suite('install.sh — piped from stdin (curl | bash)', () => {
+  it('fetches from GitHub, not from the caller directory', async () => {
     const home = makeHome();
     // A directory that merely looks like a checkout. BASH_SOURCE is unset for a
     // piped script, so a SCRIPT_DIR that silently falls back to CWD would
@@ -417,7 +491,7 @@ describe('install.sh — piped from stdin (curl | bash)', () => {
     fs.mkdirSync(path.join(decoy, 'lib'), { recursive: true });
     fs.writeFileSync(path.join(decoy, 'commands', 'do', 'push.md'), 'DECOY\n');
 
-    const result = runScript(INSTALL_SH, {
+    const result = await runScript(INSTALL_SH, {
       home,
       cwd: decoy,
       stdin: true,
@@ -435,49 +509,49 @@ describe('install.sh — piped from stdin (curl | bash)', () => {
   });
 });
 
-describe('install.sh — Claude Code re-install', () => {
-  it('is idempotent: a second run reports "already configured" and leaves settings.json byte-identical', () => {
+suite('install.sh — Claude Code re-install', () => {
+  it('is idempotent: a second run reports "already configured" and leaves settings.json byte-identical', async () => {
     const home = makeHome();
-    runInstall({ home });
+    await runInstall({ home });
     const first = fs.readFileSync(settingsPathOf(home), 'utf8');
 
-    const second = runInstall({ home });
+    const second = await runInstall({ home });
     assert.equal(second.status, 0, second.stdout);
     assert.match(second.stdout, /already configured/);
     assert.equal(fs.readFileSync(settingsPathOf(home), 'utf8'), first);
   });
 
-  it('removes superseded command files from earlier versions', () => {
+  it('removes superseded command files from earlier versions', async () => {
     const home = makeHome();
     const oldCmd = path.join(home, '.claude', 'commands', 'do', 'makegood.md');
     fs.mkdirSync(path.dirname(oldCmd), { recursive: true });
     fs.writeFileSync(oldCmd, 'stale\n');
 
-    const result = runInstall({ home });
+    const result = await runInstall({ home });
     assert.equal(result.status, 0, result.stdout);
     assert.ok(!fs.existsSync(oldCmd), 'superseded command should be removed');
   });
 });
 
-describe('install.sh — settings.json edge cases', () => {
-  it('preserves a user statusline it does not own', () => {
+suite('install.sh — settings.json edge cases', () => {
+  it('preserves a user statusline it does not own', async () => {
     const home = makeHome();
     writeSettings(home, { statusLine: { type: 'command', command: 'node /my/own/statusline.js' } });
 
-    runInstall({ home });
+    await runInstall({ home });
     assert.equal(readSettings(home).statusLine.command, 'node /my/own/statusline.js');
   });
 
-  it('upgrades a gsd-statusline entry to slashdo-statusline', () => {
+  it('upgrades a gsd-statusline entry to slashdo-statusline', async () => {
     const home = makeHome();
     fs.mkdirSync(path.join(home, '.claude', 'hooks'), { recursive: true });
     writeSettings(home, { statusLine: { type: 'command', command: 'node "/x/gsd-statusline.js"' } });
 
-    runInstall({ home });
+    await runInstall({ home });
     assert.match(readSettings(home).statusLine.command, /slashdo-statusline\.js/);
   });
 
-  it('appends into an existing SessionStart group without dropping user hooks', () => {
+  it('appends into an existing SessionStart group without dropping user hooks', async () => {
     const home = makeHome();
     writeSettings(home, {
       hooks: {
@@ -486,7 +560,7 @@ describe('install.sh — settings.json edge cases', () => {
       },
     });
 
-    runInstall({ home });
+    await runInstall({ home });
     const settings = readSettings(home);
     const commands = settings.hooks.SessionStart.flatMap((g) => g.hooks.map((h) => h.command));
     assert.ok(commands.includes('echo user-hook'), 'user hook must survive');
@@ -494,46 +568,124 @@ describe('install.sh — settings.json edge cases', () => {
     assert.deepEqual(settings.hooks.PreToolUse, [{ hooks: [{ type: 'command', command: 'echo pre' }] }]);
   });
 
-  it('leaves an unparseable settings.json untouched', () => {
+  it('leaves an unparseable settings.json untouched', async () => {
     const home = makeHome();
     fs.writeFileSync(settingsPathOf(home), '{ not json');
 
-    const result = runInstall({ home });
+    const result = await runInstall({ home });
     assert.equal(result.status, 0, result.stdout);
     assert.match(result.stdout, /settings\.json: skipped \(parse error\)/);
     assert.equal(fs.readFileSync(settingsPathOf(home), 'utf8'), '{ not json');
   });
 
-  it('does not clobber a settings.hooks value of an unexpected shape', () => {
+  it('does not clobber a settings.hooks value of an unexpected shape', async () => {
     const home = makeHome();
     writeSettings(home, { hooks: ['not', 'an', 'object'] });
 
-    const result = runInstall({ home });
+    const result = await runInstall({ home });
     assert.equal(result.status, 0, result.stdout);
     assert.deepEqual(readSettings(home).hooks, ['not', 'an', 'object']);
   });
 });
 
-describe('install.sh — no supported environment', () => {
-  it('exits non-zero with guidance when nothing is detected', () => {
-    const result = runInstall({ home: makeHome([]) });
+suite('install.sh — no supported environment', () => {
+  it('exits non-zero with guidance when nothing is detected', async () => {
+    const result = await runInstall({ home: makeHome([]) });
     assert.equal(result.status, 1);
     assert.match(result.stdout, /No supported AI coding environments detected/);
   });
 });
 
+// ── install.sh: the manifest ────────────────────────────────────────
+
+suite('install.sh — install manifest', () => {
+  const retired = parseManifest(fs.readFileSync(path.join(REPO_ROOT, MANIFEST), 'utf8'));
+
+  it('aborts before touching anything when the manifest cannot be downloaded', async () => {
+    const home = makeHome(['.claude', '.config/opencode']);
+    const tmpdir = makeTmpdir();
+    const result = await runScript(remoteModeInstaller(), { home, tmpdir, pathPrefix: makeOfflineCurl() });
+
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stdout, /failed to download .*install-manifest\.txt/);
+    assert.match(result.stdout, /Install aborted:.*nothing was changed/);
+    assert.deepEqual(fs.readdirSync(path.join(home, '.claude')), [], 'no Claude file or directory is created');
+    assert.deepEqual(fs.readdirSync(path.join(home, '.config', 'opencode')), [], 'no OpenCode file or directory is created');
+    assert.deepEqual(fs.readdirSync(tmpdir), [], 'the manifest download is cleaned up');
+  });
+
+  it('rejects a manifest whose entries are not bare filenames, before touching anything', async () => {
+    const home = makeHome();
+    const text = fs.readFileSync(path.join(REPO_ROOT, MANIFEST), 'utf8').replace('[libs]\n', () => '[libs]\n../escape.md\n');
+    const result = await runScript(remoteModeInstaller(), { home, pathPrefix: makeServingCurlWithManifest(text) });
+
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stdout, /invalid entry \.\.\/escape\.md/);
+    assert.deepEqual(fs.readdirSync(path.join(home, '.claude')), []);
+  });
+
+  it('rejects a manifest of an unknown format version', async () => {
+    const home = makeHome();
+    const text = fs.readFileSync(path.join(REPO_ROOT, MANIFEST), 'utf8').replace(' v1', () => ' v2');
+    const result = await runScript(remoteModeInstaller(), { home, pathPrefix: makeServingCurlWithManifest(text) });
+
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stdout, /not a v1 slashdo install manifest/);
+    assert.deepEqual(fs.readdirSync(path.join(home, '.claude')), []);
+  });
+
+  it('reports and fails on a listed file that does not download, instead of skipping it', async () => {
+    // A manifest from a newer commit than the files (or a typo) names a file the
+    // ref does not serve.
+    const home = makeHome();
+    const text = fs.readFileSync(path.join(REPO_ROOT, MANIFEST), 'utf8').replace('[libs]\n', () => '[libs]\nnot-in-the-tree.md\n');
+    const result = await runScript(remoteModeInstaller(), { home, pathPrefix: makeServingCurlWithManifest(text) });
+
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stdout, /lib\/not-in-the-tree\.md\s+failed/);
+    assert.match(result.stdout, /Install incomplete/);
+    assert.doesNotMatch(result.stdout, /Done!/);
+    assert.ok(fs.existsSync(path.join(home, '.claude', 'lib', LIBS[0] + '.md')), 'the files that do download are installed');
+  });
+
+  it('removes retired commands, libs and hooks from earlier releases', async () => {
+    const home = makeHome(['.claude', '.config/opencode']);
+    const stale = [
+      path.join(home, '.claude', 'commands', 'do', retired['retired-commands'][0]),
+      path.join(home, '.claude', 'lib', retired['retired-libs'][0]),
+      path.join(home, '.claude', 'hooks', retired['retired-hooks'][0]),
+      path.join(home, '.config', 'opencode', 'commands', `do-${retired['retired-commands'][0]}`),
+      path.join(home, '.config', 'opencode', 'lib', retired['retired-libs'][0]),
+    ];
+    for (const file of stale) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, 'stale\n');
+    }
+
+    const result = await runInstall({ home });
+    assert.equal(result.status, 0, result.stdout);
+    for (const file of stale) assert.ok(!fs.existsSync(file), `${path.relative(home, file)} should be removed`);
+
+    // And it leaves a copy of the manifest in each environment root for uninstall.
+    const committed = fs.readFileSync(path.join(REPO_ROOT, MANIFEST), 'utf8');
+    for (const root of [path.join(home, '.claude'), path.join(home, '.config', 'opencode')]) {
+      assert.equal(fs.readFileSync(path.join(root, '.slashdo-install-manifest.txt'), 'utf8'), committed);
+    }
+  });
+});
+
 // ── install.sh: atomic writes ───────────────────────────────────────
 
-describe('install.sh — atomic writes', () => {
-  it('leaves the previously installed file intact when a transfer fails mid-write', () => {
+suite('install.sh — atomic writes', () => {
+  it('leaves the previously installed file intact when a transfer fails mid-write', async () => {
     const home = makeHome();
-    runInstall({ home });
+    await runInstall({ home });
 
     const pushPath = path.join(home, '.claude', 'commands', 'do', 'push.md');
     const before = fs.readFileSync(pushPath, 'utf8');
     assert.ok(before.length > 100, 'sanity: push.md should have real content');
 
-    const remote = runScript(remoteModeInstaller(), { home, pathPrefix: makeFailingCurl() });
+    const remote = await runScript(remoteModeInstaller(), { home, pathPrefix: makeFailingCurl() });
 
     // A failed fetch is reported per file, and a Claude install that cannot
     // register its hooks now fails closed instead of claiming completion.
@@ -545,12 +697,12 @@ describe('install.sh — atomic writes', () => {
     assert.doesNotMatch(fs.readFileSync(pushPath, 'utf8'), /TRUNCATED/);
   });
 
-  it('cleans up its staging temp files after a failed transfer, in both destinations and TMPDIR', () => {
+  it('cleans up its staging temp files after a failed transfer, in both destinations and TMPDIR', async () => {
     const home = makeHome(['.claude', '.config/opencode']);
     const tmpdir = makeTmpdir();
-    runInstall({ home, tmpdir: makeTmpdir() });
+    await runInstall({ home, tmpdir: makeTmpdir() });
 
-    runScript(remoteModeInstaller(), { home, tmpdir, pathPrefix: makeFailingCurl() });
+    await runScript(remoteModeInstaller(), { home, tmpdir, pathPrefix: makeFailingCurl() });
 
     for (const dir of claudeSubdirs(home)) {
       assert.deepEqual(strayTempFiles(dir), [], `${dir} should have no leftover .slashdo-tmp.* files`);
@@ -561,9 +713,9 @@ describe('install.sh — atomic writes', () => {
     assert.deepEqual(fs.readdirSync(tmpdir), [], 'the OpenCode staging dir should be removed even when fetches fail');
   });
 
-  it('fails closed when hook registration cannot fetch its shared module', () => {
+  it('fails closed when hook registration cannot fetch its shared module', async () => {
     const home = makeHome();
-    const remote = runScript(remoteModeInstaller(), {
+    const remote = await runScript(remoteModeInstaller(), {
       home,
       pathPrefix: makeServingCurlWithoutSettingsHooks(),
     });
@@ -573,9 +725,9 @@ describe('install.sh — atomic writes', () => {
     assert.doesNotMatch(remote.stdout, /Done!/);
   });
 
-  it('fails closed when either required hook file cannot download', () => {
+  it('fails closed when either required hook file cannot download', async () => {
     const home = makeHome();
-    const remote = runScript(remoteModeInstaller(), {
+    const remote = await runScript(remoteModeInstaller(), {
       home,
       pathPrefix: makeServingCurlWithoutHook('slashdo-check-update'),
     });
@@ -589,7 +741,7 @@ describe('install.sh — atomic writes', () => {
 
   it('removes the in-flight temp file when the install is interrupted', { timeout: 60000 }, async () => {
     const home = makeHome();
-    runInstall({ home });
+    await runInstall({ home });
 
     const cmdDir = path.join(home, '.claude', 'commands', 'do');
     const pushPath = path.join(cmdDir, 'push.md');
@@ -655,7 +807,7 @@ describe('install.sh — atomic writes', () => {
 
 // ── install.sh: temp file safety ────────────────────────────────────
 
-describe('install.sh — temp file safety', () => {
+suite('install.sh — temp file safety', () => {
   const allocations = [
     ['Claude staging', ['.claude'], '*/slashdo-claude.*'],
     ['OpenCode staging', ['.config/opencode'], '*/slashdo-install.*'],
@@ -679,8 +831,9 @@ describe('install.sh — temp file safety', () => {
       fs.writeFileSync(command, 'PREVIOUS COMMAND\n');
       const bin = makeServingCurl();
       const curl = path.join(bin, 'curl');
+      // Log every URL fetched; the manifest is read before any staging exists.
       fs.writeFileSync(curl, fs.readFileSync(curl, 'utf8').replace('#!/bin/sh',
-        '#!/bin/sh\nprintf called >> "$HOME/curl-called"'));
+        '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$HOME/curl-called"'));
       makePausedMktemp(bin, pattern);
       const child = spawn('bash', [remoteModeInstaller()], {
         env: childEnv({ home, tmpdir, pathPrefix: bin }),
@@ -699,8 +852,10 @@ describe('install.sh — temp file safety', () => {
         assert.equal(stat.mode & 0o777, stat.isDirectory() ? 0o700 : 0o600,
           'allocation must retain mktemp privacy');
         if (label.endsWith('staging')) {
-          assert.equal(fs.existsSync(path.join(home, 'curl-called')), false,
-            'this boundary precedes any transfer');
+          const fetched = fs.existsSync(path.join(home, 'curl-called'))
+            ? fs.readFileSync(path.join(home, 'curl-called'), 'utf8').trim().split('\n') : [];
+          assert.deepEqual(fetched.filter((call) => !call.includes(`/${MANIFEST} `)), [],
+            'this boundary precedes any transfer but the manifest');
         }
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 20000);
@@ -732,7 +887,7 @@ describe('install.sh — temp file safety', () => {
     });
   }
 
-  it('derives every temp path from mktemp, never a literal', () => {
+  it('derives every temp path from mktemp, never a literal', async () => {
     // Strip comments so the rule reads the code, not the prose explaining it.
     const code = fs.readFileSync(INSTALL_SH, 'utf8')
       .split('\n')
@@ -741,10 +896,11 @@ describe('install.sh — temp file safety', () => {
     assert.doesNotMatch(code, /\/tmp\/slashdo/, 'staging must not use a predictable /tmp/slashdo-* name');
     assert.match(code, /mktemp "\$@"/, 'allocation must use mktemp');
     assert.match(code, /allocate_temp STAGE_DIR -d "\$\{TMPDIR:-\/tmp\}\/slashdo-install\.XXXXXX"/, 'staging dir must come from mktemp -d');
-    assert.match(code, /allocate_temp ACTIVE_TMP "\$\(dirname "\$dest"\)\/\.slashdo-tmp\.XXXXXX"/, 'file staging must come from mktemp');
+    assert.match(code, /allocate_temp ACTIVE_TMP "\$dir\/\.slashdo-tmp\.XXXXXX"/, 'file staging must come from mktemp');
+    assert.match(code, /allocate_temp MANIFEST_TMP "\$\{TMPDIR:-\/tmp\}\/slashdo-manifest\.XXXXXX"/, 'the manifest download must come from mktemp');
   });
 
-  it('never writes through a pre-existing path in TMPDIR', () => {
+  it('never writes through a pre-existing path in TMPDIR', async () => {
     const home = makeHome(['.claude', '.config/opencode']);
     const tmpdir = makeTmpdir();
     // The names the installer used to hard-code, plus the current prefix.
@@ -755,7 +911,7 @@ describe('install.sh — temp file safety', () => {
     ];
     for (const name of decoys) fs.writeFileSync(path.join(tmpdir, name), 'DECOY\n');
 
-    const result = runInstall({ home, tmpdir });
+    const result = await runInstall({ home, tmpdir });
     assert.equal(result.status, 0, result.stdout);
 
     for (const name of decoys) {
@@ -764,12 +920,12 @@ describe('install.sh — temp file safety', () => {
     assert.deepEqual(fs.readdirSync(tmpdir).sort(), decoys.slice().sort(), 'no staging leftovers beside the decoys');
   });
 
-  it('does not claim success when the staging directory cannot be created', { skip: process.getuid && process.getuid() === 0 ? 'root ignores directory permissions' : false }, () => {
+  it('does not claim success when the staging directory cannot be created', { skip: process.getuid && process.getuid() === 0 ? 'root ignores directory permissions' : false }, async () => {
     const home = makeHome(['.config/opencode']);
     const tmpdir = makeTmpdir();
     fs.chmodSync(tmpdir, 0o500); // readable and traversable, but not writable
     try {
-      const result = runScript(INSTALL_SH, { home, tmpdir });
+      const result = await runScript(INSTALL_SH, { home, tmpdir });
       assert.equal(result.status, 1, 'a staging failure must propagate to the installer exit status');
       assert.match(result.stdout, /could not create a temp directory/);
       assert.doesNotMatch(result.stdout, /Done!/, 'a zero-file install must not report success');
@@ -778,11 +934,11 @@ describe('install.sh — temp file safety', () => {
     }
   });
 
-  it('removes its staging directory on exit', () => {
+  it('removes its staging directory on exit', async () => {
     const home = makeHome(['.claude', '.config/opencode']);
     const tmpdir = makeTmpdir();
 
-    const result = runInstall({ home, tmpdir });
+    const result = await runInstall({ home, tmpdir });
     assert.equal(result.status, 0, result.stdout);
     assert.deepEqual(fs.readdirSync(tmpdir), [], 'TMPDIR should be empty after the install');
   });
@@ -810,7 +966,7 @@ describe('install.sh — temp file safety', () => {
 
 // ── install.sh vs src/installer.js: settings.json parity ────────────
 
-describe('install.sh / src/installer.js settings.json parity', () => {
+suite('install.sh / src/installer.js settings.json parity', () => {
   // install.sh embeds its own copy of the hook-merging logic because the curl
   // path cannot require() src/installer.js. These cases pin the two together.
   const SCENARIOS = [
@@ -864,10 +1020,10 @@ describe('install.sh / src/installer.js settings.json parity', () => {
   }
 
   for (const [label, initial] of SCENARIOS) {
-    it(`produces the same settings.json as the npm installer — ${label}`, () => {
+    it(`produces the same settings.json as the npm installer — ${label}`, async () => {
       const shHome = makeHome();
       seed(shHome, initial);
-      const shResult = runInstall({ home: shHome });
+      const shResult = await runInstall({ home: shHome });
       assert.equal(shResult.status, 0, shResult.stdout);
 
       const jsHome = makeHome();
@@ -892,12 +1048,12 @@ describe('install.sh / src/installer.js settings.json parity', () => {
 
 // ── uninstall.sh ────────────────────────────────────────────────────
 
-describe('uninstall.sh — Claude Code', () => {
-  it('removes everything install.sh put in place', () => {
+suite('uninstall.sh — Claude Code', () => {
+  it('removes everything install.sh put in place', async () => {
     const home = makeHome();
-    runInstall({ home });
+    await runInstall({ home });
 
-    const result = runUninstall({ home });
+    const result = await runUninstall({ home });
     assert.equal(result.status, 0, result.stdout);
 
     for (const cmd of COMMANDS) {
@@ -906,28 +1062,32 @@ describe('uninstall.sh — Claude Code', () => {
     for (const lib of LIBS) {
       assert.ok(!fs.existsSync(path.join(home, '.claude', 'lib', `${lib}.md`)), `${lib}.md should be gone`);
     }
+    for (const asset of LIB_ASSETS) {
+      assert.ok(!fs.existsSync(path.join(home, '.claude', 'lib', asset)), `${asset} should be gone`);
+    }
+    assert.ok(!fs.existsSync(path.join(home, '.claude', '.slashdo-install-manifest.txt')), 'the manifest copy should be gone');
     for (const hook of HOOKS) {
       assert.ok(!fs.existsSync(path.join(home, '.claude', 'hooks', `${hook}.js`)), `${hook}.js should be gone`);
     }
     assert.ok(!fs.existsSync(path.join(home, '.claude', '.slashdo-config.json')));
   });
 
-  it('keeps files it does not own', () => {
+  it('keeps files it does not own', async () => {
     const home = makeHome();
-    runInstall({ home });
+    await runInstall({ home });
     const mine = path.join(home, '.claude', 'commands', 'do', 'my-own-command.md');
     const myLib = path.join(home, '.claude', 'lib', 'my-own-lib.md');
     fs.writeFileSync(mine, 'mine\n');
     fs.writeFileSync(myLib, 'mine\n');
 
-    runUninstall({ home });
+    await runUninstall({ home });
     assert.equal(fs.readFileSync(mine, 'utf8'), 'mine\n');
     assert.equal(fs.readFileSync(myLib, 'utf8'), 'mine\n');
   });
 
-  it('deregisters only slashdo hooks, preserving user hooks in the same group', () => {
+  it('deregisters only slashdo hooks, preserving user hooks in the same group', async () => {
     const home = makeHome();
-    runInstall({ home });
+    await runInstall({ home });
 
     const settings = readSettings(home);
     settings.hooks.SessionStart[0].hooks.push({ type: 'command', command: 'echo user-hook' });
@@ -935,7 +1095,7 @@ describe('uninstall.sh — Claude Code', () => {
     settings.hooks.PreToolUse = [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo pre' }] }];
     writeSettings(home, settings);
 
-    runUninstall({ home });
+    await runUninstall({ home });
 
     const after = readSettings(home);
     const commands = after.hooks.SessionStart.flatMap((g) => g.hooks.map((h) => h.command));
@@ -944,24 +1104,24 @@ describe('uninstall.sh — Claude Code', () => {
     assert.ok(!('statusLine' in after), 'slashdo statusline should be removed');
   });
 
-  it('drops the hooks key entirely when slashdo was the only hook', () => {
+  it('drops the hooks key entirely when slashdo was the only hook', async () => {
     const home = makeHome();
-    runInstall({ home });
+    await runInstall({ home });
 
-    runUninstall({ home });
+    await runUninstall({ home });
     assert.ok(!('hooks' in readSettings(home)), 'empty hooks object should not be left behind');
   });
 
-  it('preserves a statusline slashdo does not own', () => {
+  it('preserves a statusline slashdo does not own', async () => {
     const home = makeHome();
     writeSettings(home, { statusLine: { type: 'command', command: 'node /my/own/statusline.js' } });
-    runInstall({ home });
+    await runInstall({ home });
 
-    runUninstall({ home });
+    await runUninstall({ home });
     assert.equal(readSettings(home).statusLine.command, 'node /my/own/statusline.js');
   });
 
-  it('restores gsd-statusline when its hook file is still present', () => {
+  it('restores gsd-statusline when its hook file is still present', async () => {
     const home = makeHome();
     const hooksDir = path.join(home, '.claude', 'hooks');
     fs.mkdirSync(hooksDir, { recursive: true });
@@ -970,19 +1130,19 @@ describe('uninstall.sh — Claude Code', () => {
       statusLine: { type: 'command', command: `node "${path.join(hooksDir, 'gsd-statusline.js')}"` },
     });
 
-    runInstall({ home });
+    await runInstall({ home });
     assert.match(readSettings(home).statusLine.command, /slashdo-statusline\.js/);
 
-    runUninstall({ home });
+    await runUninstall({ home });
     assert.match(readSettings(home).statusLine.command, /gsd-statusline\.js/);
   });
 
-  it('leaves an unparseable settings.json untouched, and removes nothing', () => {
+  it('leaves an unparseable settings.json untouched, and removes nothing', async () => {
     const home = makeHome();
-    runInstall({ home });
+    await runInstall({ home });
     fs.writeFileSync(settingsPathOf(home), '{ not json');
 
-    const result = runUninstall({ home });
+    const result = await runUninstall({ home });
     // Deleting the hook files while settings.json still names them would make
     // Claude Code error on every session start, so nothing is removed.
     assert.equal(result.status, 1, result.stdout);
@@ -993,25 +1153,82 @@ describe('uninstall.sh — Claude Code', () => {
       'hooks named by a settings.json we could not edit must survive');
   });
 
-  it('reports nothing to remove on a clean Claude directory', () => {
-    const result = runUninstall({ home: makeHome() });
+  it('reports nothing to remove on a clean Claude directory', async () => {
+    const result = await runUninstall({ home: makeHome() });
     assert.equal(result.status, 0, result.stdout);
     assert.match(result.stdout, /nothing to remove/);
   });
 
-  it('exits cleanly when no environment is present', () => {
-    const result = runUninstall({ home: makeHome([]) });
+  it('exits cleanly when no environment is present', async () => {
+    const result = await runUninstall({ home: makeHome([]) });
     assert.equal(result.status, 0, result.stdout);
     assert.match(result.stdout, /Nothing to uninstall/);
   });
 });
 
-describe('uninstall.sh — OpenCode', () => {
-  it('removes the rewritten OpenCode commands and libs', () => {
-    const home = makeHome(['.claude', '.config/opencode']);
-    runInstall({ home });
+suite('uninstall.sh — install manifest', () => {
+  const manifest = parseManifest(fs.readFileSync(path.join(REPO_ROOT, MANIFEST), 'utf8'));
+  const runRemoteUninstall = (opts) => runScript(remoteModeCopy(UNINSTALL_SH), opts);
 
-    const result = runUninstall({ home });
+  it('uninstalls offline from the manifest copy install.sh left behind', async () => {
+    const home = makeHome(['.claude', '.config/opencode']);
+    await runInstall({ home });
+
+    const result = await runRemoteUninstall({ home, pathPrefix: makeOfflineCurl() });
+    assert.equal(result.status, 0, result.stdout);
+    assert.match(result.stdout, /using the installed copy/);
+    for (const cmd of COMMANDS) {
+      assert.ok(!fs.existsSync(path.join(home, '.claude', 'commands', 'do', `${cmd}.md`)), `${cmd}.md should be gone`);
+    }
+    assert.deepEqual(fs.readdirSync(path.join(home, '.claude', 'lib')), []);
+    assert.deepEqual(fs.readdirSync(path.join(home, '.config', 'opencode', 'lib')), []);
+    for (const root of [path.join(home, '.claude'), path.join(home, '.config', 'opencode')]) {
+      assert.ok(!fs.existsSync(path.join(root, '.slashdo-install-manifest.txt')), 'the manifest copy is removed too');
+    }
+  });
+
+  it('removes nothing when no manifest can be read from anywhere', async () => {
+    const home = makeHome();
+    const cmd = path.join(home, '.claude', 'commands', 'do', 'push.md');
+    fs.mkdirSync(path.dirname(cmd), { recursive: true });
+    fs.writeFileSync(cmd, 'installed\n');
+
+    const result = await runRemoteUninstall({ home, pathPrefix: makeOfflineCurl() });
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stdout, /Uninstall aborted:.*install-manifest\.txt/);
+    assert.equal(fs.readFileSync(cmd, 'utf8'), 'installed\n');
+  });
+
+  it('removes retired files, and what an older installed manifest lists beyond the current one', async () => {
+    const home = makeHome(['.claude', '.config/opencode']);
+    await runInstall({ home });
+    // Files a previous release shipped that the current manifest retired.
+    const stale = [
+      path.join(home, '.claude', 'commands', 'do', manifest['retired-commands'][0]),
+      path.join(home, '.claude', 'lib', manifest['retired-libs'][0]),
+      path.join(home, '.claude', 'hooks', manifest['retired-hooks'][0]),
+      path.join(home, '.config', 'opencode', 'lib', manifest['retired-libs'][0]),
+    ];
+    // A file only the installed copy names: it came from an older release the
+    // current manifest has never heard of.
+    const cache = path.join(home, '.claude', '.slashdo-install-manifest.txt');
+    fs.writeFileSync(cache, fs.readFileSync(cache, 'utf8').replace('[libs]\n', () => '[libs]\nancient-partial.md\n'));
+    stale.push(path.join(home, '.claude', 'lib', 'ancient-partial.md'));
+    for (const file of stale) fs.writeFileSync(file, 'stale\n');
+
+    const result = await runRemoteUninstall({ home, pathPrefix: makeServingCurl() });
+    assert.equal(result.status, 0, result.stdout);
+    for (const file of stale) assert.ok(!fs.existsSync(file), `${path.relative(home, file)} should be removed`);
+    assert.deepEqual(fs.readdirSync(path.join(home, '.claude', 'lib')), []);
+  });
+});
+
+suite('uninstall.sh — OpenCode', () => {
+  it('removes the rewritten OpenCode commands and libs', async () => {
+    const home = makeHome(['.claude', '.config/opencode']);
+    await runInstall({ home });
+
+    const result = await runUninstall({ home });
     assert.equal(result.status, 0, result.stdout);
 
     for (const cmd of COMMANDS) {
@@ -1023,5 +1240,12 @@ describe('uninstall.sh — OpenCode', () => {
     for (const lib of LIBS) {
       assert.ok(!fs.existsSync(path.join(home, '.config', 'opencode', 'lib', `${lib}.md`)), `${lib}.md should be gone`);
     }
+    for (const asset of LIB_ASSETS) {
+      assert.ok(!fs.existsSync(path.join(home, '.config', 'opencode', 'lib', asset)), `opencode lib/${asset} should be gone`);
+    }
   });
+});
+
+describe('curl installer scripts', { concurrency: true }, () => {
+  for (const [name, fn] of suites) describe(name, { concurrency: true }, fn);
 });

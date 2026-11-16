@@ -7,7 +7,9 @@ second release workflow that reloads saved reviewer defaults.
    branch, PR head (if any), previous published version, version/notes owner,
    required test/build commands, publication trigger, and expected artifacts
    (tag, GitHub/GitLab Release, package, deployment, or the documented subset).
-   Detect the code host first (`lib/vcs-host.md`, `{CODE_HOST}`/`{CLI_TOOL}`/`{CR_NOUN}`);
+   Detect the code host first (`lib/vcs-host.md`, `{CODE_HOST}`/`{CLI_TOOL}`/`{CR_NOUN}`)
+   and write those values literally into every later command, since shell
+   variables do not survive between tool calls;
    on GitHub, additionally derive `{GH_HOST}` and authenticate using the shared
    host snippet below before forge operations — GitLab needs no equivalent, since
    `glab` resolves its host from `origin` directly. A PR/MR head must differ
@@ -34,7 +36,7 @@ second release workflow that reloads saved reviewer defaults.
    including isolated test-database provisioning where required. Resolve failures
    before delivery. Apply **Local Code Review** below to the full previous-release
    commit-to-prepared-head diff, replacing its promotion-only
-   `git diff {target}...{source}` command with that range. A version-bump PR diff
+   `git diff origin/{target}...HEAD` command with that range. A version-bump PR diff
    alone does not cover the release. Include the previous-tag comparison in the
    PR description. For a **PR workflow**, run the configured review loops from
    **Run the Review Loop** below after step 5 creates the PR and before step 6

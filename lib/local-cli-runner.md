@@ -1,228 +1,34 @@
 ## Local CLI runner: timeout, snapshot/restore, background launch
 
-The shared mechanics for driving a headless local CLI against this working tree. The local-agent review loop, the draft-enhancement loop, and the multi-reviewer parallel barrier all use it. The calling loop owns the prompt, the `{INVOCATION}`, and what a failure means for its status. This file owns how the CLI is bounded, launched, and waited on, and how it is kept from changing the caller's tree.
+The local-agent review loop, the draft-enhancement loop and the parallel barrier drive a headless CLI against this working tree through one installed script, `~/.claude/lib/local-cli-runner.sh`. Always run it as `bash ~/.claude/lib/local-cli-runner.sh <subcommand>`, exactly as written here. The caller owns the prompt, the `{INVOCATION}`, and what a failure means for its status. The script bounds the run, launches it and waits on it, and keeps the CLI from changing the caller's tree. It refuses to run from inside the working tree it protects.
 
-### Timeout wrapper
+**Shell state between tool calls.** Many harnesses start a fresh shell for every command, so nothing may depend on a variable from an earlier call. Each subcommand prints what a later call needs as `NAME=value`; start that later call by assigning those values. Run the caller's input and flag blocks, any recipe pre-launch block, and the launch line as one command: wherever a loop or recipe says a block runs "in the launch command", it means that one.
 
-Run once, verbatim:
+**Snapshot**, before the CLI runs: `bash ~/.claude/lib/local-cli-runner.sh snapshot`. It saves HEAD, the index, tracked and untracked content, and the security-relevant git config and hooks into a private state directory, and prints `RUN_STATE_DIR=… RUN_STATE_SUM=… RUNNER_SUM=…`. Keep all three: they are all Verify needs. `RUNNER_SUM` is the script's own hash, because a CLI that can write outside the repository could rewrite the script during the pass. A non-zero exit means no snapshot was taken, so do not launch.
 
-```bash
-# An ARRAY, expanded only as ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} — see ~/.claude/lib/empty-array-expansion.md.
-# Empty on stock macOS is a supported configuration (the CLI's own limits bound the run), never a failure.
-TIMEOUT_CMD=()
-if command -v timeout >/dev/null 2>&1; then TIMEOUT_CMD=(timeout 1800)
-elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_CMD=(gtimeout 1800); fi
-```
-
-### Snapshot
-
-Take this before the CLI runs. It captures the caller's entire pre-pass state as five artifacts, including staged, unstaged and untracked content, pre-existing dirty files, and git metadata. The artifacts are HEAD (`HEAD_BASELINE`), the index (`INDEX_TREE`), tracked worktree content (`SNAPSHOT`), untracked content (`UNTRACKED_TAR`), and git metadata (`GIT_META_BAK`, which holds a `.git/config` copy plus hooks). Having all five is what lets the restore work wholesale instead of enumerating what a misbehaving CLI touched:
+**Launch**: the last line of the launch command, with the caller's `RUN_TAG`:
 
 ```bash
-HEAD_BASELINE=$(git rev-parse HEAD)
-INDEX_TREE=$(git write-tree)                              # caller's staged state
-DIFF_BASELINE=$(git diff HEAD | git hash-object --stdin)  # catches edits to ALREADY-dirty tracked files
-SNAPSHOT=$(git stash create)                              # dirty tracked worktree ('' when clean)
-UNTRACKED_TAR="$(mktemp -t cli-untracked.XXXXXX.tar)"
-(set -o pipefail; git ls-files --others --exclude-standard -z | tar --null -T - -cf "$UNTRACKED_TAR" 2>/dev/null) || {
-  echo "cannot snapshot untracked files" >&2
-  exit 1
-}
-# The NUL-delimited file list feeds tar directly; hashing the archive fingerprints
-# every path, file type, mode, content, and symlink target without splitting names.
-untracked_manifest_hash() {
-  (set -o pipefail; git ls-files --others --exclude-standard -z | tar --null -T - -cf - | shasum -a 256)
-}
-UNTRACKED_BASELINE=$(untracked_manifest_hash) || {
-  echo "cannot fingerprint untracked files" >&2
-  exit 1
-}
-MTIME_STAMP="$(mktemp -t cli-stamp.XXXXXX)"              # gitignored-file detection window
-# A planted hook or core.hooksPath/fsmonitor/pager/alias in .git/config runs on the next git command.
-# $GIT_COMMON is shared by every linked worktree, so OTHER agents legitimately write to its config
-# during the pass (a `git push -u` adds a [branch "x"] section). Fingerprint and restore only the
-# keys that can execute code or redirect where data goes; never the whole file.
-GIT_COMMON="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
-GIT_META_BAK="$(mktemp -d -t cli-gitmeta.XXXXXX)"
-cp -p "$GIT_COMMON/config" "$GIT_META_BAK/config"
-{ tar -cf "$GIT_META_BAK/hooks.tar" -C "$GIT_COMMON" hooks 2>/dev/null; } || : > "$GIT_META_BAK/hooks.tar"
-GIT_SEC_KEYS='^(core\.(hookspath|fsmonitor|pager|editor|sshcommand|askpass|gitproxy)|alias\..+|include\..+|includeif\..+|filter\..+|diff\..+|merge\..+\.driver|(diff|merge)tool\..+\.cmd|pager\..+|credential\..+|remote\..+\.(url|pushurl|uploadpack|receivepack|vcs|proxy)|http\..*proxy|core\.attributesfile|url\..+\.(insteadof|pushinsteadof)|gpg\.(.+\.)?program|sequence\.editor|interactive\.difffilter|trailer\..+\.(cmd|command)|core\.alternaterefscommand|uploadpack\.packobjectshook|submodule\..+\.(update|url)|browser\..+\.(cmd|path)|web\.browser)$'
-# `git config --file` reads only the named file, so no repo config (aliases, pager, fsmonitor) is consulted.
-git_sec_hash() {   # GIT_SEC_FILE = config file; git exit 1 means "no matching key", which is fine
-  # Sorted by key, so a restore that re-creates a section elsewhere still matches; each key's values
-  # keep file order (credential.helper order matters).
-  (set -o pipefail
-   { git config --file "$GIT_SEC_FILE" --null --name-only --get-regexp "$GIT_SEC_KEYS"; [ $? -le 1 ]; } | tr '\0' '\n' | LC_ALL=C sort -u |
-     while IFS= read -r k; do printf '%s\0' "$k"; git config --file "$GIT_SEC_FILE" --null --get-all -- "$k" || exit 1; done | shasum -a 256)
-}
-git_hooks_hash() {
-  # Fingerprint what can execute, never archive metadata: a sorted, NUL-delimited listing of every
-  # path with its type, executable bit (`-x`, the same access(X_OK) test Git applies), and content hash (symlink target for links). mtimes, owners and
-  # tar headers are deliberately excluded, so a restore that only changes timestamps verifies clean.
-  # Uses only POSIX find/sort -z/readlink/shasum, which GNU and BSD userlands share.
-  if [ -d "$GIT_COMMON/hooks" ]; then
-    (set -o pipefail; cd "$GIT_COMMON" || exit 1
-     find hooks -print0 | LC_ALL=C sort -z |
-       while IFS= read -r -d '' p; do
-         if [ -L "$p" ]; then printf 'l\0%s\0%s\0' "$p" "$(readlink "$p")"
-         elif [ -d "$p" ]; then printf 'd\0%s\0' "$p"
-         elif [ -f "$p" ]; then
-           if [ -x "$p" ]; then x=x; else x=n; fi
-           h=$(shasum -a 256 < "$p") || exit 1
-           printf 'f\0%s\0%s\0%s\0' "$p" "$x" "$h"
-         else printf 'o\0%s\0' "$p"; fi
-       done | shasum -a 256)
-  else
-    echo "no-hooks-dir"
-  fi
-}
-GIT_CFG_BASELINE=$(GIT_SEC_FILE="$GIT_COMMON/config" git_sec_hash) && GIT_HOOKS_BASELINE=$(git_hooks_hash) || {
-  echo "cannot fingerprint git metadata" >&2
-  exit 1
-}
+bash ~/.claude/lib/local-cli-runner.sh launch --tag "$RUN_TAG" -- {INVOCATION}
+printf '%s' "$PROMPT_ON_STDIN" | bash ~/.claude/lib/local-cli-runner.sh launch --tag "$RUN_TAG" -- {INVOCATION}
 ```
 
-A bare `git status --porcelain` comparison is **not** sufficient. Editing an already-dirty file leaves its ` M` line unchanged, and editing or deleting a pre-existing untracked file leaves its `??` line unchanged. The diff hash and the untracked hash catch those cases.
+Use the second form only when the caller set a non-empty `PROMPT_ON_STDIN` (the invocation reads its prompt on stdin). Put the pipe in front of the script, never inside `{INVOCATION}`. The script prints `LOG_FILE=…`, then runs the invocation under `timeout 1800` (or `gtimeout`; stock macOS has neither, and running unbounded there is supported, never a failure). Stdout goes to `$LOG_FILE`, stderr to `$LOG_FILE.err` (`ERR_FILE`), and the exit code to `$LOG_FILE.exit`. Callers parse `$LOG_FILE` strictly, and the CLIs' banners and progress stay out of it.
 
-### Launch and wait
+A real review routinely runs past ten minutes, and most harnesses cap a foreground command at about that long. Run the launch command in the background when your harness can. Otherwise run it in the foreground with the command timeout at its maximum, and treat a run cut off there as timed out. A foreground launch exits with the CLI's exit code, which is `EXIT_CODE`. After a background launch, repeat the first two lines of the Verify block below followed by `bash "$R" wait --log "$LOG_FILE"` until it prints an exit code, which is `EXIT_CODE`. Each call blocks up to 540 seconds; pass `--seconds <n>` if your harness caps a foreground command sooner. On `STILL_RUNNING`, call again straight away. Never end your turn while a CLI is in flight. Inside a sub-agent (a `/do:next --swarm` worker, any background agent), ending the turn ends the run and loses the result. A `124` exit, or an empty log after the run, means it passed 30 minutes. That is a failed pass, never a clean one.
 
-**Run the invocation in the BACKGROUND, not as a blocking foreground Bash call.** A real review or a heavy-model pass routinely runs past ten minutes, and the host CLI's Bash tool caps a single foreground command at about 10 minutes (Claude Code's Bash `timeout` maxes out at 600000 ms). A foreground call is killed at that mark by the host, before the CLI prints its result.
-
-Before each launch the caller sets `RUN_TAG`, the log-name prefix. It also sets `PROMPT_ON_STDIN`: the prompt text when the invocation reads its prompt on stdin, and empty otherwise. The pipe then goes in front of the whole timed line; if it were folded into `{INVOCATION}`, `TIMEOUT_CMD` would bound only the `printf`.
-
-- **Claude Code and other hosts with a backgroundable Bash tool**: run this in the host's background mode (Claude Code: `run_in_background: true` on the Bash tool call). Capture it exactly as shown; the trailing `; echo $? > "$DONE_FILE"` records the real exit code for the wait loop:
-
-  ```bash
-  LOG_FILE="$(mktemp -t "${RUN_TAG}.XXXXXX.log")"
-  ERR_FILE="${LOG_FILE}.err"
-  DONE_FILE="${LOG_FILE}.exit"
-  if [ -n "$PROMPT_ON_STDIN" ]; then
-    printf '%s' "$PROMPT_ON_STDIN" | ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"; echo $? > "$DONE_FILE"
-  else
-    ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} {INVOCATION} > "$LOG_FILE" 2> "$ERR_FILE"; echo $? > "$DONE_FILE"
-  fi
-  ```
-
-  Then wait with **bounded blocking-chunk foreground calls**. Do NOT end your turn and wait to be notified. Repeat this call (each one blocks about 9 minutes, under the host cap) until `$DONE_FILE` exists, then read `EXIT_CODE=$(cat "$DONE_FILE")`:
-
-  ```bash
-  for i in $(seq 1 55); do [ -f "$DONE_FILE" ] && break; sleep 10; done; [ -f "$DONE_FILE" ] && cat "$DONE_FILE" || echo "STILL_RUNNING"
-  ```
-
-  On `STILL_RUNNING`, issue the same call again straight away. Tail `$LOG_FILE` between chunks only if you need a progress signal. The run is bounded by `TIMEOUT_CMD` or the CLI's own timeout.
-
-  **NEVER end your turn while a CLI is in flight.** A re-notification when the background task exits only happens in a top-level interactive session. Inside a **subagent** (a `/do:next --swarm` worker, a CoS/background agent, anything spawned through an Agent/Task tool), ending the turn *terminates the run* and the result is lost. The blocking-chunk loop is correct in both contexts, so use it unconditionally.
-
-- **Hosts with no background Bash mechanism**: run the identical launch block in the foreground, then read `EXIT_CODE=$(cat "$DONE_FILE")`. Raise the host tool's timeout to its maximum. A run cut off at that maximum is a timed-out pass, never a silently empty result.
-
-**Keep stderr OUT of `$LOG_FILE` (`2> "$ERR_FILE"`, never `2>&1`).** Every CLI writes chatter to stderr: banners, auth notices, progress, update nags, a `timeout` kill message. Callers parse `$LOG_FILE` strictly, so a merged stream would corrupt the result. A `124` exit from `timeout`/`gtimeout`, or an empty log after the poll loop gave up, means the run passed 30 minutes. Treat it as a failed pass, never as a clean one.
-
-### Verify and restore
-
-Run this after the CLI exits, before reading its result. First validate, compare, and if needed restore git metadata using only shell tools. Then recompute the other four artifacts with Git and compare them against the snapshot. If this runs in a different shell, set `GIT_COMMON` and `GIT_META_BAK` to the exact saved paths from Snapshot; never rediscover either with Git before metadata is restored.
+**Verify and restore**, after the CLI exits and before reading its result, as one command. Its first two lines check the script against `RUNNER_SUM` without running any of its code; begin every call made after the launch with them:
 
 ```bash
-if [ -z "${GIT_COMMON:-}" ] || [ -z "${GIT_META_BAK:-}" ] || [ ! -d "$GIT_COMMON" ] || [ ! -d "$GIT_META_BAK" ] || [ ! -f "$GIT_COMMON/config" ] || [ ! -f "$GIT_META_BAK/config" ] || [ ! -f "$GIT_META_BAK/hooks.tar" ]; then
-  echo "cannot restore git metadata: snapshot paths unavailable" >&2
-  exit 1   # a failed restore — never continue on a tree you could not restore
-fi
-case "$GIT_COMMON" in
-  /*) ;;
-  *) echo "cannot restore git metadata: saved common-dir path is not absolute" >&2; exit 1 ;;
-esac
-if [ "$GIT_COMMON" = "/" ]; then
-  echo "cannot restore git metadata: invalid saved common-dir path" >&2
-  exit 1
-fi
-GIT_SEC_KEYS='^(core\.(hookspath|fsmonitor|pager|editor|sshcommand|askpass|gitproxy)|alias\..+|include\..+|includeif\..+|filter\..+|diff\..+|merge\..+\.driver|(diff|merge)tool\..+\.cmd|pager\..+|credential\..+|remote\..+\.(url|pushurl|uploadpack|receivepack|vcs|proxy)|http\..*proxy|core\.attributesfile|url\..+\.(insteadof|pushinsteadof)|gpg\.(.+\.)?program|sequence\.editor|interactive\.difffilter|trailer\..+\.(cmd|command)|core\.alternaterefscommand|uploadpack\.packobjectshook|submodule\..+\.(update|url)|browser\..+\.(cmd|path)|web\.browser)$'   # identical to Snapshot
-git_sec_hash() {
-  # Sorted by key, so a restore that re-creates a section elsewhere still matches; each key's values
-  # keep file order (credential.helper order matters).
-  (set -o pipefail
-   { git config --file "$GIT_SEC_FILE" --null --name-only --get-regexp "$GIT_SEC_KEYS"; [ $? -le 1 ]; } | tr '\0' '\n' | LC_ALL=C sort -u |
-     while IFS= read -r k; do printf '%s\0' "$k"; git config --file "$GIT_SEC_FILE" --null --get-all -- "$k" || exit 1; done | shasum -a 256)
-}
-git_hooks_hash() {
-  # Fingerprint what can execute, never archive metadata: a sorted, NUL-delimited listing of every
-  # path with its type, executable bit (`-x`, the same access(X_OK) test Git applies), and content hash (symlink target for links). mtimes, owners and
-  # tar headers are deliberately excluded, so a restore that only changes timestamps verifies clean.
-  # Uses only POSIX find/sort -z/readlink/shasum, which GNU and BSD userlands share.
-  if [ -d "$GIT_COMMON/hooks" ]; then
-    (set -o pipefail; cd "$GIT_COMMON" || exit 1
-     find hooks -print0 | LC_ALL=C sort -z |
-       while IFS= read -r -d '' p; do
-         if [ -L "$p" ]; then printf 'l\0%s\0%s\0' "$p" "$(readlink "$p")"
-         elif [ -d "$p" ]; then printf 'd\0%s\0' "$p"
-         elif [ -f "$p" ]; then
-           if [ -x "$p" ]; then x=x; else x=n; fi
-           h=$(shasum -a 256 < "$p") || exit 1
-           printf 'f\0%s\0%s\0%s\0' "$p" "$x" "$h"
-         else printf 'o\0%s\0' "$p"; fi
-       done | shasum -a 256)
-  else
-    echo "no-hooks-dir"
-  fi
-}
-GIT_CFG_CURRENT=$(GIT_SEC_FILE="$GIT_COMMON/config" git_sec_hash) && GIT_HOOKS_CURRENT=$(git_hooks_hash) || {
-  echo "cannot inspect git metadata; stop before running Git" >&2
-  exit 1
-}
-if [ "$GIT_CFG_CURRENT" != "$GIT_CFG_BASELINE" ]; then
-  # Restore ONLY the security-relevant keys, before any Git command can consult them: drop every such
-  # key now in the live file, then re-add the snapshot's. Everything else (notably other agents'
-  # [branch "x"] sections) is concurrent activity and is left exactly as it is.
-  while IFS= read -r -d '' key; do
-    git config --file "$GIT_COMMON/config" --unset-all -- "$key" || [ $? -eq 5 ] || exit 1
-  done < <(git config --file "$GIT_COMMON/config" --null --name-only --get-regexp "$GIT_SEC_KEYS")
-  while IFS= read -r -d '' rec; do
-    case "$rec" in
-      *$'\n'*) git config --file "$GIT_COMMON/config" --add -- "${rec%%$'\n'*}" "${rec#*$'\n'}" || exit 1 ;;
-      *) echo "cannot restore valueless config key ${rec}; stop before running Git" >&2; exit 1 ;;
-    esac
-  done < <(git config --file "$GIT_META_BAK/config" --null --get-regexp "$GIT_SEC_KEYS")
-  GIT_CFG_CURRENT=$(GIT_SEC_FILE="$GIT_COMMON/config" git_sec_hash) || exit 1
-  if [ "$GIT_CFG_CURRENT" != "$GIT_CFG_BASELINE" ]; then
-    echo "git config restore failed; stop before running Git" >&2
-    exit 1
-  fi
-fi
-if [ "$GIT_HOOKS_CURRENT" != "$GIT_HOOKS_BASELINE" ]; then
-  rm -rf "$GIT_COMMON/hooks" || exit 1
-  if [ -s "$GIT_META_BAK/hooks.tar" ]; then
-    tar -xpf "$GIT_META_BAK/hooks.tar" -C "$GIT_COMMON" || exit 1
-  fi
-  GIT_HOOKS_CURRENT=$(git_hooks_hash) || exit 1
-  if [ "$GIT_HOOKS_CURRENT" != "$GIT_HOOKS_BASELINE" ]; then
-    echo "git hooks restore failed; stop before running Git" >&2
-    exit 1
-  fi
-fi
-# Informational only: other worktrees' branch.* (or any non-security) config writes during the pass.
-if [ "$(git config --file "$GIT_META_BAK/config" --list | sort)" != "$(git config --file "$GIT_COMMON/config" --list | sort)" ]; then
-  echo "note: non-security git config changed during the pass (likely a concurrent worktree); left untouched" >&2
-fi
+R=~/.claude/lib/local-cli-runner.sh
+[ "$(cd / && GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git hash-object --no-filters -- "$R")" = "$RUNNER_SUM" ] || { echo "runner script changed during the pass; do not trust this tree" >&2; exit 1; }
+bash "$R" verify --state-dir "$RUN_STATE_DIR" --sum "$RUN_STATE_SUM"
 ```
 
-**Only after the metadata check/restore above succeeds**, compare the remaining artifacts. The untracked fingerprint reuses the NUL-delimited tar manifest, so filenames containing newlines remain one path and content, type, mode, and symlink-target changes are detected:
+It refuses a state directory whose checksum does not match. It restores git config and hooks with shell tools before running any Git command, then compares the tree and, if the CLI moved it, restores the whole pre-pass state. It prints one of:
 
-```bash
-untracked_manifest_hash() {
-  (set -o pipefail; git ls-files --others --exclude-standard -z | tar --null -T - -cf - | shasum -a 256)
-}
-git rev-parse HEAD                              # vs $HEAD_BASELINE
-git write-tree                                  # vs $INDEX_TREE
-git diff HEAD | git hash-object --stdin         # vs $DIFF_BASELINE
-untracked_manifest_hash                         # vs $UNTRACKED_BASELINE
-```
+- `TREE_STATE=clean`: the CLI left the tree alone.
+- `TREE_STATE=restored`: the CLI wrote to the tree (or only to git config or hooks) and the snapshot was put back. The caller decides what that means for its status.
+- `TREE_STATE=restore-failed`, or a non-zero exit with a `runner script changed`, `cannot …` or `… failed` message and no `TREE_STATE`: the tree is not at baseline. The caller stops with a warning naming the log and never continues on top of that tree.
 
-**If any artifact differs**, the CLI wrote to the tree. Restore the caller's entire pre-pass state wholesale from the snapshot, running from the repo root after the git-metadata restore above. Do NOT enumerate what it touched path by path. That approach has repeatedly had destructive edge cases: a mixed reset unstages the caller's work, `git checkout --` does nothing to staged-but-uncommitted content, and stash misses untracked files. The wholesale sequence:
-
-1. **HEAD**: if it moved, run `git reset --soft "$HEAD_BASELINE"`. Never use `--mixed`, which wipes the caller's staged state, and never `--hard`, which destroys uncommitted work swept into the CLI's commit.
-2. **Index**: `git read-tree "$INDEX_TREE"`.
-3. **Tracked worktree**: `git restore --source="${SNAPSHOT:-$HEAD_BASELINE}" --worktree -- .`.
-4. **Untracked**: run `git clean -fd -- .` to remove all non-ignored untracked content, then `tar -xpf "$UNTRACKED_TAR"` to restore the snapshot. This deletes and restores the entire untracked set without parsing filenames as newline-delimited text.
-5. Recompute all five comparisons, including `untracked_manifest_hash` and `git_sec_hash` and `git_hooks_hash`. If the tree is not back at baseline, the restore **failed**. The caller must stop with a loud warning naming the log, and must never continue on top of that tree.
-
-**Gitignored files are outside the snapshot/restore guarantee**, because hashing or tarring them has no size bound (`node_modules/`, build output). They still get a cheap check: `find . -path ./.git -prune -o -type f -newer "$MTIME_STAMP" -print` lists files modified during the pass. For any hit that git ignores (`git check-ignore`), such as `.env` or a local generated config, print a loud warning naming the file: `local CLI modified gitignored file {path} — not auto-restorable; inspect before committing/running`.
-
-The caller decides what a mismatch means for its status. This file only guarantees that the tree is back at baseline, or that you know it is not.
+A `local CLI modified gitignored file` line names a file (`.env`, a local generated config) the runner cannot put back. Surface it in the caller's report. Delete `RUN_STATE_DIR` once the pass's result has been read.

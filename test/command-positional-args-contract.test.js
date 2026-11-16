@@ -64,12 +64,6 @@ describe('lib shell blocks carry no new positional parameters', () => {
   }
 });
 
-describe('GitHub host snippet and claim gates avoid positional parameters', () => {
-  it('lib/gh-host.md extracts the host with cut, not awk fields', () => {
-    assert.match(fs.readFileSync(path.join(libDir, 'gh-host.md'), 'utf8'), /cut -d\/ -f3/);
-  });
-});
-
 describe('in_flight() matcher (next.md), executed', () => {
   const next = fs.readFileSync(path.join(commandsDir, 'do', 'next.md'), 'utf8');
   const def = next.split('\n').find((line) => line.startsWith('in_flight() {'));

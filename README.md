@@ -221,7 +221,7 @@ All three suffixes chain in any order and are shell-safe. `~max` is ignored (wit
 
 **The merge gate.** Commands that merge (e.g. `/do:release`, `/do:pr --merge`) require the multi-reviewer aggregate status to be `clean` — or `partial`, if you explicitly opted into a stop-mode short-circuit. A `dirty` or `inconclusive` aggregate blocks the merge, even if other passes returned clean.
 
-**Command-specific behavior:** `/do:review` runs its own focused self-review lenses first, then any `--review-with` agents as additional reviewers. `/do:better`/`/do:better-swift`/`/do:simplify`/`/do:depfree` run the chosen reviewers as the post-PR loop — **omitting `--review-with` skips the loop and the auto-merge**. `/do:rpr` resolves existing review threads from any author, requesting a new one only if you name a reviewer; it accepts only `--review-with`/`--reviewer-applies` and drops `@<login>` entries with a notice.
+**Command-specific behavior:** `/do:review` runs its own focused self-review lenses first, then any `--review-with` agents as additional reviewers. `/do:better`/`/do:better-swift`/`/do:simplify`/`/do:depfree` run the chosen reviewers as the post-PR loop — **omitting `--review-with` skips the loop and the auto-merge**. `/do:rpr` resolves existing review threads from any author, requesting a new one only if you name a reviewer; it accepts only `--review-with`/`--reviewer-applies`, and requests `copilot` and `@<login>` reviewers through the same host-reviewer loop as `/do:pr`.
 
 ## Auto-merge (`/do:pr --merge`)
 

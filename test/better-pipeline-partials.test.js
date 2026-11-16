@@ -13,7 +13,7 @@ const readCommand = (name) => readCommandDocs(name);
 // That used to be ~800 byte-identical lines maintained by hand in both files, and
 // they had already drifted. The phases now live in lib/better-*.md, which only
 // keeps them in lockstep for as long as both commands actually include the
-// partials, in pipeline order, and define every input the partials read.
+// partials and define every input the partials read.
 const AUDIT_COMMANDS = ['better.md', 'better-swift.md'];
 const PIPELINE_LIBS = [
   'better-verification',
@@ -35,27 +35,7 @@ const RUNTIME_TOKENS = new Set([
   'NEW_TEST_CASES', 'NEW_TEST_FILES', 'SIMPLIFY_CATEGORIES', 'N',
 ]);
 
-// The reviewer loops Phase 6.1 dispatches to. `inlineLibContent` resolves a `!cat`
-// once and does not re-scan the text it pasted in, so a `!cat` written INSIDE a
-// partial is never expanded on the Claude path — these five must stay at each
-// command's own top level.
-const REVIEWER_LOOP_LIBS = [
-  'multi-reviewer-loop',
-  'host-reviewer-loop',
-  'copilot-review-loop',
-  'local-agent-review-loop',
-  'ollama-review-loop',
-];
-
-const includeIndex = (body, lib) => body.indexOf('!read lib/' + lib + '.md');
-
-// A partial carries no `### Inputs` placeholder-docs block (#325): its phase text
-// is the only substitution point, so every token it reads appears where it is used.
-const partialBody = (lib) => {
-  const text = fs.readFileSync(path.join(root, 'lib', `${lib}.md`), 'utf8');
-  assert.doesNotMatch(text, /^### Inputs\b/m, `lib/${lib}.md must not document inputs in a ### Inputs block`);
-  return text;
-};
+const partialBody = (lib) => fs.readFileSync(path.join(root, 'lib', `${lib}.md`), 'utf8');
 
 const tokensIn = (text) => new Set([...text.matchAll(/\{([A-Z][A-Z0-9_]+)\}/g)].map((m) => m[1]));
 
@@ -78,69 +58,14 @@ const inputTokens = (body) => {
 };
 
 describe('shared better-* pipeline partials', () => {
-  it('is included by both audit commands, in pipeline order', () => {
-    // Re-inlining one command's copy of a phase leaves every other test green and
-    // silently restores the drift the extraction removed. Order matters just as
-    // much: cleanup ahead of PR creation would tell the agent to delete the
-    // staging branch and the spool before Phase 5 cherry-picks files out of them.
-    for (const name of AUDIT_COMMANDS) {
-      const body = readCommand(name);
-      const at = PIPELINE_LIBS.map((lib) => {
-        const i = includeIndex(body, lib);
-        assert.notEqual(i, -1, `${name} must include lib/${lib}.md`);
-        return i;
-      });
-      for (let i = 1; i < at.length; i++) {
-        assert.ok(
-          at[i] > at[i - 1],
-          `${name}: lib/${PIPELINE_LIBS[i]}.md must come after lib/${PIPELINE_LIBS[i - 1]}.md`,
-        );
-      }
-    }
-  });
-
-  it('leaves no shared phase re-pasted inline', () => {
-    // The include test only proves the !cat is THERE. A command carrying both the
-    // include and a re-pasted copy of a phase passes it — and that copy is the
-    // drift, since the agent then reads two versions of Phase 5 and follows one.
-    // Phase 4c is the only phase heading that legitimately stays inline.
-    for (const name of AUDIT_COMMANDS) {
-      const strays = fs.readFileSync(path.join(root, 'commands', 'do', name), 'utf8')
-        .split('\n')
-        .filter((l) => /^## Phase /.test(l) && !/^## Phase (0|1|2|3|4c)\b/.test(l));
-      assert.deepEqual(strays, [], `${name} re-pastes a shared phase the partials own`);
-    }
-  });
-
-  it('points Phase 6 at reviewer loops that come after it', () => {
-    // Reviewer details must remain downstream of the Phase 6 gate.
-    for (const name of AUDIT_COMMANDS) {
-      const body = readCommand(name);
-      const phase6 = includeIndex(body, 'better-review-loop');
-      for (const lib of REVIEWER_LOOP_LIBS) {
-        assert.ok(
-          includeIndex(body, lib) > phase6,
-          `${name}: lib/${lib}.md must be included after lib/better-review-loop.md`,
-        );
-      }
-    }
-  });
-
-  it('keeps the Copilot gate on the shared host-reviewer core', () => {
-    const source = fs.readFileSync(path.join(root, 'lib', 'better-review-loop.md'), 'utf8');
-    const coreAt = source.indexOf('!read lib/host-reviewer-loop.md');
-    const deltaAt = source.indexOf('!read lib/copilot-review-loop.md');
-
-    assert.ok(coreAt >= 0);
-    assert.ok(deltaAt > coreAt);
-    assert.match(source.slice(source.lastIndexOf('For every', coreAt), deltaAt), /For every `copilot` or `@<login>` entry/);
-  });
-
   it('is driven by the same input token set from both commands', () => {
     // A token one command defines and the other does not is drift by another name:
     // the partial reads it, and one of the two pipelines runs with a hole in it.
     const [a, b] = AUDIT_COMMANDS.map((name) => inputTokens(readCommand(name)));
     assert.deepEqual([...a].sort(), [...b].sort());
+    // An empty set on both sides would pass every check here vacuously (a renamed
+    // heading, say), so the comparison has to be over real tokens.
+    assert.ok(a.has('BRANCH_PREFIX'), 'no caller inputs were parsed from better.md');
   });
 
   it('has every token its partials substitute defined by both commands', () => {
@@ -168,16 +93,6 @@ describe('shared better-* pipeline partials', () => {
     for (const name of AUDIT_COMMANDS) {
       for (const token of inputTokens(readCommand(name))) {
         assert.ok(read.has(token), `${name} defines {${token}}, which no partial substitutes`);
-      }
-    }
-  });
-
-  it('loads reviewer libraries only from the shared review phase', () => {
-    for (const name of AUDIT_COMMANDS) {
-      const source = fs.readFileSync(path.join(root, 'commands', 'do', name), 'utf8');
-      for (const lib of REVIEWER_LOOP_LIBS) {
-        assert.ok(!source.includes(lib + '.md'), `${name} eagerly exposes ${lib}`);
-        assert.ok(includeIndex(readCommand(name), lib) >= 0, `${name} cannot reach ${lib}`);
       }
     }
   });

@@ -58,11 +58,9 @@ echo "LINKED_WORKTREE=$LINKED_WORKTREE"
 - Unnormalized, `--git-common-dir` is *relative* when run from a subdirectory of a plain clone, so the plain clone is misreported as a linked worktree.
 - `--path-format=absolute` is rejected by git < 2.31. Both outputs are then empty, they compare equal, and the probe fails *open* into `LINKED_WORKTREE=0`.
 
-## 3. Merge (GitHub)
+## Upstream target (steps 3-5)
 
-**`{MODE}=queue`:** first try GitHub-native auto-merge: `gh pr merge {PR} --auto --{MERGE_METHOD}`. It lands when the required checks pass, even if this session ends. If it errors because auto-merge is not enabled on the repo, fall through to `wait`.
-
-**`{MODE}=wait`:** push, wait on the **required** checks, then merge. Push to the ref named by the branch's upstream config. Never use a bare `git push`: under `push.default=matching` it pushes every same-named local branch. Never push to `origin/<local name>` either: that is the wrong ref when the upstream is `upstream/feature-x` or `origin/pr-123-head`. Chain the steps with `&&` so that a failed push (which would leave CI watching the stale SHA) or a red check stops before the merge:
+Steps 3-5 push to, watch, and delete the ref named by the branch's upstream config. A bare `git push` pushes every same-named local branch under `push.default=matching`, and `origin` plus the local branch name is the wrong ref when the upstream is `upstream/feature-x` or `origin/pr-123-head`. Resolve the target once, before step 3, whenever `{MODE}=wait` or `{LINKED_WORKTREE}=1`. This is `lib/upstream-push.md`'s guard with `{GIT}` in place of `git`; that file explains each case:
 
 ```bash
 BR="$({GIT} branch --show-current)"
@@ -74,9 +72,22 @@ BASE_BRANCH="$({GIT} symbolic-ref --quiet --short "refs/remotes/$UP_REMOTE/HEAD"
 [ -n "$BASE_BRANCH" ] || BASE_BRANCH="$({GIT} remote show "$UP_REMOTE" 2>/dev/null | sed -n '/HEAD branch: (unknown)$/d; s/.*HEAD branch: //p')"
 if { [ "$UP_REF" = "refs/heads/${BASE_BRANCH:-main}" ] || { [ -z "$BASE_BRANCH" ] && [ "$UP_REF" = refs/heads/master ]; }; } && [ "$BR" != "${UP_REF#refs/heads/}" ]; then UP_REMOTE=""; fi
 if [ -z "$UP_REMOTE" ] || [ "$UP_REMOTE" = "." ] || [ -z "$UP_REF" ]; then
-  echo "No remote upstream for '$BR' — not merging PR {PR}"; exit 1
+  echo "UPSTREAM=none (no remote upstream for '$BR')"
+else
+  echo "UP_REMOTE=$UP_REMOTE UP_REF=$UP_REF"
 fi
-{GIT} push "$UP_REMOTE" "HEAD:$UP_REF" && \
+```
+
+Read the printed values and write them literally as `{UP_REMOTE}` and `{UP_REF}` below. On `UPSTREAM=none`, a `wait`-mode merge has nothing to push: do not merge, and report `left open`; step 5 deletes no remote branch.
+
+## 3. Merge (GitHub)
+
+**`{MODE}=queue`:** first try GitHub-native auto-merge: `gh pr merge {PR} --auto --{MERGE_METHOD}`. It lands when the required checks pass, even if this session ends. If it errors because auto-merge is not enabled on the repo, fall through to `wait`.
+
+**`{MODE}=wait`:** push, wait on the **required** checks, then merge. Chain the steps with `&&` so that a failed push (which would leave CI watching the stale SHA) or a red check stops before the merge:
+
+```bash
+{GIT} push "{UP_REMOTE}" "HEAD:{UP_REF}" && \
   gh pr checks {PR} --required --watch --fail-fast && \
   gh pr merge {PR} --{MERGE_METHOD}
 ```
@@ -100,19 +111,10 @@ GitLab has no separate list of required checks. The project's pipeline-must-succ
 
 **`{MODE}=queue`:** run `glab mr merge {PR} --auto-merge --yes --remove-source-branch`, which merges when the pipeline succeeds. If the installed `glab` does not support `--auto-merge`, fall through to `wait`.
 
-**`{MODE}=wait`:** push, wait on the branch's pipeline, then merge. Use the same upstream-derived push as step 3. Pass `--branch` so the wait watches the PR's branch, not whatever branch is checked out in the caller's working directory:
+**`{MODE}=wait`:** push, wait on the branch's pipeline, then merge. Pass `--branch` with `{UP_BRANCH}`, the `{UP_REF}` name without its `refs/heads/` prefix, so the wait watches the MR's branch, not whatever branch is checked out in the caller's working directory:
 
 ```bash
-BR="$({GIT} branch --show-current)"
-UP_REMOTE="$({GIT} config --get "branch.$BR.remote")"
-UP_REF="$({GIT} config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
-BASE_BRANCH="$({GIT} symbolic-ref --quiet --short "refs/remotes/$UP_REMOTE/HEAD" 2>/dev/null | sed "s@^$UP_REMOTE/@@")"
-[ -n "$BASE_BRANCH" ] || BASE_BRANCH="$({GIT} remote show "$UP_REMOTE" 2>/dev/null | sed -n '/HEAD branch: (unknown)$/d; s/.*HEAD branch: //p')"
-if { [ "$UP_REF" = "refs/heads/${BASE_BRANCH:-main}" ] || { [ -z "$BASE_BRANCH" ] && [ "$UP_REF" = refs/heads/master ]; }; } && [ "$BR" != "${UP_REF#refs/heads/}" ]; then UP_REMOTE=""; fi
-if [ -z "$UP_REMOTE" ] || [ "$UP_REMOTE" = "." ] || [ -z "$UP_REF" ]; then
-  echo "No remote upstream for '$BR' — not merging MR {PR}"; exit 1
-fi
-{GIT} push "$UP_REMOTE" "HEAD:$UP_REF" && glab ci status --wait --branch "${UP_REF#refs/heads/}" && glab mr merge {PR} --yes --remove-source-branch
+{GIT} push "{UP_REMOTE}" "HEAD:{UP_REF}" && glab ci status --wait --branch "{UP_BRANCH}" && glab mr merge {PR} --yes --remove-source-branch
 ```
 
 **Why `wait` avoids `--auto-merge`:** `--auto-merge` only sets merge-when-pipeline-succeeds on the server and returns while the MR is still `opened`. A `wait`-mode caller's read-back would then see `opened` on every run and never clean up or close an issue. If a `wait`-mode caller must use `--auto-merge` anyway (for example, a very long pipeline), replace the single read-back in step 5 with a bounded poll of the MR state. Treat "still `opened` at the deadline" as queued, not merged. `--remove-source-branch` deletes the head branch on the server when the MR merges. It never touches a local checkout, so it is safe inside a worktree, and step 5 has nothing to delete on GitLab.
@@ -126,35 +128,20 @@ Never trust the merge command's exit status. `gh pr merge` exits zero on a repo 
 
 Any other value means the PR is **queued**, if `queue` mode or a merge queue accepted it, or **left open**. Report which one, and **delete nothing**: GitHub auto-closes a PR whose head branch disappears, which destroys both the open PR and a queued merge. Whether the PR is queued or left open, the repo's "automatically delete head branches" setting or the caller owns its branch.
 
-On GitHub, once the PR reads `MERGED` with `{LINKED_WORKTREE}=1`, delete the remote head here, unless the caller says its own cleanup owns that deletion. Use the remote and ref from config, never a hardcoded `origin` plus the local branch name. That combination would delete an unrelated remote branch when the upstream is `upstream/feature-x` or `origin/pr-123-head`:
+On GitHub, once the PR reads `MERGED` with `{LINKED_WORKTREE}=1`, delete the remote head here, unless the caller says its own cleanup owns that deletion. Delete the resolved upstream target, never a hardcoded `origin` plus the local branch name, which could be an unrelated remote branch:
 
 ```bash
 if [ "$(gh pr view {PR} --json state -q .state)" = "MERGED" ]; then
-  BR="$({GIT} branch --show-current)"
-  DEL_REMOTE="$({GIT} config --get "branch.$BR.remote")"
-  DEL_REF="$({GIT} config --get "branch.$BR.merge")"   # already a full refs/heads/<name>
-  # Inherited base tracking (a worktree cut from origin/main auto-tracks it) is not a publication
-  # target: treat it as unpublished so feature commits never reach the default branch.
-  BASE_BRANCH="$({GIT} symbolic-ref --quiet --short "refs/remotes/$DEL_REMOTE/HEAD" 2>/dev/null | sed "s@^$DEL_REMOTE/@@")"
-  [ -n "$BASE_BRANCH" ] || BASE_BRANCH="$({GIT} remote show "$DEL_REMOTE" 2>/dev/null | sed -n '/HEAD branch: (unknown)$/d; s/.*HEAD branch: //p')"
-  if { [ "$DEL_REF" = "refs/heads/${BASE_BRANCH:-main}" ] || { [ -z "$BASE_BRANCH" ] && [ "$DEL_REF" = refs/heads/master ]; }; } && [ "$BR" != "${DEL_REF#refs/heads/}" ]; then DEL_REMOTE=""; fi
-  # $DEL_REF must be non-empty too: `git push --delete ""` fails, and
-  # `ls-remote --heads <remote> ""` returns 2, so an empty ref would report
-  # the benign "already gone" for a delete that never ran.
-  if [ -n "$DEL_REMOTE" ] && [ "$DEL_REMOTE" != "." ] && [ -n "$DEL_REF" ]; then
-    if ! {GIT} push "$DEL_REMOTE" --delete "$DEL_REF"; then
-      # rc 2 means "no such ref": the branch is already gone (the repo auto-deletes
-      # merged heads), which counts as success. Any other rc is a transport or auth
-      # failure that proves nothing, so do NOT report the branch as deleted.
-      {GIT} ls-remote --exit-code --heads "$DEL_REMOTE" "$DEL_REF" >/dev/null 2>&1; RC=$?
-      if [ "$RC" -eq 2 ]; then
-        echo "note: remote branch $DEL_REF was already gone"
-      else
-        echo "ERROR: could not confirm $DEL_REF is gone (ls-remote rc=$RC) — delete it manually"
-      fi
+  if ! {GIT} push "{UP_REMOTE}" --delete "{UP_REF}"; then
+    # rc 2 means "no such ref": the branch is already gone (the repo auto-deletes
+    # merged heads), which counts as success. Any other rc is a transport or auth
+    # failure that proves nothing, so do not report the branch as deleted.
+    {GIT} ls-remote --exit-code --heads "{UP_REMOTE}" "{UP_REF}" >/dev/null 2>&1; RC=$?
+    if [ "$RC" -eq 2 ]; then
+      echo "note: remote branch {UP_REF} was already gone"
+    else
+      echo "ERROR: could not confirm {UP_REF} is gone (ls-remote rc=$RC) — delete it manually"
     fi
-  else
-    echo "note: no upstream resolved for $BR — not deleting any remote branch"
   fi
 else
   echo "PR {PR} is not MERGED — keeping its head branch"

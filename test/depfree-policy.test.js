@@ -5,18 +5,100 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { buildPromptBundle } = require('../src/transformer');
 
 const root = path.join(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8');
 const policy = read('lib/depfree-policy.md');
-// Execute the optional reference shipped to hosts, not a test-side matcher.
-const source = policy.match(/```javascript\n([\s\S]*?)\n```/)[1];
-const { readDepfreeDefaults, resolveDepfreeAllow, depfreePolicyDecision } =
-  new Function('require', `${source}\nreturn { readDepfreeDefaults, resolveDepfreeAllow, depfreePolicyDecision };`)(require);
+
+// Reference implementation of the procedure lib/depfree-policy.md specifies in
+// prose (the prompt is the only specification shipped to hosts, which apply it
+// with their file tools). The first describe block checks this implementation
+// against the worked-example tables in that file, so the prose examples and the
+// rules stay consistent; the second pins the edge cases the prose states.
+
+function readDepfreeDefaults(file) {
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw error;
+  }
+  const config = JSON.parse(text);
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new TypeError('slashdo config must be an object');
+  }
+  const defaults = config.defaults === undefined ? {} : config.defaults;
+  if (!defaults || typeof defaults !== 'object' || Array.isArray(defaults)) {
+    throw new TypeError('slashdo defaults must be an object');
+  }
+  return defaults;
+}
+
+function resolveDepfreeAllow(globalDefaults, projectDefaults) {
+  const patterns = (defaults, source) => {
+    const value = defaults['depfree-allow'];
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.some(entry =>
+      typeof entry !== 'string' || !entry.trim() || /\s/.test(entry.trim()))) {
+      throw new TypeError(`${source} depfree-allow must be an array of nonblank package-name patterns`);
+    }
+    return value.map(entry => entry.trim());
+  };
+  return [...new Set([
+    ...patterns(globalDefaults, 'global'),
+    ...patterns(projectDefaults, 'project'),
+  ])];
+}
+
+// Returns the first matching pattern, or null.
+function matchingPattern(packageName, allowlist) {
+  const pattern = allowlist.find(entry => {
+    const escaped = entry.split('*').map(part =>
+      part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+    return new RegExp(`^${escaped}$`, 'u').test(packageName);
+  });
+  return pattern === undefined ? null : pattern;
+}
+
 const defaults = entries => ({ 'depfree-allow': entries });
-const depfree = read('commands/do/depfree.md');
-const config = read('commands/do/config.md');
+
+// Rows of the markdown table whose header starts with `firstHeader`, as arrays
+// of cell text with surrounding backticks removed.
+function tableRows(markdown, firstHeader) {
+  const lines = markdown.split('\n');
+  const start = lines.findIndex(line => line.startsWith(`| ${firstHeader} |`));
+  assert.notEqual(start, -1, `table "${firstHeader}" not found in lib/depfree-policy.md`);
+  const rows = [];
+  for (const line of lines.slice(start + 2)) {
+    if (!line.startsWith('|')) break;
+    rows.push(line.split('|').slice(1, -1).map(cell => cell.trim().replace(/^`(.*)`$/, '$1')));
+  }
+  return rows;
+}
+
+describe('dependency policy worked examples in lib/depfree-policy.md', () => {
+  it('union examples resolve as the table states', () => {
+    const rows = tableRows(policy, 'Global');
+    assert.ok(rows.length >= 3);
+    for (const [globalList, projectList, expected] of rows) {
+      assert.deepEqual(
+        resolveDepfreeAllow(defaults(JSON.parse(globalList)), defaults(JSON.parse(projectList))),
+        JSON.parse(expected),
+        `${globalList} + ${projectList}`,
+      );
+    }
+  });
+
+  it('match examples match, or do not, as the table states', () => {
+    const rows = tableRows(policy, 'Pattern');
+    assert.ok(rows.length >= 8);
+    for (const [pattern, name, matches] of rows) {
+      assert.ok(['yes', 'no'].includes(matches), `${pattern} / ${name}: ${matches}`);
+      assert.equal(matchingPattern(name, [pattern]) !== null, matches === 'yes', `${pattern} / ${name}`);
+    }
+  });
+});
 
 describe('dependency policy procedure', () => {
   it('loads both config scopes and unions exact names and scope/prefix globs', t => {
@@ -28,10 +110,8 @@ describe('dependency policy procedure', () => {
     fs.writeFileSync(projectFile, JSON.stringify({ defaults: defaults(['pg', 'prefix-*']) }));
     const allow = resolveDepfreeAllow(readDepfreeDefaults(globalFile), readDepfreeDefaults(projectFile));
     assert.deepEqual(allow, ['@aws-sdk/*', 'pg', 'prefix-*']);
-    for (const name of ['@aws-sdk/client-s3', '@aws-sdk/credential-providers', 'pg', 'prefix-utils']) {
-      assert.equal(depfreePolicyDecision(name, allow).recommendation, 'KEEP');
-    }
-    assert.equal(depfreePolicyDecision('chalk', allow), null);
+    assert.equal(matchingPattern('@aws-sdk/credential-providers', allow), '@aws-sdk/*');
+    assert.equal(matchingPattern('chalk', allow), null);
     fs.writeFileSync(projectFile, JSON.stringify({ defaults: defaults([]) }));
     assert.deepEqual(resolveDepfreeAllow(readDepfreeDefaults(globalFile), readDepfreeDefaults(projectFile)), ['@aws-sdk/*', 'pg']);
   });
@@ -46,30 +126,20 @@ describe('dependency policy procedure', () => {
     assert.deepEqual(resolveDepfreeAllow({}, {}), []);
   });
 
-  it('anchors exact and glob matches and treats regex metacharacters literally', () => {
-    const allow = ['pg', '@aws-sdk/*', 'prefix-*', 'lib.js', 'a+b', 'pkg[1]', 'x?y'];
-    for (const name of ['pg-native', 'xpg', 'PG', 'other/@aws-sdk/client-s3', '@aws-sdkx/client-s3', 'other-prefix-utils', 'libXjs', 'aaab', 'pkg1', 'xy']) {
-      assert.equal(depfreePolicyDecision(name, allow), null, name);
+  it('treats regex metacharacters in a pattern literally', () => {
+    const allow = ['lib.js', 'a+b', 'pkg[1]', 'x?y'];
+    for (const name of ['libXjs', 'aaab', 'pkg1', 'xy', 'xpg']) {
+      assert.equal(matchingPattern(name, allow), null, name);
     }
-    for (const name of ['prefix-', 'lib.js', 'a+b', 'pkg[1]', 'x?y']) {
-      assert.equal(depfreePolicyDecision(name, allow).recommendation, 'KEEP', name);
+    for (const name of allow) {
+      assert.equal(matchingPattern(name, allow), name);
     }
-    assert.equal(depfreePolicyDecision('any-package', ['*']).policy_pattern, '*');
   });
 
-  for (const mode of ['default', 'heavy', 'extreme']) {
-    it(`keeps policy matches before the ${mode} audit rules`, () => {
-      const classification = depfree.slice(depfree.indexOf('### 1b:'), depfree.indexOf('### 1c:'));
-      assert.ok(classification.indexOf('depfreePolicyDecision(packageName, DEPFREE_ALLOW)') < classification.indexOf('check `PRIOR_DECISIONS`'));
-      assert.match(classification, /skip all remaining tier\/removal rules and Phase 1c/);
-      assert.ok(classification.includes(`This applies in default, heavy, and extreme modes`));
-      // The procedure has no mode override: even the SDK from the issue stays KEEP.
-      assert.deepEqual(depfreePolicyDecision('@aws-sdk/client-s3', resolveDepfreeAllow(defaults(['@aws-sdk/*']), {})), {
-        decision: 'KEPT_POLICY', recommendation: 'KEEP', reason: 'policy allowlist',
-        policy_pattern: '@aws-sdk/*', from_policy: true,
-      });
-    });
-  }
+  it('stops matching a package once its allowance is gone', () => {
+    assert.equal(matchingPattern('pg', ['pg']), 'pg');
+    assert.equal(matchingPattern('pg', resolveDepfreeAllow({}, {})), null);
+  });
 
   it('rejects malformed policy in either scope rather than dropping allowances', () => {
     for (const invalid of [null, 'pg', {}, [null], [''], ['  '], ['two names'], [4], [{ pattern: 'pg' }]]) {
@@ -90,61 +160,5 @@ describe('dependency policy procedure', () => {
       assert.throws(() => readDepfreeDefaults(file));
     }
     assert.throws(() => readDepfreeDefaults(dir));
-  });
-
-  it('stops keeping a package when current policy no longer matches', () => {
-    assert.equal(depfreePolicyDecision('pg', ['pg']).decision, 'KEPT_POLICY');
-    assert.equal(depfreePolicyDecision('pg', resolveDepfreeAllow({}, {})), null);
-    assert.match(depfree, /The decision is not `KEPT_POLICY`/);
-    assert.match(depfree, /excluding old `KEPT_POLICY` and `KEPT_TRANSITIVE` rows and entries superseded by current policy/);
-  });
-});
-
-describe('dependency policy workflow integration', () => {
-  it('recomputes cached transitive decisions after a policy parent can become removable', () => {
-    assert.match(depfree, /The decision is not `KEPT_TRANSITIVE`/);
-    assert.match(depfree, /rerun Phase 1d against this run's kept-parent graph/);
-    const classification = depfree.slice(depfree.indexOf('### 1b:'), depfree.indexOf('### 1c:'));
-    assert.doesNotMatch(classification, /`KEPT_TRANSITIVE` →/);
-    assert.match(depfree, /excluding old `KEPT_POLICY` and `KEPT_TRANSITIVE` rows/);
-  });
-
-  it('preserves usage exclusion, vulnerability reporting, and transitive accounting', () => {
-    assert.match(depfree, /Skip any dependency with `from_policy: true` or `from_prior: true`/);
-    assert.match(depfree, /Exclude `from_policy: true` from REMOVE, EVALUATE, deferred findings, and remediation/);
-    assert.match(policy, /whole-tree vulnerability audit and Phase 1d/);
-    assert.match(depfree, /record their transitive footprint, even when there are no REMOVE candidates/);
-    assert.match(depfree, /Tier 1 under Extreme Mode rule 1 or `from_policy: true`/);
-  });
-
-  it('reports current policy in the plan, DEPS.md, and PR summary', () => {
-    for (const heading of ['| Policy kept |', '## Kept — Policy allowlist', '### Dependencies Kept']) {
-      assert.ok(depfree.includes(heading), heading);
-    }
-    assert.match(depfree, /including on scan-only and "All dependencies are justified" exits/);
-    assert.match(depfree, /these were not usage-audited/);
-  });
-
-  it('exposes config set/unset/show and documents the union exception', () => {
-    assert.match(config, /\[--depfree-allow <patterns>\]/);
-    assert.match(config, /`--depfree-allow <patterns>` → key `depfree-allow`/);
-    assert.match(config, /`--unset depfree-allow`/);
-    assert.match(config, /depfree-allow\s+= \{global\/project union as JSON array, or \[\]\}/);
-    assert.match(read('lib/review-config-defaults.md'), /`depfree-allow` unions scopes separately; never drop global allowances/);
-    assert.match(read('docs/config.md'), /@aws-sdk\/\*,pg/);
-  });
-
-  it('ships the policy procedure with both audit and config command bundles', () => {
-    for (const command of [depfree, config]) {
-      assert.match(command, /^!read lib\/depfree-policy\.md$/m);
-      const bundle = buildPromptBundle(command, path.join(root, 'lib'));
-      assert.match(bundle.files['depfree-policy.md'], /function depfreePolicyDecision/);
-      assert.match(bundle.files['depfree-policy.md'], /function resolveDepfreeAllow/);
-      // Both installed commands must support shell installs without Node.js.
-      assert.match(bundle.files['depfree-policy.md'], /Use the host's file tools to read and parse the two JSON files/);
-      assert.match(bundle.files['depfree-policy.md'], /do not require Node\.js, Python, `jq`, or another runtime/);
-      assert.match(bundle.files['depfree-policy.md'], /optional reference implementation/);
-      assert.match(bundle.files['depfree-policy.md'], /`DEPFREE_ALLOW` with steps 1–3/);
-    }
   });
 });

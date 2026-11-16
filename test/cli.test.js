@@ -1,8 +1,10 @@
 'use strict';
 
-const { describe, it } = require('node:test');
+const { describe, it, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const { parseArgs, printListTable } = require('../bin/cli');
@@ -29,6 +31,31 @@ describe('help output', () => {
     });
 
     assert.match(output, /\(~[/\\]\.claude[/\\]commands\)/);
+  });
+});
+
+// End-to-end smoke runs of the real CLI (formerly inline steps in ci.yml). HOME points at
+// a throwaway directory so nothing touches the developer's real install.
+describe('CLI smoke runs', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'slashdo-cli-smoke-'));
+  const run = (args) => execFileSync(process.execPath, [cliPath, ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: '' },
+  });
+
+  after(() => fs.rmSync(home, { recursive: true, force: true }));
+
+  it('--help exits 0 and prints usage', () => {
+    assert.match(run(['--help']), /--dry-run/);
+  });
+
+  it('--list --env claude exits 0 and lists the commands', () => {
+    assert.match(run(['--list', '--env', 'claude']), /\/do:push/);
+  });
+
+  it('--dry-run --env claude exits 0 and writes nothing', () => {
+    run(['--dry-run', '--env', 'claude']);
+    assert.deepEqual(fs.readdirSync(home), []);
   });
 });
 

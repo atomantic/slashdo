@@ -29,4 +29,4 @@ Only when `$ARGUMENTS` carries a review flag (`--review-with`, `--review-mode`, 
 
 !read lib/review-flags.md
 
-After defaults, unresolved reviewers become `[]`; unresolved simplify/strict flags become false. No built-in reviewer is selected, including Copilot. Empty reviewers leave PRs open. GitLab skips review/auto-merge. The shared review wrapper owns the final aggregate gate; do not reimplement its optional, cap, or stop-mode semantics.
+After defaults, unresolved reviewers become `[]`; unresolved simplify/strict flags become false. No built-in reviewer is selected, including Copilot. Empty reviewers leave PRs open. The review loop and merge run on GitHub and GitLab alike; only the `copilot` reviewer is GitHub-only. The shared review wrapper owns the final aggregate gate; do not reimplement its optional, cap, or stop-mode semantics.

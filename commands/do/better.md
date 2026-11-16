@@ -37,7 +37,7 @@ Read the shared spool/filer contract once, before any phase below touches it:
 
 !read lib/better-plan.md
 
-3. Resolve the pipeline inputs Phases 3–7 substitute, then remediate CRITICAL/HIGH/MEDIUM code findings in the isolated worktree, one owner per file.
+3. Read the caller values Phases 3–7 use, then remediate CRITICAL/HIGH/MEDIUM code findings in the isolated worktree, one owner per file.
 
 !read lib/better-pipeline-inputs.md
 !read lib/better-remediation.md
@@ -50,7 +50,7 @@ Read the shared spool/filer contract once, before any phase below touches it:
 
 !read lib/better-test-enhancement.md
 
-5. Publish category PRs and verify CI. `--no-merge` stops after PR/MR creation and proceeds to safe finalization.
+5. Publish category PRs (categories that depend on each other share one) and verify CI. `--no-merge` stops after PR/MR creation and proceeds to safe finalization.
 
 !read lib/better-pr-and-ci.md
 

@@ -7,15 +7,10 @@ argument-hint: "[<task description>] [--yes|-y] [--label <name>] [--model <tier>
 
 Turn a rough idea into a **well-formed, claimable tracker issue**: investigate the
 codebase to ground the task in reality (affected files, current behavior,
-constraints), draft an issue with a clean title and a structured body (problem,
-context, approach, acceptance criteria), show it for approval, then create it in the
-repo's tracker — **GitHub via `gh` or GitLab via `glab`**, auto-detected from the
-`origin` remote the same way `/do:pr` detects its host, or a **Jira project via
-`jira`** when `/do:config --tracker jira` selects one. A custom GitHub Enterprise or
-self-managed GitLab host needs no configuration: this command only uses `gh issue` /
-`glab issue` subcommands, which resolve the host from the remote (see
-[lib/gh-host.md](../../lib/gh-host.md) — only raw `gh api` calls need an explicit
-host, and this command makes none).
+constraints), draft an issue with a clean title and a structured body, show it for
+approval, then create it in the repo's tracker — **GitHub via `gh` or GitLab via
+`glab`**, detected from the `origin` remote the way `/do:pr` detects its host, or a
+**Jira project via `jira`** when `/do:config --tracker jira` selects one.
 
 This is the **single-issue authoring** counterpart to `/do:replan` (which triages a
 whole backlog): one specific piece of work, captured as a first-class issue that
@@ -46,38 +41,34 @@ accept either `--flag=value` or `--flag value`. Order is free.
   Labels are created if missing (idempotent) exactly as in
   [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) "Label creation".
 - **`--model <tier>`** / **`--effort <level>`** — set the issue's **dispatch hint**
-  explicitly instead of letting Phase 4 infer it. `<tier>` ∈ `light` / `medium` /
-  `heavy`; `<level>` ∈ `low` / `medium` / `high` / `xhigh` / `max`. Each applies the
-  corresponding `model${LABEL_SEP}<tier>` / `effort${LABEL_SEP}<level>` label (see
-  [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) "The dispatch hint"). A typed
-  value **wins over inference** for that axis and is not re-litigated at the gate; the
-  other axis is still inferred. `--model none` / `--effort none` **suppress** that
-  axis entirely — no label, no inference. Reject anything else with
-  `--model must be one of light, medium, heavy, none (got: {value}).` /
+  yourself instead of letting Phase 4 infer it: `<tier>` is `light`, `medium` or
+  `heavy`; `<level>` is `low`, `medium`, `high`, `xhigh` or `max` (see
+  [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) "The dispatch hint"). A
+  typed value wins for its axis and is not questioned at the gate; the other axis is
+  still inferred. `none` suppresses an axis: no label, no inference. Reject anything
+  else with `--model must be one of light, medium, heavy, none (got: {value}).` /
   `--effort must be one of low, medium, high, xhigh, max, none (got: {value}).`
-- **`--enhance-with <list>`** — after the draft is written, route it through an
+- **`--enhance-with <list>`** — after the draft is written, pass it through an
   **ordered pipeline of enhancement agents** (Phase 3.5), each refining the previous
-  agent's output, before the approval gate. Parsed with the same `agent[model]` list
-  grammar as `--review-with` — comma-split outside brackets, `[<model>]` stripped
-  into a per-entry `{ENH_MODEL}`, `gemini`/`antigravity` → `agy`, `cursor-agent` →
-  `cursor`, dedupe preserving first-occurrence order (the bracket is part of the
-  identity) — see [lib/review-flags.md](../../lib/review-flags.md). **One boundary is
-  specific to this flag**: the rest of `$ARGUMENTS` after it is free-form task text,
-  so the value ends at the first whitespace *outside* any `[...]` bracket (an opened
-  bracket runs to its matching `]`) rather than at the first whitespace outright —
-  `--enhance-with 'agy[Gemini 3.8 Flash (High)]' fix the login bug` must not leak
-  `3.8 Flash (High)]` into the description.
-  **What differs from `--review-with`: only `codex`, `claude`, `agy` (aliases
-  `gemini`/`antigravity`), `grok`, `pi`, and `cursor` (alias `cursor-agent`) are
-  accepted** — the agentic CLIs that take a free-form prompt and return a rewritten
-  draft; `ollama` and `copilot` are findings emitters, not draft rewriters, and are
-  rejected here (see [lib/enhance-loop.md](../../lib/enhance-loop.md) "Inputs" for the
-  full per-entry contract). Examples: `--enhance-with=grok`;
-  `--enhance-with=codex[o3],grok` (Codex on `o3` first, then Grok on Codex's result).
-  Reject an unknown slug with
-  `Unknown --enhance-with value: {value}. Use one of: codex, claude, agy, grok, pi, cursor.`
-  **`--enhance-with=none`** (case-insensitive) explicitly skips the pipeline (mirrors
-  `--review-with none`). Absent → no enhancement pass runs.
+  one's output, before the approval gate. The list uses the `agent[model]` grammar of
+  `--review-with` ([lib/review-flags.md](../../lib/review-flags.md)), including its
+  aliases (`gemini`/`antigravity` → `agy`, `cursor-agent` → `cursor`) and
+  first-occurrence dedupe, with the bracket stripped into a per-entry `{ENH_MODEL}`.
+  Two things differ:
+  - **Where the value ends.** The rest of `$ARGUMENTS` is free-form task text, so the
+    value ends at the first whitespace *outside* any `[...]` bracket:
+    `--enhance-with 'agy[Gemini 3.8 Flash (High)]' fix the login bug` must not leak
+    `3.8 Flash (High)]` into the description.
+  - **Which agents.** Only `codex`, `claude`, `agy`, `grok`, `pi`, and `cursor` are
+    accepted: the agentic CLIs that take a free-form prompt and return a rewritten
+    draft. `ollama` and `copilot` emit findings rather than rewrites and are rejected
+    ([lib/enhance-loop.md](../../lib/enhance-loop.md) "Inputs" has the per-entry
+    contract). Reject an unknown slug with
+    `Unknown --enhance-with value: {value}. Use one of: codex, claude, agy, grok, pi, cursor.`
+
+  Examples: `--enhance-with=grok`; `--enhance-with=codex[o3],grok` (Codex on `o3`
+  first, then Grok on Codex's result). `--enhance-with=none` (case-insensitive) skips
+  the pipeline, as does leaving the flag off.
 - **`--no-dedup`** — skip the Phase 2 duplicate check against existing open issues and
   file unconditionally.
 - **`--dry-run`** — do everything up to and including the draft (and the dedup
@@ -86,12 +77,12 @@ accept either `--flag=value` or `--flag value`. Order is free.
 
 ## Phase 0 — Detect the tracker
 
-1. **VCS host / `CLI_TOOL` / `LABEL_SEP`** — same order every slashdo command uses:
-   derive the host from the `origin` remote first, then confirm that host's
-   credentials (`auth status` only says which CLI is *usable*, so with **both** `gh`
-   and `glab` authenticated the host must never be decided by whichever probe passes
-   first). This command makes no raw `gh api` calls, so it needs no `GH_HOST`
-   derivation on top of this.
+1. **VCS host / `CLI_TOOL` / `LABEL_SEP`** — the shared selection rule: the `origin`
+   remote decides the host, then that host's credentials are confirmed. A custom
+   GitHub Enterprise or self-managed GitLab host needs no configuration here, because
+   this command only uses `gh issue` / `glab issue` and label subcommands, which
+   resolve the host from the remote; only raw `gh api` calls need an explicit
+   `GH_HOST` ([lib/gh-host.md](../../lib/gh-host.md)), and it makes none.
 
    !read lib/vcs-host.md
 
@@ -116,10 +107,6 @@ accept either `--flag=value` or `--flag value`. Order is free.
    '.[].name'` (glab: `glab label list --output json --per-page 100 --jq
    '.[].name'`; Jira: the label sample in [lib/tracker-jira.md](../../lib/tracker-jira.md)) — and record it as `EXISTING_LABELS` for Phase 4's label inference
    and dispatch hint.
-   This command files at most one issue per run, so per
-   [lib/plan-issue-filing.md](../../lib/plan-issue-filing.md) "Fetch existing open
-   issues" it skips that fetch's full open-issue `--json …,body` dump; Phase 2 dedups
-   with a targeted search instead.
 
 (Labels are created lazily in Phase 5, immediately before each is applied.)
 
@@ -130,9 +117,9 @@ find the code the request touches, and name the real files, functions, and curre
 behavior — "current: `commands/do/pr.md` has no `--dry-run` handling in Parse
 Arguments" is worth ten "we should add a dry-run flag." Note prior art the task
 should follow and any genuine open question the draft can't proceed without (folded
-into the draft per the invariant above). For a large or cross-cutting task, spawn a
-read-only investigation subagent (`Explore` or `general-purpose`) to sweep the
-affected area and report the map back — a one-file tweak doesn't need one.
+into the draft per the invariant above). For a large or cross-cutting task, hand the
+sweep of the affected area to a read-only investigation sub-agent, where the harness
+has one, and work from the map it reports; a one-file tweak doesn't need one.
 
 ## Phase 2 — Dedup against existing issues
 
@@ -162,8 +149,19 @@ Produce a **clean, human-readable title** and a **structured body**.
 Good: `Add a --dry-run flag to /do:pr that prints the PR body without pushing`. Bad:
 `[feature] dry-run` or `update pr.md`.
 
-**Body** — use this structure; **omit a section only when it genuinely has no
-content** (never drop Acceptance criteria — a decision-complete task always has them):
+**Body** — use the project's own issue template when one fits the task. Look in
+`.github/ISSUE_TEMPLATE/` on GitHub (markdown templates, or issue-form `.yml` files,
+whose fields give the section headings and any labels to apply),
+`.gitlab/issue_templates/` on GitLab, and anything the project's contributing docs
+point to. Pick the template for this kind of work (feature, bug, chore), keep its
+headings and order, and fill every section from what Phase 1 found. Whatever the
+template asks for, the decision-complete bar still needs **acceptance criteria**, and
+any surviving open questions stated as such: add those sections when the template
+lacks them.
+
+When the project has no template, or none fits (only a bug-report form for a feature
+task, or a Jira tracker), use this structure, omitting a section only when it has no
+content (never Acceptance criteria):
 
 ```markdown
 ## Problem / Goal
@@ -182,7 +180,7 @@ actionable, not so prescriptive it forecloses a better idea found during the wor
 - [ ] <include tests / docs updates when the change warrants them>
 
 ## Out of scope
-<what this task explicitly does NOT include — prevents scope creep on the claim>
+<what this task explicitly does not include — prevents scope creep on the claim>
 
 ## Open questions
 <only if any remain after the gate — ideally empty by the time the issue is filed>
@@ -232,16 +230,16 @@ feature task — severity is for audit findings.
 
 Recommend **how to run the work** on the two axes defined in
 [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) ("The dispatch hint"),
-judged from what Phase 1 actually found, not the request's wording — an approach
-you could write out line-by-line is `model:light` however long it is; genuine
-uncertainty between two designs is `model:heavy`; `effort` is how hard each step is
-to reason through, independent of `model` and of how much work there is. Breadth and
-blast radius call for an enumerated checklist and verification in the body, not a
-higher `effort`. A typed `--model`/`--effort` wins outright for that axis
-(don't re-raise it at the gate); `--model none`/`--effort none` suppress it; leave an
-axis off rather than guess when you can't justify a value. If the repo already uses
-its **own** sizing/dispatch taxonomy (`size/M`, story points, `complexity:*` —
-visible in `EXISTING_LABELS`), prefer it and skip these — say which you used.
+judged from what Phase 1 found rather than the request's wording. `model` is how much
+capability the task needs: an approach you could write out line by line is `light`
+however long it is, and genuine uncertainty between two designs is `heavy`. `effort`
+is how hard each step is to reason through, independent of `model` and of how much
+work there is; breadth and blast radius call for an enumerated checklist and
+verification in the body, not a higher `effort`. Leave an axis off when you cannot
+justify a value, and apply any `--model`/`--effort` override from Parse Arguments. If
+the repo already uses its **own** sizing/dispatch taxonomy (`size/M`, story points,
+`complexity:*` — visible in `EXISTING_LABELS`), prefer it and skip these — say which
+you used.
 
 State the hint with a one-line justification in the Phase 5 gate (e.g. `model:light +
 effort:low — mechanical; the 40 call sites are listed in the body`).
@@ -292,8 +290,6 @@ in the backlog is always a valid stopping point.
 
 ## Notes
 
-- **Custom / Enterprise hosts** need no configuration: `gh issue` / `glab issue`
-  infer the host from the `origin` remote, and this command never calls raw `gh api`.
 - **Outside `/do:replan`'s scope by default.** `/do:replan` only triages issues
   carrying `PLAN_LABEL`, and this command doesn't apply that label on its own. Pass
   `--label <name>` with the saved `issues-label` default (or `plan`) if a filed issue

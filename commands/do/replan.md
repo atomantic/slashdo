@@ -7,11 +7,9 @@ argument-hint: "[--interactive] [--issues-label <name>]"
 
 Audit the backlog against the codebase, close completed/stale issues, suggest new work, and leave the backlog lean. The backlog lives in your **GitHub/GitLab issue tracker**, or in a **Jira project** (`/do:config --tracker jira`) — only issues carrying `PLAN_LABEL` are plan items.
 
-**Default mode: fully autonomous** — scan, close, file, no prompts. **`--interactive`** pauses after evidence gathering for approval.
+**Default mode: autonomous** — scan, close and file without asking for approval. The one thing it still asks is a decision an item cannot be filed without (Phase 3). **`--interactive`** pauses after evidence gathering for approval.
 
 **Philosophy:** the backlog should be short enough to scan in one screen. Completed work doesn't belong in it — closed issues are the audit trail.
-
-**Phase ordering:** phases 0 → 6.
 
 ## Parse Arguments
 
@@ -23,7 +21,7 @@ Parse `$ARGUMENTS` for:
 
 **Actionable-issues invariant.** Every issue replan files must be **well-formed and decision-complete**. Before filing an item, replan surfaces any open question or pending decision on it (Phase 3) and asks the human to resolve it, folding the resolution into the issue body. If the human explicitly **defers**, the item is not filed (reported in the summary).
 
-**A `Depends on #N` does NOT violate this invariant.** "Actionable" means "no unresolved question/decision," not "pickable this very second." A blocked-but-well-formed issue is merely *sequenced* (`/do:next` claims it once #N closes); only an *undecided* item is barred.
+**A `Depends on #N` does not violate this invariant.** "Actionable" means "no unresolved question/decision," not "pickable this very second." A blocked-but-well-formed issue is merely *sequenced* (`/do:next` claims it once #N closes); only an *undecided* item is barred.
 
 **Item IDs.** The **issue number** is the ID; `/do:next` claims it on a `next/issue-<n>` branch. On a Jira tracker the **key** (`PROJ-123`) is the ID everywhere this command says `#<n>` — summaries, comments, dependency lines, commit messages.
 
@@ -31,7 +29,7 @@ Parse `$ARGUMENTS` for:
 
 **The tracker is tactical** (what are we building next, the backlog). **GOALS.md is strategic** (why the project exists, what success looks like, what we will never do).
 
-**Plan issues must NOT contain:**
+**Plan issues must not contain:**
 - Mission statements, core tenets, or non-goals (GOALS.md)
 - Detailed documentation (`docs/`)
 
@@ -87,26 +85,13 @@ section; a line ending in `?`; markers like `TBD`, `TODO: decide`, `decision nee
 `> QUESTION:` / `> DECISION:` blockquote. Record each as `{item, question, options-if-any}`
 for the Phase 3 resolution gate.
 
-Launch these agents in parallel. Agents 1–3 and 5 operate per open issue (and per migration candidate).
+Gather the evidence below, in parallel sub-agents where the harness has them. Agents 1–3 and 5 work per open issue (and per migration candidate).
 
-**Agent 1: Git History Analysis**
-- `git log --oneline -50` — identify commits that completed plan items
-- `git log --since="2 weeks ago" --oneline` — surface recent work not yet reflected in the backlog
-- Cross-reference commit messages (`#<n>`, `Closes #<n>`, titles) against open issues to auto-detect completions
-
-**Agent 2: Codebase Verification**
-- For each open issue, grep for function names, component names, or feature keywords
-- Check test files for coverage of features listed as untested
-- Look at recently modified files for signs of completed work
-- Build a confidence score per item: `confirmed-done`, `likely-done`, `still-pending`, `stale`
+**Agents 1–2: Completion evidence**
+For each open issue, settle on `confirmed-done`, `likely-done`, `still-pending` or `stale` from two sources: git history (commits that cite `#<n>` / `Closes #<n>` or match the title, plus recent work the backlog does not reflect yet) and the code itself (the functions, components or features the issue names now exist; tests cover what it called untested).
 
 **Agent 3: Opportunity Scanner**
-- Scan for TODOs, FIXMEs, HACKs in the codebase that aren't tracked as issues
-- Look for test coverage gaps (files with no corresponding test)
-- Check for outdated dependencies (`npm outdated`, `cargo outdated`, etc. as appropriate)
-- Review GOALS.md (if it exists) for strategic goals not yet represented in the backlog
-- Identify code quality opportunities (large files, complex functions, missing error handling)
-- Formulate 1-3 suggested new items
+Look for untracked work worth a place in the backlog: TODO/FIXME/HACK markers no issue covers, test-coverage gaps, outdated dependencies (the ecosystem's own `outdated` command), GOALS.md goals with nothing in the backlog, and code-quality hot spots. Propose at most three items, and none when nothing clears that bar.
 
 **Agent 4: GOALS.md Boundary Check**
 If `GOALS.md` exists:
@@ -200,7 +185,7 @@ fold fixes into Phase 3:
 
 **Priority labels and dispatch hints (`priority:<N>`, `model:`, `effort:`) are
 advisory, never a triage signal.** They only steer `/do:next`; don't add, remove, or
-read them as evidence here. Replan MAY set `Depends on #N` (hard predecessor),
+read them as evidence here. Replan may set `Depends on #N` (hard predecessor),
 `priority:<N>` (soft sequencing), or a dispatch hint (per
 [lib/plan-issue-setup.md](../../lib/plan-issue-setup.md) "The dispatch hint") on
 **new** work it investigated well enough to justify, but must **not** stamp hints
@@ -209,29 +194,26 @@ onto migrated PLAN.md items or existing issues in bulk. A `Depends on #N` issue 
 
 ## Phase 3: Apply Changes (or Checkpoint if Interactive)
 
-**Resolve open questions FIRST.** For each item from Phase 1 carrying an unresolved
-question or decision, ask the human to resolve it — even in autonomous
-(non-`--interactive`) runs:
-
-```
-AskUserQuestion([{
-  question: "Before I file this as an issue, it needs a decision:\n\n> {item text}\n\n**Open question:** {question}",
-  multiSelect: false,
-  options: [
-    { label: "{option A}", description: "File the issue scoped to option A" },
-    { label: "{option B}", description: "File the issue scoped to option B" },
-    { label: "Defer — don't file yet", description: "Don't file this item until the decision is made" }
-  ]
-}])
-```
-
-(When the item names explicit choices, surface them as options; otherwise offer
-"Decide now" with free-text and "Defer.") Fold the decision into the issue body
-(e.g. a `## Decision` line). If the human **defers**, do not file a new suggestion — list it under
+**Resolve open questions first.** For each item from Phase 1 carrying an unresolved
+question or decision, ask the human to resolve it — in autonomous runs too, since this
+is the one question the invariant requires. Quote the item and its open question, and
+offer the choices it names (each one files the issue scoped to that choice) plus
+"Defer — don't file yet"; when it names none, offer "Decide now" with a free-text
+answer and "Defer". Fold the decision into the issue body (e.g. a `## Decision` line).
+If the human **defers**, do not file a new suggestion — list it under
 "deferred — needs a decision" in the summary. A deferred **migrated PLAN.md item**
 is still filed (so it isn't lost when PLAN.md is removed), with the open question
-under a `## Open question` heading in its body and a `needs-decision` label
-(create that label first, as for `drift` below).
+under a `## Open question` heading in its body and a `needs-decision` label.
+
+**Issue operations.** The steps below name these operations; run the detected host's
+form (Jira: [lib/tracker-jira.md](../../lib/tracker-jira.md) "`/do:replan` on Jira",
+which files through its "File one issue" block and closes by transition):
+
+- **comment** — `gh issue comment <n> --body "<text>"` (glab: `glab issue note <n> -m "<text>"`)
+- **close with a comment** — `gh issue close <n> --comment "<text>"` (glab: the note above, then `glab issue close <n>`)
+- **label** — create the label, then add it: `gh label create <label> --color <hex> 2>/dev/null || true` and `gh issue edit <n> --add-label <label>` (glab: `glab label create --name <label> --color "#<hex>" 2>/dev/null || true` and `glab issue update <n> --label <label>`). Colors: `likely-done` `0E8A16`, `stale` `D4C5F9`, `drift` `E8A33D`, `needs-decision` `FBCA04`.
+- **create** — `gh issue create --title "<title>" --body "<body incl. any ## Decision>" --label <PLAN_LABEL>` (glab: `glab issue create --title "<title>" --description "<body>" --label <PLAN_LABEL>`); capture the returned number.
+- **rewrite** — `gh issue edit <n> --body "<body>"` (glab: `glab issue update <n> --description "<body>"`)
 
 **Dedup before every create.** Fetch the open issues once
 ([lib/plan-issue-filing.md](../../lib/plan-issue-filing.md) "Fetch existing open issues" —
@@ -250,33 +232,22 @@ label. Only file when nothing existing covers it.
 
 ### Default Mode (autonomous)
 
-Apply the triage decisions as issue operations (GitHub `gh`; glab in parens; Jira
-per [lib/tracker-jira.md](../../lib/tracker-jira.md) "`/do:replan` on Jira", which
-files through its "File one issue" block and closes by transition) —
-**only `confirmed-done` and `epic-done` are auto-closed in Default mode; `likely-done`, `stale`, and `drifted` items are never auto-closed without human confirmation**:
+Apply the triage decisions. **Only `confirmed-done` and `epic-done` are closed in
+Default mode; `likely-done`, `stale`, and `drifted` items are never closed without
+human confirmation:**
 
-- `confirmed-done` → **close** with an evidence comment:
-  `gh issue close <n> --comment "Closed by /do:replan — <evidence>"`
-  (glab: `glab issue note <n> -m "<evidence>"` then `glab issue close <n>`).
-- **epic mapped to `confirmed-done`** (state `epic-done`) → **close** listing the
-  closed children: `gh issue close <n> --comment "All children closed (#a, #b, …) and wrap-up complete — closing epic. (/do:replan)"`.
-  An `epic-wrapup`/`epic-open` epic is never closed here (when `epic-wrapup`,
-  optionally comment that only the epic's own wrap-up remains).
-- `likely-done` → **never auto-close in Default mode.** Post the completion evidence
-  as a comment and apply a `likely-done` label (`gh label create likely-done --color 0E8A16 2>/dev/null || true` first, then
-  `gh issue edit <n> --add-label likely-done`; glab: `glab label create --name likely-done --color "#0E8A16" 2>/dev/null || true` first, then `glab issue note <n> -m "<evidence>"` + `glab issue update <n> --label likely-done`).
-- `stale` → **never auto-close in Default mode.** Post a stale-reason comment (noting the last-activity date)
-  and apply a `stale` label (`gh label create stale --color D4C5F9 2>/dev/null || true` first, then
-  `gh issue edit <n> --add-label stale`; glab: `glab label create --name stale --color "#D4C5F9" 2>/dev/null || true` first, then `glab issue note <n> -m "<stale-reason>"` + `glab issue update <n> --label stale`).
+- `confirmed-done` → **close with a comment**: `Closed by /do:replan — <evidence>`.
+- **epic in state `epic-done`** → **close with a comment** listing the closed children:
+  `All children closed (#a, #b, …) and wrap-up complete — closing epic. (/do:replan)`.
+  An `epic-wrapup`/`epic-open` epic is never closed here (for `epic-wrapup`, optionally
+  comment that only the epic's own wrap-up remains).
+- `likely-done` → **comment** the completion evidence and **label** it `likely-done`.
+- `stale` → **comment** the reason, with the last-activity date, and **label** it `stale`.
+- `drifted` → **comment** `⚠️ DRIFT: <collision> — conflicting commit <sha>` and
+  **label** it `drift`.
 - new suggestions **and every pending PLAN.md item being migrated** → dedup against
-  `EXISTING_ISSUES` (below), then **create**:
-  `gh issue create --title "<title>" --body "<body incl. any ## Decision>" --label <PLAN_LABEL>`
-  (glab: `glab issue create --title "<title>" --description "<body>" --label <PLAN_LABEL>`).
-  Capture the returned issue number (created or reused) for the summary.
-- `drifted` → **never auto-close.** Post the `⚠️ DRIFT:` description as a
-  comment (`gh issue comment <n> --body "⚠️ DRIFT: <collision> — conflicting commit <sha>"`)
-  and apply a `drift` label (`gh label create drift --color E8A33D 2>/dev/null || true` first, then
-  `gh issue edit <n> --add-label drift`; glab: `glab label create --name drift --color "#E8A33D" 2>/dev/null || true` first, then `glab issue note <n> -m "<drift>"` + `glab issue update <n> --label drift`).
+  `EXISTING_ISSUES` (above), then **create**. Keep the issue number (created or
+  reused) for the summary.
 
 The audit trail is the issue's close/comment event — **not** git log. Then print a
 brief summary (list the actual numbers):
@@ -287,7 +258,7 @@ Replan complete (label: {PLAN_LABEL}):
 - Flagged {M} likely-done issue(s) (labeled `likely-done`, re-run with --interactive to close): #c, …
 - Flagged {S} stale issue(s) (labeled `stale`, re-run with --interactive to close): #d, …
 - Created {P} new issue(s): #e, …  ({Mg} migrated from PLAN.md, {Op} from the opportunity scan)
-- {any GOALS.md boundary fixes}
+- {GOALS.md tactical items filed as issues, and any proposed GOALS.md removals awaiting approval}
 
 ⚠️ {D} drifted issue(s) require human review — commented + labeled `drift`: #f, …
    Re-run with --interactive to resolve (replan / examine / close).
@@ -302,44 +273,29 @@ If `D > 0`, emphasize the drift count visually (bold + the `⚠️` prefix). Do 
 
 ### Interactive Mode (`--interactive`)
 
-Present ONE consolidated summary to the user (reference items by `#<number>`); each selected action runs the matching Default Mode issue operation:
+Present one consolidated summary, referring to items by `#<number>`, in these groups:
+confirmed done, to close ({N}); likely done, with the evidence ({M}); stale, with
+last-activity dates ({S}); drifted, with the collision details ({D}); and new
+suggestions, numbered, with rationale ({P}). Then ask the user which actions to take,
+allowing several: close the confirmed-done issues; also close the likely-done ones;
+close the stale ones; file the suggested items; walk through the drifted items. If
+they ask for details, print the full evidence and ask again. Each chosen action runs
+the matching Default Mode operation.
 
-```
-AskUserQuestion([{
-  question: "Replan audit complete. Here's what I found:\n\n**Confirmed done — close** ({N} issues):\n{list of confirmed-done issues}\n\n**Likely done — close?** ({M} issues):\n{list with evidence}\n\n**Flagged as stale** ({S} issues):\n{list with last-activity dates}\n\n**⚠️ Drifted — would remove new features** ({D} issues):\n{list with collision details}\n\n**New suggestions** ({P} items):\n{numbered list of proposed new items with rationale}\n\nHow should I proceed?",
-  multiSelect: true,
-  options: [
-    { label: "Close confirmed-done", description: "Close {N} confirmed issues with an evidence comment" },
-    { label: "Close likely-done too", description: "Also close {M} likely-done issues" },
-    { label: "Close stale issues", description: "Close {S} stale issues with a stale-reason comment" },
-    { label: "Add suggested items", description: "File {P} new issues" },
-    { label: "Resolve drifted items", description: "Walk through {D} drifted issues one-by-one" }
-  ]
-}])
-```
+Filing migrated PLAN.md items and Phase 4 run regardless of those choices, still gated by the open-question resolution.
 
-**Exclusive option** (present only if the user asks, as a separate follow-up):
-- "Show me the details" — print full evidence, then re-ask the above
+If the user chooses to file suggestions, present each one individually so they can accept, reject, or modify it.
 
-Filing migrated PLAN.md items and Phase 4 run regardless of the selections above, still gated by the open-question resolution.
+**Drifted items are never bundled.** Walk through them one at a time. For each, show
+the issue title, the collision in one line, the conflicting commits (SHAs and
+subjects) and the new features at risk, and ask the user to pick one:
 
-For suggested new items: if the user selects "Add suggested items", present each suggestion individually so they can accept, reject, or modify each one.
-
-**For drifted items: never bundle.** If the user selects "Resolve drifted items", walk through each one individually with this prompt:
-
-```
-AskUserQuestion([{
-  question: "**Drift detected** on issue #{n}:\n\n> {issue title}\n\n**Collision:** {one-line description}\n**Conflicting commit(s):** {SHAs + subjects}\n**New feature(s) at risk:** {names / paths}\n\nHow do you want to handle this?",
-  multiSelect: false,
-  options: [
-    { label: "Replan — rewrite issue", description: "I'll propose a revised version that preserves the new feature; you approve before it lands" },
-    { label: "Examine — leave commented", description: "Keep the issue with the ⚠️ DRIFT comment and `drift` label so you can investigate offline" },
-    { label: "Close the issue", description: "The new feature supersedes this item" }
-  ]
-}])
-```
-
-If "Replan — rewrite issue": draft a revised issue body that explicitly accounts for the new feature, then ask the user to accept / edit / reject the rewrite before running `gh issue edit <n>` (glab: `glab issue update <n>`). Never auto-apply a rewrite.
+- **Replan** — draft a revised issue body that accounts for the new feature, and ask
+  the user to accept, edit or reject it before the **rewrite** lands. Never apply a
+  rewrite unapproved.
+- **Examine** — keep the issue with its `⚠️ DRIFT` comment and `drift` label so they
+  can investigate offline.
+- **Close** — the new feature supersedes the item.
 
 ## Phase 4: Retire the Legacy PLAN.md
 
@@ -356,24 +312,24 @@ glab: `glab issue list --label <PLAN_LABEL> --per-page 100`) as the post-replan 
 
 ## Phase 5: Absorb GOALS.md Violations
 
-If tactical items (checkboxes, implementation details) were found in GOALS.md, file
-an issue for each (`gh issue create --title … --body … --label <PLAN_LABEL>`, deduped
-as in Phase 3), then strip the tactical content from GOALS.md.
+If Agent 4 found tactical items (checkboxes, implementation details) in GOALS.md,
+file an issue for each (**create**, deduped as in Phase 3). Removing that content
+from GOALS.md is an edit to the user's strategy document, so it needs their approval:
+in `--interactive`, show the lines you would remove and apply the edit on a yes; in
+Default mode leave GOALS.md unchanged and list the proposed removals in the summary,
+each with the issue number that now carries it.
 
 ## Phase 6: Commit
 
 The tracker is the audit trail, not a commit. Commit **only** exact paths this
-run changed (the Phase 4 `PLAN.md` removal, Phase 5 `GOALS.md` edit, or specific
+run changed (the Phase 4 `PLAN.md` removal, an approved Phase 5 `GOALS.md` edit, or specific
 `docs/` files). Stage those paths by name — never stage an entire directory,
 which could include unrelated user changes. For example, list only the changed
 paths in `git add -- PLAN.md GOALS.md docs/path-you-edited.md`, then commit with
 `git commit -m "docs: replan — migrated PLAN.md to issues #c, #d"` (Jira: the
 keys, `PROJ-3, PROJ-4`). Omit any example path that this run did not change.
-If nothing on disk changed, there is no commit. Do NOT push unless explicitly asked.
+If nothing on disk changed, there is no commit. Do not push unless explicitly asked.
 
 ## Notes
 
-- If there are no open `PLAN_LABEL` issues (and no PLAN.md to migrate), seed the backlog from the opportunity scanner.
-- The opportunity scanner suggestion is the key differentiator — every replan should surface at least one new idea
-- Adapt to existing project structure and conventions
-- **Never silently resolve a `drifted` item.** Only the human decides between replan / examine / close.
+- If there are no open `PLAN_LABEL` issues (and no PLAN.md to migrate), the opportunity scan is the run's whole output. Suggest only what is worth filing; an empty scan is a fine result for a lean backlog.

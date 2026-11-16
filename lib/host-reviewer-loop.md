@@ -27,10 +27,19 @@ cloud-side, so there is no reviewer-side edit path. Fixes are always applied by
 the sub-agent the parent spawns, reading from the reviewer's comments. The
 calling command should already have warned and continued.
 
-**Sub-agent delegation**: delegate the entire loop to a **general-purpose
-sub-agent** via the Agent tool so long review cycles don't exhaust the parent's
-context. The sub-agent runs the full loop (request → wait → check → fix →
-re-request) autonomously and returns only the final status.
+**Sub-agent delegation**: when your harness can spawn sub-agents, hand the
+entire loop to one with the prompt below, so long review cycles don't exhaust
+the parent's context. It needs shell and file-editing tools. The sub-agent runs
+the full loop (request → wait → check → fix → re-request) and returns only the
+final status. Without sub-agents, run the same prompt yourself, inline.
+
+### Wait schedules
+
+The default `{WAIT_SCHEDULE}` for a host-side entry, used whenever the caller states none, by reviewer kind. This is the one definition; the wrapper and every caller point here:
+
+- `copilot` — expected duration is the previous Copilot review's duration on this PR (60 seconds if there is none). Wait at most 3× that, no less than 90 seconds and no more than 5 minutes. Poll every 5s, 5s, 10s, 10s, then 15s.
+- `@<login>` ending in `[bot]` (an automated reviewer) — expected duration 5 minutes. Wait at most 3× that, no less than 3 minutes and no more than 15 minutes. Poll every 10s, 10s, 20s, 20s, then 30s.
+- Any other `@<login>` (presumed human) — wait at most 4 hours. Poll every 30s for the first 5 minutes, then every 60s.
 
 ### Sub-agent prompt template:
 
@@ -52,26 +61,17 @@ HOST VERBS: run every verb named below (`cr-state`, `request-review`,
   success.
 {HOST_VERBS}
 
-Max iterations: {REVIEW_ITERATIONS} (default 1). Run at most this many
-  review-and-fix cycles, exiting early the moment a review comes back with zero
-  unresolved comments. The default of 1 means: request one review, fix
-  everything it surfaced, and stop. 0 means "loop until the reviewer returns 0
-  comments", bounded by the safety guardrail below.
-  The caller resolves this value: a per-entry `~max=<n>` suffix on the
-  `--review-with` token (e.g. `@org-review-bot~max=3`) wins over the run's
-  `--review-iterations`, which wins over the default of 1. Either source is
-  user-configured, so reaching the cap here is "capped", never "guardrail".
-  See `~/.claude/lib/multi-reviewer-loop.md`.
-Safety guardrail: in unlimited mode ({REVIEW_ITERATIONS}=0), after 10 iterations
-  report back and — in interactive mode — ask whether to continue; never loop
-  indefinitely. When {REVIEW_ITERATIONS} is positive, that count IS the cap: the
-  loop stops there with status "capped" (clean-equivalent for merge purposes).
+Iteration cap: {REVIEW_ITERATIONS} (default 1) review-and-fix cycles, already
+  resolved by the caller. A positive count is a cap the user chose: fix
+  everything the last allowed review surfaced, then stop with status `capped`.
+  0 means "loop until the reviewer returns 0 comments", bounded by a built-in
+  ceiling of 10 cycles, which stops with status `guardrail`.
 
 WAIT SCHEDULE:
 {WAIT_SCHEDULE}
 
-Run the loop for at most {REVIEW_ITERATIONS} cycles (default 1), exiting early
-the moment a review returns zero unresolved comments:
+Run the loop, exiting early the moment a review returns zero unresolved
+comments:
 
 1. CAPTURE the baseline with `cr-state`: the {CR_NOUN}'s current head SHA, and
    {REVIEWER_LOGIN}'s reviews (compare logins case-insensitively), each with its
@@ -141,16 +141,15 @@ the moment a review returns zero unresolved comments:
      change, per `~/.claude/lib/review-fix-conventions.md`. Defer big refactors
      to the end-of-loop Convention Encoding phase.
    - Run the build command.
-   - If build passes, commit: address review (@{REVIEWER_LOGIN}): <summary>
+   - If build passes, commit in the project's commit convention when it states
+     one, naming the reviewer; otherwise:
+     address review (@{REVIEWER_LOGIN}): <summary>
    - Resolve the thread with `resolve-thread`.
    - After all threads are resolved, push all commits to remote.
-   - Increment the iteration counter.
-   - If {REVIEW_ITERATIONS} > 0 and the counter reaches {REVIEW_ITERATIONS}, stop
-     and report `capped` after applying every fix. This is clean-equivalent for
-     the caller's merge gate.
-   - If {REVIEW_ITERATIONS}=0 and the counter reaches 10, report `guardrail`.
-     Default mode auto-stops; interactive mode asks whether to continue.
-   - CONVERGENCE GATE (unlimited mode, before the guardrail): apply
+   - Increment the iteration counter, then apply the iteration cap above: at a
+     positive cap report `capped`; at 10 cycles in unlimited mode report
+     `guardrail` (interactive mode asks whether to continue instead).
+   - CONVERGENCE GATE (unlimited mode, before the ceiling): apply
      `~/.claude/lib/review-convergence-gate.md`. If the round resolved only
      marginal feedback, report `clean`; only a round with at least one substantive
      fix earns another request.
@@ -160,12 +159,11 @@ When done, report back:
 - Final status: clean / capped / timeout / not-requestable / error / guardrail
   - `clean` — a current-head review had no unresolved threads or actionable body
     feedback
-  - `capped` — the configured iteration cap was reached after applying every fix
+  - `capped` / `guardrail` — the iteration cap above
   - `timeout` — no qualifying current-head review arrived within the wait budget
     (the "awaiting @login" state: the review was requested and the PR is left open
     with the request pending, so a host can resume once the reviewer responds)
   - `not-requestable` — the request failed and no qualifying review arrived
-  - `guardrail` — unlimited mode reached 10 iterations with work outstanding
   - `error` — an unexpected host API failure prevented a verdict
 - Total iterations completed
 - List of commits made, if any

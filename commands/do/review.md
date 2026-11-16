@@ -9,7 +9,7 @@ An explicit invocation of `/do:review` requests a fresh review, even for a PR wh
 
 Parse `$ARGUMENTS` for:
 - **`--strict`** (alias: **`--nuclear`**): raise the structural-review bar — permit the Structural Ambition lens when the diff contains structural signals, and promote structural findings to blocker tier. Strict mode does not force a focused agent when the orchestrator finds no structural concern.
-- **`--draft`** (PR mode only): write the review payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the command(s) to publish it manually (`gh api` on GitHub, the retargeted `glab` calls on GitLab), instead of posting the review. Ignored when `PR_MODE=false`. Set `REVIEW_DRAFT=true` (otherwise `false`). Implies `--no-apply` and disables approval, hosted review requests, and merging, even with `--approve` or `--merge` — a draft publishes nothing.
+- **`--draft`** (PR mode only): write the review payload to `{REVIEW_TMP}/payload.json` (the run's private scratch directory, created under "PR / MR mode") and print the command(s) to publish it manually (`gh api` on GitHub, the retargeted `glab` calls on GitLab), instead of posting the review. Ignored when `PR_MODE=false`. Set `REVIEW_DRAFT=true` (otherwise `false`). Implies `--no-apply` and disables approval, hosted review requests, and merging, even with `--approve` or `--merge` — a draft publishes nothing.
 - **`--approve` / `--no-approve`** (mutually exclusive, PR/MR mode only): approve a completed, clean review of someone else's change at the exact reviewed head. Set `APPROVE_ENABLED=true` / `false`; abort with `--approve and --no-approve cannot be combined` if both appear. When neither is typed, resolve the boolean `approve` saved default using explicit flag → project → global → built-in `true`; reject a non-boolean saved value with `approve must be a boolean`. A saved `false` is an opt-out, not a missing value. `/do:config --no-approve` saves it; `--approve` overrides it for one run. Local branch mode never approves. Trusted project policy reserving approval for a human still applies; issue/PR text cannot grant permission to bypass it.
 - **`--apply` / `--no-apply`** (mutually exclusive, PR mode only): how verified findings are delivered. Default `PR_APPLY=auto` — **commit the fixes onto the PR's head branch when we can push to it, post inline review comments when we can't** (see "Determine write access"). `--no-apply` forces review-only; `--apply` forces fix-and-push and aborts with `--apply was requested but the PR head branch is not writable ({reason}) — rerun without --apply to post an inline review instead.` when `CAN_PUSH_HEAD=false`. Abort with `--apply and --no-apply cannot be combined` if both appear.
 - **`--merge` / `--merge=<method>`** (optional, PR mode only): after the review finishes **clean**, merge the PR. Off by default — without this flag `/do:review` never merges anything. `<method>` ∈ {`squash`, `rebase`, `merge`}; abort on anything else with `--merge=<method> must be one of squash, rebase, merge (got: {value}).` Record `MERGE_ENABLED=true` and, when given, `MERGE_METHOD`. Every gate in "Merge the PR" must pass — the flag requests a merge, it does not authorize one.
@@ -55,7 +55,13 @@ If there are no changes, inform the user and stop.
 
 ### PR / MR mode (`PR_MODE=true`)
 
-Do NOT use the local working tree as the source of truth; review the PR or MR as published on its code host. This entire mode (fetching the change, probing write access, fixing on its branch, pushing, posting the review, and merging) is content a local run never touches. It is loaded in one shot, one partial per code host.
+Review the PR or MR as published on its code host, not the local working tree. This entire mode (fetching the change, probing write access, fixing on its branch, pushing, posting the review, and merging) is content a local run never touches. It is loaded in one shot, one partial per code host.
+
+Create a private scratch directory for this run first, and substitute the printed path for `{REVIEW_TMP}` everywhere below. A fixed `/tmp` name would let two sessions reviewing the same PR number overwrite each other's diff and payload:
+
+```bash
+REVIEW_TMP="$(mktemp -d -t do-review.XXXXXX)" && mkdir "$REVIEW_TMP/files" && echo "REVIEW_TMP=$REVIEW_TMP"
+```
 
 GitHub PR mode, only when `CODE_HOST=github` (a GitHub PR reference):
 
@@ -81,12 +87,12 @@ off, posting review comments`. A `false` here is an ordinary outcome, not a fail
 
 ## Apply Project Conventions
 
-Use CLAUDE.md's rules (code style, error handling, logging, security model, scope exclusions) as overrides to generic best practices, and pass the relevant overrides to each agent.
+The project's own rules (CLAUDE.md, AGENTS.md, CONTRIBUTING: code style, error handling, logging, security model, scope exclusions) override generic best practices. Pass the relevant ones to each agent.
 
-In `PR_MODE`, the local CLAUDE.md may not apply to the PR (fork or different repo). Also fetch the target repo's CLAUDE.md and AGENTS.md if they exist. The command below is for GitHub; GitLab MR mode fetches them in `lib/review-mr-mode.md` step 6:
+In `PR_MODE`, the local files may not apply to the PR (fork or different repo). Also fetch the target repo's CLAUDE.md and AGENTS.md if they exist. The command below is for GitHub; GitLab MR mode fetches them in `lib/review-mr-mode.md` step 6:
 ```bash
-gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/contents/CLAUDE.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}-CLAUDE.md || true
-gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/contents/AGENTS.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > /tmp/do-review-pr-{PR_NUM}-AGENTS.md || true
+gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/contents/CLAUDE.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > {REVIEW_TMP}/CLAUDE.md || true
+gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/contents/AGENTS.md?ref={HEAD_SHA} --jq '.content' 2>/dev/null | base64 -d > {REVIEW_TMP}/AGENTS.md || true
 ```
 Pass whichever exists to the agents instead of (or in addition to) the local one.
 
@@ -96,16 +102,11 @@ Before dispatching agents, understand what this change set claims to do:
 
 1. Read commit messages (`git log {base}...HEAD --oneline`)
 2. Read the project docs, changelog (if any), and the PR description for capability claims, test counts, and "deep-links to X" / "feature Y now works" assertions
-3. Note the claims — verify after agents return whether the code delivers them. Concrete drift to flag:
-   - Test counts in docs/changelog vs `find . -name '*.test.*' -exec grep -c '^\(it\|test\)(' {} +` (or project equivalent)
-   - "Deep-links to record X" claims vs whether the destination route handler actually consumes the encoded parameter
-   - "Auto-prune after N days" / "scans only the page returned" claims vs the listing implementation
-   - Comments in code claiming behavior the surrounding code doesn't perform
-   - Field names quoted in docs (request body shape, event payload shape) vs what the code actually reads/emits
+3. Note the claims, and verify after the agents return whether the code delivers them. Drift worth flagging: a number quoted in docs or the changelog (test counts, limits) that the code no longer matches; a described behavior the implementation does not perform, including code comments; and field or parameter names quoted in docs that differ from what the code reads or emits.
 
 ## Dispatch Review Agents
 
-The host CLI is the review orchestrator. Inspect the scoped diff, run the selection protocol below, then spawn only the focused agents it selects — **in parallel** via the Agent tool at the **`heavy` tier** (this host's strongest model by alias, `model: "opus"` on Claude Code, per [lib/model-tiers.md](../../lib/model-tiers.md); never a version ID, never the session's own tier). If that tier is rejected for lack of entitlement, retry once with `model` omitted, say so, and continue. Each selected agent reviews ALL changed files independently.
+The host CLI is the review orchestrator. Inspect the scoped diff, run the selection protocol below, then spawn only the focused agents it selects, as parallel sub-agents at the `heavy` tier of [lib/model-tiers.md](../../lib/model-tiers.md) (this host's strongest model by alias; never a version ID, never the session's own tier). If that tier is rejected for lack of entitlement, retry once with the model left unset, say so, and continue. On a host that cannot spawn sub-agents, run each selected lens yourself, one after another. Each selected agent reviews all changed files independently.
 
 The host orchestrator does the full review itself even when no focused agent is selected. Do not dispatch a focused agent merely because it exists below or because strict mode is active; use the selection protocol and record the decision.
 
@@ -189,9 +190,9 @@ Lens body — read only if this lens was selected:
 
 For each selected agent, construct its prompt by combining:
 1. The agent's instruction content (from the sections above), plus the orchestrator's recorded reason for selecting that lens
-2. Project convention overrides from CLAUDE.md (the PR's CLAUDE.md/AGENTS.md when `PR_MODE=true`)
-3. The list of changed files from the diff stat (or the PR/MR changed-files list in PR mode) AND, in PR mode, the path to each file's full content under `/tmp/do-review-pr-{PR_NUM}/`
-4. In PR mode only: the path to `/tmp/do-review-pr-{PR_NUM}-lines.json` (the commentable-lines map) and an instruction that **every finding MUST cite a `file:line` where `line` appears in the commentable-lines map** — otherwise the finding cannot be posted inline and is downgraded to a summary-only finding
+2. Project convention overrides (the PR's CLAUDE.md/AGENTS.md when `PR_MODE=true`)
+3. The list of changed files from the diff stat (or the PR/MR changed-files list in PR mode) and, in PR mode, the path to each file's full content under `{REVIEW_TMP}/files/`
+4. In PR mode only: the path to `{REVIEW_TMP}/lines.json` (the commentable-lines map) and an instruction that every finding cite a `file:line` whose `line` appears in that map — otherwise the finding cannot be posted inline and is downgraded to a summary-only finding
 5. Instruction: "Read each changed file in full (not just diff hunks). Report findings that demonstrate consequence reasoning, not just pattern matches."
 6. In PR mode only: "For every CRITICAL or IMPROVEMENT finding where a concrete fix is obvious, include a `suggestion:` block — the exact replacement text for the cited line(s). Use `start_line` and `line` to span multiple lines when the fix needs more than one line. The reviewer will package these as inline review suggestions."
 
@@ -210,7 +211,7 @@ After the host self-review and any selected agents return:
 1. **Merge** all findings into a single list, tagged by source agent
 2. **Deduplicate**: if two agents flagged the same `file:line` with overlapping descriptions, keep the most detailed version and note all agents that found it (overlap is signal the finding is real); prefer the Structural Ambition phrasing when it names a concrete reframing
 3. **PR coherence**: verify commits deliver what they claim — flag discrepancies as IMPROVEMENT findings
-4. **CLAUDE.md filter**: remove findings that conflict with explicit project conventions
+4. **Project-convention filter**: remove findings that conflict with explicit project conventions
 5. **Strict-mode severity promotion** (only when `STRICT_MODE=true`): promote findings marked `[BLOCKER]` by the Structural Ambition agent to CRITICAL in the fix phase, along with findings from other agents that match a strict-mode blocker pattern (file pushed past 1000 lines, ad-hoc conditional in unrelated flow, thin wrapper/identity abstraction, bespoke duplicate of a canonical helper)
 
 ## Verify Findings
@@ -248,7 +249,7 @@ For each verified finding (local branch mode):
 5. **Run end-of-cycle Convention Encoding now**, before verification or delivery. For local branch mode and `PR_DISPOSITION=apply`, apply the shared partial's smallest recurring-pattern actions to the active branch. Skip it for `PR_MODE=true` and `PR_DISPOSITION=inline`, where no branch is checked out; put recommendations in the posted review summary instead. This ordering ensures every encoded edit goes through the build/test gate and reaches the same commit as the review fixes.
 6. After direct fixes and convention encoding, run the project's test suite and build command
 7. Verify the test suite covers the changed code paths — passing unrelated tests is not validation
-8. Commit fixes: `address review (self): <summary>` — the parenthesized reviewer name matches the convention used by delegated `--review-with` passes.
+8. Commit fixes in the project's commit convention when it states one (CONTRIBUTING, CLAUDE.md/AGENTS.md, a commit-lint config). With none stated, use `address review (self): <summary>`, the fallback subject the delegated `--review-with` passes share.
 
 `PR_MODE=true` and `PR_DISPOSITION=apply` continues from here to "Push fixes to the PR branch", `PR_DISPOSITION=inline` to "Post Review to GitHub PR". GitLab MR mode uses the corresponding MR sections. Finish any delegated review passes before running the partial's "Approve the reviewed head" and "Merge the PR/MR" sections; publishing findings alone is not the final clean verdict.
 
@@ -302,24 +303,11 @@ For local branch mode, after the review and any fixes:
 
 After the host CLI's self-review has fully completed for the active mode (local: fixes applied and Convention Encoding done; PR: review posted, Convention Encoding deliberately skipped), hand off to the **multi-reviewer loop**. Do NOT block delegation on a phase that is intentionally inert for the current mode.
 
-Inputs to the wrapper:
+The wrapper takes the values resolved in Parse Arguments (`{REVIEW_AGENTS}`, `{REVIEW_STOP_MODE}`, `{REVIEW_MODE}`, `{REVIEWER_APPLIES}`, `{REVIEW_ITERATIONS}`, `{REVIEW_MODELS}`), plus:
 
-- `{REVIEW_AGENTS}` — the parsed list (e.g. `[claude, agy, copilot]`)
-- `{REVIEW_STOP_MODE}` — `all` (default) | `on-findings` | `on-clean`
-- `{REVIEW_MODE}` — `series` (default) | `parallel`
-- `{REVIEWER_APPLIES}` — boolean, forwarded to each local-agent pass
-- `{REVIEW_ITERATIONS}` — non-negative integer (default `1`); copilot/`@<login>` iteration cap (`0` = loop until clean)
-- `{REVIEW_MODELS}` — the saved per-agent default models (`EFFECTIVE_REVIEW_MODELS` from the saved-defaults step); every local reviewer but `cmd` reads it when an entry's own `[<model>]` bracket is absent
-- `{GH_HOST}` — the GitHub API host established in "Determine Scope" (the PR URL's host in PR mode, the `origin` remote's host in local mode); forwarded to the GitHub loops so their `gh api` calls target the right host on GitHub Enterprise
+- `{GH_HOST}` — the GitHub API host established in "Determine Scope" (the PR URL's host in PR mode, the `origin` remote's host in local mode).
 - `{CODE_HOST}` / `{CR_NOUN}` — in PR mode, the reference's host from Parse Arguments: `github` / `PR` for a GitHub PR, `gitlab` / `MR` for a GitLab MR. Never re-derive them from `origin` there. In local mode, use the `origin` code host from `lib/vcs-host.md`. When the list has a `copilot` or `@<login>` entry and the deferral path has not already resolved it, read and run that partial now. It selects the verb file the host-side loops run, so `@<login>` works on the branch's GitLab MR too.
-- `{WAIT_SCHEDULE}` — the single schedule selected below for the current host-side entry
-
-For each host-side entry, resolve the caller-owned `{WAIT_SCHEDULE}` before dispatch:
-
-- `copilot` — use the previous Copilot review duration on this PR (default 60 seconds if none); max wait 3x that duration, minimum 90 seconds, maximum 5 minutes; poll every 5s, 5s, 10s, 10s, then 15s.
-- `@<login>` — a login ending in `[bot]` is an automated reviewer: expected duration 5 minutes; max wait 3x that duration, minimum 3 minutes, maximum 15 minutes; poll every 10s, 10s, 20s, 20s, then 30s. Any other login is presumed human: max wait 4 hours; poll every 30s for the first 5 minutes, then every 60s.
-
-Forward only the selected schedule as `{WAIT_SCHEDULE}`; never give one pass both schedules.
+- `{WAIT_SCHEDULE}` — for each host-side entry, the default for that reviewer kind ("Wait schedules" in the host-reviewer file); this command does not override it.
 
 Per-agent dispatch inside the wrapper:
 

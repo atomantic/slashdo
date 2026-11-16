@@ -18,6 +18,14 @@ const {
 
 const shellQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
 
+// The manifest copy install.sh leaves in each environment root it installs to
+// (MANIFEST_CACHE in install.sh/uninstall.sh). A full npm uninstall removes it too.
+const INSTALL_MANIFEST_CACHE = '.slashdo-install-manifest.txt';
+
+// Lib files that ship: markdown partials, which are rewritten per environment,
+// and executable assets, which are copied verbatim and run as `bash <path>`.
+const isLibAsset = name => name.endsWith('.sh');
+
 function collectCommands(commandsDir) {
   const commands = [];
   const doDir = path.join(commandsDir, 'do');
@@ -105,7 +113,7 @@ function collectLibFiles(libDir) {
   const files = [];
   const entries = fs.readdirSync(libDir, { withFileTypes: true });
   for (const entry of entries) {
-    if (entry.isFile() && entry.name.endsWith('.md')) {
+    if (entry.isFile() && (entry.name.endsWith('.md') || isLibAsset(entry.name))) {
       files.push({
         relPath: entry.name,
         absPath: path.join(libDir, entry.name),
@@ -460,7 +468,9 @@ function install({ env, packageDir, filterNames, dryRun, uninstall, autoUpdate }
 
   if (env.libDir) {
     syncFileSet(libFiles, {
-      getContent: lib => transformLib(fs.readFileSync(lib.absPath, 'utf8'), env, libDir),
+      getContent: lib => isLibAsset(lib.name)
+        ? fs.readFileSync(lib.absPath, 'utf8')
+        : transformLib(fs.readFileSync(lib.absPath, 'utf8'), env, libDir),
       getTargetPath: lib => path.join(env.libDir, lib.relPath),
       getLabel: lib => `lib/${lib.name}`,
       dryRun,
@@ -582,6 +592,15 @@ function doUninstall(commands, libFiles, hookFiles, env, results, dryRun, filter
       }
       results.removed++;
     }
+  }
+
+  if (!filterNames?.length) {
+    removeFile({
+      label: INSTALL_MANIFEST_CACHE,
+      targetPath: path.join(path.dirname(env.commandsDir), INSTALL_MANIFEST_CACHE),
+      dryRun,
+      results,
+    });
   }
 
   if (!dryRun && env.versionFile && fs.existsSync(env.versionFile)) {

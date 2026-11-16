@@ -16,19 +16,19 @@ stays out of context on every run that reviews the working tree instead of a pub
    ```
 3. **Fetch the full unified diff**:
    ```bash
-   gh pr diff {PR_NUM} --repo {GH_HOST}/{OWNER}/{REPO} > /tmp/do-review-pr-{PR_NUM}.diff
+   gh pr diff {PR_NUM} --repo {GH_HOST}/{OWNER}/{REPO} > {REVIEW_TMP}/pr.diff
    ```
 4. **Parse the diff to build a "commentable lines" map** — `{file_path: set of line numbers on the RIGHT (new) side of the diff}`; GitHub's review API rejects inline comments on lines outside the patch. Walk the unified diff line by line:
    - Track the current file from `diff --git a/<path> b/<path>` headers, not `+++ b/<path>` (deletions emit `+++ /dev/null`; renames may not round-trip through `+++`). Skip deleted files entirely.
    - Parse each `@@ -a,b +c,d @@` hunk header to seed the right-side line counter at `c`, then iterate hunk body lines: increment the counter on `+` (added) and ` ` (context) lines and include both in the map; skip `-` (removed) lines without incrementing.
    - **Ignore the `\ No newline at end of file` marker line** — it must NOT advance the right-side counter.
-   - (Do NOT use `git apply --numstat` — it reports per-file totals, not hunk line ranges.) Save to `/tmp/do-review-pr-{PR_NUM}-lines.json`.
+   - (`git apply --numstat` is no substitute: it reports per-file totals, not hunk line ranges.) Save to `{REVIEW_TMP}/lines.json`.
 5. **Fetch each changed file at HEAD_SHA** so agents can read full file content. Skip deleted files — `repos/{OWNER}/{REPO}/contents/{path}?ref={HEAD_SHA}` returns 404 for any path removed in the PR:
    ```bash
    case "$FILE_PATH" in
      /*|../*|*/../*|*/..) printf 'INCOMPLETE — unsafe repository path %s.\n' "$FILE_PATH"; exit 1 ;;
    esac
-   DEST_PATH="/tmp/do-review-pr-${PR_NUM}/${FILE_PATH}"
+   DEST_PATH="{REVIEW_TMP}/files/${FILE_PATH}"
    mkdir -p "$(dirname "$DEST_PATH")" || { printf 'INCOMPLETE — could not create the source directory for %s.\n' "$FILE_PATH"; exit 1; }
    TEMP_PATH="${DEST_PATH}.tmp"
    CONTENT_API_PATH="repos/${OWNER}/${REPO}/contents/${URL_ENCODED_PATH}?ref=${HEAD_SHA}"
@@ -60,7 +60,7 @@ one, then continue to "Push fixes to the PR branch" below:
 1. **Refuse to start on a dirty tree.** Before checking anything out, if `git status --porcelain` is non-empty, do not check out over the user's uncommitted work — fall back to `PR_DISPOSITION=inline`, say why, and continue.
 2. `gh pr checkout {PR_NUM} --repo "{GH_HOST}/{OWNER}/{REPO}"` (per `~/.claude/lib/pr-write-access.md`) so the tracking ref points at the PR head, not the base repo.
 3. Fix only what this review found. Do not rebase the PR, reformat untouched files, or fold in unrelated cleanups — the author owns this branch.
-4. Attribute the commits to the review, exactly as local mode does (`address review (self): …`).
+4. This is someone else's branch in someone else's repository, so its commit convention wins: read the PR repo's CONTRIBUTING / CLAUDE.md / AGENTS.md and its recent `git log` subjects, and write the fix commits that way, saying in the message that they address review findings. Only when the repo states and shows no convention, use the local-mode fallback (`address review (self): …`).
 
 ## Push fixes to the PR branch (`PR_DISPOSITION=apply`)
 
@@ -80,7 +80,7 @@ Skip this section when `PR_DISPOSITION=apply` succeeded in pushing. Package the 
 
 For each verified finding:
 1. **Severity**: CRITICAL (runtime crash, data leak, security, contract break) vs IMPROVEMENT (consistency, robustness, conventions).
-2. **Postability**: Check the cited `file:line` against the commentable-lines map (`/tmp/do-review-pr-{PR_NUM}-lines.json`):
+2. **Postability**: Check the cited `file:line` against the commentable-lines map (`{REVIEW_TMP}/lines.json`):
    - **In-diff** → eligible for an inline comment
    - **Out-of-diff** → cannot be inline; include in the review summary body instead
 3. **Has suggestion**: True if the finding contains a concrete replacement for the cited line(s).
@@ -122,7 +122,7 @@ Assemble a top-level review body (markdown) with:
 
 ### Submit the review
 
-Write the payload to `/tmp/do-review-pr-{PR_NUM}-payload.json`:
+Write the payload to `{REVIEW_TMP}/payload.json`:
 
 ```json
 {
@@ -137,7 +137,7 @@ Post it:
 ```bash
 gh api --hostname {GH_HOST} repos/{OWNER}/{REPO}/pulls/{PR_NUM}/reviews \
   --method POST \
-  --input /tmp/do-review-pr-{PR_NUM}-payload.json
+  --input {REVIEW_TMP}/payload.json
 ```
 
 On `422 Unprocessable Entity`, the most common causes are:
@@ -149,7 +149,7 @@ Print the review URL returned by the API (`html_url`) so the user can open it.
 
 ### Drafts mode (optional)
 
-With `--draft`: instead of `POST .../reviews`, write the payload to `/tmp/do-review-pr-{PR_NUM}-payload.json` and print the path plus the `gh api` command needed to publish it manually — include the `--hostname {GH_HOST}` flag in that printed command so it targets the right host on GitHub Enterprise. (Default behavior remains: publish immediately.)
+With `--draft`: instead of `POST .../reviews`, write the payload to `{REVIEW_TMP}/payload.json` and print the path plus the `gh api` command needed to publish it manually — include the `--hostname {GH_HOST}` flag in that printed command so it targets the right host on GitHub Enterprise. (Default behavior remains: publish immediately.)
 
 ## Approve the reviewed head (all dispositions)
 
@@ -239,7 +239,7 @@ When every gate passes:
 gh pr merge {PR_NUM} --repo "{GH_HOST}/{OWNER}/{REPO}" --{MERGE_METHOD} --match-head-commit {HEAD_SHA}
 ```
 
-`{MERGE_METHOD}` defaults to `squash` when `--merge` carried no method. **Never pass `--delete-branch` here** — on a cross-repo PR the head branch belongs to the contributor's fork, and in a linked worktree `gh`'s implicit default-branch checkout fails and reports a successful merge as an error. Read the PR's state back and confirm it is `MERGED` before saying so: `gh pr merge` exits zero on a repo with a merge queue while the PR is only *queued*.
+When `--merge` carried no method, `{MERGE_METHOD}` is the one the project documents (CONTRIBUTING, CLAUDE.md/AGENTS.md); failing that, the first of `squash`, `merge`, `rebase` the repository allows (`gh repo view "{GH_HOST}/{OWNER}/{REPO}" --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed`); and `squash` only when that read fails. **Never pass `--delete-branch` here** — on a cross-repo PR the head branch belongs to the contributor's fork, and in a linked worktree `gh`'s implicit default-branch checkout fails and reports a successful merge as an error. Read the PR's state back and confirm it is `MERGED` before saying so: `gh pr merge` exits zero on a repo with a merge queue while the PR is only *queued*.
 
 ## Report additions
 

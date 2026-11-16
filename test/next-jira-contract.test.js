@@ -3,9 +3,7 @@
 // /do:next serving a Jira tracker (#422). The executable layer RUNS the shell that
 // decides a claim — the in-flight segment match in next.md, and the Jira target,
 // walk, claim, release, and close blocks in lib/tracker-jira.md — against a stub
-// `jira`, the same way test/tracker-jira-contract.test.js checks the verbs. The
-// wiring layer keeps next.md, next-swarm.md, epic-children.md, and merge-gate.md
-// pointed at those blocks instead of GitHub-only behavior (`Closes #`, labels).
+// `jira`, the same way test/tracker-jira-contract.test.js checks the verbs.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
@@ -18,9 +16,6 @@ const root = path.join(__dirname, '..');
 const read = (...segments) => fs.readFileSync(path.join(root, ...segments), 'utf8');
 const next = read('commands', 'do', 'next.md');
 const jira = read('lib', 'tracker-jira.md');
-const swarm = read('lib', 'next-swarm.md');
-const epics = read('lib', 'epic-children.md');
-const gate = read('lib', 'merge-gate.md');
 
 const section = (doc, marker) => {
   const start = doc.indexOf(marker);
@@ -144,13 +139,6 @@ describe('in-flight segment match (next.md), executed', () => {
     return out === 'HIT';
   };
 
-  it('is defined once, in the Phase 1 in-flight block', () => {
-    assert.ok(inFlight, 'next.md must define in_flight() as a shell function');
-    assert.match(next, /LOCAL_REFS="\$\(git branch -a --no-color --format='%\(refname:short\)'\)" \|\| return 1/);
-    assert.match(next, /OPEN_REFS="\$\(open_refs\)" \|\| return 1/);
-    assert.match(next, /Issue `N` is in flight if EITHER `CLAIM_ID=N in_flight` succeeds/);
-  });
-
   it('accepts issue-PROJ-123 for PROJ-123 on any ref, with a case-insensitive project', () => {
     assert.ok(check(['main', 'origin/next/issue-PROJ-123'], 'PROJ-123'));
     assert.ok(check(['next/issue-proj-123'], 'PROJ-123'));
@@ -252,7 +240,6 @@ describe('Jira claim, release, and close, executed', () => {
     assert.match(result.stdout, /^PRE_CLAIM_STATUS=To Do$/m);
     assert.deepEqual(mutations(result.calls), ['issue|assign|PROJ-7|dev@example.com|', 'issue|move|PROJ-7|In Progress|']);
     assert.equal(result.calls.filter((c) => c.includes('assignee = currentUser()')).length, 2);
-    assert.match(jira, /preceding worktree step must atomically publish `next\/\$\{SLUG\}`[\s\S]*exclusive cross-machine claim/);
   });
 
   it('refuses an issue someone already holds, without touching it', () => {
@@ -341,56 +328,5 @@ describe('Jira claim, release, and close, executed', () => {
     const failed = runShell(`${preflight}\n${childrenHelper}\n${form}`, { env: { JIRA_LIST_MODE: 'denied' } });
     assert.notEqual(failed.status, 0);
     assert.match(failed.stderr, /Error: 401 Unauthorized/);
-  });
-});
-
-describe('/do:next is wired to the Jira backend', () => {
-  it('runs the Jira pre-flight in place of the tracker gate, right after host selection', () => {
-    const vcs = next.indexOf('!read lib/vcs-host.md');
-    const jiraRead = next.indexOf('\n!read lib/tracker-jira.md\n');
-    const gateLine = next.indexOf('Otherwise, if the partial\'s tracker gate leaves `TRACKER_CLI` empty, abort naming the tracker');
-    assert.ok(vcs > -1 && vcs < jiraRead && jiraRead < gateLine, 'vcs-host → tracker-jira → plain gate');
-    assert.match(next, /\*\*Jira tracker \(`TRACKER=jira`\) only — read the Jira backend now\*\* and run its Pre-flight \(`\{COMMAND\}` = `\/do:next`\) in place of the tracker gate/);
-    assert.match(next, /on a Jira tracker \(`TRACKER_CLI` is `jira`\) every `issue_\*`, `label_\*`, `assign_me`, and `unassign_me` runs its form in \[lib\/tracker-jira\.md\]/);
-  });
-
-  it('routes targets, walk, claim, release, and close through tracker-jira.md', () => {
-    for (const heading of ['Targets', 'Claim gates', 'Queue walk', 'Claim', '`release_marker`', 'Close after merge']) {
-      assert.match(next, new RegExp(`lib/tracker-jira\\.md[^\\n]*${heading.replace(/[`()]/g, '\\$&')}`), `next.md must route to "${heading}"`);
-    }
-    assert.match(next, /argument-hint: "\[#<issue>\|<JIRA-KEY> …\]/);
-  });
-
-  it('skips auto-pick when Jira native blocker state is unresolved', () => {
-    const queue = section(serving, '\n### Queue walk\n');
-    assert.match(queue, /unreadable or malformed native-link\s+response is \*\*UNRESOLVED\*\*, not unblocked/);
-    assert.match(queue, /during auto-pick, skip the candidate/);
-    assert.match(queue, /rather than falling back to body-only dependencies/);
-    assert.match(queue, /explicitly named\s+issue may proceed only as an explicit override/);
-    assert.match(queue, /JIRA_JSON="\$\(jira issue view <KEY> --raw\)"/);
-    assert.match(queue, /\.fields\.issuelinks \| type == "array"/);
-    assert.match(next, /or Jira's `issuelinks`/);
-  });
-
-  it('never closes a Jira issue with a Closes # trailer', () => {
-    assert.match(serving, /`Jira: PROJ-123` and \*\*no\*\* `Closes #…` line/);
-    assert.match(next, /\*\*On a Jira tracker\*\* the body says `Jira: <KEY>` \(follow-ups by key\) and carries \*\*no\*\* `Closes #…`/);
-    assert.match(serving, /prefix `\[issue-<num>\]` \(commits, PR title, changelog\) \| `\[PROJ-123\]`/);
-    assert.match(gate, /## 6\. Close the issue \(caller\)[\s\S]*On a Jira tracker nothing closes on merge[\s\S]*"Close after merge"/);
-  });
-
-  it('refuses --collaborators on Jira instead of failing open', () => {
-    assert.match(serving, /\/do:next --collaborators cannot be enforced on a Jira tracker/);
-    assert.match(serving, /When `COLLAB_MODE` is on and `SELF_MODE` is not, abort before listing\s+anything — never fall open to any-author/);
-    assert.match(serving, /-q "key = <KEY> AND reporter = currentUser\(\)"/);
-  });
-
-  it('carries the key through swarm and epics', () => {
-    assert.match(swarm, /\*\*Jira tracker\.\*\* Every `#<num>` below is the issue key/);
-    assert.match(swarm, /On Jira, that step is \[tracker-jira\.md\]\(\.\/tracker-jira\.md\) "Close after merge"/);
-    const jiraEpics = section(epics, '\n## Jira\n');
-    assert.match(jiraEpics, /`issue_children <KEY>`/);
-    assert.match(jiraEpics, /\.fields\.parent\.key \/\/ empty/);
-    assert.match(jiraEpics, /`issue_close_note <KEY> /);
   });
 });

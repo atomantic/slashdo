@@ -1,6 +1,6 @@
 ---
 description: SwiftUI DevSecOps audit, remediation, test enhancement, per-category PRs, CI verification, and an optional multi-reviewer review loop with worktree isolation — optimized for multi-platform Swift/SwiftUI apps (iOS, macOS, watchOS, tvOS, visionOS)
-argument-hint: "[--interactive] [--scan-only] [--simplify-only] [--strict] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues-label <name>] [path filter or focus areas]"
+argument-hint: "[--interactive] [--scan-only] [--no-merge] [--review-with <agent>[,<agent>...]] [--review-iterations <n>] [--review-mode <series|parallel>] [--review-stop-on-findings|--review-stop-on-clean] [--reviewer-applies] [--issues-label <name>] [path filter or focus areas]"
 ---
 
 # Better Swift — Unified DevSecOps Pipeline for SwiftUI Apps
@@ -17,7 +17,7 @@ Parse arguments and saved defaults through the shared options contract:
 
 `--simplify-only`, `--refactor-only`, `--strict`, and `--nuclear` are unsupported by this Swift caller; reject any of them before Phase 0 rather than applying the generic mode gates.
 
-Read the Swift caller inputs before entering the workflow. Their phase-labelled sections are data and guardrails for the canonical partials, not forked phase procedures:
+Read the Swift caller inputs before entering the workflow. Their phase-labelled sections are data and deltas for the shared partials, not forked phase procedures:
 
 !read lib/swift-pipeline-inputs.md
 
@@ -29,7 +29,7 @@ Read the shared spool/filer contract once, before Phase 1 touches the spool or t
 
 Execute the canonical phases in order. Read each partial when its phase applies; the Swift input file supplies the differences between `/do:better` and this caller.
 
-0. Discover the repository, VCS host, Swift project/build system, platforms, deployment targets, commands, and initial state. Keep the shared worktree ownership and no-prompt recovery rules.
+0. Discover the repository, VCS host, Swift project/build system, platforms, deployment targets, commands, and initial state. Set `AUDIT_MODEL_TIER=medium` and `REMEDIATION_MODEL_TIER=medium` unless `--interactive` chose another profile.
 
 !read lib/better-discovery.md
 
@@ -45,7 +45,7 @@ Execute the canonical phases in order. Read each partial when its phase applies;
 
 !read lib/better-remediation.md
 
-4. Resolve the shared pipeline inputs, run all-platform build/tests, and perform the Swift-specific internal review before publication.
+4. Run the build and tests on every platform, and perform the Swift-specific internal review before publication.
 
 !read lib/better-verification.md
 
@@ -53,7 +53,7 @@ Execute the canonical phases in order. Read each partial when its phase applies;
 
 !read lib/better-test-enhancement.md
 
-5. Create the Swift category PRs and verify CI.
+5. Create the Swift category PRs (categories that depend on each other share one) and verify CI.
 
 !read lib/better-pr-and-ci.md
 

@@ -449,6 +449,22 @@ describe('uninstall', () => {
     assert.ok(!fs.existsSync(settingsHooksCache), 'cached settings module should be removed');
     cleanup(tmpDir);
   });
+
+  it('a full uninstall removes the manifest copy the curl installer left, a filtered one keeps it', () => {
+    const { tmpDir, env } = makeTmpEnv();
+    const cache = path.join(path.dirname(env.commandsDir), '.slashdo-install-manifest.txt');
+    try {
+      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+      fs.writeFileSync(cache, '# slashdo install manifest v1\n');
+      install({ env, packageDir: PACKAGE_DIR, filterNames: ['help'], uninstall: true, dryRun: false });
+      assert.ok(fs.existsSync(cache), 'a filtered uninstall leaves the rest of the install, and its manifest');
+      const dry = install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: true });
+      assert.ok(dry.actions.some((a) => a.name === '.slashdo-install-manifest.txt' && a.status === 'would remove'));
+      assert.ok(fs.existsSync(cache));
+      install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false });
+      assert.ok(!fs.existsSync(cache), 'full uninstall removes the cached manifest');
+    } finally { cleanup(tmpDir); }
+  });
 });
 
 // ── registerHooksInSettings (via install) ───────────────────────────
@@ -793,40 +809,31 @@ describe('bundled lib docs', () => {
     return { tmpDir, env };
   }
 
-  it('writes each deferred lib beside the SKILL.md that cites it', () => {
-    // Only the libs a command actually cites — /do:pr bundles its four reviewer
-    // backends plus the conflict resolver; it never opens the tracker, so it gets
-    // no issue-mode doc.
+  it('writes exactly the bundle each command compiles to, beside its SKILL.md', () => {
+    // Which libs a bundle holds is checked against each command's references in
+    // test/command-bundle-closure.test.js; this checks the installer writes that
+    // set, no more and no less, into each skill's own bundle directory.
+    const { transformCommand, getTargetFilename } = require('../src/transformer');
     const { tmpDir, env } = makeSkillEnv();
     try {
       install({ env, packageDir: PACKAGE_DIR, dryRun: false });
-      const bundleDir = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR);
-      assert.ok(fs.existsSync(bundleDir), 'do-pr must get a bundle dir');
-      const written = fs.readdirSync(bundleDir);
-      for (const name of ['copilot-review-loop.md', 'host-reviewer-loop.md',
-        // The loop's gated per-host verb files ride along with it (#412).
-        'host-github.md', 'host-gitlab.md',
-        'local-agent-review-loop.md', 'ollama-review-loop.md',
-        // The core's gated per-harness recipes ride along with it (#347).
-        'local-agent-claude.md', 'local-agent-agy.md', 'local-agent-cursor.md',
-        'local-agent-opencode.md', 'local-agent-cmd.md',
-        'rebase-conflict-resolution.md']) {
-        assert.ok(written.includes(name), `${name} must be bundled with /do:pr`);
+      const commands = collectCommands(path.join(PACKAGE_DIR, 'commands'));
+      const commandNames = new Set(commands.map(cmd => cmd.name));
+      let bundledSkills = 0;
+      for (const cmd of commands) {
+        const files = {};
+        transformCommand(fs.readFileSync(cmd.absPath, 'utf8'), env, path.join(PACKAGE_DIR, 'lib'), cmd.relPath,
+          { files, commandNames });
+        const skillDir = path.dirname(path.join(env.commandsDir, getTargetFilename(cmd.relPath, env)));
+        const bundleDir = path.join(skillDir, BUNDLED_LIB_DIR);
+        const written = fs.existsSync(bundleDir) ? fs.readdirSync(bundleDir).sort() : [];
+        assert.deepEqual(written, Object.keys(files).sort(), `${cmd.relPath} bundle on disk`);
+        for (const [name, text] of Object.entries(files)) {
+          assert.equal(fs.readFileSync(path.join(bundleDir, name), 'utf8'), text, `${cmd.relPath} ${name}`);
+        }
+        if (written.length) bundledSkills++;
       }
-      assert.ok(!written.includes('plan-issue-setup.md'), '/do:pr does not use issue mode');
-      assert.ok(!written.includes('plan-issue-filing.md'), '/do:pr does not use issue mode');
-    } finally { cleanup(tmpDir); }
-  });
-
-  it('bundles a deferred lib only into the commands that cite it', () => {
-    const { tmpDir, env } = makeSkillEnv();
-    try {
-      install({ env, packageDir: PACKAGE_DIR, dryRun: false });
-      const bundled = (skill, name) =>
-        fs.existsSync(path.join(env.commandsDir, skill, BUNDLED_LIB_DIR, name));
-      assert.ok(bundled('do-next', 'plan-issue-setup.md'), '/do:next has an issues mode');
-      assert.ok(bundled('do-review', 'review-security-audit.md'), '/do:review has lenses');
-      assert.ok(!bundled('do-next', 'review-security-audit.md'), '/do:next has no lenses');
+      assert.ok(bundledSkills > 0, 'some command defers a lib');
     } finally { cleanup(tmpDir); }
   });
 
@@ -864,20 +871,28 @@ describe('bundled lib docs', () => {
   });
 
   it('keeps deferred bodies out of SKILL.md but reachable in the bundle', () => {
+    // For every skill and every conditional-path lib it bundles: a long,
+    // distinctive line from the lib is present in the bundle and absent from
+    // the skill body it was split out of.
     const { tmpDir, env } = makeSkillEnv();
     try {
       install({ env, packageDir: PACKAGE_DIR, dryRun: false });
-      const skillDir = path.join(env.commandsDir, 'do-pr');
-      const body = fs.readFileSync(path.join(skillDir, 'SKILL.md'), 'utf8');
-      const source = fs.readFileSync(
-        path.join(PACKAGE_DIR, 'lib', 'ollama-review-loop.md'), 'utf8');
-      // A long, distinctive line from the backend: present in the bundle, absent
-      // from the skill body it was split out of.
-      const marker = source.split('\n').filter(l => l.trim().length > 100)[0].trim();
-      assert.ok(!body.includes(marker), 'deferred body must not remain in SKILL.md');
-      const bundled = fs.readFileSync(
-        path.join(skillDir, BUNDLED_LIB_DIR, 'ollama-review-loop.md'), 'utf8');
-      assert.ok(bundled.includes(marker), 'deferred body must survive in the bundle');
+      let checked = 0;
+      for (const skill of fs.readdirSync(env.commandsDir)) {
+        const bundleDir = path.join(env.commandsDir, skill, BUNDLED_LIB_DIR);
+        if (!fs.existsSync(bundleDir)) continue;
+        const body = fs.readFileSync(path.join(env.commandsDir, skill, 'SKILL.md'), 'utf8');
+        for (const name of fs.readdirSync(bundleDir).filter(n => DEFERRED_LIBS.has(n))) {
+          const marker = fs.readFileSync(path.join(PACKAGE_DIR, 'lib', name), 'utf8')
+            .split('\n').map(l => l.trim()).find(l => l.length > 100 && !/[`~$]|\.md/.test(l));
+          if (!marker) continue;
+          assert.ok(!body.includes(marker), `${skill}: deferred ${name} must not remain in SKILL.md`);
+          assert.ok(fs.readFileSync(path.join(bundleDir, name), 'utf8').includes(marker),
+            `${skill}: deferred ${name} must survive in the bundle`);
+          checked++;
+        }
+      }
+      assert.ok(checked > 0, 'some skill bundles a deferred lib');
     } finally { cleanup(tmpDir); }
   });
 
@@ -948,7 +963,8 @@ describe('bundled lib docs', () => {
       const nextItem = () => list({ env, packageDir: PACKAGE_DIR })
         .find(item => item.name === '/do:next');
       const bundleDir = path.join(env.commandsDir, 'do-next', BUNDLED_LIB_DIR);
-      const bundlePath = path.join(bundleDir, 'next-swarm.md');
+      // Any bundled file will do; which ones next bundles is checked elsewhere.
+      const bundlePath = path.join(bundleDir, fs.readdirSync(bundleDir).sort()[0]);
 
       assert.equal(nextItem().status, 'up to date');
       fs.unlinkSync(bundlePath);
@@ -968,8 +984,8 @@ describe('bundled lib docs', () => {
     const { tmpDir, env } = makeSkillEnv();
     try {
       install({ env, packageDir: PACKAGE_DIR, dryRun: false });
-      const target = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR,
-        'ollama-review-loop.md');
+      const bundleDir = path.join(env.commandsDir, 'do-pr', BUNDLED_LIB_DIR);
+      const target = path.join(bundleDir, fs.readdirSync(bundleDir).sort()[0]);
       const victim = path.join(tmpDir, 'victim.md');
       fs.writeFileSync(victim, 'must survive', 'utf8');
       fs.unlinkSync(target);
@@ -1245,4 +1261,75 @@ describe('list flags a wrapper command as unhealthy when its dependency is missi
       assert.ok(prd.missingDependencies.includes('goals'));
     } finally { cleanup(tmpDir); }
   });
+});
+
+// ── local CLI runner script (#532) ──────────────────────────────────
+
+describe('local CLI runner script in every environment', () => {
+  const { ENVIRONMENTS } = require('../src/environments');
+  const RUNNER_SOURCE = fs.readFileSync(path.join(PACKAGE_DIR, 'lib', 'local-cli-runner.sh'), 'utf8');
+
+  // A real environment definition with every on-disk location moved into a temp
+  // dir. Runtime prefixes (~/.codex/skills/, ~/.config/opencode/lib/, ...) stay as
+  // the prompts will see them, and `onDisk` maps such a path back to the temp dir.
+  function relocated(name) {
+    const real = ENVIRONMENTS[name];
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `slashdo-runner-${name}-`));
+    tempDirs.add(tmpDir);
+    const env = {
+      ...real,
+      commandsDir: path.join(tmpDir, 'commands'),
+      libDir: real.libDir ? path.join(tmpDir, 'lib') : null,
+      hooksDir: real.hooksDir ? path.join(tmpDir, 'hooks') : null,
+      settingsFile: path.join(tmpDir, 'settings.json'),
+      versionFile: path.join(tmpDir, '.slashdo-version'),
+      configFile: path.join(tmpDir, '.slashdo-config.json'),
+      // Default layout only; a relocated CLAUDE_CONFIG_DIR is covered by the transformer tests.
+      claudeRootPath: null,
+      claudeRootPathPrefix: null,
+      libPathPrefix: name === 'claude' ? '~/.claude/lib/' : real.libPathPrefix,
+    };
+    const prefixes = [
+      [env.libPathPrefix, env.libDir],
+      [env.commandsPathPrefix, env.commandsDir],
+    ].filter(([prefix, dir]) => prefix && dir);
+    const onDisk = (runtimePath) => {
+      const hit = prefixes.find(([prefix]) => runtimePath.startsWith(prefix));
+      return hit ? path.join(hit[1], runtimePath.slice(hit[0].length)) : null;
+    };
+    return { tmpDir, env, onDisk };
+  }
+
+  function installedMarkdown(dir) {
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir, { recursive: true })
+      .map((rel) => path.join(dir, rel))
+      .filter((file) => file.endsWith('.md') && fs.statSync(file).isFile());
+  }
+
+  for (const name of Object.keys(ENVIRONMENTS)) {
+    it(`${name}: every invocation of the runner names the installed copy, and uninstall removes it`, () => {
+      const { tmpDir, env, onDisk } = relocated(name);
+      try {
+        install({ env, packageDir: PACKAGE_DIR, dryRun: false });
+        const docs = [...installedMarkdown(env.commandsDir), ...(env.libDir ? installedMarkdown(env.libDir) : [])];
+        const invoked = new Set();
+        for (const doc of docs) {
+          for (const [, ref] of fs.readFileSync(doc, 'utf8').matchAll(/(?:bash |^R=)(\S*local-cli-runner\.sh)\b/gm)) invoked.add(ref);
+        }
+        assert.ok(invoked.size > 0, `${name}: some installed prompt invokes the runner`);
+        const scripts = new Set();
+        for (const ref of invoked) {
+          const file = onDisk(ref);
+          assert.ok(file, `${name}: ${ref} is not under an installed root`);
+          assert.ok(fs.existsSync(file), `${name}: ${ref} was not installed`);
+          assert.equal(fs.readFileSync(file, 'utf8'), RUNNER_SOURCE, `${name}: ${ref} is the runner, verbatim`);
+          scripts.add(file);
+        }
+
+        install({ env, packageDir: PACKAGE_DIR, uninstall: true, dryRun: false });
+        for (const file of scripts) assert.ok(!fs.existsSync(file), `${name}: uninstall removes ${file}`);
+      } finally { cleanup(tmpDir); }
+    });
+  }
 });

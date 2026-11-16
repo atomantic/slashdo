@@ -129,3 +129,32 @@ test('legacy recipes include explicit dependencies without following see-also gr
   const bareCitation = buildPromptBundle('See `lib/large.md`.', dir, { defer: false });
   assert.deepEqual(bareCitation, { body: 'See `large`.', files: {} });
 });
+
+test('ships a cited shell asset verbatim in both modes, cited at the host-supplied prefix', t => {
+  const script = '#!/usr/bin/env bash\necho "~/.claude/.slashdo-config.json $1"\n';
+  const dir = libraries(t, {
+    'runner.md': 'Run `bash ~/.claude/lib/run.sh snapshot`, then `bash ~/.claude/lib/run.sh verify`.',
+    'run.sh': script,
+  });
+  const deferred = buildPromptBundle('!read lib/runner.md', dir, { assetPathPrefix: '/skills/x/lib/' });
+  assert.deepEqual(Object.keys(deferred.files), ['runner.md', 'run.sh']);
+  assert.equal(deferred.files['run.sh'], script, 'never trimmed, rewritten or rendered');
+  assert.equal(deferred.files['runner.md'], 'Run `bash /skills/x/lib/run.sh snapshot`, then `bash /skills/x/lib/run.sh verify`.');
+
+  const eager = buildPromptBundle('!`cat ~/.claude/lib/runner.md`', dir, { defer: false });
+  assert.deepEqual(eager.files, { 'run.sh': script }, 'an asset cannot be inlined, so eager mode still ships it');
+  assert.match(eager.body, /bash lib\/run\.sh snapshot/, 'default prefix is the bundle lib directory');
+
+  assert.deepEqual(buildPromptBundle('`bash ~/.claude/lib/run.sh`', dir, { skipIncludes: ['run.sh'] }).files, {});
+  assert.throws(() => buildPromptBundle('`bash ~/.claude/lib/absent.sh`', dir), /Missing required slashdo library: absent\.sh/);
+});
+
+test('a skill environment cites a shell asset at its installed skill lib directory', t => {
+  const dir = libraries(t, { 'runner.md': 'bash ~/.claude/lib/run.sh snapshot', 'run.sh': 'echo ~/.claude/.slashdo-config.json\n' });
+  const env = { namespacing: 'directory', commandsPathPrefix: '~/.codex/skills/', bundlesLibs: true, configPath: '~/.codex/.slashdo-config.json' };
+  const files = {};
+  const out = transformCommand('---\ndescription: d\n---\n!read lib/runner.md\n', env, dir, 'do/review.md', { files });
+  assert.match(out, /Read `lib\/runner\.md`/);
+  assert.equal(files['runner.md'], 'bash ~/.codex/skills/do-review/lib/run.sh snapshot');
+  assert.equal(files['run.sh'], 'echo ~/.claude/.slashdo-config.json\n', 'assets skip the config-path rewrite');
+});
