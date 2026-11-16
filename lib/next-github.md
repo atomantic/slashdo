@@ -106,6 +106,8 @@ query($owner: String!, $name: String!, $number: Int!, $search: String!, $endCurs
   printf '%s\n' "$CLAIM_REPO" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || exit 1
   DEFAULT_BRANCH="$(printf '%s' "$PAGES" | jq -r '.[0].data.repository.defaultBranchRef.name')" || exit 1
   git rev-parse --verify --quiet "refs/remotes/origin/${DEFAULT_BRANCH}^{commit}" >/dev/null || exit 1
+  # A single-branch clone keeps a restricted fetch refspec, so a plain fetch never sees other PR heads.
+  git fetch --quiet --prune origin '+refs/heads/*:refs/remotes/origin/*' || exit 1
   BOUNDARY='([^[:alnum:]_]|$)'
   PATTERN="(^|[^[:alnum:]_])(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]*:?[[:space:]]*#${CLAIM_ID}${BOUNDARY}|\\[issue-${CLAIM_ID}\\]|\\(#${CLAIM_ID}\\)"
   SHAS="$(git log --remotes=origin --not "refs/remotes/origin/${DEFAULT_BRANCH}" \
