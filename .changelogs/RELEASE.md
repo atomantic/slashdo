@@ -1,21 +1,16 @@
-# Release v4.4.0
+# Release v4.5.0
 
-Released: 2026-11-15
+Released: 2026-11-16
 
 ## Highlights
 
-- **Local CLI reviewer runner ships as an installed script.** The runner that drives local review CLIs is now a real script installed with slashdo instead of bash embedded in a prompt, and it refuses a runner script that was rewritten between snapshot and verify.
-- **Curl installer reads a generated manifest.** `install.sh` / `uninstall.sh` take their file list from a generated `install-manifest.txt`, a stale manifest fails CI, and the npm uninstall removes the curl installer's manifest copy.
-- **`/do:next` claim evidence is scoped.** Claim evidence now covers only the candidate issue, prints each surfaced PR head ref once, and no longer reads back a claim push that a rival run could share.
-- **Review loops are simpler and sturdier.** One reviewer grammar and status table, shell-state-safe loops, unique scratch directories, project commit and merge conventions respected, and a pending GitLab pipeline is no longer treated as green.
-- **Release flow clarified.** `/do:release` has a current-release notes file shape, states its resume and checkpoint invariants, waits on workflows whose trigger it cannot resolve, and asks before creating a release branch when no target is documented.
-- **Command cleanups.** Tighter `/do:better`, `/do:better-swift`, `/do:depfree`, `/do:goals`, `/do:omd`, `/do:scan`, `/do:plan-task`, `/do:replan`, `/do:fpr` and `/do:rpr`; `/do:goals --refresh` keeps unfiled checkbox items and the project's own commit convention wins.
-- **Swift gotchas corrected** for SwiftData inverses, `UIRequiresFullScreen`, and IAP sandbox behavior.
+- **`/do:next --swarm` protects issues you named.** When an explicit `--swarm` list is larger than the concurrency cap and runs in waves, issues in wave 2 or later are now reserved (labeled in-progress) as soon as they pass vetting. A second `/do:next` run or a scheduled agent can no longer claim an issue you named while earlier waves are still shipping.
 
-## Internal
+## Changed
 
-- Tests that pinned prompt wording were dropped in favor of executed-snippet and structural checks; install.sh tests run concurrently; CI validation steps covered by `npm test` were removed and CI now tests Node 18 and 20.
+- The worker for a reserved later-wave member runs the ownership gate with `CLAIM_RESERVED=1`, which accepts that one in-progress label and still refuses an assignee, an existing branch, an open PR, or a failed read.
+- Reservations that go unused are released when the swarm run reconciles.
 
 ## Full Changelog
 
-**Full Diff**: https://github.com/atomantic/slashdo/compare/v4.3.7...v4.4.0
+**Full Diff**: https://github.com/atomantic/slashdo/compare/v4.4.0...v4.5.0
