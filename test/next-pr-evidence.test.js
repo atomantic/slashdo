@@ -291,6 +291,17 @@ describe('fresh ownership checks shared by explicit, auto-pick and swarm', () =>
     });
   }
 
+  it('accepts only the in-progress label for an issue this swarm run reserved', (t) => {
+    const reserved = (options) => run(t, {}, { labels: '["in-progress","plan"]', ...options,
+      tail: 'refresh_in_flight && CLAIM_RESERVED=1 CLAIM_ID=466 fresh_claim_check && echo AVAILABLE' });
+    assert.equal(reserved({}).stdout.trim(), 'AVAILABLE');
+    for (const options of [{ assignees: 'atomantic' }, { LOCAL_TEST_REFS: 'next/issue-466' }, { labels: '{}' }, { ISSUE_STATE: 'CLOSED' }]) {
+      const result = reserved(options);
+      assert.notEqual(result.status, 0);
+      assert.equal(result.stdout, '');
+    }
+  });
+
   for (const flag of ['FETCH_FAIL', 'BRANCH_FAIL']) {
     it(`stops before claiming if ${flag} occurs`, (t) => {
       const result = run(t, {}, { [flag]: 'true',

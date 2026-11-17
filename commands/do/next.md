@@ -142,16 +142,17 @@ fresh_claim_check() {
   CLAIM_ASSIGNEES="$(issue_assignees "$CLAIM_ID")" || return 1
   [ -z "$CLAIM_ASSIGNEES" ] || return 1
   CLAIM_LABELS="$(issue_labels "$CLAIM_ID")" || return 1
-  printf '%s' "$CLAIM_LABELS" | jq -e '
+  # CLAIM_RESERVED=1: this swarm run's own batch reservation put `in-progress` there (Swarm A2e), so only that label is expected.
+  printf '%s' "$CLAIM_LABELS" | jq -e --arg reserved "${CLAIM_RESERVED:-}" '
     type == "array" and all(.[]; type == "string")
-    and (index("in-progress") == null)' >/dev/null || return 1
+    and ($reserved == "1" or index("in-progress") == null)' >/dev/null || return 1
   # PR evidence scoped to this candidate, read last so a skipped candidate costs no PR lookup.
   CLAIM_PR_REFS="$(pr_claim_refs)" || return 1
   ! printf '%s\n' "$CLAIM_PR_REFS" | tr '/' '\n' | grep -qixF -- "issue-${CLAIM_ID}"
 }
 ```
 
-Every ref's `/`-segments and GitHub's synthetic segments form the in-flight set, and `CLAIM_ID=<ID> in_flight` is an exact segment match (a Jira project compares case-insensitively): `issue-12` never matches `feature/12` or `issue-123`, and `issue-PROJ-12` never matches `PROJ-123`. `CLAIM_ID=<ID> fresh_claim_check` adds live assignee and `in-progress` checks, including same-login assignment, then the candidate's PR evidence from `pr_claim_refs` (the same exact segment match), and refuses metadata or evidence errors. Its API cost is per candidate checked, not per open PR. On Jira retain its native In Progress transition/status gate as well (see its Claim procedure). Use this same gate for explicit targets, auto-pick, epic children and both swarm paths. Shell state does not persist: redefine the collector and these functions, and refresh evidence, in each Bash call that checks ownership.
+Every ref's `/`-segments and GitHub's synthetic segments form the in-flight set, and `CLAIM_ID=<ID> in_flight` is an exact segment match (a Jira project compares case-insensitively): `issue-12` never matches `feature/12` or `issue-123`, and `issue-PROJ-12` never matches `PROJ-123`. `CLAIM_ID=<ID> fresh_claim_check` adds live assignee and `in-progress` checks, including same-login assignment, then the candidate's PR evidence from `pr_claim_refs` (the same exact segment match), and refuses metadata or evidence errors. Its API cost is per candidate checked, not per open PR. On Jira retain its native In Progress transition/status gate as well (see its Claim procedure). Use this same gate for explicit targets, auto-pick, epic children and both swarm paths. The one variant is `CLAIM_RESERVED=1 CLAIM_ID=<ID> fresh_claim_check`, which a swarm worker runs only for an issue its orchestrator reserved (Swarm A2e): it accepts the `in-progress` label that reservation applied and still refuses an assignee, a branch, a PR or a failed read. Shell state does not persist: redefine the collector and these functions, and refresh evidence, in each Bash call that checks ownership.
 
 ### Phase 1 — issue queue
 
