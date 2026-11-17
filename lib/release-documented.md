@@ -32,13 +32,30 @@ second release workflow that reloads saved reviewer defaults.
    **Determine Version and Finalize Changelog** section supplies defaults only
    where the project has not specified them. Do not create a second version bump
    when recovering prepared state. Commit only the intended release files.
-4. **Validate and review the release scope.** Run the documented tests/build,
-   including isolated test-database provisioning where required. Resolve failures
-   before delivery. Apply **Local Code Review** below to the full previous-release
-   commit-to-prepared-head diff, replacing its promotion-only
-   `git diff origin/{target}...HEAD` command with that range. A version-bump PR diff
-   alone does not cover the release. Include the previous-tag comparison in the
-   PR description. For a **PR workflow**, run the configured review loops from
+4. **Validate and review the release scope.** The project's documented release
+   procedure owns both scopes; the defaults below apply only where it is silent.
+   - **Local validation.** Run what the procedure requires locally, including
+     isolated test-database provisioning where it says so, and resolve failures
+     before delivery. When the procedure assigns its broad suites to the release
+     PR's hosted CI on the prepared head, run only its documented pre-push gate
+     here: step 6 already waits for that CI and never merges over a failure, so
+     running the same suites first only repeats them. With no such assignment,
+     run the documented tests/build.
+   - **Review range.** Apply **Local Code Review** below, replacing its
+     promotion-only `git diff origin/{target}...HEAD` command with the range the
+     procedure names (for example the preparation commit plus recorded
+     release-gating fixes, when every other change already reached the
+     integration branch through its own reviewed PR), and pass that base as
+     `{BASE_BRANCH}` to every configured local reviewer. With no range named, review
+     the full previous-release commit-to-prepared-head diff: a version-bump PR
+     diff alone does not cover the release. A host-side reviewer (`copilot`,
+     `@<login>`) always sees the whole PR diff and cannot be given a base.
+   - **Commit log.** Read the whole previous-release-to-prepared-head commit log
+     in every case; the version, the notes and readiness depend on it whatever
+     the review range is. Include the previous-tag comparison in the PR
+     description.
+
+   For a **PR workflow**, run the configured review loops from
    **Run the Review Loop** below after step 5 creates the PR and before step 6
    merges it, preserving their verdict and optionality rules from **Merge the
    PR**. For a **tool-managed or tag-only workflow** — which never creates a
