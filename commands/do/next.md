@@ -152,7 +152,7 @@ fresh_claim_check() {
 }
 ```
 
-Every ref's `/`-segments and GitHub's synthetic segments form the in-flight set, and `CLAIM_ID=<ID> in_flight` is an exact segment match (a Jira project compares case-insensitively): `issue-12` never matches `feature/12` or `issue-123`, and `issue-PROJ-12` never matches `PROJ-123`. `CLAIM_ID=<ID> fresh_claim_check` adds live assignee and `in-progress` checks, including same-login assignment, then the candidate's PR evidence from `pr_claim_refs` (the same exact segment match), and refuses metadata or evidence errors. Its API cost is per candidate checked, not per open PR. On Jira retain its native In Progress transition/status gate as well (see its Claim procedure). Use this same gate for explicit targets, auto-pick, epic children and both swarm paths. The one variant is `CLAIM_RESERVED=1 CLAIM_ID=<ID> fresh_claim_check`, which a swarm worker runs only for an issue its orchestrator reserved (Swarm A2e): it accepts the `in-progress` label that reservation applied and still refuses an assignee, a branch, a PR or a failed read. Shell state does not persist: redefine the collector and these functions, and refresh evidence, in each Bash call that checks ownership.
+Every ref's `/`-segments and GitHub's synthetic segments form the in-flight set, and `CLAIM_ID=<ID> in_flight` is an exact segment match (a Jira project compares case-insensitively): `issue-12` never matches `feature/12` or `issue-123`, and `issue-PROJ-12` never matches `PROJ-123`. `CLAIM_ID=<ID> fresh_claim_check` adds live assignee and `in-progress` checks, including same-login assignment, then the candidate's PR evidence from `pr_claim_refs` (the same exact segment match), and refuses metadata or evidence errors. Its API cost is per candidate checked, not per open PR. On Jira retain its native In Progress transition/status gate as well (see its Claim procedure). Use this same gate for explicit targets, auto-pick, epic children and both swarm paths. The one variant is `CLAIM_RESERVED=1 CLAIM_ID=<ID> fresh_claim_check`, which a swarm worker runs for an issue its orchestrator reserved (Swarm A1e/A2e) and the explicit-target path runs when adopting a bare `in-progress` reservation (Phase 1 step 5): it accepts that one `in-progress` label and still refuses an assignee, a branch, a PR or a failed read. Shell state does not persist: redefine the collector and these functions, and refresh evidence, in each Bash call that checks ownership.
 
 ### Phase 1 — issue queue
 
@@ -250,7 +250,7 @@ Then:
    - **With an argument** — set `ISSUE_NUM` to the number (without the `#`) and check, in this order:
      1. **`--self`.** When `SELF_MODE` is on, the author from `issue_author "$ISSUE_NUM"` must be the authenticated login (GitLab: resolve that login with the two-step capture in [lib/next-gitlab.md](../../lib/next-gitlab.md), as the claim verb does; Jira: the JQL check in [lib/tracker-jira.md](../../lib/tracker-jira.md) "Claim gates", never a display-name comparison). Otherwise stop with `Issue #<num> was filed by <author>, not you — /do:next --self only works on issues you filed. Drop --self to claim it.`
      2. **`--collaborators`.** When `COLLAB_MODE` is on and `SELF_MODE` is not, that author must be in `TRUSTED_CLAIM_POOL`, compared case-insensitively. Otherwise stop with `Issue #<num> was filed by <author>, who is not a collaborator on <owner/repo> (and not on --trusted-authors) — /do:next --collaborators only claims collaborator-authored issues. Drop --collaborators to claim it.`
-     3. **Open and not in flight** (step 2). An in-flight issue that meets "Resuming your own stopped run" (top of this file) is resumed; any other closed or in-flight issue prints why and stops.
+     3. **Open and not in flight** (step 2). If the issue carries `in-progress` with no assignee, no `issue-<num>` branch and no PR — a bare label reservation from whoever queued it (or from Swarm Phase A falling back to a single surviving issue) — adopt the reservation: check it with `CLAIM_RESERVED=1 CLAIM_ID="$ISSUE_NUM" fresh_claim_check`, say `#<num>: adopting its in-progress reservation`, and keep `CLAIM_RESERVED=1` for Phase 2's recheck. An in-flight issue that meets "Resuming your own stopped run" (top of this file) is resumed; any other closed or in-flight issue prints why and stops.
      4. **Epic.** Resolve its state (step 3): claim an `epic-wrapup`, close an `epic-done`, and for an `epic-open` warn that children are still open and proceed.
 
      Everything else auto-pick would skip — a parking label, an open declared blocker (step 4), an issue outside `LABEL_FILTER` or `MODEL_FILTER`/`EFFORT_FILTER` — the named number overrides. Say so plainly ("claiming `future`-labelled #123 by explicit request", "claiming #123 despite open blocker #120 by explicit request").
@@ -264,9 +264,9 @@ Then:
 
 ```bash
 ISSUE_NUM="<picked-issue-number>"
-# Recheck live evidence immediately before creating anything (also for epic children and swarm workers).
+# Recheck live evidence immediately before creating anything (also for epic children and swarm workers; set CLAIM_RESERVED=1 when this issue is reserved).
 refresh_in_flight || { echo "Claim evidence unresolved — aborting."; exit 1; }
-CLAIM_ID="$ISSUE_NUM" fresh_claim_check || { echo "Issue #$ISSUE_NUM is claimed or ownership is unresolved — stopping."; exit 1; }
+CLAIM_RESERVED="${CLAIM_RESERVED:-}" CLAIM_ID="$ISSUE_NUM" fresh_claim_check || { echo "Issue #$ISSUE_NUM is claimed or ownership is unresolved — stopping."; exit 1; }
 REPO_ROOT="$(git rev-parse --show-toplevel)" && \
 SLUG="issue-${ISSUE_NUM}" && \
 # The default-branch one-liner (Conventions):
@@ -287,7 +287,7 @@ if ! git push --force-with-lease="refs/heads/next/${SLUG}:" -u origin "next/${SL
 fi
 ```
 
-Check that `pwd` printed the worktree path. If it printed the main repo path, the worktree creation or the `cd` failed: stop and report it. Later snippets re-anchor per Conventions.
+Check that `pwd` printed the worktree path. If it printed the main repo path, the worktree creation or the `cd` failed: stop and report it. If the repo's `CLAUDE.md` / `AGENTS.md` defines a post-`git worktree add` dependency-linking command (e.g. linking `node_modules` from `"$REPO_ROOT"` into `"$WORKTREE"` instead of running `npm install`), run it now before Phase 4 runs tests. Later snippets re-anchor per Conventions.
 
 ### Phase 2 — mark the issue in progress
 
