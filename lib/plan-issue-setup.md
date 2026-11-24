@@ -19,7 +19,7 @@ Only on a Jira tracker (`TRACKER=jira`), if not yet read (it replaces the tracke
 ## The dispatch hint (`model:` + `effort:`)
 
 Two optional labels (`:` here means `LABEL_SEP`) recommending **how to run the work**:
-- **`model:light` / `model:medium` / `model:heavy`** — capability tier: `light` is mechanical; `heavy` is hard reasoning.
+- **`model:light` / `model:medium` / `model:heavy` / `model:ultra`** — capability tier: `light` is mechanical; `heavy` is hard reasoning; `ultra` is exceptional frontier reasoning (opt-in).
 - **`effort:low` / `medium` / `high` / `xhigh` / `max`** — thinking per step, not amount of work: `medium` normal, `low` mechanical, `high` when a step hinges on a hard argument, `xhigh`/`max` rarely. List wide call sites in the body instead.
 
 Axes are independent. Record **tier names only**, never slugs — resolve per [model-tiers.md](./model-tiers.md). Apply an axis only when justified; reflexive `model:medium` is noise.
@@ -30,5 +30,5 @@ Create each label immediately before applying it, passing name and `--color` sep
 - `gh label create <PLAN_LABEL> --color 428BCA 2>/dev/null || true`
 - `gh label create <category> --color 0366D6 2>/dev/null || true`
 - `gh label create severity${LABEL_SEP}critical --color B60205 2>/dev/null || true`, `gh label create severity${LABEL_SEP}high --color D93F0B 2>/dev/null || true`, `gh label create severity${LABEL_SEP}medium --color FBCA04 2>/dev/null || true`, `gh label create severity${LABEL_SEP}low --color 0E8A16 2>/dev/null || true`
-- `gh label create model${LABEL_SEP}light --color D4C5F9 2>/dev/null || true`, `gh label create model${LABEL_SEP}medium --color A371F7 2>/dev/null || true`, `gh label create model${LABEL_SEP}heavy --color 6F42C1 2>/dev/null || true`
+- `gh label create model${LABEL_SEP}light --color D4C5F9 2>/dev/null || true`, `gh label create model${LABEL_SEP}medium --color A371F7 2>/dev/null || true`, `gh label create model${LABEL_SEP}heavy --color 6F42C1 2>/dev/null || true`, `gh label create model${LABEL_SEP}ultra --color C2185B 2>/dev/null || true`
 - `gh label create effort${LABEL_SEP}low --color BFE5E5 2>/dev/null || true`, `gh label create effort${LABEL_SEP}medium --color 76C7C7 2>/dev/null || true`, `gh label create effort${LABEL_SEP}high --color 1D7874 2>/dev/null || true`, `gh label create effort${LABEL_SEP}xhigh --color 0E4F4C 2>/dev/null || true`, `gh label create effort${LABEL_SEP}max --color 05403D 2>/dev/null || true`

@@ -11,7 +11,8 @@ command or partial, this one included, names a model.
 |---|---|---|
 | `light` | the **fastest, cheapest** model the harness offers that can still do coding work | mechanical work: pattern-matching, inventory sweeps, well-specified edits |
 | `medium` | its **balanced** everyday model | the default for real work — audits, remediation, review |
-| `heavy` | the **strongest** model it offers this account | hard reasoning where a weaker model gives confident wrong answers |
+| `heavy` | the **strongest** everyday model it offers this account | hard reasoning where a weaker model gives confident wrong answers |
+| `ultra` | the **frontier** model explicitly configured for exceptional reasoning (opt-in; degrades to `heavy` / session model when unavailable) | rare architectural or cross-system reasoning where `heavy` is insufficient |
 
 - Select the model through the harness's own alias or selector for that class where it
   has one. An alias follows whatever version the user or organization configured; a
