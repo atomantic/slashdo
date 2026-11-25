@@ -269,7 +269,7 @@ slashdo tracks todo items in your project's issue tracker — GitHub or GitLab, 
 
 **`/do:next` is label-agnostic by default** — `--issues-label` scopes the commands that *file or triage* plan items, but a bare `/do:next` claims the oldest open issue regardless of label. Pass `--issues-label <name>` (or save it) to restrict auto-pick to a curated queue.
 
-**Dispatch hints (`model:` + `effort:`)** let issues carry a recommendation for how to run the work; `/do:plan-task` infers them, `/do:next --model`/`--effort` filter the queue, and `--swarm[=N]` dispatches each worker at its own issue's tier (default 3 agents, clamped `1..6`) — name the issues yourself with `--swarm #12 #14 #15`. GitLab writes them as scoped labels (`model::light`, double-colon). See [docs/work-tracking.md](docs/work-tracking.md) for the full rationale, the epic-aware claiming rule, and swarm's scheduling/wave behavior.
+**Dispatch hints (`model:` + `effort:`)** let issues carry a recommendation for how to run the work; `/do:plan-task` infers them, `/do:next --model`/`--effort` filter the queue, and `--swarm[=N]` dispatches each worker at its own issue's tier (default 3 agents, clamped `1..6`) — name the issues yourself with `--swarm #12 #14 #15`. GitLab writes them as scoped labels (`model::light`, double-colon). See [docs/work-tracking.md](docs/work-tracking.md) for the full rationale, the epic-aware claiming rule, and swarm's scheduling behavior.
 
 ## Configuration (`/do:config`)
 
